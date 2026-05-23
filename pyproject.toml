@@ -1,0 +1,38 @@
+[project]
+name = "crypto-alpha-lab"
+version = "0.1.0"
+description = "Personal crypto alpha research and small-position live execution platform"
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "ccxt>=4.0.0",
+    "loguru>=0.7.0",
+    "aiosqlite>=0.20.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
