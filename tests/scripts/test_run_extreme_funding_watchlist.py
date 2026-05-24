@@ -5,6 +5,8 @@ from scripts.run_extreme_funding_watchlist import (
     binance_symbol_from_pair,
     build_binance_fapi_url,
     fetch_json_url,
+    find_premium_item,
+    parse_open_interest,
 )
 
 
@@ -85,5 +87,23 @@ def test_fetch_json_url_uses_injected_opener():
 
     assert result == {"ok": True}
     assert calls == [("https://example.test/path", 2.5)]
+
+
+def test_find_premium_item_returns_matching_symbol():
+    items = [
+        {"symbol": "BTCUSDT", "markPrice": "100.0"},
+        {"symbol": "DOGEUSDT", "markPrice": "0.25"},
+    ]
+
+    assert find_premium_item(items, "DOGEUSDT") == {"symbol": "DOGEUSDT", "markPrice": "0.25"}
+
+
+def test_find_premium_item_returns_none_when_missing():
+    assert find_premium_item([{"symbol": "BTCUSDT"}], "DOGEUSDT") is None
+
+
+def test_parse_open_interest_returns_float():
+    assert parse_open_interest({"openInterest": "12345.67"}) == 12345.67
+
 
 

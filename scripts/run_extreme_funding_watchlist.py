@@ -56,3 +56,19 @@ def fetch_json_url(url: str, *, timeout_sec: float, opener: UrlOpen = urlopen) -
         return json.loads(response.read().decode("utf-8"))
 
 
+def find_premium_item(items: list[dict] | dict, binance_symbol: str) -> dict | None:
+    if isinstance(items, dict):
+        if items.get("symbol") == binance_symbol:
+            return items
+        return None
+    for item in items:
+        if item.get("symbol") == binance_symbol:
+            return item
+    return None
+
+
+def parse_open_interest(payload: dict) -> float:
+    return float(payload["openInterest"])
+
+
+
