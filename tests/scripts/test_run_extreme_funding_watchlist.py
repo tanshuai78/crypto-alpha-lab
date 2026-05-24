@@ -7,6 +7,7 @@ from scripts.run_extreme_funding_watchlist import (
     fetch_json_url,
     find_premium_item,
     parse_open_interest,
+    OpenInterestWindow,
 )
 
 
@@ -104,6 +105,22 @@ def test_find_premium_item_returns_none_when_missing():
 
 def test_parse_open_interest_returns_float():
     assert parse_open_interest({"openInterest": "12345.67"}) == 12345.67
+
+
+def test_open_interest_window_returns_none_until_lookback_exists():
+    window = OpenInterestWindow(lookback_sec=3600)
+    window.append("DOGE/USDT", timestamp_ms=0, open_interest=100.0)
+
+    assert window.change_pct("DOGE/USDT", now_ms=10 * 60_000, current_open_interest=110.0) is None
+
+
+def test_open_interest_window_calculates_change_against_oldest_retained_value():
+    window = OpenInterestWindow(lookback_sec=3600)
+    window.append("DOGE/USDT", timestamp_ms=0, open_interest=100.0)
+    window.append("DOGE/USDT", timestamp_ms=3600 * 1000, open_interest=110.0)
+
+    assert window.change_pct("DOGE/USDT", now_ms=3600 * 1000, current_open_interest=110.0) == 10.0
+
 
 
 

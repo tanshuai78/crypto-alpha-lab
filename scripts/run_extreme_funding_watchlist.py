@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from urllib.parse import urlencode
 import json
 from typing import Any, Callable
@@ -69,6 +69,31 @@ def find_premium_item(items: list[dict] | dict, binance_symbol: str) -> dict | N
 
 def parse_open_interest(payload: dict) -> float:
     return float(payload["openInterest"])
+
+
+class OpenInterestWindow:
+    def __init__(self, *, lookback_sec: int) -> None:
+        self._lookback_ms = lookback_sec * 1000
+        self._history: dict[str, deque[tuple[int, float]]] = defaultdict(deque)
+
+    def append(self, symbol: str, *, timestamp_ms: int, open_interest: float) -> None:
+        self._history[symbol].append((timestamp_ms, open_interest))
+        self._prune(symbol, now_ms=timestamp_ms)
+
+    def change_pct(self, symbol: str, *, now_ms: int, current_open_interest: float) -> float | None:
+        self._prune(symbol, now_ms=now_ms)
+        if not self._history[symbol]:
+            return None
+        oldest_ts, oldest_value = self._history[symbol][0]
+        if now_ms - oldest_ts < self._lookback_ms or oldest_value <= 0:
+            return None
+        return ((current_open_interest - oldest_value) / oldest_value) * 100
+
+    def _prune(self, symbol: str, *, now_ms: int) -> None:
+        cutoff_ms = now_ms - self._lookback_ms
+        while len(self._history[symbol]) > 1 and self._history[symbol][1][0] <= cutoff_ms:
+            self._history[symbol].popleft()
+
 
 
 
