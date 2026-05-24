@@ -19,8 +19,8 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 # Copy the rest of the application code
 COPY . .
 
-# Set PYTHONPATH
-ENV PYTHONPATH=src
+# Set PYTHONPATH to search in both project root and src/
+ENV PYTHONPATH=/app:/app/src
 
 # Run command
 CMD ["python", "scripts/run_extreme_funding_watchlist.py", "--forever", "--data-root", "data"]
