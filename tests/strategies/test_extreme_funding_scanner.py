@@ -1,6 +1,8 @@
 from strategies.extreme_funding.scanner import (
     ExtremeFundingWatchEvent,
+    ExtremeFundingWatchlistScanner,
     classify_extreme_funding_snapshot,
+    compute_micro_persistence,
 )
 
 
@@ -60,3 +62,22 @@ def test_symbol_outside_watchlist_is_rejected():
     )
     assert result.reject_reason == "symbol_not_in_watchlist"
     assert result.event is None
+
+
+def test_micro_persistence_counts_fraction_above_threshold():
+    values = [10.0, 35.0, 40.0, 20.0]
+    assert compute_micro_persistence(values, threshold_pct=30.0) == 0.5
+
+
+def test_micro_persistence_empty_window_is_zero():
+    assert compute_micro_persistence([], threshold_pct=30.0) == 0.0
+
+
+def test_micro_persistence_uses_timestamp_window_not_sample_count():
+    scanner = ExtremeFundingWatchlistScanner()
+    scanner.append_observation("DOGE/USDT", timestamp_ms=0, annualized_pct=120.0)
+    scanner.append_observation("DOGE/USDT", timestamp_ms=31 * 60_000, annualized_pct=10.0)
+
+    values = scanner.get_window_values("DOGE/USDT", now_ms=31 * 60_000)
+
+    assert values == [10.0]
