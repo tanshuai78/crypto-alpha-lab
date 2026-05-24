@@ -95,5 +95,37 @@ class OpenInterestWindow:
             self._history[symbol].popleft()
 
 
+def build_raw_snapshot_from_public_data(
+    *,
+    pair: str,
+    exchange: str,
+    timestamp_ms: int,
+    premium_item: dict,
+    open_interest: float | None,
+    oi_change_1h_pct: float | None,
+    mark_data_age_sec: float,
+    oi_data_age_sec: float,
+) -> dict:
+    mark_price = float(premium_item["markPrice"])
+    index_price = float(premium_item["indexPrice"])
+    premium_index = (mark_price - index_price) / index_price if index_price > 0 else 0.0
+    return {
+        "symbol": pair,
+        "exchange": exchange,
+        "timestamp_ms": timestamp_ms,
+        "mark_price": mark_price,
+        "index_price": index_price,
+        "premium_index": premium_index,
+        "estimated_funding_rate": float(premium_item.get("lastFundingRate", 0.0)),
+        "next_funding_time_ms": int(premium_item.get("nextFundingTime", 0)),
+        "open_interest": open_interest,
+        "oi_change_1h_pct": oi_change_1h_pct,
+        "volume_24h_usdt": None,
+        "mark_data_age_sec": mark_data_age_sec,
+        "oi_data_age_sec": oi_data_age_sec,
+    }
+
+
+
 
 

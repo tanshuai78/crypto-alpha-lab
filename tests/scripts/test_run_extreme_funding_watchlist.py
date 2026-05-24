@@ -8,6 +8,7 @@ from scripts.run_extreme_funding_watchlist import (
     find_premium_item,
     parse_open_interest,
     OpenInterestWindow,
+    build_raw_snapshot_from_public_data,
 )
 
 
@@ -120,6 +121,38 @@ def test_open_interest_window_calculates_change_against_oldest_retained_value():
     window.append("DOGE/USDT", timestamp_ms=3600 * 1000, open_interest=110.0)
 
     assert window.change_pct("DOGE/USDT", now_ms=3600 * 1000, current_open_interest=110.0) == 10.0
+
+
+def test_build_raw_snapshot_from_public_data_maps_public_fields():
+    premium_item = {
+        "symbol": "DOGEUSDT",
+        "markPrice": "0.2500",
+        "indexPrice": "0.2490",
+        "lastFundingRate": "0.0008",
+        "nextFundingTime": "123456789",
+    }
+
+    raw = build_raw_snapshot_from_public_data(
+        pair="DOGE/USDT",
+        exchange="binance",
+        timestamp_ms=1000,
+        premium_item=premium_item,
+        open_interest=12345.0,
+        oi_change_1h_pct=2.5,
+        mark_data_age_sec=1.0,
+        oi_data_age_sec=2.0,
+    )
+
+    assert raw["symbol"] == "DOGE/USDT"
+    assert raw["exchange"] == "binance"
+    assert raw["mark_price"] == 0.25
+    assert raw["index_price"] == 0.249
+    assert raw["premium_index"] == (0.25 - 0.249) / 0.249
+    assert raw["estimated_funding_rate"] == 0.0008
+    assert raw["next_funding_time_ms"] == 123456789
+    assert raw["open_interest"] == 12345.0
+    assert raw["oi_change_1h_pct"] == 2.5
+
 
 
 
