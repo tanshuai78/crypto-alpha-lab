@@ -6,6 +6,13 @@ import json
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
+import argparse
+import asyncio
+import time
+from json import JSONDecodeError
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from loguru import logger
 
 PUBLIC_SNAPSHOT_FIELDS = {
     "symbol",
@@ -179,6 +186,169 @@ def run_watchlist_poll_once(
             reject_reasons.append(result.reject_reason)
 
     return {"events": events, "reject_reasons": reject_reasons, "snapshots": snapshots}
+
+
+from configs.base import (
+    EXTREME_FUNDING_BINANCE_FAPI_BASE_URL,
+    EXTREME_FUNDING_EVENT_LOG_JSONL,
+    EXTREME_FUNDING_HEARTBEAT_INTERVAL_SEC,
+    EXTREME_FUNDING_HTTP_TIMEOUT_SEC,
+    EXTREME_FUNDING_LOCAL_DRY_RUN_MAX_ITERATIONS,
+    EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC,
+    EXTREME_FUNDING_MARK_DATA_POLL_INTERVAL_SEC,
+    EXTREME_FUNDING_OI_CHANGE_LOOKBACK_SEC,
+    EXTREME_FUNDING_OI_POLL_INTERVAL_SEC,
+    EXTREME_FUNDING_WATCH_SYMBOLS,
+)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Phase 1A extreme funding watchlist daemon.")
+    parser.add_argument("--forever", action="store_true")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--max-iterations", type=int, default=EXTREME_FUNDING_LOCAL_DRY_RUN_MAX_ITERATIONS)
+    parser.add_argument("--data-root", default="data")
+    parser.add_argument("--poll-interval-sec", type=float, default=float(EXTREME_FUNDING_MARK_DATA_POLL_INTERVAL_SEC))
+    args = parser.parse_args(argv)
+    if args.once:
+        args.max_iterations = 1
+        args.poll_interval_sec = 0.0
+    return args
+
+
+def classify_loop_exception(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, HTTPError):
+        return "watchlist_http_error", f"status={exc.code} detail={exc.reason}"
+    if isinstance(exc, URLError):
+        return "watchlist_url_error", f"detail={exc.reason}"
+    if isinstance(exc, JSONDecodeError):
+        return "watchlist_json_error", f"detail={exc}"
+    if isinstance(exc, KeyError):
+        return "watchlist_schema_error", f"missing={exc}"
+    return "watchlist_loop_error", f"type={type(exc).__name__} detail={exc}"
+
+
+def should_refresh_oi(*, last_fetch_ts: float | None, now_ts: float, interval_sec: int) -> bool:
+    if last_fetch_ts is None:
+        return True
+    return now_ts - last_fetch_ts >= interval_sec
+
+
+def oi_data_age_sec(*, last_fetch_ts: float | None, now_ts: float) -> float:
+    if last_fetch_ts is None:
+        return 999999.0
+    return now_ts - last_fetch_ts
+
+
+def append_jsonl(filepath: Path, data: dict) -> None:
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(json.dumps(data, default=str) + "\n")
+
+
+async def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    scanner = ExtremeFundingWatchlistScanner()
+    oi_window = OpenInterestWindow(lookback_sec=EXTREME_FUNDING_OI_CHANGE_LOOKBACK_SEC)
+    iteration = 0
+    last_heartbeat = 0.0
+
+    oi_payload_cache: dict[str, dict] = {}
+    last_oi_fetch_ts: float | None = None
+
+    event_log_path = Path(args.data_root) / EXTREME_FUNDING_EVENT_LOG_JSONL
+
+    while args.forever or iteration < args.max_iterations:
+        try:
+            now_ts = time.time()
+            now_ms = int(now_ts * 1000)
+
+            premium_url = build_binance_fapi_url(
+                base_url=EXTREME_FUNDING_BINANCE_FAPI_BASE_URL,
+                path="/fapi/v1/premiumIndex",
+            )
+            premium_payload = fetch_json_url(premium_url, timeout_sec=EXTREME_FUNDING_HTTP_TIMEOUT_SEC)
+
+            if should_refresh_oi(
+                last_fetch_ts=last_oi_fetch_ts,
+                now_ts=now_ts,
+                interval_sec=EXTREME_FUNDING_OI_POLL_INTERVAL_SEC,
+            ):
+                new_oi_payloads = {}
+                for pair in EXTREME_FUNDING_WATCH_SYMBOLS:
+                    symbol = binance_symbol_from_pair(pair)
+                    oi_url = build_binance_fapi_url(
+                        base_url=EXTREME_FUNDING_BINANCE_FAPI_BASE_URL,
+                        path="/fapi/v1/openInterest",
+                        params={"symbol": symbol},
+                    )
+                    try:
+                        new_oi_payloads[symbol] = fetch_json_url(oi_url, timeout_sec=EXTREME_FUNDING_HTTP_TIMEOUT_SEC)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch OI for {symbol}: {e}")
+                        if symbol in oi_payload_cache:
+                            new_oi_payloads[symbol] = oi_payload_cache[symbol]
+                
+                oi_payload_cache = new_oi_payloads
+                last_oi_fetch_ts = now_ts
+
+            oi_age = oi_data_age_sec(last_fetch_ts=last_oi_fetch_ts, now_ts=now_ts)
+
+            result = run_watchlist_poll_once(
+                pairs=EXTREME_FUNDING_WATCH_SYMBOLS,
+                scanner=scanner,
+                oi_window=oi_window,
+                timestamp_ms=now_ms,
+                premium_payload=premium_payload,
+                oi_payloads=oi_payload_cache,
+                oi_data_age_sec=oi_age,
+            )
+
+            if result["events"]:
+                for event in result["events"]:
+                    logger.info(f"watch_event={event}")
+                    append_jsonl(event_log_path, {"type": "watch_event", "event": event.__dict__})
+
+            if should_poll(
+                last_poll_ts=last_heartbeat,
+                now_ts=now_ts,
+                interval_sec=EXTREME_FUNDING_HEARTBEAT_INTERVAL_SEC,
+            ):
+                logger.info(
+                    "heartbeat "
+                    f"events={len(result['events'])} "
+                    f"rejects={summarize_reject_counts(result['reject_reasons'])}"
+                )
+                append_jsonl(
+                    event_log_path,
+                    {
+                        "type": "heartbeat_summary",
+                        "timestamp_ms": now_ms,
+                        "events": len(result["events"]),
+                        "reject_counts": summarize_reject_counts(result["reject_reasons"]),
+                        "oi_data_age_sec": oi_age,
+                    },
+                )
+                last_heartbeat = now_ts
+
+            iteration += 1
+            if not args.forever and iteration >= args.max_iterations:
+                break
+            await asyncio.sleep(args.poll_interval_sec)
+        except Exception as exc:
+            err_type, err_detail = classify_loop_exception(exc)
+            logger.warning(f"{err_type} {err_detail}")
+            iteration += 1
+            if not args.forever and iteration >= args.max_iterations:
+                break
+            await asyncio.sleep(EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))
+
 
 
 

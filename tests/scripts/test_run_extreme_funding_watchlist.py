@@ -10,6 +10,8 @@ from scripts.run_extreme_funding_watchlist import (
     OpenInterestWindow,
     build_raw_snapshot_from_public_data,
     run_watchlist_poll_once,
+    parse_args,
+    classify_loop_exception,
 )
 from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 
@@ -235,6 +237,34 @@ def test_run_watchlist_poll_once_calculates_oi_change_before_append():
     )
 
     assert result["snapshots"][0]["oi_change_1h_pct"] == 10.0
+
+
+from json import JSONDecodeError
+from urllib.error import URLError
+
+
+def test_parse_args_defaults_to_bounded_local_dry_run():
+    args = parse_args([])
+
+    assert args.forever is False
+    assert args.max_iterations == 3
+    assert args.data_root == "data"
+    assert args.once is False
+
+
+def test_parse_args_once_sets_single_fast_iteration():
+    args = parse_args(["--once"])
+
+    assert args.once is True
+    assert args.max_iterations == 1
+    assert args.poll_interval_sec == 0.0
+
+
+def test_classify_loop_exception_separates_url_json_and_schema_errors():
+    assert classify_loop_exception(URLError("offline"))[0] == "watchlist_url_error"
+    assert classify_loop_exception(JSONDecodeError("bad", "{", 0))[0] == "watchlist_json_error"
+    assert classify_loop_exception(KeyError("markPrice"))[0] == "watchlist_schema_error"
+
 
 
 
