@@ -81,3 +81,136 @@ def test_micro_persistence_uses_timestamp_window_not_sample_count():
     values = scanner.get_window_values("DOGE/USDT", now_ms=31 * 60_000)
 
     assert values == [10.0]
+
+
+def _snapshot(**overrides):
+    base = {
+        "symbol": "DOGE/USDT",
+        "exchange": "binance",
+        "timestamp_ms": 1,
+        "premium_index": 0.001,
+        "estimated_funding_rate": 0.0008,
+        "open_interest": 1_000_000.0,
+        "oi_change_1h_pct": 0.0,
+        "volume_24h_usdt": 100_000_000.0,
+        "mark_data_age_sec": 1.0,
+        "oi_data_age_sec": 1.0,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_premium_spike_without_persistence_is_rejected():
+    scanner = ExtremeFundingWatchlistScanner()
+    result = scanner.classify(_snapshot(premium_annualized_estimate_pct=80.0))
+    assert result.event is None
+    assert result.reject_reason == "micro_persistence_below_threshold"
+
+
+def test_persistent_premium_with_weak_oi_returns_level_1():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(20):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=35.0,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=20 * 60_000,
+            premium_annualized_estimate_pct=35.0,
+        )
+    )
+    assert result.event is not None
+    assert result.event.level == "watch_level_1"
+    assert result.event.executable is False
+
+
+def test_persistent_premium_with_oi_expansion_returns_level_2():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(30):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=60.0,
+                oi_change_1h_pct=1.0,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=30 * 60_000,
+            premium_annualized_estimate_pct=60.0,
+            oi_change_1h_pct=1.0,
+        )
+    )
+    assert result.event is not None
+    assert result.event.level == "watch_level_2"
+
+
+def test_strong_premium_with_strong_oi_returns_level_3():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(30):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=120.0,
+                oi_change_1h_pct=4.0,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=30 * 60_000,
+            premium_annualized_estimate_pct=120.0,
+            oi_change_1h_pct=4.0,
+        )
+    )
+    assert result.event is not None
+    assert result.event.level == "watch_level_3"
+
+
+def test_persistent_premium_with_missing_oi_returns_level_1_with_oi_missing_metadata():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(30):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=60.0,
+                oi_change_1h_pct=None,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=30 * 60_000,
+            premium_annualized_estimate_pct=60.0,
+            oi_change_1h_pct=None,
+        )
+    )
+    assert result.event is not None
+    assert result.event.level == "watch_level_1"
+    assert result.event.metadata["oi_status"] == "missing"
+    assert result.reject_reason is None
+
+
+def test_persistent_premium_with_stale_oi_returns_level_1_with_oi_stale_metadata():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(30):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=60.0,
+                oi_data_age_sec=181,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=30 * 60_000,
+            premium_annualized_estimate_pct=60.0,
+            oi_data_age_sec=181,
+        )
+    )
+
+    assert result.event is not None
+    assert result.event.level == "watch_level_1"
+    assert result.event.metadata["oi_status"] == "stale"
+    assert result.reject_reason is None
