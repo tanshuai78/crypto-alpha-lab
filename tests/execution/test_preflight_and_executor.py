@@ -1,15 +1,15 @@
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
-import sqlite3
 
 import pytest
 
+from execution.compat import build_legacy_entry_intent, build_legacy_entry_intent_adapter
 from execution.execution_journal import ExecutionJournal
 from execution.models import ExecutionLeg, TradeIntent
 from execution.order_executor import OrderExecutor
 from execution.order_state_machine import IntentState
 from execution.preflight import PREFLIGHT_BLOCKER_PREFIXES, preflight_check
-from execution.compat import build_legacy_entry_intent, build_legacy_entry_intent_adapter
 
 
 class FakeExchange:

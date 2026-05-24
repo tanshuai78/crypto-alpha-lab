@@ -6,7 +6,7 @@ RISK_LIVE_TRADING_ENABLED defaults to False — the system boots in observation 
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 try:
     from configs.base import (

@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
+from execution.execution_journal import ExecutionJournal
+from execution.models import ExecutionLeg, TradeIntent
+from execution.order_state_machine import IntentState, IntentStateMachine
 from tests.execution.fixtures import (
     describe_bridge_contract,
     make_execution_leg_fixture,
     make_trade_intent_fixture,
 )
-from execution.execution_journal import ExecutionJournal
-from execution.models import ExecutionLeg, TradeIntent
-from execution.order_state_machine import IntentState, IntentStateMachine
 
 
 def make_leg(

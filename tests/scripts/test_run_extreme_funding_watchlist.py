@@ -1,17 +1,22 @@
+import json
+from io import BytesIO
+from json import JSONDecodeError
+from urllib.error import URLError
+
 from scripts.run_extreme_funding_watchlist import (
-    build_snapshot,
-    should_poll,
-    summarize_reject_counts,
+    OpenInterestWindow,
     binance_symbol_from_pair,
     build_binance_fapi_url,
+    build_raw_snapshot_from_public_data,
+    build_snapshot,
+    classify_loop_exception,
     fetch_json_url,
     find_premium_item,
-    parse_open_interest,
-    OpenInterestWindow,
-    build_raw_snapshot_from_public_data,
-    run_watchlist_poll_once,
     parse_args,
-    classify_loop_exception,
+    parse_open_interest,
+    run_watchlist_poll_once,
+    should_poll,
+    summarize_reject_counts,
 )
 from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 
@@ -66,9 +71,6 @@ def test_build_binance_fapi_url_encodes_query_params():
 
     assert url == "https://fapi.binance.com/fapi/v1/openInterest?symbol=DOGEUSDT"
 
-
-import json
-from io import BytesIO
 
 
 class _FakeResponse:
@@ -238,9 +240,6 @@ def test_run_watchlist_poll_once_calculates_oi_change_before_append():
 
     assert result["snapshots"][0]["oi_change_1h_pct"] == 10.0
 
-
-from json import JSONDecodeError
-from urllib.error import URLError
 
 
 def test_parse_args_defaults_to_bounded_local_dry_run():

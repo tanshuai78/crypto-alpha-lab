@@ -1,11 +1,11 @@
+import pytest
+
 from strategies.extreme_funding.scanner import (
     ExtremeFundingWatchEvent,
     ExtremeFundingWatchlistScanner,
-    ExtremeFundingClassification,
     classify_extreme_funding_snapshot,
     compute_micro_persistence,
 )
-import pytest
 
 
 def test_watch_event_contract_is_observation_only():

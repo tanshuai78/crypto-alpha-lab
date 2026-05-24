@@ -108,7 +108,7 @@ def test_recovery_cannot_clear_while_unknown_remote_state_remains():
     )
     assert recovery.status == GuardStatus.RECOVERY
     assert "unresolved journal state" in recovery.reason
-    assert guard.allow_intent(entry_intent := TradeIntent(
+    assert guard.allow_intent(TradeIntent(
         intent_id="entry-unknown-remote",
         strategy_type="carry",
         leg_a=ExecutionLeg("okx", "BTC/USDT:USDT", "sell", "limit", "short", "a2", "GTC", False, True, 100.0),
