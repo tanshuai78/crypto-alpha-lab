@@ -148,6 +148,10 @@ class ExtremeFundingWatchlistScanner:
         )
         return ExtremeFundingClassification(event, None)
 
+    async def scan(self, market_data: dict[str, Any]) -> list[ExtremeFundingWatchEvent]:
+        result = self.classify(market_data)
+        return [result.event] if result.event is not None else []
+
 
 def premium_to_naive_annualized_pct(
     premium_index: float,

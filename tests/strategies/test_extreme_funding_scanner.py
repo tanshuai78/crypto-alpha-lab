@@ -1,9 +1,11 @@
 from strategies.extreme_funding.scanner import (
     ExtremeFundingWatchEvent,
     ExtremeFundingWatchlistScanner,
+    ExtremeFundingClassification,
     classify_extreme_funding_snapshot,
     compute_micro_persistence,
 )
+import pytest
 
 
 def test_watch_event_contract_is_observation_only():
@@ -214,3 +216,28 @@ def test_persistent_premium_with_stale_oi_returns_level_1_with_oi_stale_metadata
     assert result.event.level == "watch_level_1"
     assert result.event.metadata["oi_status"] == "stale"
     assert result.reject_reason is None
+
+
+@pytest.mark.asyncio
+async def test_scan_returns_watch_events_not_signal_candidates():
+    scanner = ExtremeFundingWatchlistScanner()
+    for minute in range(30):
+        await scanner.scan(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=60.0,
+                oi_change_1h_pct=1.0,
+            )
+        )
+
+    events = await scanner.scan(
+        _snapshot(
+            timestamp_ms=30 * 60_000,
+            premium_annualized_estimate_pct=60.0,
+            oi_change_1h_pct=1.0,
+        )
+    )
+
+    assert len(events) == 1
+    assert isinstance(events[0], ExtremeFundingWatchEvent)
+    assert events[0].executable is False
