@@ -1,24 +1,26 @@
-FROM ghcr.io/astral-sh/uv:python3.11-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Enable bytecode compilation
-ENV UV_COMPILE_BYTECODE=1
+# Install system dependencies if any library needs compilation (e.g. pandas/pyarrow pre-built wheels might need it)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files to optimize build caching
-COPY pyproject.toml uv.lock ./
+# Copy configuration files
+COPY pyproject.toml ./
 
-# Install dependencies
-RUN uv sync --frozen --no-install-project
+# Install project dependencies directly via pip (pip supports pyproject.toml out of the box in python 3.11)
+RUN pip install --no-cache-dir .
 
 # Copy the rest of the application code
 COPY . .
 
-# Install the project itself
-RUN uv sync --frozen
+# Install the application itself in editable mode
+RUN pip install --no-cache-dir -e .
 
-# Set PYTHONPATH to search in src/
+# Set PYTHONPATH
 ENV PYTHONPATH=src
 
 # Default daemon command
-CMD ["uv", "run", "python", "scripts/run_extreme_funding_watchlist.py", "--forever", "--data-root", "data"]
+CMD ["python", "scripts/run_extreme_funding_watchlist.py", "--forever", "--data-root", "data"]
