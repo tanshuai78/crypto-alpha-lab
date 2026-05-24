@@ -1,26 +1,26 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Install system dependencies if any library needs compilation (e.g. pandas/pyarrow pre-built wheels might need it)
+# Install system compilation dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy configuration files
-COPY pyproject.toml ./
+# Install uv for super fast and cached package management
+RUN pip install --no-cache-dir uv
 
-# Install project dependencies directly via pip (pip supports pyproject.toml out of the box in python 3.11)
-RUN pip install --no-cache-dir .
+WORKDIR /app
+
+# Copy dependency definition files first (including README.md to satisfy hatchling metadata validation)
+COPY pyproject.toml uv.lock README.md ./
+
+# Install project dependencies into the system python environment
+RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Copy the rest of the application code
 COPY . .
 
-# Install the application itself in editable mode
-RUN pip install --no-cache-dir -e .
-
 # Set PYTHONPATH
 ENV PYTHONPATH=src
 
-# Default daemon command
+# Run command
 CMD ["python", "scripts/run_extreme_funding_watchlist.py", "--forever", "--data-root", "data"]
