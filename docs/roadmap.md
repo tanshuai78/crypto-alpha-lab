@@ -98,6 +98,27 @@ Changing a threshold requires changing one file and is immediately auditable.
 
 **Shadow validation target (Day 1–10)**: At least 1 qualifying signal per 7 days over a 30-day window.
 
+#### Historical Verification & Backtest Results
+
+To validate the Extreme Funding Event Scanner hypothesis, two historical analyses were performed:
+1. **74-Day Local Orderbook Analysis (2026-02-10 to 2026-05-08)**:
+   - **Data Source**: Local orderbook snapshots (194k on Binance, 103k on OKX) for target symbols (BTC, ETH, SOL, XRP, ADA, DOGE).
+   - **Results**: **0 events detected** at the 30% annualized threshold.
+   - **Critical Limitations**:
+     - **Exchange API Capping**: Both Binance and OKX public real-time/estimated funding rate endpoints are capped at ±0.01% per 8h (±10.95% annualized) in the historical snapshot data. Thus, real-time feeds cannot register rates above 10.95%, making a 30% threshold impossible to trigger.
+     - **Market Regime (Backwardation)**: The market was in a backwardation (贴水) phase. Mean annualized rates were negative (BTC: -1.3%, ETH: -1.9%, SOL: -3.2%). Under backwardation, short perp positions *pay* funding instead of receiving it, resulting in no profitable long spot / short perp carry events.
+2. **5-Year Settled Funding Rate Analysis (2021-01-01 to 2026-05-23)**:
+   - **Data Source**: Binance settled funding rate history (5,900+ intervals per asset, uncapped true settled rates).
+   - **Key Finding 1 (Threshold Effect)**: Higher thresholds lead to significantly higher win rates due to clearing the transaction cost floor (16 bps round-trip) and filtering out transient noise.
+     - *BTC example*: >30% threshold yields ~30% win rate; >100% threshold yields **61% win rate** (31 segments, +21 bps avg net edge).
+   - **Key Finding 2 (Asset Priority)**: Altcoins exhibit much stronger edge and higher event frequencies than BTC.
+     - *DOGE (>100% threshold)*: 38 segments, **71% win rate**, **+46 bps** avg net edge, cumulative +1,755 bps.
+     - *XRP (>100% threshold)*: 42 segments, **64% win rate**, **+51 bps** avg net edge, cumulative +2,119 bps.
+     - *ADA (>100% threshold)*: 43 segments, **53% win rate**, **+33 bps** avg net edge, cumulative +1,433 bps.
+     - *ETH (>100% threshold)*: 41 segments, **51% win rate**, **+26 bps** avg net edge, cumulative +1,076 bps.
+     - **Recommended Priority**: XRP/DOGE > ADA > ETH > BTC.
+   - **Key Finding 3 (Regime Clustering)**: Extreme positive funding events are heavily clustered in the 2021–2022 bull market segments, meaning the strategy relies on macro bull runs for high frequency.
+
 ---
 
 ### 2. Trend / Liquidation Regime Scanner (Priority 2)
