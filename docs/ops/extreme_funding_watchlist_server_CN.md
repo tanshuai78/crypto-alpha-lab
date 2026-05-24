@@ -62,6 +62,40 @@ PYTHONPATH=src uv run python scripts/run_extreme_funding_watchlist.py --forever 
 
 ---
 
+## Docker 部署与运行 (Docker Deployment & Operations)
+
+对于不支持本地 `uv` 环境或需要运行隔离的服务器环境，推荐使用 Docker 进行部署。
+
+### 1. 同步本地代码至服务器 (本地 Mac 执行)
+```bash
+rsync -avzP --exclude='data' --exclude='.git' --exclude='.venv' --exclude='.ruff_cache' --exclude='.pytest_cache' --exclude='__pycache__' \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/ \
+  root@47.82.4.85:/root/crypto-alpha-lab/
+```
+
+### 2. 构建镜像与启动容器 (服务器端执行)
+```bash
+cd /root/crypto-alpha-lab
+
+# 构建镜像
+docker build -t crypto-watchlist .
+
+# 启动容器（限制内存为 512MB，挂载数据目录以持久化日志）
+docker run -d --name crypto-watchlist \
+  --memory="512m" \
+  --restart always \
+  -v /root/crypto-alpha-lab/data:/app/data \
+  crypto-watchlist
+```
+
+### 3. 日常维护常用指令 (服务器端执行)
+*   **查看运行日志**：`docker logs -f crypto-watchlist`
+*   **停止监控容器**：`docker stop crypto-watchlist`
+*   **重启监控容器**：`docker start crypto-watchlist`
+*   **删除监控容器**：`docker rm crypto-watchlist`
+
+---
+
 ## systemd 服务配置示例 (systemd Example)
 
 ```ini
