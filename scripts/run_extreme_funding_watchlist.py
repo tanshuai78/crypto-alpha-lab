@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import json
 from typing import Any, Callable
 from urllib.request import Request, urlopen
+from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 
 PUBLIC_SNAPSHOT_FIELDS = {
     "symbol",
@@ -124,6 +125,61 @@ def build_raw_snapshot_from_public_data(
         "mark_data_age_sec": mark_data_age_sec,
         "oi_data_age_sec": oi_data_age_sec,
     }
+
+
+def run_watchlist_poll_once(
+    *,
+    pairs: tuple[str, ...],
+    scanner: ExtremeFundingWatchlistScanner,
+    oi_window: OpenInterestWindow,
+    timestamp_ms: int,
+    premium_payload: list[dict] | dict,
+    oi_payloads: dict[str, dict],
+    oi_data_age_sec: float,
+) -> dict[str, Any]:
+    events = []
+    reject_reasons = []
+    snapshots = []
+
+    for pair in pairs:
+        binance_symbol = binance_symbol_from_pair(pair)
+        premium_item = find_premium_item(premium_payload, binance_symbol)
+        if premium_item is None:
+            reject_reasons.append("missing_premium")
+            continue
+
+        oi_payload = oi_payloads.get(binance_symbol)
+        open_interest = parse_open_interest(oi_payload) if oi_payload else None
+        oi_change = None
+        if open_interest is not None:
+            # Calculate against the previous retained value before appending current OI.
+            oi_change = oi_window.change_pct(
+                pair,
+                now_ms=timestamp_ms,
+                current_open_interest=open_interest,
+            )
+            oi_window.append(pair, timestamp_ms=timestamp_ms, open_interest=open_interest)
+
+        raw = build_raw_snapshot_from_public_data(
+            pair=pair,
+            exchange="binance",
+            timestamp_ms=timestamp_ms,
+            premium_item=premium_item,
+            open_interest=open_interest,
+            oi_change_1h_pct=oi_change,
+            mark_data_age_sec=0.0,
+            oi_data_age_sec=oi_data_age_sec if oi_payload else 999999.0,
+        )
+        snapshot = build_snapshot(raw)
+        snapshots.append(snapshot)
+        result = scanner.classify(snapshot)
+        if result.event is not None:
+            events.append(result.event)
+        elif result.reject_reason is not None:
+            reject_reasons.append(result.reject_reason)
+
+    return {"events": events, "reject_reasons": reject_reasons, "snapshots": snapshots}
+
 
 
 

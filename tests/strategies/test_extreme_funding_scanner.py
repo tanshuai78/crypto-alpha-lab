@@ -104,9 +104,22 @@ def _snapshot(**overrides):
 
 def test_premium_spike_without_persistence_is_rejected():
     scanner = ExtremeFundingWatchlistScanner()
-    result = scanner.classify(_snapshot(premium_annualized_estimate_pct=80.0))
+    for minute in range(6):
+        scanner.classify(
+            _snapshot(
+                timestamp_ms=minute * 60_000,
+                premium_annualized_estimate_pct=0.0,
+            )
+        )
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=6 * 60_000,
+            premium_annualized_estimate_pct=80.0,
+        )
+    )
     assert result.event is None
     assert result.reject_reason == "micro_persistence_below_threshold"
+
 
 
 def test_persistent_premium_with_weak_oi_returns_level_1():

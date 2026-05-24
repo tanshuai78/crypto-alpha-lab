@@ -93,6 +93,12 @@ class ExtremeFundingWatchlistScanner:
 
         self.append_observation(symbol, timestamp_ms=timestamp_ms, annualized_pct=annualized_pct)
         window_values = self.get_window_values(symbol, now_ms=timestamp_ms)
+
+        if self._history[symbol]:
+            first_ts = self._history[symbol][0][0]
+            if timestamp_ms - first_ts < 5 * 60_000:
+                return ExtremeFundingClassification(None, "micro_persistence_warmup")
+
         micro_persistence = compute_micro_persistence(
             window_values,
             threshold_pct=EXTREME_FUNDING_PRE_SIGNAL_ANNUALIZED_THRESHOLD_PCT,

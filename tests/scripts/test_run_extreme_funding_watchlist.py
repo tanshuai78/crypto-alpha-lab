@@ -9,7 +9,9 @@ from scripts.run_extreme_funding_watchlist import (
     parse_open_interest,
     OpenInterestWindow,
     build_raw_snapshot_from_public_data,
+    run_watchlist_poll_once,
 )
+from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 
 
 def test_should_poll_respects_interval():
@@ -152,6 +154,88 @@ def test_build_raw_snapshot_from_public_data_maps_public_fields():
     assert raw["next_funding_time_ms"] == 123456789
     assert raw["open_interest"] == 12345.0
     assert raw["oi_change_1h_pct"] == 2.5
+
+
+def _premium_payload():
+    return [
+        {
+            "symbol": "DOGEUSDT",
+            "markPrice": "0.2600",
+            "indexPrice": "0.2500",
+            "lastFundingRate": "0.0008",
+            "nextFundingTime": "123456789",
+        }
+    ]
+
+
+def test_run_watchlist_poll_once_rejects_until_persistence_warmup_complete():
+    scanner = ExtremeFundingWatchlistScanner()
+    oi_window = OpenInterestWindow(lookback_sec=3600)
+    oi_payloads = {"DOGEUSDT": {"openInterest": "1000"}}
+
+    result = None
+    for second in (0, 60, 120, 180, 240):
+        result = run_watchlist_poll_once(
+            pairs=("DOGE/USDT",),
+            scanner=scanner,
+            oi_window=oi_window,
+            timestamp_ms=second * 1000,
+            premium_payload=_premium_payload(),
+            oi_payloads=oi_payloads,
+            oi_data_age_sec=1.0,
+        )
+
+    assert result["events"] == []
+    assert result["reject_reasons"] == ["micro_persistence_warmup"]
+
+
+def test_run_watchlist_poll_once_emits_after_warmup_and_persistence():
+    scanner = ExtremeFundingWatchlistScanner()
+    oi_window = OpenInterestWindow(lookback_sec=3600)
+    oi_payloads = {"DOGEUSDT": {"openInterest": "1000"}}
+
+    for second in (0, 60, 120, 180, 240):
+        run_watchlist_poll_once(
+            pairs=("DOGE/USDT",),
+            scanner=scanner,
+            oi_window=oi_window,
+            timestamp_ms=second * 1000,
+            premium_payload=_premium_payload(),
+            oi_payloads=oi_payloads,
+            oi_data_age_sec=1.0,
+        )
+
+    result = run_watchlist_poll_once(
+        pairs=("DOGE/USDT",),
+        scanner=scanner,
+        oi_window=oi_window,
+        timestamp_ms=300 * 1000,
+        premium_payload=_premium_payload(),
+        oi_payloads=oi_payloads,
+        oi_data_age_sec=1.0,
+    )
+
+    assert len(result["events"]) == 1
+    assert result["events"][0].level in {"watch_level_1", "watch_level_2", "watch_level_3"}
+
+
+def test_run_watchlist_poll_once_calculates_oi_change_before_append():
+    scanner = ExtremeFundingWatchlistScanner()
+    oi_window = OpenInterestWindow(lookback_sec=3600)
+    oi_window.append("DOGE/USDT", timestamp_ms=0, open_interest=100.0)
+
+    result = run_watchlist_poll_once(
+        pairs=("DOGE/USDT",),
+        scanner=scanner,
+        oi_window=oi_window,
+        timestamp_ms=3600 * 1000,
+        premium_payload=_premium_payload(),
+        oi_payloads={"DOGEUSDT": {"openInterest": "110"}},
+        oi_data_age_sec=1.0,
+    )
+
+    assert result["snapshots"][0]["oi_change_1h_pct"] == 10.0
+
 
 
 
