@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import Counter
 from urllib.parse import urlencode
+import json
+from typing import Any, Callable
+from urllib.request import Request, urlopen
 
 PUBLIC_SNAPSHOT_FIELDS = {
     "symbol",
@@ -42,4 +45,14 @@ def build_binance_fapi_url(*, base_url: str, path: str, params: dict[str, str] |
     if not params:
         return f"{normalized_base}{normalized_path}"
     return f"{normalized_base}{normalized_path}?{urlencode(params)}"
+
+
+UrlOpen = Callable[..., Any]
+
+
+def fetch_json_url(url: str, *, timeout_sec: float, opener: UrlOpen = urlopen) -> Any:
+    request = Request(url, headers={"User-Agent": "crypto-alpha-lab/phase1a-watchlist"})
+    with opener(request, timeout=timeout_sec) as response:
+        return json.loads(response.read().decode("utf-8"))
+
 

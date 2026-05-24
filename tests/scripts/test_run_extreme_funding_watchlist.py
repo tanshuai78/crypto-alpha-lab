@@ -4,6 +4,7 @@ from scripts.run_extreme_funding_watchlist import (
     summarize_reject_counts,
     binance_symbol_from_pair,
     build_binance_fapi_url,
+    fetch_json_url,
 )
 
 
@@ -56,4 +57,33 @@ def test_build_binance_fapi_url_encodes_query_params():
     )
 
     assert url == "https://fapi.binance.com/fapi/v1/openInterest?symbol=DOGEUSDT"
+
+
+import json
+from io import BytesIO
+
+
+class _FakeResponse:
+    def __init__(self, payload: object):
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return BytesIO(self._payload)
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_fetch_json_url_uses_injected_opener():
+    calls = []
+
+    def fake_opener(request, *, timeout):
+        calls.append((request.full_url, timeout))
+        return _FakeResponse({"ok": True})
+
+    result = fetch_json_url("https://example.test/path", timeout_sec=2.5, opener=fake_opener)
+
+    assert result == {"ok": True}
+    assert calls == [("https://example.test/path", 2.5)]
+
 
