@@ -132,6 +132,10 @@ EXTREME_FUNDING_TRADE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 100.0
 EXTREME_FUNDING_MICRO_PERSISTENCE_WINDOW_MIN = 30
 # Rolling micro window length for premium-derived observation persistence.
 
+EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC = 300
+# Minimum timestamp coverage before emitting a Phase 1A watch event.
+# 300s = 5 minutes. Prevents startup false positives from 1-2 samples.
+
 EXTREME_FUNDING_MICRO_PERSISTENCE_MIN = 0.70
 # Strong micro persistence threshold.
 

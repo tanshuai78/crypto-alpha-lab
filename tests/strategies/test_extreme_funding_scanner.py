@@ -1,5 +1,6 @@
 import pytest
 
+from strategies.extreme_funding import scanner as scanner_module
 from strategies.extreme_funding.scanner import (
     ExtremeFundingWatchEvent,
     ExtremeFundingWatchlistScanner,
@@ -119,6 +120,34 @@ def test_premium_spike_without_persistence_is_rejected():
     )
     assert result.event is None
     assert result.reject_reason == "micro_persistence_below_threshold"
+
+
+def test_warmup_uses_configured_min_coverage(monkeypatch):
+    monkeypatch.setattr(scanner_module, "EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC", 120)
+    scanner = ExtremeFundingWatchlistScanner()
+
+    for second in (0, 60):
+        result = scanner.classify(
+            _snapshot(
+                timestamp_ms=second * 1000,
+                premium_annualized_estimate_pct=60.0,
+                oi_change_1h_pct=1.0,
+            )
+        )
+
+    assert result.event is None
+    assert result.reject_reason == "micro_persistence_warmup"
+
+    result = scanner.classify(
+        _snapshot(
+            timestamp_ms=120 * 1000,
+            premium_annualized_estimate_pct=60.0,
+            oi_change_1h_pct=1.0,
+        )
+    )
+
+    assert result.event is not None
+    assert result.event.level == "watch_level_2"
 
 
 

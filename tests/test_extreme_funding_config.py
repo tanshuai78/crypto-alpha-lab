@@ -32,4 +32,5 @@ def test_extreme_funding_phase1a_live_polling_config_constants_exist():
     assert base.EXTREME_FUNDING_LOCAL_DRY_RUN_MAX_ITERATIONS == 3
     assert base.EXTREME_FUNDING_OI_CHANGE_LOOKBACK_SEC == 3600
     assert base.EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC == 5.0
-
+    assert base.EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC == 300
+    assert base.EXTREME_FUNDING_EVENT_LOG_JSONL == "extreme_funding_watch_events.jsonl"

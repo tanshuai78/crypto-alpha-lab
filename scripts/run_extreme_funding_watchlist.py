@@ -21,7 +21,11 @@ PUBLIC_SNAPSHOT_FIELDS = {
     "mark_price",
     "index_price",
     "premium_index",
+    "raw_mark_index_premium",
+    "premium_source",
+    "last_funding_rate",
     "estimated_funding_rate",
+    "funding_rate_source",
     "next_funding_time_ms",
     "open_interest",
     "oi_change_1h_pct",
@@ -116,15 +120,20 @@ def build_raw_snapshot_from_public_data(
 ) -> dict:
     mark_price = float(premium_item["markPrice"])
     index_price = float(premium_item["indexPrice"])
-    premium_index = (mark_price - index_price) / index_price if index_price > 0 else 0.0
+    raw_mark_index_premium = (mark_price - index_price) / index_price if index_price > 0 else 0.0
+    last_funding_rate = float(premium_item.get("lastFundingRate", 0.0))
     return {
         "symbol": pair,
         "exchange": exchange,
         "timestamp_ms": timestamp_ms,
         "mark_price": mark_price,
         "index_price": index_price,
-        "premium_index": premium_index,
-        "estimated_funding_rate": float(premium_item.get("lastFundingRate", 0.0)),
+        "premium_index": raw_mark_index_premium,
+        "raw_mark_index_premium": raw_mark_index_premium,
+        "premium_source": "mark_price_minus_index_price",
+        "last_funding_rate": last_funding_rate,
+        "estimated_funding_rate": last_funding_rate,
+        "funding_rate_source": "binance_lastFundingRate",
         "next_funding_time_ms": int(premium_item.get("nextFundingTime", 0)),
         "open_interest": open_interest,
         "oi_change_1h_pct": oi_change_1h_pct,
@@ -240,10 +249,27 @@ def oi_data_age_sec(*, last_fetch_ts: float | None, now_ts: float) -> float:
     return now_ts - last_fetch_ts
 
 
+def merge_open_interest_cache(
+    *,
+    pairs: tuple[str, ...],
+    current_cache: dict[str, dict],
+    fetched_payloads: dict[str, dict],
+) -> tuple[dict[str, dict], bool]:
+    merged = dict(current_cache)
+    complete_refresh = True
+    for pair in pairs:
+        symbol = binance_symbol_from_pair(pair)
+        if symbol in fetched_payloads:
+            merged[symbol] = fetched_payloads[symbol]
+        else:
+            complete_refresh = False
+    return merged, complete_refresh
+
+
 def append_jsonl(filepath: Path, data: dict) -> None:
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "a", encoding="utf-8") as f:
-        f.write(json.dumps(data, default=str) + "\n")
+        f.write(json.dumps(data, default=str, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 async def main(argv: list[str] | None = None) -> int:
@@ -274,7 +300,7 @@ async def main(argv: list[str] | None = None) -> int:
                 now_ts=now_ts,
                 interval_sec=EXTREME_FUNDING_OI_POLL_INTERVAL_SEC,
             ):
-                new_oi_payloads = {}
+                fetched_oi_payloads = {}
                 for pair in EXTREME_FUNDING_WATCH_SYMBOLS:
                     symbol = binance_symbol_from_pair(pair)
                     oi_url = build_binance_fapi_url(
@@ -283,14 +309,21 @@ async def main(argv: list[str] | None = None) -> int:
                         params={"symbol": symbol},
                     )
                     try:
-                        new_oi_payloads[symbol] = fetch_json_url(oi_url, timeout_sec=EXTREME_FUNDING_HTTP_TIMEOUT_SEC)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch OI for {symbol}: {e}")
-                        if symbol in oi_payload_cache:
-                            new_oi_payloads[symbol] = oi_payload_cache[symbol]
-                
-                oi_payload_cache = new_oi_payloads
-                last_oi_fetch_ts = now_ts
+                        fetched_oi_payloads[symbol] = fetch_json_url(
+                            oi_url,
+                            timeout_sec=EXTREME_FUNDING_HTTP_TIMEOUT_SEC,
+                        )
+                    except Exception as exc:
+                        err_type, err_detail = classify_loop_exception(exc)
+                        logger.warning(f"watchlist_oi_fetch_error symbol={symbol} {err_type} {err_detail}")
+
+                oi_payload_cache, complete_oi_refresh = merge_open_interest_cache(
+                    pairs=EXTREME_FUNDING_WATCH_SYMBOLS,
+                    current_cache=oi_payload_cache,
+                    fetched_payloads=fetched_oi_payloads,
+                )
+                if complete_oi_refresh:
+                    last_oi_fetch_ts = now_ts
 
             oi_age = oi_data_age_sec(last_fetch_ts=last_oi_fetch_ts, now_ts=now_ts)
 
@@ -348,7 +381,6 @@ async def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
-
 
 
 

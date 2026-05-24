@@ -8,6 +8,7 @@ from configs.base import (
     EXTREME_FUNDING_MAX_MARK_DATA_AGE_SEC,
     EXTREME_FUNDING_MAX_OI_DATA_AGE_SEC,
     EXTREME_FUNDING_MICRO_PERSISTENCE_MIN,
+    EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC,
     EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_WEAK,
     EXTREME_FUNDING_MICRO_PERSISTENCE_WINDOW_MIN,
     EXTREME_FUNDING_OI_CONFIRMATION_MIN_CHANGE_1H_PCT,
@@ -96,7 +97,7 @@ class ExtremeFundingWatchlistScanner:
 
         if self._history[symbol]:
             first_ts = self._history[symbol][0][0]
-            if timestamp_ms - first_ts < 5 * 60_000:
+            if timestamp_ms - first_ts < EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC * 1000:
                 return ExtremeFundingClassification(None, "micro_persistence_warmup")
 
         micro_persistence = compute_micro_persistence(

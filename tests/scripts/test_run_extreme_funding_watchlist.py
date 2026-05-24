@@ -5,6 +5,7 @@ from urllib.error import URLError
 
 from scripts.run_extreme_funding_watchlist import (
     OpenInterestWindow,
+    append_jsonl,
     binance_symbol_from_pair,
     build_binance_fapi_url,
     build_raw_snapshot_from_public_data,
@@ -12,10 +13,13 @@ from scripts.run_extreme_funding_watchlist import (
     classify_loop_exception,
     fetch_json_url,
     find_premium_item,
+    oi_data_age_sec,
     parse_args,
     parse_open_interest,
     run_watchlist_poll_once,
+    merge_open_interest_cache,
     should_poll,
+    should_refresh_oi,
     summarize_reject_counts,
 )
 from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
@@ -46,6 +50,10 @@ def test_build_snapshot_requires_no_private_fields():
         "volume_24h_usdt": 100000000.0,
         "mark_data_age_sec": 1.0,
         "oi_data_age_sec": 1.0,
+        "raw_mark_index_premium": 0.001,
+        "premium_source": "mark_price_minus_index_price",
+        "last_funding_rate": 0.0008,
+        "funding_rate_source": "binance_lastFundingRate",
         "apiKey": "must_drop",
         "secret": "must_drop",
     }
@@ -53,6 +61,8 @@ def test_build_snapshot_requires_no_private_fields():
     snapshot = build_snapshot(raw)
 
     assert snapshot["symbol"] == "DOGE/USDT"
+    assert snapshot["premium_source"] == "mark_price_minus_index_price"
+    assert snapshot["funding_rate_source"] == "binance_lastFundingRate"
     assert "apiKey" not in snapshot
     assert "secret" not in snapshot
 
@@ -110,6 +120,18 @@ def test_find_premium_item_returns_none_when_missing():
     assert find_premium_item([{"symbol": "BTCUSDT"}], "DOGEUSDT") is None
 
 
+def test_find_premium_item_accepts_single_symbol_dict_payload():
+    payload = {"symbol": "DOGEUSDT", "markPrice": "0.25"}
+
+    assert find_premium_item(payload, "DOGEUSDT") == payload
+
+
+def test_find_premium_item_rejects_wrong_single_symbol_dict_payload():
+    payload = {"symbol": "BTCUSDT", "markPrice": "100000"}
+
+    assert find_premium_item(payload, "DOGEUSDT") is None
+
+
 def test_parse_open_interest_returns_float():
     assert parse_open_interest({"openInterest": "12345.67"}) == 12345.67
 
@@ -127,6 +149,44 @@ def test_open_interest_window_calculates_change_against_oldest_retained_value():
     window.append("DOGE/USDT", timestamp_ms=3600 * 1000, open_interest=110.0)
 
     assert window.change_pct("DOGE/USDT", now_ms=3600 * 1000, current_open_interest=110.0) == 10.0
+
+
+def test_should_refresh_oi_respects_poll_interval():
+    assert should_refresh_oi(last_fetch_ts=None, now_ts=100.0, interval_sec=60) is True
+    assert should_refresh_oi(last_fetch_ts=50.0, now_ts=100.0, interval_sec=60) is False
+    assert should_refresh_oi(last_fetch_ts=40.0, now_ts=100.0, interval_sec=60) is True
+
+
+def test_oi_data_age_sec_uses_last_fetch_timestamp():
+    assert oi_data_age_sec(last_fetch_ts=None, now_ts=100.0) == 999999.0
+    assert oi_data_age_sec(last_fetch_ts=40.0, now_ts=100.0) == 60.0
+
+
+def test_merge_open_interest_cache_only_reports_complete_refresh_when_all_symbols_fetched():
+    old_cache = {"DOGEUSDT": {"openInterest": "100"}, "BTCUSDT": {"openInterest": "200"}}
+    fetched = {"DOGEUSDT": {"openInterest": "110"}}
+
+    merged, complete_refresh = merge_open_interest_cache(
+        pairs=("DOGE/USDT", "BTC/USDT"),
+        current_cache=old_cache,
+        fetched_payloads=fetched,
+    )
+
+    assert merged == {"DOGEUSDT": {"openInterest": "110"}, "BTCUSDT": {"openInterest": "200"}}
+    assert complete_refresh is False
+
+
+def test_merge_open_interest_cache_reports_complete_refresh_when_all_symbols_fetched():
+    fetched = {"DOGEUSDT": {"openInterest": "110"}, "BTCUSDT": {"openInterest": "210"}}
+
+    merged, complete_refresh = merge_open_interest_cache(
+        pairs=("DOGE/USDT", "BTC/USDT"),
+        current_cache={},
+        fetched_payloads=fetched,
+    )
+
+    assert merged == fetched
+    assert complete_refresh is True
 
 
 def test_build_raw_snapshot_from_public_data_maps_public_fields():
@@ -154,10 +214,22 @@ def test_build_raw_snapshot_from_public_data_maps_public_fields():
     assert raw["mark_price"] == 0.25
     assert raw["index_price"] == 0.249
     assert raw["premium_index"] == (0.25 - 0.249) / 0.249
+    assert raw["raw_mark_index_premium"] == (0.25 - 0.249) / 0.249
+    assert raw["premium_source"] == "mark_price_minus_index_price"
+    assert raw["last_funding_rate"] == 0.0008
     assert raw["estimated_funding_rate"] == 0.0008
+    assert raw["funding_rate_source"] == "binance_lastFundingRate"
     assert raw["next_funding_time_ms"] == 123456789
     assert raw["open_interest"] == 12345.0
     assert raw["oi_change_1h_pct"] == 2.5
+
+
+def test_append_jsonl_writes_one_sorted_record(tmp_path):
+    path = tmp_path / "events.jsonl"
+
+    append_jsonl(path, {"type": "heartbeat", "events": 0})
+
+    assert path.read_text(encoding="utf-8").strip() == '{"events": 0, "type": "heartbeat"}'
 
 
 def _premium_payload():
@@ -263,8 +335,6 @@ def test_classify_loop_exception_separates_url_json_and_schema_errors():
     assert classify_loop_exception(URLError("offline"))[0] == "watchlist_url_error"
     assert classify_loop_exception(JSONDecodeError("bad", "{", 0))[0] == "watchlist_json_error"
     assert classify_loop_exception(KeyError("markPrice"))[0] == "watchlist_schema_error"
-
-
 
 
 
