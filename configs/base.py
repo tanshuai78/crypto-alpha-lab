@@ -110,6 +110,58 @@ EXTREME_FUNDING_MAX_HOLDING_HOURS = 24
 # Maximum holding period for an extreme funding position (hours).
 # Exit at next settlement cycle or when funding drops below threshold.
 
+EXTREME_FUNDING_WATCH_SYMBOLS = (
+    "XRP/USDT",
+    "DOGE/USDT",
+    "ADA/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "BTC/USDT",
+)
+# Symbols monitored by Phase 1A watchlist mode, ordered by historical priority.
+
+EXTREME_FUNDING_PRE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 30.0
+# Observation-only threshold for premium-derived pre-signal alerts.
+
+EXTREME_FUNDING_STRONG_PRE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 50.0
+# Stronger watchlist threshold requiring persistence and OI confirmation.
+
+EXTREME_FUNDING_TRADE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 100.0
+# Historical trade-like threshold. Phase 1A must not produce executable trades from it.
+
+EXTREME_FUNDING_MICRO_PERSISTENCE_WINDOW_MIN = 30
+# Rolling micro window length for premium-derived observation persistence.
+
+EXTREME_FUNDING_MICRO_PERSISTENCE_MIN = 0.70
+# Strong micro persistence threshold.
+
+EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_WEAK = 0.50
+# Weak micro persistence threshold for watch_level_1.
+
+EXTREME_FUNDING_OI_CONFIRMATION_MIN_CHANGE_1H_PCT = 0.0
+# Minimum 1h OI change for watch_level_2.
+
+EXTREME_FUNDING_OI_STRONG_CONFIRMATION_MIN_CHANGE_1H_PCT = 3.0
+# Minimum 1h OI change for watch_level_3.
+
+EXTREME_FUNDING_MARK_DATA_POLL_INTERVAL_SEC = 10
+# Public mark/premium polling interval for observation daemon.
+
+EXTREME_FUNDING_OI_POLL_INTERVAL_SEC = 60
+# Open interest polling interval.
+
+EXTREME_FUNDING_KLINE_REFRESH_INTERVAL_SEC = 3600
+# Kline baseline refresh interval; do not fetch 720 candles every 10 seconds.
+
+EXTREME_FUNDING_HEARTBEAT_INTERVAL_SEC = 300
+# Heartbeat print interval for daemon status.
+
+EXTREME_FUNDING_MAX_MARK_DATA_AGE_SEC = 30
+# Maximum age for mark/premium data before classifying as stale.
+
+EXTREME_FUNDING_MAX_OI_DATA_AGE_SEC = 180
+# Maximum age for OI data before classifying as stale.
+
 # ─── Strategy: Trend / Liquidation Regime ────────────────────────────────────
 
 TREND_REGIME_VOL_BREAKOUT_MULTIPLIER = 2.0
