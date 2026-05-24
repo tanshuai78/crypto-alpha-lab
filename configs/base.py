@@ -162,6 +162,25 @@ EXTREME_FUNDING_MAX_MARK_DATA_AGE_SEC = 30
 EXTREME_FUNDING_MAX_OI_DATA_AGE_SEC = 180
 # Maximum age for OI data before classifying as stale.
 
+EXTREME_FUNDING_BINANCE_FAPI_BASE_URL = "https://fapi.binance.com"
+# Binance USD-M futures public REST base URL used by Phase 1A observation daemon.
+
+EXTREME_FUNDING_HTTP_TIMEOUT_SEC = 10.0
+# Timeout for each public REST request. Keep conservative to avoid hanging the daemon.
+
+EXTREME_FUNDING_LOCAL_DRY_RUN_MAX_ITERATIONS = 3
+# Default bounded local dry-run loop count. Server mode may override to run forever.
+
+EXTREME_FUNDING_OI_CHANGE_LOOKBACK_SEC = 3600
+# Lookback window for open-interest change confirmation.
+
+EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC = 5.0
+# Sleep duration after a recoverable polling-loop error.
+
+EXTREME_FUNDING_EVENT_LOG_JSONL = "extreme_funding_watch_events.jsonl"
+# File name for low-frequency JSONL evidence.
+
+
 # ─── Strategy: Trend / Liquidation Regime ────────────────────────────────────
 
 TREND_REGIME_VOL_BREAKOUT_MULTIPLIER = 2.0

@@ -24,3 +24,12 @@ def test_extreme_funding_phase1a_config_constants_exist():
     assert base.EXTREME_FUNDING_HEARTBEAT_INTERVAL_SEC == 300
     assert base.EXTREME_FUNDING_MAX_MARK_DATA_AGE_SEC == 30
     assert base.EXTREME_FUNDING_MAX_OI_DATA_AGE_SEC == 180
+
+
+def test_extreme_funding_phase1a_live_polling_config_constants_exist():
+    assert base.EXTREME_FUNDING_BINANCE_FAPI_BASE_URL == "https://fapi.binance.com"
+    assert base.EXTREME_FUNDING_HTTP_TIMEOUT_SEC == 10.0
+    assert base.EXTREME_FUNDING_LOCAL_DRY_RUN_MAX_ITERATIONS == 3
+    assert base.EXTREME_FUNDING_OI_CHANGE_LOOKBACK_SEC == 3600
+    assert base.EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC == 5.0
+
