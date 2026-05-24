@@ -128,6 +128,11 @@
 - 用 `loguru` 记录关键状态迁移（级别要合适）。（loguru：日志库）
 - 远端 API/数据异常要优雅降级；网络错误不能把主循环搞崩。（graceful degradation：优雅降级）
 
+## 文档规范（Documentation Policy）
+
+- 所有的项目文档（包括计划、操作指南、路线图更新和检查清单）均可采用中文编写，以方便人工审核。
+- 为防止 AI 代理（AI agents）产生语义理解偏差，所有的代码级标识符（包括变量名、类名、配置常量如 `configs/base.py` 中的常量、错误键名、文件路径和 API 键名）在中文文档中必须保留其确切的英文名称（例如 `raw_mark_index_premium`、`TradeIntent`、`docs/ops/`），不能进行翻译或拼写修改。
+
 ## 回复风格（Response Style：输出格式偏好）
 
 - 直接、技术化。（direct/technical：直截了当）

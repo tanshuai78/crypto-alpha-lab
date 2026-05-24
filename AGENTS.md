@@ -141,6 +141,11 @@ These rules apply to all strategy and execution discussions and code changes.
 - Ensure important state transitions are logged at appropriate levels using `loguru`.
 - Fail gracefully on remote API or data issues. Never crash the main loop on a network error.
 
+## Documentation Policy
+
+- All future project documents (including plans, operational guides, roadmap updates, and checklists) may be written in Chinese to facilitate human review.
+- To prevent any semantic misalignment or comprehension differences for AI agents, all code-level identifiers—including variables, classes, configurations (e.g. from `configs/base.py`), error keys, file paths, and API keys—must retain their exact English names (e.g., `raw_mark_index_premium`, `TradeIntent`, `docs/ops/`) within the Chinese text.
+
 ## Response Style
 
 - Be direct and technical.
