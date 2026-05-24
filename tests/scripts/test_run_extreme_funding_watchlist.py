@@ -2,6 +2,8 @@ from scripts.run_extreme_funding_watchlist import (
     build_snapshot,
     should_poll,
     summarize_reject_counts,
+    binance_symbol_from_pair,
+    build_binance_fapi_url,
 )
 
 
@@ -39,3 +41,19 @@ def test_build_snapshot_requires_no_private_fields():
     assert snapshot["symbol"] == "DOGE/USDT"
     assert "apiKey" not in snapshot
     assert "secret" not in snapshot
+
+
+def test_binance_symbol_from_pair_removes_separator():
+    assert binance_symbol_from_pair("DOGE/USDT") == "DOGEUSDT"
+    assert binance_symbol_from_pair("BTC/USDT") == "BTCUSDT"
+
+
+def test_build_binance_fapi_url_encodes_query_params():
+    url = build_binance_fapi_url(
+        base_url="https://fapi.binance.com",
+        path="/fapi/v1/openInterest",
+        params={"symbol": "DOGEUSDT"},
+    )
+
+    assert url == "https://fapi.binance.com/fapi/v1/openInterest?symbol=DOGEUSDT"
+

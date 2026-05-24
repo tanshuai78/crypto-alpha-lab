@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from urllib.parse import urlencode
 
 PUBLIC_SNAPSHOT_FIELDS = {
     "symbol",
@@ -29,3 +30,16 @@ def summarize_reject_counts(reasons: list[str]) -> dict[str, int]:
 
 def build_snapshot(raw: dict) -> dict:
     return {key: raw.get(key) for key in PUBLIC_SNAPSHOT_FIELDS}
+
+
+def binance_symbol_from_pair(pair: str) -> str:
+    return pair.replace("/", "")
+
+
+def build_binance_fapi_url(*, base_url: str, path: str, params: dict[str, str] | None = None) -> str:
+    normalized_base = base_url.rstrip("/")
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    if not params:
+        return f"{normalized_base}{normalized_path}"
+    return f"{normalized_base}{normalized_path}?{urlencode(params)}"
+
