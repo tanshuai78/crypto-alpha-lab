@@ -118,6 +118,14 @@
      - **推荐执行优先级**：XRP/DOGE > ADA > ETH > BTC。
    - **核心发现 3（时间分布集中度）**：极端资金费事件高度集中在 2021–2022 年的牛市行情中。熊市与震荡市中信号极度稀缺。
 
+#### 2026-05-26 参数敏感性审计更新（Decision Update）
+
+- 已完成 pre-orderbook 参数敏感性审计（DOGE/XRP，162 组参数组合）。
+- 审计结论：**不进入 `orderbook-aware replay`**。
+- 原因：在 `conservative_1_interval` 假设下，候选数为 0；候选仅出现在 `optimistic_2_intervals` 与放宽门槛组合下，稳健性不足。
+- 主阻塞仍是 funding 强度门槛（`annualized_funding_below_trade_threshold`、`expected_funding_income_below_min`），不是 `basis_absorbed` 主导。
+- 下一步：回到策略定义层，先修正保守口径可触发性，再重跑参数敏感性审计。
+
 ---
 
 ### 2. Trend / Liquidation Regime Scanner（优先级 2）
@@ -211,4 +219,3 @@
 | `screening/`, `router/`, `buckets/` | 为另一套设计哲学服务的治理表面（不适配本项目）。（governance surface：治理表面） |
 | `shadow_mode/` | 被“策略级 shadow simulation”替代。（strategy-level shadow：策略级影子） |
 | Phase 4.5、bucket allocator、carry builder | 历史复杂度，缺乏前向价值。（historical complexity：历史复杂度） |
-
