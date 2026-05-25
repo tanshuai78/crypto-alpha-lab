@@ -61,3 +61,11 @@ def test_extreme_funding_historical_basis_replay_config_values_are_defined():
     assert base.EXTREME_FUNDING_BASIS_REPLAY_REQUEST_SLEEP_SEC == 0.2
     assert base.EXTREME_FUNDING_BASIS_REPLAY_STATIC_DEPTH_MULTIPLIER == 2.0
     assert base.EXTREME_FUNDING_BASIS_REPLAY_OUTPUT_DIR == "reports/extreme_funding"
+
+
+def test_extreme_funding_sensitivity_audit_config_defined():
+    assert base.EXTREME_FUNDING_SENSITIVITY_ANNUALIZED_GRID_PCT == (80.0, 100.0, 120.0)
+    assert base.EXTREME_FUNDING_SENSITIVITY_MIN_INCOME_GRID_BPS == (30.0, 50.0, 70.0)
+    assert base.EXTREME_FUNDING_SENSITIVITY_MAX_SLIPPAGE_GRID_BPS == (8.0, 10.0, 12.0)
+    assert base.EXTREME_FUNDING_SENSITIVITY_EXPECTED_INTERVAL_GRID == (1, 2)
+    assert base.EXTREME_FUNDING_SENSITIVITY_BASIS_ABSORPTION_GRID == (0.30, 0.50, 0.70)

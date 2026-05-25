@@ -241,6 +241,22 @@ EXTREME_FUNDING_BASIS_REPLAY_STATIC_DEPTH_MULTIPLIER = 2.0
 EXTREME_FUNDING_BASIS_REPLAY_OUTPUT_DIR = "reports/extreme_funding"
 # Output directory for historical basis-aware replay artifacts.
 
+# Extreme Funding pre-orderbook parameter sensitivity audit.
+EXTREME_FUNDING_SENSITIVITY_ANNUALIZED_GRID_PCT = (80.0, 100.0, 120.0)
+# Annualized funding threshold sweep for candidate gating stress test.
+
+EXTREME_FUNDING_SENSITIVITY_MIN_INCOME_GRID_BPS = (30.0, 50.0, 70.0)
+# Expected funding income threshold sweep. 50 bps is current baseline.
+
+EXTREME_FUNDING_SENSITIVITY_MAX_SLIPPAGE_GRID_BPS = (8.0, 10.0, 12.0)
+# Max slippage threshold sweep to test cost tolerance sensitivity.
+
+EXTREME_FUNDING_SENSITIVITY_EXPECTED_INTERVAL_GRID = (1, 2)
+# Holding-interval assumption sweep: 1 (conservative) and 2 (optimistic).
+
+EXTREME_FUNDING_SENSITIVITY_BASIS_ABSORPTION_GRID = (0.30, 0.50, 0.70)
+# Basis absorption threshold sweep to measure basis-cost gate sensitivity.
+
 
 # ─── Strategy: Trend / Liquidation Regime ────────────────────────────────────
 

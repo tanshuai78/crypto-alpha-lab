@@ -30,6 +30,16 @@ class ExtremeFundingCandidateDecision:
     metrics: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ExtremeFundingCandidateThresholds:
+    annualized_threshold_pct: float
+    min_expected_funding_income_bps: float
+    max_slippage_bps: float
+    expected_holding_intervals: int
+    min_net_edge_bps: float
+    basis_absorption_max_ratio: float
+
+
 def _number_or_none(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -60,7 +70,11 @@ def _costs(row: dict[str, Any]) -> tuple[float, float, float, float]:
     return fee_bps, slippage_bps, rollback_reserve_bps, fee_bps + slippage_bps + rollback_reserve_bps
 
 
-def build_extreme_funding_candidate(row: dict[str, Any]) -> ExtremeFundingCandidateDecision:
+def build_extreme_funding_candidate(
+    row: dict[str, Any],
+    *,
+    thresholds: ExtremeFundingCandidateThresholds | None = None,
+) -> ExtremeFundingCandidateDecision:
     symbol = str(row.get("symbol") or "UNKNOWN")
     exchange = str(row.get("exchange") or "unknown")
     source_type = str(row.get("source_type") or "live_watch_event")
@@ -73,10 +87,39 @@ def build_extreme_funding_candidate(row: dict[str, Any]) -> ExtremeFundingCandid
     basis_bps = _number_or_none(row.get("basis_bps"))
     depth_capacity_usdt = _number_or_none(row.get("depth_capacity_usdt"))
     planned_notional_usdt = _number_or_none(row.get("planned_notional_usdt")) or RISK_MAX_SINGLE_POSITION_USDT
-    expected_intervals = int(
-        _number_or_none(row.get("expected_holding_intervals"))
-        or EXTREME_FUNDING_EXPECTED_HOLDING_INTERVALS
+    annualized_threshold_pct = (
+        thresholds.annualized_threshold_pct
+        if thresholds is not None
+        else EXTREME_FUNDING_TRADE_SIGNAL_ANNUALIZED_THRESHOLD_PCT
     )
+    min_expected_funding_income_bps = (
+        thresholds.min_expected_funding_income_bps
+        if thresholds is not None
+        else EXTREME_FUNDING_MIN_EXPECTED_FUNDING_INCOME_BPS
+    )
+    max_slippage_bps = (
+        thresholds.max_slippage_bps
+        if thresholds is not None
+        else EXTREME_FUNDING_MAX_SLIPPAGE_BPS
+    )
+    min_net_edge_bps = (
+        thresholds.min_net_edge_bps
+        if thresholds is not None
+        else EXTREME_FUNDING_MIN_NET_EDGE_BPS
+    )
+    basis_absorption_max_ratio = (
+        thresholds.basis_absorption_max_ratio
+        if thresholds is not None
+        else EXTREME_FUNDING_BASIS_ABSORPTION_MAX_RATIO
+    )
+
+    if thresholds is not None:
+        expected_intervals = int(thresholds.expected_holding_intervals)
+    else:
+        expected_intervals = int(
+            _number_or_none(row.get("expected_holding_intervals"))
+            or EXTREME_FUNDING_EXPECTED_HOLDING_INTERVALS
+        )
 
     fee_bps, slippage_bps, rollback_reserve_bps, estimated_total_cost_bps = _costs(row)
 
@@ -93,11 +136,19 @@ def build_extreme_funding_candidate(row: dict[str, Any]) -> ExtremeFundingCandid
         "slippage_bps": slippage_bps,
         "rollback_reserve_bps": rollback_reserve_bps,
         "estimated_total_cost_bps": estimated_total_cost_bps,
+        "thresholds": {
+            "annualized_threshold_pct": annualized_threshold_pct,
+            "min_expected_funding_income_bps": min_expected_funding_income_bps,
+            "max_slippage_bps": max_slippage_bps,
+            "expected_holding_intervals": expected_intervals,
+            "min_net_edge_bps": min_net_edge_bps,
+            "basis_absorption_max_ratio": basis_absorption_max_ratio,
+        },
     }
 
     if watch_level not in _ALLOWED_WATCH_LEVELS:
         return _reject("watch_level_too_weak", metrics)
-    if annualized_pct is None or annualized_pct < EXTREME_FUNDING_TRADE_SIGNAL_ANNUALIZED_THRESHOLD_PCT:
+    if annualized_pct is None or annualized_pct < annualized_threshold_pct:
         return _reject("annualized_funding_below_trade_threshold", metrics)
 
     if source_type == "historical_settled":
@@ -133,13 +184,13 @@ def build_extreme_funding_candidate(row: dict[str, Any]) -> ExtremeFundingCandid
         }
     )
 
-    if expected_funding_income_bps < EXTREME_FUNDING_MIN_EXPECTED_FUNDING_INCOME_BPS:
+    if expected_funding_income_bps < min_expected_funding_income_bps:
         return _reject("expected_funding_income_below_min", metrics)
-    if basis_absorption_ratio > EXTREME_FUNDING_BASIS_ABSORPTION_MAX_RATIO:
+    if basis_absorption_ratio > basis_absorption_max_ratio:
         return _reject("basis_absorbed", metrics)
-    if net_edge_bps < EXTREME_FUNDING_MIN_NET_EDGE_BPS:
+    if net_edge_bps < min_net_edge_bps:
         return _reject("net_edge_below_min", metrics)
-    if slippage_bps > EXTREME_FUNDING_MAX_SLIPPAGE_BPS:
+    if slippage_bps > max_slippage_bps:
         return _reject("slippage_above_max", metrics)
     if depth_capacity_usdt is None:
         return _reject("missing_depth_capacity", metrics)
