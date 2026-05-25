@@ -1,0 +1,20 @@
+{
+  "coverage_quality": "historical_basis_proxy_not_depth_aware",
+  "depth_aware": false,
+  "depth_source": "static_min_capacity_proxy",
+  "exit_reason_counts": {
+    "basis_loss_halt": 78,
+    "funding_decay": 38,
+    "funding_flip": 7,
+    "max_holding_intervals_reached": 104,
+    "path_exhausted": 2
+  },
+  "mean_net_pnl_bps": -2.5583678196855897,
+  "median_net_pnl_bps": -6.1268314411,
+  "shadow_trade_count": 229,
+  "status": "ok",
+  "symbols": [
+    "DOGE/USDT"
+  ],
+  "win_rate": 0.4279475982532751
+}

@@ -1,0 +1,19 @@
+{
+  "coverage_quality": "historical_basis_proxy_not_depth_aware",
+  "depth_aware": false,
+  "depth_source": "static_min_capacity_proxy",
+  "exit_reason_counts": {
+    "basis_loss_halt": 89,
+    "funding_decay": 29,
+    "max_holding_intervals_reached": 155,
+    "path_exhausted": 1
+  },
+  "mean_net_pnl_bps": 0.47243197752846705,
+  "median_net_pnl_bps": -1.11126283315,
+  "shadow_trade_count": 274,
+  "status": "ok",
+  "symbols": [
+    "XRP/USDT"
+  ],
+  "win_rate": 0.4781021897810219
+}

@@ -1,0 +1,21 @@
+{
+  "alignment_miss_count": 0,
+  "basis_row_count": 275,
+  "coverage_quality": "historical_basis_proxy_not_depth_aware",
+  "depth_aware": false,
+  "depth_source": "static_min_capacity_proxy",
+  "fetch_error_count": 0,
+  "futures_empty_count": 0,
+  "has_basis_rows": true,
+  "max_price_time_diff_ms": 0,
+  "missing_basis_count": 0,
+  "parse_error_count": 0,
+  "request_count": 550,
+  "row_error_count": 0,
+  "selected_funding_row_count": 275,
+  "spot_empty_count": 0,
+  "status": "ok",
+  "symbols": [
+    "XRP/USDT"
+  ]
+}

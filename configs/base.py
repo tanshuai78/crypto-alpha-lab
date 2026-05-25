@@ -219,6 +219,28 @@ EXTREME_FUNDING_SHADOW_EXIT_ANNUALIZED_BELOW_PCT = 15.0
 EXTREME_FUNDING_SHADOW_BASIS_LOSS_HALT_RATIO = 0.50
 # Exit condition when basis loss exceeds this fraction of cumulative funding income.
 
+# Extreme Funding historical basis-aware replay.
+EXTREME_FUNDING_BASIS_REPLAY_INTERVAL = "1m"
+# Kline interval used for historical basis replay alignment.
+
+EXTREME_FUNDING_BASIS_REPLAY_ALIGNMENT_TOLERANCE_MS = 120_000
+# Maximum absolute distance between funding settlement and selected price proxy.
+
+EXTREME_FUNDING_BASIS_REPLAY_REQUEST_WINDOW_MS = 300_000
+# Public kline request window around each funding settlement.
+
+EXTREME_FUNDING_BASIS_REPLAY_HTTP_TIMEOUT_SEC = 20.0
+# Public REST timeout for historical basis replay.
+
+EXTREME_FUNDING_BASIS_REPLAY_REQUEST_SLEEP_SEC = 0.2
+# Sleep between replay REST requests to avoid aggressive polling.
+
+EXTREME_FUNDING_BASIS_REPLAY_STATIC_DEPTH_MULTIPLIER = 2.0
+# Static depth proxy multiplier against RISK_MAX_SINGLE_POSITION_USDT.
+
+EXTREME_FUNDING_BASIS_REPLAY_OUTPUT_DIR = "reports/extreme_funding"
+# Output directory for historical basis-aware replay artifacts.
+
 
 # ─── Strategy: Trend / Liquidation Regime ────────────────────────────────────
 

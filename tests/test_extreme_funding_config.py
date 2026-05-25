@@ -51,3 +51,13 @@ def test_extreme_funding_phase1c_shadow_config_values_are_defined():
     assert base.EXTREME_FUNDING_SHADOW_MAX_HOLDING_INTERVALS == 3
     assert base.EXTREME_FUNDING_SHADOW_EXIT_ANNUALIZED_BELOW_PCT == 15.0
     assert base.EXTREME_FUNDING_SHADOW_BASIS_LOSS_HALT_RATIO == 0.50
+
+
+def test_extreme_funding_historical_basis_replay_config_values_are_defined():
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_INTERVAL == "1m"
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_ALIGNMENT_TOLERANCE_MS == 120_000
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_REQUEST_WINDOW_MS == 300_000
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_HTTP_TIMEOUT_SEC == 20.0
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_REQUEST_SLEEP_SEC == 0.2
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_STATIC_DEPTH_MULTIPLIER == 2.0
+    assert base.EXTREME_FUNDING_BASIS_REPLAY_OUTPUT_DIR == "reports/extreme_funding"

@@ -1,0 +1,12 @@
+{
+  "candidate_count": 0,
+  "coverage_quality": "historical_basis_proxy_not_depth_aware",
+  "depth_aware": false,
+  "depth_source": "static_min_capacity_proxy",
+  "input_row_count": 230,
+  "reject_reason_counts": {
+    "annualized_funding_below_trade_threshold": 87,
+    "expected_funding_income_below_min": 143
+  },
+  "status": "ok"
+}
