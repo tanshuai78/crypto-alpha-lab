@@ -1,5 +1,8 @@
 from src.strategies.base import SignalCandidate
-from src.strategies.extreme_funding.candidate_builder import build_extreme_funding_candidate
+from src.strategies.extreme_funding.candidate_builder import (
+    ExtremeFundingCandidateThresholds,
+    build_extreme_funding_candidate,
+)
 
 
 def _complete_row(**overrides):
@@ -125,3 +128,42 @@ def test_candidate_rejects_depth_capacity_insufficient() -> None:
     decision = build_extreme_funding_candidate(_complete_row(depth_capacity_usdt=600.0, planned_notional_usdt=500.0))
     assert decision.accepted is False
     assert decision.reject_reason == "depth_capacity_insufficient"
+
+
+def test_candidate_builder_accepts_explicit_threshold_overrides() -> None:
+    row = _complete_row(annualized_funding_estimate_pct=90.0)
+    thresholds = ExtremeFundingCandidateThresholds(
+        annualized_threshold_pct=80.0,
+        min_expected_funding_income_bps=50.0,
+        max_slippage_bps=10.0,
+        expected_holding_intervals=1,
+        min_net_edge_bps=30.0,
+        basis_absorption_max_ratio=0.50,
+    )
+    decision = build_extreme_funding_candidate(row, thresholds=thresholds)
+    assert decision.accepted is True
+    assert decision.reject_reason is None
+
+
+def test_candidate_builder_default_behavior_unchanged_without_overrides() -> None:
+    row = _complete_row(annualized_funding_estimate_pct=90.0)
+    decision = build_extreme_funding_candidate(row)
+    assert decision.accepted is False
+    assert decision.reject_reason == "annualized_funding_below_trade_threshold"
+
+
+def test_candidate_builder_threshold_override_does_not_mutate_global_defaults() -> None:
+    row = _complete_row(annualized_funding_estimate_pct=90.0)
+    thresholds = ExtremeFundingCandidateThresholds(
+        annualized_threshold_pct=80.0,
+        min_expected_funding_income_bps=50.0,
+        max_slippage_bps=10.0,
+        expected_holding_intervals=1,
+        min_net_edge_bps=30.0,
+        basis_absorption_max_ratio=0.50,
+    )
+    overridden = build_extreme_funding_candidate(row, thresholds=thresholds)
+    default_after = build_extreme_funding_candidate(row)
+    assert overridden.accepted is True
+    assert default_after.accepted is False
+    assert default_after.reject_reason == "annualized_funding_below_trade_threshold"
