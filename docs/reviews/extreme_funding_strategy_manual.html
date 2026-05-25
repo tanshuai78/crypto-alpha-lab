@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Extreme Funding Strategy Manual</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; line-height: 1.65; margin: 0; background: #f6f7f9; color: #1f2937; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 22px 64px; }
+  h1 { font-size: 34px; margin: 0 0 8px; }
+  h2 { margin-top: 42px; border-left: 6px solid #111827; padding-left: 12px; font-size: 26px; }
+  h3 { margin-top: 28px; font-size: 20px; }
+  .subtitle { color: #4b5563; margin-bottom: 24px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 20px 22px; margin: 18px 0; box-shadow: 0 3px 10px rgba(0,0,0,.035); }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .box { background: #ffffff; border: 1px solid #d1d5db; border-radius: 14px; padding: 16px; }
+  .bad { border-left: 6px solid #dc2626; }
+  .good { border-left: 6px solid #059669; }
+  .warn { border-left: 6px solid #d97706; }
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 18px 0; }
+  .node { flex: 1 1 150px; background: #111827; color: white; padding: 14px 12px; border-radius: 12px; text-align: center; min-height: 54px; display:flex; align-items:center; justify-content:center; }
+  .arrow { align-self: center; color: #6b7280; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; background:#fff; }
+  th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; }
+  code, pre { background: #f3f4f6; border-radius: 8px; }
+  code { padding: 2px 5px; }
+  pre { padding: 14px; overflow:auto; }
+  .formula { font-size: 18px; background: #f9fafb; border: 1px dashed #9ca3af; padding: 14px; border-radius: 12px; }
+  .small { color: #6b7280; font-size: 14px; }
+  @media (max-width: 860px) { .grid, .grid2 { grid-template-columns: 1fr; } .arrow { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Extreme Funding 策略手册</h1>
+  <div class="subtitle">从 Watchlist → Candidate Builder → Shadow Simulator → 实盘前红队检查</div>
+
+  <div class="card warn">
+    <strong>一句话核心：</strong>当永续合约资金费极端为正时，做 <code>买现货 + 空永续</code>，价格涨跌基本对冲，理论上赚空永续收到的资金费。但真正能不能赚，取决于 basis 是否已经把收益吃掉、滑点/手续费是否吞掉收益、资金费是否快速衰减或翻负。
+  </div>
+
+  <h2>1. 三阶段系统架构</h2>
+  <div class="flow">
+    <div class="node">Phase 1A<br/>Watchlist Scanner<br/>只报警</div><div class="arrow">→</div>
+    <div class="node">Phase 1B<br/>Candidate Builder<br/>过滤伪机会</div><div class="arrow">→</div>
+    <div class="node">Phase 1C<br/>Shadow Simulator<br/>模拟持仓 PnL</div><div class="arrow">→</div>
+    <div class="node">Pre-live Review<br/>仍不自动实盘</div>
+  </div>
+
+  <div class="grid">
+    <div class="box">
+      <h3>Phase 1A：发现异常</h3>
+      <p>监控 premium-derived funding、持续性、OI 变化。只输出 watch event，不输出可交易信号。</p>
+    </div>
+    <div class="box">
+      <h3>Phase 1B：判断是否值得做</h3>
+      <p>必须检查 funding、persistence、basis absorption、成本、深度、滑点。通过后也只是 observation-only candidate。</p>
+    </div>
+    <div class="box">
+      <h3>Phase 1C：影子模拟</h3>
+      <p>用 funding path + basis path 模拟 1–3 个 funding interval 后的真实净 PnL。funding-only 只能输出 diagnostic。</p>
+    </div>
+  </div>
+
+  <h2>2. 核心公式</h2>
+  <div class="card">
+    <div class="formula">
+      expected_funding_income_bps = funding_rate_per_interval × holding_intervals × 10000
+    </div>
+    <div class="formula">
+      basis_absorption_ratio = max(basis_bps, 0) / expected_funding_income_bps
+    </div>
+    <div class="formula">
+      estimated_total_cost_bps = fee_bps + slippage_bps + rollback_reserve_bps
+    </div>
+    <div class="formula">
+      net_edge_bps = expected_funding_income_bps - max(entry_basis_bps, 0) - estimated_total_cost_bps
+    </div>
+    <div class="formula">
+      net_pnl_bps = funding_income_bps - basis_change_bps - estimated_total_cost_bps
+    </div>
+    <p class="small">basis_change_bps = exit_basis_bps - entry_basis_bps。正数代表 basis 扩大，对 long spot / short perp 是亏损；负数代表 basis 收敛，是额外盈利。</p>
+  </div>
+
+  <h2>3. 完整操作示例</h2>
+  <div class="card">
+    <h3>假设条件</h3>
+    <table>
+      <tr><th>项目</th><th>数值</th><th>含义</th></tr>
+      <tr><td>币种</td><td>DOGE/USDT</td><td>极端资金费更常见于山寨主流币</td></tr>
+      <tr><td>现货价格</td><td>0.2500</td><td>买入现货价格</td></tr>
+      <tr><td>永续价格</td><td>0.25025</td><td>空永续价格</td></tr>
+      <tr><td>entry basis</td><td>10 bps</td><td>(0.25025 / 0.2500 - 1) × 10000</td></tr>
+      <tr><td>单笔名义金额</td><td>500 USDT</td><td>最大单笔上限</td></tr>
+      <tr><td>资金费率</td><td>0.80% / 8h</td><td>80 bps per interval，年化约 876%</td></tr>
+      <tr><td>成本</td><td>26 bps</td><td>fee 8 + slippage 8 + rollback reserve 10</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2">
+    <div class="box good">
+      <h3>开仓资金流</h3>
+      <ol>
+        <li>用约 500 USDT 买入现货 DOGE。</li>
+        <li>同时在永续合约卖空等值 DOGE。</li>
+        <li>现货多头和永续空头 delta 接近中性。</li>
+        <li>如果 DOGE 上涨：现货赚，空永续亏，方向风险大部分抵消。</li>
+        <li>如果 DOGE 下跌：现货亏，空永续赚，方向风险大部分抵消。</li>
+      </ol>
+    </div>
+    <div class="box warn">
+      <h3>我们赚什么</h3>
+      <ol>
+        <li>正资金费时，多头合约支付给空头合约。</li>
+        <li>你持有 short perp，所以收 funding。</li>
+        <li>真正利润 = funding 收入 - basis 变化损失 - 手续费 - 滑点 - 回滚准备金。</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>计算：开仓前是否通过 1B</h3>
+    <pre>
+expected_funding_income_bps = 0.008 × 1 × 10000 = 80 bps
+basis_absorption_ratio = 10 / 80 = 0.125
+estimated_total_cost_bps = 8 + 8 + 10 = 26 bps
+net_edge_bps = 80 - 10 - 26 = 44 bps
+
+500 USDT × 44 bps = 500 × 0.0044 = 2.20 USDT 预期边际
+    </pre>
+    <p>如果 min net edge = 30 bps，这个候选通过。注意：通过也只是 observation-only candidate，仍不等于可以实盘。</p>
+  </div>
+
+  <h2>4. 三种平仓情景</h2>
+  <table>
+    <tr><th>情景</th><th>结果</th><th>计算</th><th>结论</th></tr>
+    <tr>
+      <td>好情景：basis 收敛</td>
+      <td>entry basis 10 bps → exit basis 5 bps</td>
+      <td>net_pnl = 80 - (-5) - 26 = 59 bps ≈ 2.95 USDT</td>
+      <td>funding + basis 收敛双赚</td>
+    </tr>
+    <tr>
+      <td>普通情景：basis 不变</td>
+      <td>entry basis 10 bps → exit basis 10 bps</td>
+      <td>net_pnl = 80 - 0 - 26 = 54 bps ≈ 2.70 USDT</td>
+      <td>主要赚 funding</td>
+    </tr>
+    <tr>
+      <td>坏情景：basis 扩大</td>
+      <td>entry basis 10 bps → exit basis 60 bps</td>
+      <td>net_pnl = 80 - 50 - 26 = 4 bps ≈ 0.20 USDT</td>
+      <td>funding 几乎被 basis widening 吃掉</td>
+    </tr>
+    <tr>
+      <td>致命情景：basis 扩大 + funding 衰减</td>
+      <td>只收到 10 bps funding，basis loss 50 bps</td>
+      <td>net_pnl = 10 - 50 - 26 = -66 bps ≈ -3.30 USDT</td>
+      <td>典型亏损路径</td>
+    </tr>
+  </table>
+
+  <h2>5. 红队风险与风控</h2>
+  <table>
+    <tr><th>风险</th><th>为什么致命</th><th>硬风控</th></tr>
+    <tr><td>Basis 已吸收收益</td><td>perp 已经贵，开仓即买贵/卖便宜，funding 被价差吃掉</td><td>basis_absorption_ratio ≤ 0.50；net_edge_bps ≥ 30</td></tr>
+    <tr><td>Funding Flip</td><td>资金费从正变负后，你从收钱变成付钱</td><td>funding_rate &lt; 0 立即退出；shadow 必测</td></tr>
+    <tr><td>趋势行情 basis 扩大</td><td>牛市挤空时，perp premium 可以继续扩大，short perp 亏损加速</td><td>basis_loss_bps &gt; funding_income_bps × 0.5 退出</td></tr>
+    <tr><td>单腿成交</td><td>只买现货或只空永续，变成裸方向单</td><td>双腿原子执行、partial fill rollback、inventory guard</td></tr>
+    <tr><td>滑点/深度不足</td><td>纸面 edge 44 bps，实际滑点 60 bps，直接负收益</td><td>depth_capacity ≥ 2 × planned notional；slippage ≤ 10 bps</td></tr>
+    <tr><td>API stale / 限频</td><td>用旧价格/旧 funding 做决策，信号失真</td><td>数据 age gate；stale 直接 reject</td></tr>
+    <tr><td>Funding-only 伪胜率</td><td>只看资金费会显得赚钱，但漏掉 basis path</td><td>funding-only 只允许 funding_minus_cost，不允许 net_pnl/win_rate</td></tr>
+    <tr><td>交易所风险</td><td>插针、维护、风控限仓、合约参数变化</td><td>仓位上限 500 USDT；并发 ≤ 2；交易前检查公告/合约状态</td></tr>
+  </table>
+
+  <h2>6. 实操 Runbook</h2>
+  <ol>
+    <li>Phase 1A 持续运行，只看 watch_level、premium、OI、reject reason。</li>
+    <li>Phase 1B 只接受 basis-aware row；funding-only row 必须 missing_basis。</li>
+    <li>Phase 1C 只有在 coverage_quality 是 basis-aware 时才输出 net_pnl/win_rate。</li>
+    <li>实盘前必须完成 30 天 shadow、深度验证、滑点验证、InventoryGuard/RiskLimits 边界测试。</li>
+    <li>未通过前，所有 candidate 必须 metadata.executable=false。</li>
+  </ol>
+
+  <div class="card bad">
+    <h3>最重要的纪律</h3>
+    <p>Extreme Funding 不是稳定套利机。它是事件型 alpha。市场没有极端资金费时，正确动作是不交易；历史 funding-only 很漂亮时，也不能自动相信，因为真正杀人的不是 funding，而是 basis widening、滑点和执行失败。</p>
+  </div>
+</div>
+</body>
+</html>

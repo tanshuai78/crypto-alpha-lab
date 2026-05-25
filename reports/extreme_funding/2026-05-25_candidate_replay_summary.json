@@ -1,0 +1,12 @@
+{
+  "candidate_count": 0,
+  "coverage_quality": "funding_only_insufficient_for_basis",
+  "has_threshold_segments": true,
+  "input_file_count": 6,
+  "reject_reason_counts": {
+    "missing_basis": 245
+  },
+  "segments_seen": 245,
+  "status": "ok",
+  "threshold_pct": 100.0
+}

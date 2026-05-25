@@ -184,6 +184,41 @@ EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC = 5.0
 EXTREME_FUNDING_EVENT_LOG_JSONL = "extreme_funding_watch_events.jsonl"
 # File name for low-frequency JSONL evidence.
 
+# Extreme Funding Phase 1B candidate builder. Observation-only thresholds.
+EXTREME_FUNDING_MIN_NET_EDGE_BPS = 30.0
+# Minimum net edge required after basis cost and estimated total cost.
+
+EXTREME_FUNDING_BASIS_ABSORPTION_MAX_RATIO = 0.50
+# Maximum allowed basis absorption ratio for candidate acceptance.
+
+EXTREME_FUNDING_EXPECTED_HOLDING_INTERVALS = 1
+# Conservative default holding intervals for candidate admission.
+
+EXTREME_FUNDING_MIN_EXPECTED_FUNDING_INCOME_BPS = 50.0
+# Minimum expected funding income in bps for Phase 1B admission.
+
+EXTREME_FUNDING_FEE_BPS = 8.0
+# Fee component in bps used by Phase 1B/1C cost decomposition.
+
+EXTREME_FUNDING_SLIPPAGE_RESERVE_BPS = 8.0
+# Slippage reserve component in bps used by Phase 1B/1C cost decomposition.
+
+EXTREME_FUNDING_ROLLBACK_RESERVE_BPS = 10.0
+# Rollback reserve component in bps used by Phase 1B/1C cost decomposition.
+
+EXTREME_FUNDING_MAX_SLIPPAGE_BPS = 10.0
+# Maximum allowed slippage component in bps for Phase 1B candidate acceptance.
+
+# Extreme Funding Phase 1C shadow simulator. No live execution.
+EXTREME_FUNDING_SHADOW_MAX_HOLDING_INTERVALS = 3
+# Maximum intervals simulated by Phase 1C shadow simulator.
+
+EXTREME_FUNDING_SHADOW_EXIT_ANNUALIZED_BELOW_PCT = 15.0
+# Exit condition when annualized funding decays below this level.
+
+EXTREME_FUNDING_SHADOW_BASIS_LOSS_HALT_RATIO = 0.50
+# Exit condition when basis loss exceeds this fraction of cumulative funding income.
+
 
 # ─── Strategy: Trend / Liquidation Regime ────────────────────────────────────
 

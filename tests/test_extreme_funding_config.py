@@ -34,3 +34,20 @@ def test_extreme_funding_phase1a_live_polling_config_constants_exist():
     assert base.EXTREME_FUNDING_LOOP_ERROR_BACKOFF_SEC == 5.0
     assert base.EXTREME_FUNDING_MICRO_PERSISTENCE_MIN_COVERAGE_SEC == 300
     assert base.EXTREME_FUNDING_EVENT_LOG_JSONL == "extreme_funding_watch_events.jsonl"
+
+
+def test_extreme_funding_phase1b_candidate_config_values_are_defined():
+    assert base.EXTREME_FUNDING_MIN_NET_EDGE_BPS == 30.0
+    assert base.EXTREME_FUNDING_BASIS_ABSORPTION_MAX_RATIO == 0.50
+    assert base.EXTREME_FUNDING_EXPECTED_HOLDING_INTERVALS == 1
+    assert base.EXTREME_FUNDING_MIN_EXPECTED_FUNDING_INCOME_BPS == 50.0
+    assert base.EXTREME_FUNDING_FEE_BPS == 8.0
+    assert base.EXTREME_FUNDING_SLIPPAGE_RESERVE_BPS == 8.0
+    assert base.EXTREME_FUNDING_ROLLBACK_RESERVE_BPS == 10.0
+    assert base.EXTREME_FUNDING_MAX_SLIPPAGE_BPS == 10.0
+
+
+def test_extreme_funding_phase1c_shadow_config_values_are_defined():
+    assert base.EXTREME_FUNDING_SHADOW_MAX_HOLDING_INTERVALS == 3
+    assert base.EXTREME_FUNDING_SHADOW_EXIT_ANNUALIZED_BELOW_PCT == 15.0
+    assert base.EXTREME_FUNDING_SHADOW_BASIS_LOSS_HALT_RATIO == 0.50

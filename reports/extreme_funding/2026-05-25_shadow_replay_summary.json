@@ -1,0 +1,11 @@
+{
+  "coverage_quality": "funding_only_insufficient_for_basis",
+  "mean_funding_minus_cost_bps": 1.2631053971624486,
+  "median_funding_minus_cost_bps": -2.1632999999999996,
+  "notes": [
+    "funding_only_replay_does_not_validate_basis_absorption",
+    "funding_only_replay_does_not_validate_net_pnl"
+  ],
+  "positive_funding_minus_cost_rate": 0.46530612244897956,
+  "shadow_trade_count": 245
+}
