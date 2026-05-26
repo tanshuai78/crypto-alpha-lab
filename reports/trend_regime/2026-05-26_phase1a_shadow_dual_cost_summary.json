@@ -1,0 +1,38 @@
+{
+  "base": {
+    "coverage_quality": "historical_basis_proxy_not_depth_aware",
+    "depth_aware": false,
+    "entry_event_count": 0,
+    "estimated_cost_bps": 30.0,
+    "grouped_summary": {},
+    "input_row_count": 2495,
+    "insufficient_path_count": 0,
+    "mean_net_pnl_bps": 0.0,
+    "median_net_pnl_bps": 0.0,
+    "missing_entry_price_count": 0,
+    "results": [],
+    "shadow_trade_count": 0,
+    "trade_count": 0,
+    "win_rate": 0.0,
+    "worst_trade_net_pnl_bps": 0.0
+  },
+  "base_cost_bps": 30.0,
+  "stress": {
+    "coverage_quality": "historical_basis_proxy_not_depth_aware",
+    "depth_aware": false,
+    "entry_event_count": 0,
+    "estimated_cost_bps": 50.0,
+    "grouped_summary": {},
+    "input_row_count": 2495,
+    "insufficient_path_count": 0,
+    "mean_net_pnl_bps": 0.0,
+    "median_net_pnl_bps": 0.0,
+    "missing_entry_price_count": 0,
+    "results": [],
+    "shadow_trade_count": 0,
+    "trade_count": 0,
+    "win_rate": 0.0,
+    "worst_trade_net_pnl_bps": 0.0
+  },
+  "stress_cost_bps": 50.0
+}
