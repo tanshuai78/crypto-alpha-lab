@@ -84,3 +84,20 @@ def test_audit_cli_includes_decision_gate_fields(tmp_path) -> None:
     assert "assumption_level" in first["param_set"]
     assert "candidate_count" in first
     assert "top_reject_reason" in first
+
+
+def test_audit_output_contains_admission_layer_counts(tmp_path) -> None:
+    input_path = tmp_path / "basis_rows.jsonl"
+    output_dir = tmp_path / "reports"
+    _write_basis_rows(input_path)
+
+    result = run_parameter_sensitivity_audit(
+        input_path=input_path,
+        output_dir=output_dir,
+        tag="admission_counts",
+    )
+    candidate_summary = json.loads(result["candidate_output"].read_text(encoding="utf-8"))
+    first = candidate_summary["candidate_summaries"][0]
+    assert "admission_layer_counts" in first
+    assert "research_to_trade_blocker_counts" in first
+    assert "strategy_depends_on_funding_persistence" in candidate_summary["decision_gate_snapshot"]

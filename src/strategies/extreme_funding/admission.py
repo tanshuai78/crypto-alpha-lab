@@ -14,7 +14,10 @@ from configs.base import (
     EXTREME_FUNDING_SLIPPAGE_RESERVE_BPS,
     EXTREME_FUNDING_TRADE_EXPECTED_HOLDING_INTERVALS,
 )
-from src.strategies.extreme_funding.candidate_builder import build_extreme_funding_candidate
+from src.strategies.extreme_funding.candidate_builder import (
+    ExtremeFundingCandidateThresholds,
+    build_extreme_funding_candidate,
+)
 
 
 @dataclass(frozen=True)
@@ -39,7 +42,11 @@ def _number_or_none(value: Any) -> float | None:
     return number
 
 
-def classify_extreme_funding_admission(row: dict[str, Any]) -> ExtremeFundingAdmissionResult:
+def classify_extreme_funding_admission(
+    row: dict[str, Any],
+    *,
+    trade_thresholds: ExtremeFundingCandidateThresholds | None = None,
+) -> ExtremeFundingAdmissionResult:
     annualized_pct = _number_or_none(row.get("annualized_funding_estimate_pct"))
     funding_rate_per_interval = _number_or_none(row.get("funding_rate_per_interval"))
     basis_bps = _number_or_none(row.get("basis_bps"))
@@ -167,7 +174,7 @@ def classify_extreme_funding_admission(row: dict[str, Any]) -> ExtremeFundingAdm
     if expected_holding_intervals != EXTREME_FUNDING_TRADE_EXPECTED_HOLDING_INTERVALS:
         trade_blockers.append("trade_requires_conservative_one_interval")
 
-    trade_decision = build_extreme_funding_candidate(row)
+    trade_decision = build_extreme_funding_candidate(row, thresholds=trade_thresholds)
     if not trade_decision.accepted:
         if trade_decision.reject_reason == "net_edge_below_min":
             trade_blockers.append("research_only_net_edge_below_trade_gate")

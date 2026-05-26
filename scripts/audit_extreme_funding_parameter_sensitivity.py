@@ -32,19 +32,31 @@ def load_basis_rows_jsonl(path: str | Path) -> list[HistoricalBasisRow]:
 
 
 def _decision_gate_snapshot(candidate_summaries: list[dict], shadow_summaries: list[dict]) -> dict:
-    any_candidate = any(item.get("candidate_count", 0) > 0 for item in candidate_summaries)
+    any_candidate = any(
+        item.get("research_shadow_admitted_count", 0) > 0 for item in candidate_summaries
+    )
+    any_trade_candidate = any(item.get("trade_candidate_count", 0) > 0 for item in candidate_summaries)
     conservative_candidates = [
         item
         for item in candidate_summaries
         if item.get("param_set", {}).get("assumption_level") == "conservative_1_interval"
     ]
-    conservative_has_candidate = any(item.get("candidate_count", 0) > 0 for item in conservative_candidates)
+    conservative_has_candidate = any(
+        item.get("research_shadow_admitted_count", 0) > 0 for item in conservative_candidates
+    )
+    conservative_has_trade_candidate = any(
+        item.get("trade_candidate_count", 0) > 0 for item in conservative_candidates
+    )
     top_reject_reasons = sorted(
         {
             item.get("top_reject_reason")
             for item in candidate_summaries
             if item.get("top_reject_reason") is not None
         }
+    )
+    strategy_depends_on_funding_persistence = any(
+        item.get("strategy_depends_on_funding_persistence", False)
+        for item in candidate_summaries
     )
     best_median_net_pnl_bps = max(
         (item.get("median_net_pnl_bps", 0.0) for item in shadow_summaries),
@@ -53,7 +65,10 @@ def _decision_gate_snapshot(candidate_summaries: list[dict], shadow_summaries: l
 
     return {
         "any_candidate": any_candidate,
+        "any_trade_candidate": any_trade_candidate,
         "conservative_has_candidate": conservative_has_candidate,
+        "conservative_has_trade_candidate": conservative_has_trade_candidate,
+        "strategy_depends_on_funding_persistence": strategy_depends_on_funding_persistence,
         "best_median_net_pnl_bps": best_median_net_pnl_bps,
         "top_reject_reasons": top_reject_reasons,
     }

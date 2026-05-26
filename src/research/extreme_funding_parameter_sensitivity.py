@@ -14,8 +14,8 @@ from configs.base import (
 from src.research.extreme_funding_basis_replay import HistoricalBasisRow
 from src.strategies.extreme_funding.candidate_builder import (
     ExtremeFundingCandidateThresholds,
-    build_extreme_funding_candidate,
 )
+from src.strategies.extreme_funding.admission import classify_extreme_funding_admission
 from src.strategies.extreme_funding.shadow_simulator import (
     ExtremeFundingShadowPosition,
     simulate_extreme_funding_shadow,
@@ -90,24 +90,43 @@ def run_candidate_sensitivity(
         )
 
         reject_counts: Counter[str] = Counter()
-        accepted_indexes: list[int] = []
+        layer_counts: Counter[str] = Counter()
+        blocker_counts: Counter[str] = Counter()
+        research_indexes: list[int] = []
+        trade_indexes: list[int] = []
+        anchor_event_count = 0
 
         for index, row in enumerate(rows):
-            decision = build_extreme_funding_candidate(
-                row.to_candidate_row(),
-                thresholds=thresholds,
+            candidate_row = row.to_candidate_row()
+            candidate_row["expected_holding_intervals"] = param_set.expected_holding_intervals
+            admission = classify_extreme_funding_admission(
+                candidate_row,
+                trade_thresholds=thresholds,
             )
-            if decision.accepted:
-                accepted_indexes.append(index)
+            layer_counts[admission.admission_layer] += 1
+            if admission.anchor_event:
+                anchor_event_count += 1
+            if admission.research_shadow_admitted:
+                research_indexes.append(index)
+            if admission.trade_candidate_admitted:
+                trade_indexes.append(index)
             else:
-                reject_counts[decision.reject_reason or "unknown_reject"] += 1
+                reject_counts[admission.reject_reason or "unknown_reject"] += 1
+            if admission.research_shadow_admitted and not admission.trade_candidate_admitted:
+                for blocker in admission.metrics.get("trade_blockers", []):
+                    blocker_counts[str(blocker)] += 1
 
-        candidate_count = len(accepted_indexes)
+        candidate_count = len(trade_indexes)
         summary = {
             "param_set": _param_set_dict(param_set),
             "input_row_count": len(rows),
             "candidate_count": candidate_count,
+            "anchor_event_count": anchor_event_count,
+            "research_shadow_admitted_count": len(research_indexes),
+            "trade_candidate_count": candidate_count,
             "candidate_rate": (candidate_count / len(rows)) if rows else 0.0,
+            "admission_layer_counts": dict(sorted(layer_counts.items())),
+            "research_to_trade_blocker_counts": dict(sorted(blocker_counts.items())),
             "reject_reason_counts": dict(sorted(reject_counts.items())),
             "top_reject_reason": (
                 reject_counts.most_common(1)[0][0] if reject_counts else None
@@ -120,9 +139,38 @@ def run_candidate_sensitivity(
             "depth_aware": False,
             "depth_source": "static_min_capacity_proxy" if rows else None,
             "status": "ok" if rows else "insufficient_basis_data",
-            "accepted_row_indexes": accepted_indexes,
+            "accepted_row_indexes": trade_indexes,
+            "research_shadow_row_indexes": research_indexes,
         }
         summaries.append(summary)
+
+    grouped: dict[tuple[float, float, float, float], dict[int, dict]] = defaultdict(dict)
+    for item in summaries:
+        params = item["param_set"]
+        key = (
+            float(params["annualized_threshold_pct"]),
+            float(params["min_expected_funding_income_bps"]),
+            float(params["max_slippage_bps"]),
+            float(params["basis_absorption_max_ratio"]),
+        )
+        grouped[key][int(params["expected_holding_intervals"])] = item
+    for item in summaries:
+        params = item["param_set"]
+        key = (
+            float(params["annualized_threshold_pct"]),
+            float(params["min_expected_funding_income_bps"]),
+            float(params["max_slippage_bps"]),
+            float(params["basis_absorption_max_ratio"]),
+        )
+        interval = int(params["expected_holding_intervals"])
+        depends = False
+        if interval > 1 and item["research_shadow_admitted_count"] > 0:
+            baseline = grouped.get(key, {}).get(1)
+            baseline_count = int(
+                baseline.get("research_shadow_admitted_count", 0) if baseline else 0
+            )
+            depends = baseline_count == 0
+        item["strategy_depends_on_funding_persistence"] = depends
     return summaries
 
 
@@ -144,7 +192,7 @@ def run_shadow_sensitivity(
 
     summaries: list[dict] = []
     for candidate_summary in candidate_summaries:
-        accepted_indexes = list(candidate_summary.get("accepted_row_indexes", []))
+        accepted_indexes = list(candidate_summary.get("research_shadow_row_indexes", []))
         results = []
         exit_counts: Counter[str] = Counter()
 
@@ -189,6 +237,9 @@ def run_shadow_sensitivity(
             {
                 "param_set": candidate_summary["param_set"],
                 "candidate_count": int(candidate_summary.get("candidate_count", 0)),
+                "research_shadow_admitted_count": int(
+                    candidate_summary.get("research_shadow_admitted_count", 0)
+                ),
                 "shadow_trade_count": shadow_trade_count,
                 "median_net_pnl_bps": median(pnl_values) if pnl_values else 0.0,
                 "mean_net_pnl_bps": mean(pnl_values) if pnl_values else 0.0,
