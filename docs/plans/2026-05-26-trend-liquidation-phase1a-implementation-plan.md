@@ -53,11 +53,29 @@ Phase 1A 只回答：
 - Create: `src/strategies/trend_regime/shadow_simulator.py`
 - Create: `scripts/run_trend_regime_watchlist.py`
 - Create: `scripts/replay_trend_regime_shadow.py`
+- Create: `scripts/collect_trend_regime_force_orders.py` (A 增补)
 - Test: `tests/test_trend_regime_config.py`
 - Test: `tests/strategies/test_trend_regime_scanner.py`
 - Test: `tests/strategies/test_trend_regime_shadow_simulator.py`
 - Test: `tests/scripts/test_run_trend_regime_watchlist.py`
 - Test: `tests/scripts/test_replay_trend_regime_shadow.py`
+- Test: `tests/scripts/test_collect_trend_regime_force_orders.py` (A 增补)
+- Planned: `scripts/build_trend_regime_market_rows.py` (B 待实现)
+- Planned: `tests/scripts/test_build_trend_regime_market_rows.py` (B 待实现)
+
+---
+
+## 3.1 增补链路 A/B（计划更新）
+
+为形成“清算 + 行情”完整自动链路，Phase 1A 在原任务之外增加两段：
+
+- A（已完成）：`forceOrder` WebSocket 清算采集器，持续写入 `data/trend_regime_liquidation_cache.json`，并由 `run_trend_regime_watchlist.py` 自动注入 `liquidation_notional_1h_usdt`。
+- B（已完成）：行情行生产器（1h `return_1h_pct` / `vol_1h_pct` / `vol_baseline_30d_pct` / `oi_change_1h_pct` / `volume_24h_usdt` 等字段），持续写入 `data/trend_regime_phase1a_rows.jsonl`。
+
+目的：
+
+- 没有 A：`liquidation_cascade` 触发链路会长期空洞（清算 notional 常为缺失/0）。
+- 没有 B：watchlist 只有分类器，没有稳定的实时输入数据面，无法形成端到端观测。
 
 ---
 
@@ -884,6 +902,86 @@ If no files changed, do not create an empty commit.
 
 ---
 
+## Task 7A: Add forceOrder Liquidation Collector (Completed)
+
+**Status:** 已完成（代码与测试已落地并通过）
+
+**Files:**
+- Create: `scripts/collect_trend_regime_force_orders.py`
+- Modify: `scripts/run_trend_regime_watchlist.py`
+- Modify: `tests/scripts/test_run_trend_regime_watchlist.py`
+- Create: `tests/scripts/test_collect_trend_regime_force_orders.py`
+
+- [x] 增加 `build_force_order_stream_url(...)`、`parse_force_order_notional_event(...)`、`RollingLiquidationAccumulator`、`write_liquidation_cache_json(...)`。
+- [x] 增加 `run_trend_regime_poll_once(..., liquidation_notional_by_symbol=...)` 注入链路。
+- [x] `run_trend_regime_watchlist.py` 支持默认读取 `data/trend_regime_liquidation_cache.json`。
+- [x] 针对 `--max-seconds` 增加可终止逻辑（防止无消息时阻塞退出）。
+- [x] 测试通过：`tests/scripts/test_collect_trend_regime_force_orders.py` 与 `tests/scripts/test_run_trend_regime_watchlist.py`。
+
+**运行命令（A）：**
+
+```bash
+PYTHONPATH=src uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
+  --output data/trend_regime_liquidation_cache.json \
+  --flush-interval-sec 5 \
+  --max-seconds 0
+```
+
+---
+
+## Task 7B: Add Market-Row Producer for Watchlist Input (Completed)
+
+**Status:** 已完成（代码与测试已落地并通过）
+
+**Goal:** 持续生成 watchlist 所需的 raw row 输入，形成 `B -> A -> watchlist -> replay` 完整自动链路。
+
+**Files:**
+- Create: `scripts/build_trend_regime_market_rows.py`
+- Create: `tests/scripts/test_build_trend_regime_market_rows.py`
+
+- [x] **Step 1: Write failing tests**
+  - row 字段完整性（包含 `timestamp_ms/symbol/close_price/return_1h_pct/vol_1h_pct/vol_baseline_30d_pct/open_interest/oi_change_1h_pct/volume_24h_usdt/data_age_sec`）。
+  - 多 symbol 输出不串行、不交叉污染。
+  - 缺失字段与 stale 字段的降级行为可解释。
+  - JSONL 输出可复现（按时间排序/稳定字段）。
+
+- [x] **Step 2: Implement row producer**
+  - 公共数据源：`/fapi/v1/klines`、`/futures/data/openInterestHist`、`/fapi/v1/ticker/bookTicker`（必要时降级）。
+  - 计算：`return_1h_pct`、`vol_1h_pct`、`vol_baseline_30d_pct`、`oi_change_1h_pct`。
+  - 输出：`data/trend_regime_phase1a_rows.jsonl`。
+
+- [x] **Step 3: Wire with watchlist**
+  - `run_trend_regime_watchlist.py --input-jsonl data/trend_regime_phase1a_rows.jsonl` 可直接消费。
+  - 与 `data/trend_regime_liquidation_cache.json` 并联，自动补全 `liquidation_notional_1h_usdt`。
+
+- [x] **Step 4: Verification**
+  - 定向测试绿灯。
+  - `PYTHONPATH=src uv run --with pytest --with pytest-asyncio pytest -q` 全绿。
+
+**运行命令（B + A + watchlist）：**
+
+```bash
+# B: 行情行生产器（已实现）
+PYTHONPATH=src uv run python scripts/build_trend_regime_market_rows.py \
+  --output data/trend_regime_phase1a_rows.jsonl \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --poll-interval-sec 60
+
+# A: 清算采集器（已实现）
+PYTHONPATH=src uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
+  --output data/trend_regime_liquidation_cache.json \
+  --flush-interval-sec 5 \
+  --max-seconds 0
+
+# watchlist 消费 A+B
+PYTHONPATH=src uv run python scripts/run_trend_regime_watchlist.py \
+  --input-jsonl data/trend_regime_phase1a_rows.jsonl \
+  --data-root data \
+  --forever
+```
+
+---
+
 ## Done Definition
 
 This plan is complete when:
@@ -899,6 +997,8 @@ This plan is complete when:
 - Replay script discovers entries from raw rows via classifier.
 - Replay summary is grouped by `regime`, `direction`, and `symbol_tier`.
 - Replay reports base cost and stress cost results.
+- forceOrder 清算缓存可被 watchlist 自动注入到 `liquidation_notional_1h_usdt`（Task 7A）。
+- 已实现行情行生产器并完成链路接线，形成 `B -> A -> watchlist` 完整自动输入链路（Task 7B）。
 - No new code imports `src/execution/`.
 - Full test suite passes.
 
