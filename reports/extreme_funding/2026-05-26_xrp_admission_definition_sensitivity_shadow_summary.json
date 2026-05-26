@@ -1,0 +1,4071 @@
+{
+  "coverage_quality": "historical_basis_proxy_not_depth_aware",
+  "decision_gate_snapshot": {
+    "any_candidate": true,
+    "any_trade_candidate": false,
+    "best_median_net_pnl_bps": 9.4056730177,
+    "conservative_has_candidate": true,
+    "conservative_has_trade_candidate": false,
+    "strategy_depends_on_funding_persistence": false,
+    "top_reject_reasons": [
+      "anchor_threshold_not_met",
+      "trade_requires_conservative_one_interval"
+    ]
+  },
+  "depth_aware": false,
+  "input_row_count": 275,
+  "param_set_count": 162,
+  "shadow_summaries": [
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 80.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 100.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 30.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 50.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 8.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 10.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 12,
+        "funding_decay": 2,
+        "max_holding_intervals_reached": 15
+      },
+      "mean_net_pnl_bps": 2.739576849217241,
+      "median_net_pnl_bps": 9.4056730177,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "conservative_1_interval",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 1,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 29,
+      "shadow_trade_count": 29,
+      "status": "ok",
+      "win_rate": 0.5517241379310345
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.3,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.5,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    },
+    {
+      "candidate_count": 0,
+      "coverage_quality": "historical_basis_proxy_not_depth_aware",
+      "depth_aware": false,
+      "depth_source": "static_min_capacity_proxy",
+      "exit_reason_counts": {
+        "basis_loss_halt": 43,
+        "funding_decay": 12,
+        "max_holding_intervals_reached": 74
+      },
+      "mean_net_pnl_bps": 3.5247497993503876,
+      "median_net_pnl_bps": 0.450410119,
+      "param_set": {
+        "annualized_threshold_pct": 120.0,
+        "assumption_level": "optimistic_2_intervals",
+        "basis_absorption_max_ratio": 0.7,
+        "expected_holding_intervals": 2,
+        "max_slippage_bps": 12.0,
+        "min_expected_funding_income_bps": 70.0
+      },
+      "research_shadow_admitted_count": 129,
+      "shadow_trade_count": 129,
+      "status": "ok",
+      "win_rate": 0.5116279069767442
+    }
+  ],
+  "status": "ok"
+}
