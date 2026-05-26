@@ -69,3 +69,10 @@ def test_extreme_funding_sensitivity_audit_config_defined():
     assert base.EXTREME_FUNDING_SENSITIVITY_MAX_SLIPPAGE_GRID_BPS == (8.0, 10.0, 12.0)
     assert base.EXTREME_FUNDING_SENSITIVITY_EXPECTED_INTERVAL_GRID == (1, 2)
     assert base.EXTREME_FUNDING_SENSITIVITY_BASIS_ABSORPTION_GRID == (0.30, 0.50, 0.70)
+
+
+def test_extreme_funding_admission_definition_config_defined():
+    assert base.EXTREME_FUNDING_ANCHOR_ANNUALIZED_THRESHOLD_PCT == 100.0
+    assert base.EXTREME_FUNDING_RESEARCH_MIN_GROSS_FUNDING_BPS == 15.0
+    assert base.EXTREME_FUNDING_RESEARCH_BASIS_ABSORPTION_MAX_RATIO == 0.70
+    assert base.EXTREME_FUNDING_TRADE_EXPECTED_HOLDING_INTERVALS == 1

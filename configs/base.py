@@ -129,6 +129,21 @@ EXTREME_FUNDING_STRONG_PRE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 50.0
 EXTREME_FUNDING_TRADE_SIGNAL_ANNUALIZED_THRESHOLD_PCT = 100.0
 # Historical trade-like threshold. Phase 1A must not produce executable trades from it.
 
+EXTREME_FUNDING_ANCHOR_ANNUALIZED_THRESHOLD_PCT = 100.0
+# Minimum annualized funding rate (%) to qualify as an anchor event (Layer A).
+# This is a research gate, not a live trading trigger.
+
+EXTREME_FUNDING_RESEARCH_MIN_GROSS_FUNDING_BPS = 15.0
+# Minimum single-interval gross funding income (bps) for Layer B research shadow cases.
+# Deliberately lower than Layer C trade gate to retain more historical tails for analysis.
+
+EXTREME_FUNDING_RESEARCH_BASIS_ABSORPTION_MAX_RATIO = 0.70
+# Maximum basis absorption ratio for Layer B research shadow cases.
+# Layer C keeps stricter trade gate via EXTREME_FUNDING_BASIS_ABSORPTION_MAX_RATIO.
+
+EXTREME_FUNDING_TRADE_EXPECTED_HOLDING_INTERVALS = 1
+# Layer C trade candidate admission must pass under one funding interval assumption.
+
 EXTREME_FUNDING_MICRO_PERSISTENCE_WINDOW_MIN = 30
 # Rolling micro window length for premium-derived observation persistence.
 
