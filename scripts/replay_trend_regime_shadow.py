@@ -20,6 +20,48 @@ from src.strategies.trend_regime.shadow_simulator import (
 )
 
 
+def normalize_rows_for_historical_replay(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    normalized: list[dict[str, Any]] = []
+    stale_rows_normalized_count = 0
+
+    for row in rows:
+        patched = dict(row)
+        value = _number_or_none(row.get("data_age_sec"))
+        if value is None or value > 0.0:
+            patched["data_age_sec"] = 0.0
+            stale_rows_normalized_count += 1
+        normalized.append(patched)
+
+    return normalized, stale_rows_normalized_count
+
+
+def build_classification_audit(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    reject_counts: dict[str, int] = defaultdict(int)
+    entry_event_count = 0
+    rows_missing_liquidation_notional_count = 0
+    rows_with_liquidation_notional_count = 0
+
+    for row in rows:
+        liquidation_notional = _number_or_none(row.get("liquidation_notional_1h_usdt"))
+        if liquidation_notional is None:
+            rows_missing_liquidation_notional_count += 1
+        else:
+            rows_with_liquidation_notional_count += 1
+
+        classification = classify_trend_regime_snapshot(row)
+        if classification.event is None:
+            reject_counts[str(classification.reject_reason or "unknown")] += 1
+            continue
+        entry_event_count += 1
+
+    return {
+        "entry_event_count": entry_event_count,
+        "classification_reject_counts": dict(reject_counts),
+        "rows_missing_liquidation_notional_count": rows_missing_liquidation_notional_count,
+        "rows_with_liquidation_notional_count": rows_with_liquidation_notional_count,
+    }
+
+
 def _number_or_none(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -66,12 +108,15 @@ def _grouped_summary(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
 
 
 def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: float) -> dict[str, Any]:
+    normalized_rows, stale_rows_normalized_count = normalize_rows_for_historical_replay(rows)
+    audit = build_classification_audit(normalized_rows)
+
     results: list[dict[str, Any]] = []
     entry_event_count = 0
     insufficient_path_count = 0
     missing_entry_price_count = 0
 
-    for index, row in enumerate(rows):
+    for index, row in enumerate(normalized_rows):
         classification = classify_trend_regime_snapshot(row)
         if classification.event is None:
             continue
@@ -137,6 +182,14 @@ def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: floa
         "grouped_summary": _grouped_summary(results),
     }
     summary.update(_summarize_pnl(results))
+    summary.update({
+        "historical_mode": True,
+        "stale_rows_normalized_count": stale_rows_normalized_count,
+        "classification_reject_counts": audit["classification_reject_counts"],
+        "rows_missing_liquidation_notional_count": audit["rows_missing_liquidation_notional_count"],
+        "rows_with_liquidation_notional_count": audit["rows_with_liquidation_notional_count"],
+        "coverage_quality": "historical_rows_replay_not_live_freshness_aware",
+    })
     return summary
 
 
