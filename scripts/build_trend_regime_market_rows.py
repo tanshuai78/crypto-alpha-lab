@@ -204,10 +204,12 @@ def fetch_symbol_payload(
         path="/fapi/v1/klines",
         params={"symbol": symbol, "interval": "1h", "limit": str(kline_limit)},
     )
+    # Binance openInterestHist max limit is 500; cap silently to avoid HTTP 400.
+    effective_oi_limit = min(oi_limit, 500)
     oi_url = build_binance_fapi_url(
         base_url=base_url,
         path="/futures/data/openInterestHist",
-        params={"symbol": symbol, "period": "1h", "limit": str(oi_limit)},
+        params={"symbol": symbol, "period": "1h", "limit": str(effective_oi_limit)},
     )
     premium_url = build_binance_fapi_url(
         base_url=base_url,
