@@ -4,7 +4,9 @@ from scripts.run_trend_regime_watchlist import (
     apply_liquidation_notional_from_cache,
     build_snapshot,
     estimate_liquidation_notional_usdt,
+    load_rows_tail_from_jsonl,
     run_trend_regime_poll_once,
+    select_latest_rows_per_symbol,
 )
 from src.strategies.base import SignalCandidate
 from src.strategies.trend_regime.scanner import TrendRegimeObservationStrategy
@@ -142,3 +144,40 @@ def test_estimate_liquidation_notional_usdt_sums_force_orders():
     notional = estimate_liquidation_notional_usdt(payload)
 
     assert notional == 410.0
+
+
+def test_select_latest_rows_per_symbol_dedups_history():
+    rows = [
+        {"symbol": "BTC/USDT", "timestamp_ms": 1000, "value": "old"},
+        {"symbol": "ETH/USDT", "timestamp_ms": 1000, "value": "old"},
+        {"symbol": "BTC/USDT", "timestamp_ms": 2000, "value": "new"},
+        {"symbol": "ETH/USDT", "timestamp_ms": 1500, "value": "new"},
+    ]
+
+    latest = select_latest_rows_per_symbol(rows)
+    by_symbol = {item["symbol"]: item for item in latest}
+
+    assert set(by_symbol) == {"BTC/USDT", "ETH/USDT"}
+    assert by_symbol["BTC/USDT"]["value"] == "new"
+    assert by_symbol["ETH/USDT"]["value"] == "new"
+
+
+def test_load_rows_tail_from_jsonl_reads_tail_only(tmp_path):
+    path = tmp_path / "rows.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                '{"symbol":"BTC/USDT","timestamp_ms":1}',
+                '{"symbol":"ETH/USDT","timestamp_ms":2}',
+                '{"symbol":"DOGE/USDT","timestamp_ms":3}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = load_rows_tail_from_jsonl(str(path), tail_lines=2)
+
+    assert len(rows) == 2
+    assert rows[0]["symbol"] == "ETH/USDT"
+    assert rows[1]["symbol"] == "DOGE/USDT"

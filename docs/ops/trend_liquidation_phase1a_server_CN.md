@@ -68,7 +68,7 @@ docker --version
 ```bash
 rsync -avzP --exclude='data' --exclude='.git' --exclude='.venv' --exclude='.ruff_cache' --exclude='.pytest_cache' --exclude='__pycache__' \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/ \
-  root@<your-server-ip>:/root/crypto-alpha-lab/
+  root@47.82.4.85:/root/crypto-alpha-lab/
 ```
 
 ### 2) 服务器端验证同步结果
@@ -199,7 +199,8 @@ docker run -d --name trend-watchlist \
   python scripts/run_trend_regime_watchlist.py \
     --input-jsonl data/trend_regime_phase1a_rows.jsonl \
     --data-root data \
-    --forever
+    --forever \
+    --row-tail-lines 3000
 ```
 
 ---
@@ -245,6 +246,112 @@ ls -lh /root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl
 - 总 `signal_count`
 - 各 `reject_reason` 占比
 - `liquidation_status` 异常占比（如果开启了 REST 回退）
+
+---
+
+## 定期回拉与本地复核 (Pullback & Local Review)
+
+结论：建议**定期回拉**，但不必高频全量回拉。
+
+推荐节奏：
+
+1. 每 4 小时：服务器先产出摘要，本地回拉摘要文件。
+2. 每 24 小时：回拉完整 `trend_regime_watch_events.jsonl`，并按需抽样回拉 `trend_regime_phase1a_rows.jsonl`。
+3. 异常时：立即回拉三份原始文件全量（见下方）。
+
+### 服务器端摘要命令（建议 crontab 每 4 小时执行）
+
+```bash
+cd /root/crypto-alpha-lab
+python3 - <<'PY'
+import json
+from pathlib import Path
+from collections import Counter
+
+data_dir = Path("data")
+rows = data_dir / "trend_regime_phase1a_rows.jsonl"
+cache = data_dir / "trend_regime_liquidation_cache.json"
+events = data_dir / "trend_regime_watch_events.jsonl"
+out = data_dir / "trend_regime_4h_summary.json"
+
+summary = {}
+summary["rows_line_count"] = sum(1 for _ in rows.open("r", encoding="utf-8")) if rows.exists() else 0
+summary["rows_mtime"] = rows.stat().st_mtime if rows.exists() else None
+summary["cache_mtime"] = cache.stat().st_mtime if cache.exists() else None
+
+if events.exists():
+    lines = [ln for ln in events.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    summary["event_line_count"] = len(lines)
+    summary["last_event"] = json.loads(lines[-1]) if lines else None
+    reject_counter = Counter()
+    for ln in lines[-500:]:
+        obj = json.loads(ln)
+        reject_counter.update(obj.get("reject_counts", {}))
+    summary["reject_counts_recent_500"] = dict(reject_counter)
+else:
+    summary["event_line_count"] = 0
+    summary["last_event"] = None
+    summary["reject_counts_recent_500"] = {}
+
+out.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+print(out)
+PY
+```
+
+### 本地回拉命令（每 4 小时）
+
+```bash
+# 本地先建策略子目录
+mkdir -p /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime
+
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_4h_summary.json \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+```
+
+### 本地回拉命令（每 24 小时）
+
+```bash
+# 本地先建策略子目录
+mkdir -p /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime
+
+# 1) 核心观测证据（建议全量）
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+
+# 2) 清算缓存（体积小，建议全量）
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_cache.json \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+```
+
+### 异常时回拉（立即执行）
+
+触发条件示例：
+
+- `rows` 行数停止增长
+- `cache` 长时间不更新
+- `signal_count`/`reject_counts` 异常跳变
+- `trend-forceorder` 重连频繁
+
+异常时建议直接全量回拉：
+
+```bash
+mkdir -p /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime
+
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_phase1a_rows.jsonl \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_cache.json \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+```
 
 ---
 

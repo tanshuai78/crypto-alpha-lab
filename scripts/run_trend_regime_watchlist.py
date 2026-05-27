@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import json
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -209,6 +209,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--data-root", default="data")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--poll-interval-sec", type=float, default=10.0)
+    parser.add_argument(
+        "--row-tail-lines",
+        type=int,
+        default=3000,
+        help="Read only trailing rows from input JSONL each loop before dedup-by-symbol.",
+    )
     parser.add_argument("--forever", action="store_true")
     parser.add_argument(
         "--liquidation-cache-json",
@@ -237,6 +243,41 @@ def load_rows_from_jsonl(path: str) -> list[dict[str, Any]]:
     return rows
 
 
+def load_rows_tail_from_jsonl(path: str, *, tail_lines: int) -> list[dict[str, Any]]:
+    if not path or tail_lines <= 0:
+        return []
+    tail: deque[str] = deque(maxlen=tail_lines)
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line:
+                continue
+            tail.append(line)
+    rows: list[dict[str, Any]] = []
+    for line in tail:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def select_latest_rows_per_symbol(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_by_symbol: dict[str, tuple[int, dict[str, Any]]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        try:
+            ts_ms = int(row.get("timestamp_ms") or 0)
+        except (TypeError, ValueError):
+            ts_ms = 0
+        prev = latest_by_symbol.get(symbol)
+        if prev is None or ts_ms >= prev[0]:
+            latest_by_symbol[symbol] = (ts_ms, row)
+    return [item[1] for item in latest_by_symbol.values()]
+
+
 def load_liquidation_cache(path: str) -> dict[str, float]:
     if not path:
         return {}
@@ -258,12 +299,14 @@ def load_liquidation_cache(path: str) -> dict[str, float]:
 async def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     strategy = TrendRegimeObservationStrategy()
-    rows = load_rows_from_jsonl(args.input_jsonl)
     event_log_path = Path(args.data_root) / TREND_REGIME_EVENT_LOG_JSONL
 
     iteration = 0
     while args.forever or iteration < args.max_iterations:
         started_at = time.time()
+        rows = select_latest_rows_per_symbol(
+            load_rows_tail_from_jsonl(args.input_jsonl, tail_lines=args.row_tail_lines)
+        )
         liquidation_notional_by_symbol = load_liquidation_cache(args.liquidation_cache_json)
         liquidation_status_by_symbol: dict[str, str] = {}
         if args.collect_liquidation_from_binance:
