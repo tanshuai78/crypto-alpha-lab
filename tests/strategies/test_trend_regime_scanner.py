@@ -147,3 +147,8 @@ def test_risk_check_blocks_execution_even_for_valid_observation_signal():
         metadata={"mode": "observation", "executable": False},
     )
     assert strategy.risk_check(signal) == (False, "observation_only")
+
+
+def test_live_scanner_still_rejects_stale_rows():
+    stale = classify_trend_regime_snapshot(_snapshot(data_age_sec=999999.0))
+    assert stale.reject_reason == "api_stale"

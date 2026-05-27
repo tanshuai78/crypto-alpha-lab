@@ -167,3 +167,48 @@ def test_replay_outputs_base_and_stress_cost_summaries():
     assert dual["stress_cost_bps"] == TREND_REGIME_STRESS_COST_BPS
     assert dual["base"]["shadow_trade_count"] == 1
     assert dual["stress"]["shadow_trade_count"] == 1
+
+
+def test_historical_replay_normalizes_stale_rows_before_classification():
+    rows = [
+        _row(timestamp_ms=1000, data_age_sec=999999.0, close_price=100000.0),
+        _row(
+            timestamp_ms=2000,
+            data_age_sec=999999.0,
+            close_price=101000.0,
+            return_1h_pct=0.1,
+            vol_1h_pct=1.0,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=0.1,
+        ),
+    ]
+
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+
+    assert summary["historical_mode"] is True
+    assert summary["stale_rows_normalized_count"] == 2
+    assert summary["entry_event_count"] == 1
+
+
+def test_historical_replay_outputs_classification_reject_counts():
+    rows = [
+        _row(timestamp_ms=1000, vol_1h_pct=1.0, vol_baseline_30d_pct=1.0),
+        _row(timestamp_ms=2000, return_1h_pct=0.5),
+    ]
+
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+
+    assert "classification_reject_counts" in summary
+    assert "vol_breakout_below_threshold" in summary["classification_reject_counts"]
+
+
+def test_historical_replay_reports_liquidation_coverage_gap():
+    rows = [
+        _row(timestamp_ms=1000, liquidation_notional_1h_usdt=None),
+        _row(timestamp_ms=2000, liquidation_notional_1h_usdt=4_000_000.0),
+    ]
+
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+
+    assert summary["rows_missing_liquidation_notional_count"] == 1
+    assert summary["rows_with_liquidation_notional_count"] == 1
