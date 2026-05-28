@@ -249,6 +249,107 @@ ls -lh /root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl
 
 ---
 
+## Raw forceOrder 事件采集 (Raw ForceOrder Collection)
+
+除了生成滚动窗口清算缓存（`--output`）外，`collect_trend_regime_force_orders.py` 还支持 `--raw-output` 参数，将每条强平事件逐行追加到 JSONL 文件中，供后续小时级聚合使用。
+
+### 启动命令（附 `--raw-output`）
+
+```bash
+uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
+  --output data/trend_regime_liquidation_cache.json \
+  --raw-output data/trend_regime_force_orders_raw.jsonl \
+  --flush-interval-sec 5 \
+  --max-seconds 0
+```
+
+Docker 容器版本（替换 `trend-forceorder` 的启动命令）：
+
+```bash
+docker run -d --name trend-forceorder \
+  --restart always \
+  --memory="512m" \
+  -v /root/crypto-alpha-lab/data:/app/data \
+  -v /root/crypto-alpha-lab/logs:/app/logs \
+  crypto-alpha-lab:latest \
+  uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
+    --output data/trend_regime_liquidation_cache.json \
+    --raw-output data/trend_regime_force_orders_raw.jsonl \
+    --flush-interval-sec 5 \
+    --max-seconds 0
+```
+
+### 输出格式
+
+每条事件追加一行 JSON，字段如下：
+
+| 字段 | 含义 |
+|---|---|
+| `symbol` | 交易对，如 `BTCUSDT` |
+| `side` | 订单方向（`BUY` / `SELL`，即强平单的成交方向） |
+| `liquidation_side` | 被清算的仓位方向：`long`（多仓被强平，SELL 成交）或 `short`（空仓被强平，BUY 成交） |
+| `notional_usdt` | 本次事件的名义金额（USDT） |
+| `timestamp_ms` | 事件时间戳（毫秒） |
+| `hour_bucket_utc` | 所属小时桶，格式 `YYYY-MM-DDTHH:00:00Z` |
+
+**语义说明**：`liquidation_side=long` 表示多仓被强平（产生 SELL 单）；`liquidation_side=short` 表示空仓被强平（产生 BUY 单）。
+
+> [!CAUTION]
+> **[局限性 / 无历史回填]** Raw 文件仅从采集器**启动时刻**起累积事件，没有历史回填能力。若采集器在某段市场行情中未运行（容器重启、网络中断等），该时段的强平事件将**永久缺失**，导致对应小时桶的清算代理数据不完整。回放报告中出现 `liquidation_coverage_ratio` 偏低时，首先排查采集器运行时段。
+
+### 检查 Raw 文件
+
+```bash
+# 查看行数（每行一条事件）
+wc -l /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl
+
+# 查看最新几条事件
+tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python3 -m json.tool
+```
+
+---
+
+## 小时级清算聚合 (Hourly Liquidation Aggregation)
+
+采集到足够 Raw 事件后（建议至少运行 1 小时），执行聚合脚本将原始事件压缩为小时级代理数据，供历史回放使用。
+
+### 运行命令
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime_force_orders_raw.jsonl \
+  --output data/trend_regime_liquidation_hourly.jsonl
+```
+
+建议在执行历史回放**之前**先运行一次聚合，确保回放能读取到最新的清算代理数据。
+
+### 输出格式
+
+每行一条记录，按 `(symbol, hour_bucket_utc)` 分组，字段如下：
+
+| 字段 | 含义 |
+|---|---|
+| `symbol` | 交易对 |
+| `hour_bucket_utc` | 小时桶（UTC），格式 `YYYY-MM-DDTHH:00:00Z` |
+| `long_liquidation_notional_usdt` | 该小时多仓强平名义金额（USDT） |
+| `short_liquidation_notional_usdt` | 该小时空仓强平名义金额（USDT） |
+| `total_liquidation_notional_usdt` | 总强平名义金额（USDT） |
+| `dominant_side` | 主导方向：`long` / `short` / `neutral` |
+| `semantics` | 人类可读说明字符串 |
+
+### 检查聚合输出
+
+```bash
+# 查看行数
+wc -l /root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl
+
+# 查看最新几行
+tail -5 /root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl | python3 -m json.tool
+```
+
+---
+
 ## 定期回拉与本地复核 (Pullback & Local Review)
 
 结论：建议**定期回拉**，但不必高频全量回拉。
@@ -256,7 +357,7 @@ ls -lh /root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl
 推荐节奏：
 
 1. 每 4 小时：服务器先产出摘要，本地回拉摘要文件。
-2. 每 24 小时：回拉完整 `trend_regime_watch_events.jsonl`，并按需抽样回拉 `trend_regime_phase1a_rows.jsonl`。
+2. 每 24 小时：回拉完整 `trend_regime_watch_events.jsonl`，并按需抽样回拉 `trend_regime_phase1a_rows.jsonl`；同时回拉 `trend_regime_liquidation_hourly.jsonl` 供本地回放。
 3. 异常时：立即回拉三份原始文件全量（见下方）。
 
 ### 服务器端摘要命令（建议 crontab 每 4 小时执行）
@@ -324,6 +425,11 @@ rsync -avzP \
 rsync -avzP \
   root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_cache.json \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+
+# 3) 小时级清算代理（供本地回放使用）
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl \
+  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
 ```
 
 ### 异常时回拉（立即执行）
@@ -352,6 +458,33 @@ rsync -avzP \
   root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
 ```
+
+---
+
+## 本地历史回放 (Local Shadow Replay)
+
+回拉数据后，可在本地执行影子回放，验证信号条件分布与清算覆盖率。
+
+### 带清算数据的完整回放（推荐）
+
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+PYTHONPATH=src uv run python scripts/replay_trend_regime_shadow.py \
+  --input data/trend_regime_historical_rows.jsonl \
+  --output reports/trend_regime/replay_summary.json \
+  --liquidation-hourly-jsonl data/trend_regime/trend_regime_liquidation_hourly.jsonl
+```
+
+### 不带清算数据的冒烟回放（仅验证流程）
+
+```bash
+PYTHONPATH=src uv run python scripts/replay_trend_regime_shadow.py \
+  --input data/trend_regime_historical_rows.jsonl \
+  --output reports/trend_regime/replay_summary.json
+```
+
+> [!NOTE]
+> 不传 `--liquidation-hourly-jsonl` 时，回放报告中所有行的 `liquidation_coverage_ratio=0.0`（清算数据全部缺失），这是预期行为，不影响其他字段的验证。
 
 ---
 
@@ -410,6 +543,8 @@ docker rm trend-rows trend-forceorder trend-watchlist
 ## 建议执行顺序 (Recommended Rollout)
 
 1. 先启动 `trend-rows`，确认 rows 文件正常增长。
-2. 再启动 `trend-forceorder`，确认 cache 文件正常落盘。
+2. 再启动 `trend-forceorder`（附 `--raw-output`），确认 cache 与 raw JSONL 文件正常落盘。
 3. 最后启动 `trend-watchlist`，确认 heartbeat 与 reject 统计持续输出。
-4. 连续观察 24h 后，再进入下一轮 review 与参数决策。
+4. 采集至少 1 小时后，运行 `aggregate_trend_regime_liquidations.py` 生成小时级清算代理文件。
+5. 回拉数据后，执行本地 `replay_trend_regime_shadow.py`（附 `--liquidation-hourly-jsonl`），确认 `liquidation_coverage_ratio` 不全为 0。
+6. 连续观察 24h 后，再进入下一轮 review 与参数决策。
