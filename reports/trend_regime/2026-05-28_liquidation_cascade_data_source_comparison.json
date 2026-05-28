@@ -1,0 +1,28 @@
+{
+  "route_a_self_collected_forceorder_only": {
+    "allowed_decisions_if_only_route_a": [
+      "continue_data_route_upgrade"
+    ],
+    "available": true,
+    "coverage_hours": 498.0,
+    "liquidation_notional_semantics": "partial_snapshot_lower_bound",
+    "source_quality": "self_collected_partial_history"
+  },
+  "route_b_third_party_historical_only": {
+    "available": false,
+    "coverage_hours": 0.0,
+    "source_quality": "not_connected"
+  },
+  "route_c_hybrid_forceorder_plus_third_party": {
+    "available": false,
+    "reason": "requires_route_b_and_route_a"
+  },
+  "route_decision_snapshot": {
+    "allowed_decisions": [
+      "continue_data_route_upgrade"
+    ],
+    "forbidden_decisions": [
+      "retire_liquidation_cascade_branch"
+    ]
+  }
+}
