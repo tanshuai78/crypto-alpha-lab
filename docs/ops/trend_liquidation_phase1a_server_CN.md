@@ -285,12 +285,12 @@ docker run -d --name trend-forceorder \
 
 | 字段 | 含义 |
 |---|---|
-| `symbol` | 交易对，如 `BTCUSDT` |
+| `symbol` | 交易对，如 `BTC/USDT`（含斜线，与 watchlist 对齐） |
 | `side` | 订单方向（`BUY` / `SELL`，即强平单的成交方向） |
 | `liquidation_side` | 被清算的仓位方向：`long`（多仓被强平，SELL 成交）或 `short`（空仓被强平，BUY 成交） |
 | `notional_usdt` | 本次事件的名义金额（USDT） |
 | `timestamp_ms` | 事件时间戳（毫秒） |
-| `hour_bucket_utc` | 所属小时桶，格式 `YYYY-MM-DDTHH:00:00Z` |
+| `hour_bucket_utc` | 所属小时桶，格式 `YYYY-MM-DDTHH:00`（无秒数和 Z 后缀） |
 
 **语义说明**：`liquidation_side=long` 表示多仓被强平（产生 SELL 单）；`liquidation_side=short` 表示空仓被强平（产生 BUY 单）。
 
