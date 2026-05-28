@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,19 @@ def _symbol_key(symbol: str) -> str:
     return symbol.replace("/", "").upper()
 
 
-def build_force_order_stream_url(symbols: tuple[str, ...], *, base_url: str = "wss://fstream.binance.com") -> str:
+def _normalize_symbol(raw_symbol: str) -> str:
+    """Convert exchange symbol like 'BTCUSDT' to normalized 'BTC/USDT'."""
+    key = raw_symbol.upper()
+    if key.endswith("USDT"):
+        base = key[:-4]
+        return f"{base}/USDT"
+    # fallback: return as-is
+    return key
+
+
+def build_force_order_stream_url(
+    symbols: tuple[str, ...], *, base_url: str = "wss://fstream.binance.com"
+) -> str:
     streams = "/".join(f"{_symbol_key(symbol).lower()}@forceOrder" for symbol in symbols)
     return f"{base_url.rstrip('/')}/stream?streams={streams}"
 
@@ -34,20 +47,50 @@ def _number_or_none(value: Any) -> float | None:
     return number
 
 
-def parse_force_order_notional_event(message: dict[str, Any]) -> tuple[str, int, float] | None:
+def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse a Binance forceOrder WebSocket message.
+
+    Accepts both combined-stream payloads (``{"data": {"e": "forceOrder", "o": {...}}}``)
+    and bare order-only payloads (``{"o": {...}}``).
+
+    Returns a dict with keys:
+        symbol        – normalised like "BTC/USDT"
+        side          – "BUY" or "SELL" (the forced order side)
+        liquidation_side – "long" if side=="SELL", "short" if side=="BUY"
+        notional_usdt – qty * avg_price (float)
+        timestamp_ms  – event timestamp in milliseconds (int)
+
+    Returns None on any parse failure.
+    """
     payload = message.get("data") if isinstance(message.get("data"), dict) else message
     if not isinstance(payload, dict):
         return None
-    if payload.get("e") != "forceOrder":
+
+    # Allow payloads without "e" key (bare {"o": ...} format used in tests / custom feeds).
+    # Only reject when "e" is explicitly set to something other than "forceOrder".
+    event_type = payload.get("e")
+    if event_type is not None and event_type != "forceOrder":
         return None
 
     order = payload.get("o")
     if not isinstance(order, dict):
         return None
 
-    symbol = str(order.get("s") or "").upper()
-    if not symbol:
+    raw_symbol = str(order.get("s") or "").upper()
+    if not raw_symbol:
         return None
+
+    symbol = _normalize_symbol(raw_symbol)
+
+    side = str(order.get("S") or "").upper()
+    if side not in ("BUY", "SELL"):
+        if side:
+            # Unrecognised non-empty value — reject.
+            return None
+        # 'S' field absent (older test fixtures / raw feeds) — degrade gracefully.
+        liquidation_side = "unknown"
+    else:
+        liquidation_side = "long" if side == "SELL" else "short"
 
     event_time_ms = int(_number_or_none(payload.get("E")) or _number_or_none(order.get("T")) or 0)
     if event_time_ms <= 0:
@@ -59,15 +102,39 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> tuple[str, int,
         or _number_or_none(order.get("q"))
         or 0.0
     )
-    price = (
-        _number_or_none(order.get("ap"))
-        or _number_or_none(order.get("p"))
-        or 0.0
-    )
+    price = _number_or_none(order.get("ap")) or _number_or_none(order.get("p")) or 0.0
     if quantity <= 0.0 or price <= 0.0:
         return None
 
-    return symbol, event_time_ms, round(quantity * price, 10)
+    return {
+        "symbol": symbol,
+        "side": side,
+        "liquidation_side": liquidation_side,
+        "notional_usdt": round(quantity * price, 10),
+        "timestamp_ms": event_time_ms,
+    }
+
+
+def build_force_order_raw_record(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Build a flat JSONL record from a parsed forceOrder event dict."""
+    ts_ms = int(parsed["timestamp_ms"])
+    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    hour_bucket_utc = dt.strftime("%Y-%m-%dT%H:00")
+    return {
+        "symbol": parsed["symbol"],
+        "side": parsed["side"],
+        "liquidation_side": parsed["liquidation_side"],
+        "notional_usdt": parsed["notional_usdt"],
+        "timestamp_ms": ts_ms,
+        "hour_bucket_utc": hour_bucket_utc,
+    }
+
+
+def append_force_order_raw_jsonl(record: dict[str, Any], path: str) -> None:
+    """Append a single JSONL record to *path*, creating directories as needed."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
 
 
 class RollingLiquidationAccumulator:
@@ -108,7 +175,9 @@ def should_stop(*, start_ts: float, now_ts: float, max_seconds: int) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Collect Binance forceOrder stream and write 1h liquidation cache")
+    parser = argparse.ArgumentParser(
+        description="Collect Binance forceOrder stream and write 1h liquidation cache"
+    )
     parser.add_argument("--output", default="data/trend_regime_liquidation_cache.json")
     parser.add_argument("--window-sec", type=int, default=3600)
     parser.add_argument("--flush-interval-sec", type=float, default=10.0)
@@ -120,6 +189,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=list(TREND_REGIME_WATCH_SYMBOLS),
         help="Symbol list like BTC/USDT ETH/USDT",
     )
+    parser.add_argument(
+        "--raw-output",
+        default=None,
+        help="Optional path to append raw forceOrder JSONL records (one per event).",
+    )
     return parser.parse_args(argv)
 
 
@@ -127,7 +201,9 @@ async def run_collector(args: argparse.Namespace) -> int:
     try:
         import websockets
     except ImportError:
-        logger.error("missing dependency: websockets. run with: uv run --with websockets python scripts/collect_trend_regime_force_orders.py ...")
+        logger.error(
+            "missing dependency: websockets. run with: uv run --with websockets python scripts/collect_trend_regime_force_orders.py ..."
+        )
         return 2
 
     symbols = tuple(str(s) for s in args.symbols if str(s))
@@ -138,13 +214,16 @@ async def run_collector(args: argparse.Namespace) -> int:
     url = build_force_order_stream_url(symbols, base_url=args.ws_base_url)
     accumulator = RollingLiquidationAccumulator(window_ms=int(args.window_sec * 1000))
     output_path = Path(args.output)
+    raw_output_path: str | None = getattr(args, "raw_output", None)
 
     start_ts = time.time()
     last_flush_ts = 0.0
     message_count = 0
     accepted_count = 0
 
-    logger.info("force_order_collector_start url={} output={} symbols={}", url, output_path, symbols)
+    logger.info(
+        "force_order_collector_start url={} output={} symbols={}", url, output_path, symbols
+    )
 
     while True:
         if should_stop(start_ts=start_ts, now_ts=time.time(), max_seconds=args.max_seconds):
@@ -172,8 +251,17 @@ async def run_collector(args: argparse.Namespace) -> int:
                         if isinstance(message, dict):
                             parsed = parse_force_order_notional_event(message)
                             if parsed is not None:
-                                symbol, event_time_ms, notional = parsed
-                                accumulator.add_event(symbol, event_time_ms=event_time_ms, notional_usdt=notional)
+                                symbol_key = _symbol_key(parsed["symbol"])
+                                accumulator.add_event(
+                                    symbol_key,
+                                    event_time_ms=parsed["timestamp_ms"],
+                                    notional_usdt=parsed["notional_usdt"],
+                                )
+                                if raw_output_path is not None:
+                                    append_force_order_raw_jsonl(
+                                        build_force_order_raw_record(parsed),
+                                        raw_output_path,
+                                    )
                                 accepted_count += 1
 
                     if now - last_flush_ts >= float(args.flush_interval_sec):

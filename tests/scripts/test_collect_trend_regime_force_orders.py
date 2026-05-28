@@ -2,6 +2,7 @@ import json
 
 from scripts.collect_trend_regime_force_orders import (
     RollingLiquidationAccumulator,
+    build_force_order_raw_record,
     build_force_order_stream_url,
     parse_force_order_notional_event,
     should_stop,
@@ -34,10 +35,9 @@ def test_parse_force_order_notional_event_from_combined_stream_payload():
     parsed = parse_force_order_notional_event(message)
 
     assert parsed is not None
-    symbol, event_time_ms, notional = parsed
-    assert symbol == "BTCUSDT"
-    assert event_time_ms == 1710000000123
-    assert notional == 11238.048
+    assert parsed["symbol"] == "BTC/USDT"
+    assert parsed["timestamp_ms"] == 1710000000123
+    assert parsed["notional_usdt"] == 11238.048
 
 
 def test_parse_force_order_notional_event_returns_none_for_non_force_order():
@@ -72,3 +72,65 @@ def test_should_stop_handles_finite_and_infinite_runtime():
     assert should_stop(start_ts=100.0, now_ts=102.0, max_seconds=1) is True
     assert should_stop(start_ts=100.0, now_ts=100.5, max_seconds=1) is False
     assert should_stop(start_ts=100.0, now_ts=500.0, max_seconds=0) is False
+
+
+def test_parse_force_order_event_returns_dict_with_side():
+    """parse_force_order_notional_event must return a dict with 'side' key."""
+    raw = {
+        "o": {
+            "s": "BTCUSDT",
+            "S": "SELL",  # SELL forced = long position liquidated
+            "q": "0.5",
+            "ap": "60000",
+            "T": 1716800000000,
+        }
+    }
+    result = parse_force_order_notional_event(raw)
+    assert result is not None
+    assert "side" in result
+    assert "notional_usdt" in result
+    assert "liquidation_side" in result
+    # SELL forced order = long liquidated
+    assert result["side"] == "SELL"
+    assert result["liquidation_side"] == "long"
+
+
+def test_parse_force_order_buy_side_is_short_liquidation():
+    """BUY forced order = short position was liquidated."""
+    raw = {
+        "o": {
+            "s": "ETHUSDT",
+            "S": "BUY",
+            "q": "10",
+            "ap": "3000",
+            "T": 1716800000000,
+        }
+    }
+    result = parse_force_order_notional_event(raw)
+    assert result is not None
+    assert result["side"] == "BUY"
+    assert result["liquidation_side"] == "short"
+
+
+def test_build_force_order_raw_record_has_required_fields():
+    """build_force_order_raw_record must return dict with all required fields for JSONL append."""
+    parsed = {
+        "symbol": "BTC/USDT",
+        "side": "SELL",
+        "liquidation_side": "long",
+        "notional_usdt": 30000.0,
+        "timestamp_ms": 1716800000000,
+    }
+    record = build_force_order_raw_record(parsed)
+    required = {
+        "symbol",
+        "side",
+        "liquidation_side",
+        "notional_usdt",
+        "timestamp_ms",
+        "hour_bucket_utc",
+    }
+    assert required.issubset(set(record.keys()))
+    # hour_bucket_utc must be ISO-format string like '2024-05-27T10:00'
+    assert "T" in record["hour_bucket_utc"]
+    assert record["symbol"] == "BTC/USDT"
