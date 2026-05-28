@@ -1,10 +1,12 @@
-from scripts.replay_trend_regime_shadow import (
-    build_dual_cost_summary,
-    build_shadow_summary,
-)
+import pytest
+
 from configs.base import (
     TREND_REGIME_OBSERVATION_COST_BPS,
     TREND_REGIME_STRESS_COST_BPS,
+)
+from scripts.replay_trend_regime_shadow import (
+    build_dual_cost_summary,
+    build_shadow_summary,
 )
 
 
@@ -281,3 +283,42 @@ def test_historical_replay_splits_missing_symbol_from_non_watchlist_rows():
     assert summary["non_watchlist_row_count"] == 1
     assert summary["non_watchlist_symbols"] == ["ADA/USDT"]
 
+
+def test_apply_hourly_liquidation_history_joins_by_hour_bucket():
+    """apply_hourly_liquidation_history must join by (symbol, hour_bucket_utc)."""
+    from scripts.replay_trend_regime_shadow import apply_hourly_liquidation_history
+
+    rows = [
+        _row(timestamp_ms=1716804000000, symbol="BTC/USDT"),  # 2024-05-27 10:00 UTC
+        _row(timestamp_ms=1716807600000, symbol="BTC/USDT"),  # 2024-05-27 11:00 UTC
+    ]
+    hourly = [
+        {
+            "symbol": "BTC/USDT",
+            "hour_bucket_utc": "2024-05-27T10:00",
+            "total_liquidation_notional_usdt": 5_000_000.0,
+        },
+    ]
+    result = apply_hourly_liquidation_history(rows, hourly)
+    assert result[0]["liquidation_notional_1h_usdt"] == pytest.approx(5_000_000.0)
+    assert result[1]["liquidation_notional_1h_usdt"] is None  # no match for hour 11
+
+
+def test_build_shadow_summary_reports_liquidation_coverage_ratio():
+    """build_shadow_summary must include liquidation_coverage_ratio in summary."""
+    rows = [
+        _row(timestamp_ms=1000, liquidation_notional_1h_usdt=5_000_000.0),
+        _row(timestamp_ms=2000, liquidation_notional_1h_usdt=None),
+        _row(timestamp_ms=3000, liquidation_notional_1h_usdt=3_000_000.0),
+    ]
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+    assert "liquidation_coverage_ratio" in summary
+    assert summary["liquidation_coverage_ratio"] == pytest.approx(2 / 3)
+
+
+def test_load_optional_jsonl_returns_empty_when_file_missing():
+    """load_optional_jsonl must return [] when path does not exist."""
+    from scripts.replay_trend_regime_shadow import load_optional_jsonl
+
+    result = load_optional_jsonl("/tmp/nonexistent_file_xyz_123.jsonl")
+    assert result == []

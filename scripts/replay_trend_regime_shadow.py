@@ -22,7 +22,9 @@ from src.strategies.trend_regime.shadow_simulator import (
 )
 
 
-def normalize_rows_for_historical_replay(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+def normalize_rows_for_historical_replay(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
     normalized: list[dict[str, Any]] = []
     rows_originally_api_stale_count = 0
 
@@ -97,9 +99,7 @@ def build_classification_audit(rows: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "rows_missing_liquidation_notional_count": rows_missing_liquidation_notional_count,
         "rows_with_liquidation_notional_count": rows_with_liquidation_notional_count,
-        "liquidation_coverage_ratio": round(
-            rows_with_liquidation_notional_count / len(rows), 10
-        )
+        "liquidation_coverage_ratio": round(rows_with_liquidation_notional_count / len(rows), 10)
         if rows
         else 0.0,
     }
@@ -171,7 +171,9 @@ def _universe_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: float) -> dict[str, Any]:
+def build_shadow_summary(
+    rows: list[dict[str, Any]], *, estimated_cost_bps: float
+) -> dict[str, Any]:
     normalized_rows, rows_originally_api_stale_count = normalize_rows_for_historical_replay(rows)
     audit = build_classification_audit(normalized_rows)
 
@@ -287,16 +289,67 @@ def load_rows_jsonl(path: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
+def load_optional_jsonl(path: str) -> list[dict[str, Any]]:
+    p = Path(path)
+    if not p.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return records
+
+
+def apply_hourly_liquidation_history(
+    rows: list[dict[str, Any]],
+    hourly_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    from datetime import datetime, timezone
+
+    lookup: dict[tuple[str, str], float] = {}
+    for rec in hourly_records:
+        symbol = str(rec.get("symbol") or "")
+        bucket = str(rec.get("hour_bucket_utc") or "")
+        notional = rec.get("total_liquidation_notional_usdt")
+        if symbol and bucket and notional is not None:
+            lookup[(symbol, bucket)] = float(notional)
+
+    patched: list[dict[str, Any]] = []
+    for row in rows:
+        r = dict(row)
+        symbol = str(r.get("symbol") or "")
+        ts_ms = int(r.get("timestamp_ms") or 0)
+        dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+        hour_bucket = dt.strftime("%Y-%m-%dT%H:00")
+        r["liquidation_notional_1h_usdt"] = lookup.get((symbol, hour_bucket))
+        patched.append(r)
+    return patched
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay trend-regime shadow from raw rows")
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--liquidation-hourly-jsonl",
+        default=None,
+        help="Optional path to hourly liquidation proxy JSONL for backfilling liquidation_notional_1h_usdt.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     rows = load_rows_jsonl(args.input)
+    if args.liquidation_hourly_jsonl:
+        hourly = load_optional_jsonl(args.liquidation_hourly_jsonl)
+        rows = apply_hourly_liquidation_history(rows, hourly)
     summary = build_dual_cost_summary(rows)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
