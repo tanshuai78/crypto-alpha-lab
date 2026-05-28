@@ -266,3 +266,18 @@ def test_historical_replay_outputs_symbol_and_regime_breakdown_fields():
     assert summary["time_span_hours"] > 0
     assert "vol_breakout_long" in summary["entry_event_count_by_regime"]
     assert "liquidation_cascade_short" in summary["entry_event_count_by_regime"]
+
+
+def test_historical_replay_splits_missing_symbol_from_non_watchlist_rows():
+    rows = [
+        _row(timestamp_ms=1000, symbol="BTC/USDT"),
+        _row(timestamp_ms=2000, symbol="ADA/USDT"),
+        _row(timestamp_ms=3000, symbol=""),
+    ]
+
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+
+    assert summary["missing_symbol_row_count"] == 1
+    assert summary["non_watchlist_row_count"] == 1
+    assert summary["non_watchlist_symbols"] == ["ADA/USDT"]
+

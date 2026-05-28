@@ -335,6 +335,12 @@ TREND_REGIME_MAX_SLIPPAGE_BPS = 8.0
 TREND_REGIME_EVENT_LOG_JSONL = "trend_regime_watch_events.jsonl"
 # JSONL artifact path for observation daemon events.
 
+TREND_REGIME_FORCE_ORDER_RAW_JSONL = "trend_regime_force_orders_raw.jsonl"
+# Raw Binance forceOrder events collected locally for replayable liquidation proxy history.
+
+TREND_REGIME_LIQUIDATION_HOURLY_JSONL = "trend_regime_liquidation_hourly.jsonl"
+# Hourly symbol-level liquidation proxy derived from local forceOrder raw events.
+
 # ─── Strategy: Long-Horizon Funding Basis Desk ───────────────────────────────
 
 BASIS_DESK_MAX_HOLDING_DAYS = 7

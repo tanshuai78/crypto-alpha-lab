@@ -13,6 +13,7 @@ from configs.base import (
     TREND_REGIME_OBSERVATION_COST_BPS,
     TREND_REGIME_STOP_LOSS_PCT,
     TREND_REGIME_STRESS_COST_BPS,
+    TREND_REGIME_WATCH_SYMBOLS,
 )
 from src.strategies.trend_regime.scanner import classify_trend_regime_snapshot
 from src.strategies.trend_regime.shadow_simulator import (
@@ -149,6 +150,27 @@ def _grouped_summary(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     return grouped
 
 
+def _universe_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    watch = set(TREND_REGIME_WATCH_SYMBOLS)
+    missing_symbol_count = 0
+    non_watchlist_count = 0
+    non_watchlist_symbols: set[str] = set()
+
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            missing_symbol_count += 1
+        elif symbol not in watch:
+            non_watchlist_count += 1
+            non_watchlist_symbols.add(symbol)
+
+    return {
+        "missing_symbol_row_count": missing_symbol_count,
+        "non_watchlist_row_count": non_watchlist_count,
+        "non_watchlist_symbols": sorted(non_watchlist_symbols),
+    }
+
+
 def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: float) -> dict[str, Any]:
     normalized_rows, rows_originally_api_stale_count = normalize_rows_for_historical_replay(rows)
     audit = build_classification_audit(normalized_rows)
@@ -239,6 +261,7 @@ def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: floa
         "grouped_summary": _grouped_summary(results),
     }
     summary.update(_summarize_pnl(results))
+    summary.update(_universe_summary(rows))
     return summary
 
 

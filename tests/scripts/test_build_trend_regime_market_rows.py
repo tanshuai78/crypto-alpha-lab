@@ -1,8 +1,10 @@
 import json
 
+from configs.base import TREND_REGIME_WATCH_SYMBOLS
 from scripts.build_trend_regime_market_rows import (
     build_market_rows_from_payloads,
     build_symbol_market_rows,
+    parse_args,
     write_rows_jsonl,
 )
 
@@ -127,3 +129,9 @@ def test_write_rows_jsonl_outputs_stable_sorted_rows(tmp_path):
     decoded = [json.loads(line) for line in lines]
     assert decoded[0]["timestamp_ms"] == 1
     assert decoded[1]["timestamp_ms"] == 2
+
+
+def test_market_rows_default_symbols_match_trend_watchlist():
+    args = parse_args([])
+
+    assert tuple(args.symbols) == tuple(TREND_REGIME_WATCH_SYMBOLS)
