@@ -244,6 +244,7 @@ def build_dual_cost_viability_summary(rows: list[dict[str, Any]]) -> dict[str, A
     shadow_by_holding_hours: dict[str, dict[str, Any]] = {}
     base_cost = float(TREND_REGIME_OBSERVATION_COST_BPS)
     stress_cost = float(TREND_REGIME_STRESS_COST_BPS)
+    thresholds = VolBreakoutReviewThresholds.moderately_relaxed()
 
     fields_to_extract = [
         "entry_event_count",
@@ -257,10 +258,16 @@ def build_dual_cost_viability_summary(rows: list[dict[str, Any]]) -> dict[str, A
 
     for hours in [4, 8, 12, 24]:
         base_sh = build_vol_breakout_shadow_summary(
-            rows, estimated_cost_bps=base_cost, holding_hours=hours
+            rows,
+            estimated_cost_bps=base_cost,
+            holding_hours=hours,
+            thresholds=thresholds,
         )
         stress_sh = build_vol_breakout_shadow_summary(
-            rows, estimated_cost_bps=stress_cost, holding_hours=hours
+            rows,
+            estimated_cost_bps=stress_cost,
+            holding_hours=hours,
+            thresholds=thresholds,
         )
 
         shadow_by_holding_hours[str(hours)] = {
@@ -271,6 +278,9 @@ def build_dual_cost_viability_summary(rows: list[dict[str, Any]]) -> dict[str, A
     return {
         "base_cost_bps": base_cost,
         "stress_cost_bps": stress_cost,
+        "threshold_set_name": thresholds.name,
+        "assumption_level": thresholds.assumption_level,
+        "eligible_for_redefinition": thresholds.eligible_for_redefinition,
         "shadow_by_holding_hours": shadow_by_holding_hours,
     }
 

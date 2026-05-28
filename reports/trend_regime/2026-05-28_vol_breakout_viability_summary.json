@@ -1,5 +1,6 @@
 {
   "accepted_entries_with_path_count": 0,
+  "assumption_level": "candidate_redefinition_boundary",
   "base_cost_bps": 30.0,
   "capital_utilization_label": "too_sparse",
   "classification_reject_counts": {
@@ -10,6 +11,7 @@
   },
   "coverage_quality": "historical_rows_replay_not_live_freshness_aware",
   "edge_status": "unknown_until_shadow",
+  "eligible_for_redefinition": true,
   "end_timestamp_ms": 1779944399999,
   "entry_event_count": 0,
   "entry_event_count_by_regime": {},
@@ -56,82 +58,82 @@
   "shadow_by_holding_hours": {
     "12": {
       "base": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
-        "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -123.9453302423,
+        "median_net_pnl_bps": 10.1107821603,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
+        "win_rate": 0.6666666667,
+        "worst_trade_net_pnl_bps": -393.0319148936
       },
       "stress": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -143.9453302423,
+        "median_net_pnl_bps": -9.8892178397,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
         "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "worst_trade_net_pnl_bps": -413.0319148936
       }
     },
     "24": {
       "base": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -288.8087571815,
+        "median_net_pnl_bps": -302.0516004671,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.6666666667,
         "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "worst_trade_net_pnl_bps": -393.0319148936
       },
       "stress": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -308.8087571815,
+        "median_net_pnl_bps": -322.0516004671,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.6666666667,
         "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "worst_trade_net_pnl_bps": -413.0319148936
       }
     },
     "4": {
       "base": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
-        "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -125.9629561398,
+        "median_net_pnl_bps": -29.0449813771,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
+        "win_rate": 0.3333333333,
+        "worst_trade_net_pnl_bps": -393.0319148936
       },
       "stress": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
-        "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -145.9629561398,
+        "median_net_pnl_bps": -49.0449813771,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
+        "win_rate": 0.3333333333,
+        "worst_trade_net_pnl_bps": -413.0319148936
       }
     },
     "8": {
       "base": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
-        "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -144.2234368647,
+        "median_net_pnl_bps": -70.1107821603,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
+        "win_rate": 0.3333333333,
+        "worst_trade_net_pnl_bps": -393.0319148936
       },
       "stress": {
-        "entry_event_count": 0,
-        "mean_net_pnl_bps": 0.0,
-        "median_net_pnl_bps": 0.0,
-        "shadow_trade_count": 0,
-        "stop_loss_exit_rate": 0.0,
-        "win_rate": 0.0,
-        "worst_trade_net_pnl_bps": 0.0
+        "entry_event_count": 3,
+        "mean_net_pnl_bps": -164.2234368647,
+        "median_net_pnl_bps": -90.1107821603,
+        "shadow_trade_count": 3,
+        "stop_loss_exit_rate": 0.3333333333,
+        "win_rate": 0.3333333333,
+        "worst_trade_net_pnl_bps": -413.0319148936
       }
     }
   },
@@ -148,6 +150,7 @@
     "SOL/USDT",
     "XRP/USDT"
   ],
+  "threshold_set_name": "moderately_relaxed",
   "time_span_hours": 498.0,
   "win_rate": 0.0,
   "worst_trade_net_pnl_bps": 0.0

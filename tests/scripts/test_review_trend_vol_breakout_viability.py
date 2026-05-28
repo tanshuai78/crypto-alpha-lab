@@ -3,6 +3,7 @@ import pytest
 
 from scripts.review_trend_vol_breakout_viability import (
     build_vol_breakout_audit_summary,
+    build_dual_cost_viability_summary,
     build_vol_breakout_shadow_summary,
     run_vol_breakout_sensitivity,
 )
@@ -106,3 +107,32 @@ def test_sensitivity_does_not_mutate_live_config_thresholds():
     run_vol_breakout_sensitivity([_row()], threshold_sets=[VolBreakoutReviewThresholds.moderately_relaxed()])
     after = classify_vol_breakout_only_for_review(_row())
     assert before == after
+
+
+def test_dual_cost_viability_summary_uses_moderately_relaxed_thresholds_for_holding_audit():
+    rows = [
+        _row(
+            timestamp_ms=1000,
+            symbol="BTC/USDT",
+            close_price=100000.0,
+            return_1h_pct=1.6,
+            vol_1h_pct=2.1,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=1.1,
+        ),
+        _row(
+            timestamp_ms=2000,
+            symbol="BTC/USDT",
+            close_price=101000.0,
+            return_1h_pct=0.2,
+            vol_1h_pct=1.0,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=0.2,
+        ),
+    ]
+
+    summary = build_dual_cost_viability_summary(rows)
+
+    assert summary["threshold_set_name"] == "moderately_relaxed"
+    assert summary["assumption_level"] == "candidate_redefinition_boundary"
+    assert summary["shadow_by_holding_hours"]["4"]["base"]["entry_event_count"] == 1
