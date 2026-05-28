@@ -290,6 +290,8 @@ def load_rows_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 def load_optional_jsonl(path: str) -> list[dict[str, Any]]:
+    if not path:
+        return []
     p = Path(path)
     if not p.exists():
         return []
@@ -309,27 +311,72 @@ def load_optional_jsonl(path: str) -> list[dict[str, Any]]:
 def apply_hourly_liquidation_history(
     rows: list[dict[str, Any]],
     hourly_records: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    from datetime import datetime, timezone
-
-    lookup: dict[tuple[str, str], float] = {}
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    lookup: dict[tuple[str, int], dict[str, Any]] = {}
+    bucket_values: list[int] = []
     for rec in hourly_records:
         symbol = str(rec.get("symbol") or "")
-        bucket = str(rec.get("hour_bucket_utc") or "")
-        notional = rec.get("total_liquidation_notional_usdt")
-        if symbol and bucket and notional is not None:
-            lookup[(symbol, bucket)] = float(notional)
+        bucket = int(_number_or_none(rec.get("hour_bucket_ms")) or 0)
+        notional = _number_or_none(rec.get("liquidation_notional_1h_usdt"))
+        if symbol and bucket > 0 and notional is not None:
+            lookup[(symbol, bucket)] = rec
+            bucket_values.append(bucket)
 
+    joined_count = 0
     patched: list[dict[str, Any]] = []
     for row in rows:
         r = dict(row)
         symbol = str(r.get("symbol") or "")
-        ts_ms = int(r.get("timestamp_ms") or 0)
-        dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-        hour_bucket = dt.strftime("%Y-%m-%dT%H:00")
-        r["liquidation_notional_1h_usdt"] = lookup.get((symbol, hour_bucket))
+        ts_ms = int(_number_or_none(r.get("timestamp_ms")) or 0)
+        bucket = ts_ms // 3_600_000 * 3_600_000 if ts_ms > 0 else 0
+        matched = lookup.get((symbol, bucket))
+        existing = _number_or_none(r.get("liquidation_notional_1h_usdt"))
+
+        if existing is None and matched is not None:
+            r["liquidation_notional_1h_usdt"] = _number_or_none(
+                matched.get("liquidation_notional_1h_usdt")
+            )
+            r["long_liquidation_notional_1h_usdt"] = _number_or_none(
+                matched.get("long_liquidation_notional_1h_usdt")
+            )
+            r["short_liquidation_notional_1h_usdt"] = _number_or_none(
+                matched.get("short_liquidation_notional_1h_usdt")
+            )
+            r["liquidation_source"] = str(
+                matched.get("liquidation_source") or "binance_forceorder_ws"
+            )
+            r["liquidation_source_quality"] = str(
+                matched.get("source_quality") or "self_collected_partial_history"
+            )
+            r["liquidation_notional_semantics"] = str(
+                matched.get("liquidation_notional_semantics") or "partial_snapshot_lower_bound"
+            )
+            r["liquidation_bucket_semantics"] = str(
+                matched.get("liquidation_bucket_semantics")
+                or "utc_hour_floor_of_row_timestamp"
+            )
+            joined_count += 1
         patched.append(r)
-    return patched
+
+    start_ms = min(bucket_values) if bucket_values else 0
+    end_ms = max(bucket_values) if bucket_values else 0
+    duration_hours = (end_ms - start_ms) / 3_600_000.0 if end_ms > start_ms else 0.0
+    join_summary = {
+        "liquidation_history_input_count": len(hourly_records),
+        "liquidation_rows_joined_count": joined_count,
+        "liquidation_history_source": "binance_forceorder_ws" if hourly_records else "none",
+        "liquidation_history_source_quality": (
+            "self_collected_partial_history" if hourly_records else "missing"
+        ),
+        "liquidation_notional_semantics": (
+            "partial_snapshot_lower_bound" if hourly_records else "missing"
+        ),
+        "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
+        "liquidation_raw_start_ms": start_ms,
+        "liquidation_raw_end_ms": end_ms,
+        "liquidation_raw_duration_hours": round(duration_hours, 10),
+    }
+    return patched, join_summary
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -347,10 +394,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     rows = load_rows_jsonl(args.input)
+    join_summary = {
+        "liquidation_history_input_count": 0,
+        "liquidation_rows_joined_count": 0,
+        "liquidation_history_source": "none",
+        "liquidation_history_source_quality": "missing",
+        "liquidation_notional_semantics": "missing",
+        "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
+        "liquidation_raw_start_ms": 0,
+        "liquidation_raw_end_ms": 0,
+        "liquidation_raw_duration_hours": 0.0,
+    }
     if args.liquidation_hourly_jsonl:
         hourly = load_optional_jsonl(args.liquidation_hourly_jsonl)
-        rows = apply_hourly_liquidation_history(rows, hourly)
+        rows, join_summary = apply_hourly_liquidation_history(rows, hourly)
     summary = build_dual_cost_summary(rows)
+    summary["liquidation_history_join_summary"] = join_summary
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:

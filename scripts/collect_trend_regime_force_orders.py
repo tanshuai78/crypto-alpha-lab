@@ -11,7 +11,10 @@ from typing import Any
 
 from loguru import logger
 
-from configs.base import TREND_REGIME_WATCH_SYMBOLS
+from configs.base import (
+    TREND_REGIME_FORCE_ORDER_RAW_JSONL,
+    TREND_REGIME_WATCH_SYMBOLS,
+)
 
 
 def _symbol_key(symbol: str) -> str:
@@ -54,11 +57,17 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
     and bare order-only payloads (``{"o": {...}}``).
 
     Returns a dict with keys:
-        symbol        – normalised like "BTC/USDT"
-        side          – "BUY" or "SELL" (the forced order side)
-        liquidation_side – "long" if side=="SELL", "short" if side=="BUY"
-        notional_usdt – qty * avg_price (float)
-        timestamp_ms  – event timestamp in milliseconds (int)
+        symbol                – normalized like "BTC/USDT"
+        side                  – "BUY" or "SELL" (forced order side)
+        liquidation_side      – "long_liquidation" or "short_liquidation"
+        quantity              – filled quantity
+        average_price         – average fill price
+        notional_usdt         – quantity * average_price
+        timestamp_ms          – event timestamp in milliseconds
+        order_trade_time_ms   – order trade timestamp in milliseconds
+        source                – binance_forceorder_ws
+        source_quality        – self_collected_partial_history
+        liquidation_notional_semantics – partial_snapshot_lower_bound
 
     Returns None on any parse failure.
     """
@@ -90,11 +99,12 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
         # 'S' field absent (older test fixtures / raw feeds) — degrade gracefully.
         liquidation_side = "unknown"
     else:
-        liquidation_side = "long" if side == "SELL" else "short"
+        liquidation_side = "long_liquidation" if side == "SELL" else "short_liquidation"
 
     event_time_ms = int(_number_or_none(payload.get("E")) or _number_or_none(order.get("T")) or 0)
     if event_time_ms <= 0:
         return None
+    order_trade_time_ms = int(_number_or_none(order.get("T")) or event_time_ms)
 
     quantity = (
         _number_or_none(order.get("z"))
@@ -110,8 +120,14 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
         "symbol": symbol,
         "side": side,
         "liquidation_side": liquidation_side,
+        "quantity": float(quantity),
+        "average_price": float(price),
         "notional_usdt": round(quantity * price, 10),
         "timestamp_ms": event_time_ms,
+        "order_trade_time_ms": order_trade_time_ms,
+        "source": "binance_forceorder_ws",
+        "source_quality": "self_collected_partial_history",
+        "liquidation_notional_semantics": "partial_snapshot_lower_bound",
     }
 
 
@@ -120,13 +136,24 @@ def build_force_order_raw_record(parsed: dict[str, Any]) -> dict[str, Any]:
     ts_ms = int(parsed["timestamp_ms"])
     dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
     hour_bucket_utc = dt.strftime("%Y-%m-%dT%H:00")
+    hour_bucket_ms = ts_ms // 3_600_000 * 3_600_000
     return {
         "symbol": parsed["symbol"],
         "side": parsed["side"],
         "liquidation_side": parsed["liquidation_side"],
+        "quantity": parsed["quantity"],
+        "average_price": parsed["average_price"],
         "notional_usdt": parsed["notional_usdt"],
         "timestamp_ms": ts_ms,
+        "order_trade_time_ms": int(parsed.get("order_trade_time_ms") or ts_ms),
+        "hour_bucket_ms": hour_bucket_ms,
         "hour_bucket_utc": hour_bucket_utc,
+        "source": str(parsed.get("source") or "binance_forceorder_ws"),
+        "source_quality": str(parsed.get("source_quality") or "self_collected_partial_history"),
+        "liquidation_notional_semantics": str(
+            parsed.get("liquidation_notional_semantics") or "partial_snapshot_lower_bound"
+        ),
+        "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
     }
 
 
@@ -191,7 +218,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--raw-output",
-        default=None,
+        default=f"data/{TREND_REGIME_FORCE_ORDER_RAW_JSONL}",
         help="Optional path to append raw forceOrder JSONL records (one per event).",
     )
     return parser.parse_args(argv)

@@ -72,6 +72,17 @@
     "worst_trade_net_pnl_bps": 0.0
   },
   "base_cost_bps": 30.0,
+  "liquidation_history_join_summary": {
+    "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
+    "liquidation_history_input_count": 0,
+    "liquidation_history_source": "none",
+    "liquidation_history_source_quality": "missing",
+    "liquidation_notional_semantics": "missing",
+    "liquidation_raw_duration_hours": 0.0,
+    "liquidation_raw_end_ms": 0,
+    "liquidation_raw_start_ms": 0,
+    "liquidation_rows_joined_count": 0
+  },
   "stress": {
     "classification_reject_counts": {
       "oi_confirmation_below_min": 8,

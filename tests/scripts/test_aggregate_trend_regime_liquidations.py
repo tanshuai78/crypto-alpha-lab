@@ -16,37 +16,37 @@ def raw_jsonl(tmp_path):
         {
             "symbol": "BTC/USDT",
             "side": "SELL",
-            "liquidation_side": "long",
+            "liquidation_side": "long_liquidation",
             "notional_usdt": 1_000_000.0,
             "timestamp_ms": 1716800000000,
-            "hour_bucket_utc": "2024-05-27T10:00",
+            "hour_bucket_ms": 1716800000000 // 3_600_000 * 3_600_000,
         },
         # BTC BUY (short liquidated) in hour 10
         {
             "symbol": "BTC/USDT",
             "side": "BUY",
-            "liquidation_side": "short",
+            "liquidation_side": "short_liquidation",
             "notional_usdt": 500_000.0,
             "timestamp_ms": 1716800001000,
-            "hour_bucket_utc": "2024-05-27T10:00",
+            "hour_bucket_ms": 1716800001000 // 3_600_000 * 3_600_000,
         },
         # BTC SELL (long liquidated) in hour 11
         {
             "symbol": "BTC/USDT",
             "side": "SELL",
-            "liquidation_side": "long",
+            "liquidation_side": "long_liquidation",
             "notional_usdt": 200_000.0,
             "timestamp_ms": 1716803600000,
-            "hour_bucket_utc": "2024-05-27T11:00",
+            "hour_bucket_ms": 1716803600000 // 3_600_000 * 3_600_000,
         },
         # ETH long liquidated hour 10
         {
             "symbol": "ETH/USDT",
             "side": "SELL",
-            "liquidation_side": "long",
+            "liquidation_side": "long_liquidation",
             "notional_usdt": 300_000.0,
             "timestamp_ms": 1716800002000,
-            "hour_bucket_utc": "2024-05-27T10:00",
+            "hour_bucket_ms": 1716800002000 // 3_600_000 * 3_600_000,
         },
     ]
     path = tmp_path / "raw.jsonl"
@@ -62,22 +62,23 @@ def test_aggregate_produces_one_row_per_symbol_per_hour(raw_jsonl):
 
 def test_aggregate_splits_long_and_short_notional(raw_jsonl):
     rows = aggregate_raw_to_hourly(load_raw_jsonl(raw_jsonl))
-    btc_10 = next(
-        r for r in rows if r["symbol"] == "BTC/USDT" and r["hour_bucket_utc"] == "2024-05-27T10:00"
-    )
-    assert btc_10["long_liquidation_notional_usdt"] == pytest.approx(1_000_000.0)
-    assert btc_10["short_liquidation_notional_usdt"] == pytest.approx(500_000.0)
-    assert btc_10["total_liquidation_notional_usdt"] == pytest.approx(1_500_000.0)
-    assert btc_10["dominant_side"] == "long"  # long > short
+    hour_10 = 1716800000000 // 3_600_000 * 3_600_000
+    btc_10 = next(r for r in rows if r["symbol"] == "BTC/USDT" and r["hour_bucket_ms"] == hour_10)
+    assert btc_10["long_liquidation_notional_1h_usdt"] == pytest.approx(1_000_000.0)
+    assert btc_10["short_liquidation_notional_1h_usdt"] == pytest.approx(500_000.0)
+    assert btc_10["liquidation_notional_1h_usdt"] == pytest.approx(1_500_000.0)
+    assert btc_10["long_liquidation_event_count"] == 1
+    assert btc_10["short_liquidation_event_count"] == 1
 
 
 def test_aggregate_sets_semantics_field(raw_jsonl):
     rows = aggregate_raw_to_hourly(load_raw_jsonl(raw_jsonl))
-    btc_10 = next(
-        r for r in rows if r["symbol"] == "BTC/USDT" and r["hour_bucket_utc"] == "2024-05-27T10:00"
-    )
-    assert "semantics" in btc_10
-    assert btc_10["semantics"] == "forceOrder_aggregated_from_local_ws"
+    hour_10 = 1716800000000 // 3_600_000 * 3_600_000
+    btc_10 = next(r for r in rows if r["symbol"] == "BTC/USDT" and r["hour_bucket_ms"] == hour_10)
+    assert btc_10["liquidation_source"] == "binance_forceorder_ws"
+    assert btc_10["source_quality"] == "self_collected_partial_history"
+    assert btc_10["liquidation_notional_semantics"] == "partial_snapshot_lower_bound"
+    assert btc_10["liquidation_bucket_semantics"] == "utc_hour_floor_of_row_timestamp"
 
 
 def test_write_and_load_round_trip(raw_jsonl, tmp_path):

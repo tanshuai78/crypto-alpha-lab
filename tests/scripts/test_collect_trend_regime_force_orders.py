@@ -90,9 +90,15 @@ def test_parse_force_order_event_returns_dict_with_side():
     assert "side" in result
     assert "notional_usdt" in result
     assert "liquidation_side" in result
+    assert "quantity" in result
+    assert "average_price" in result
+    assert "order_trade_time_ms" in result
+    assert "source" in result
+    assert "source_quality" in result
+    assert "liquidation_notional_semantics" in result
     # SELL forced order = long liquidated
     assert result["side"] == "SELL"
-    assert result["liquidation_side"] == "long"
+    assert result["liquidation_side"] == "long_liquidation"
 
 
 def test_parse_force_order_buy_side_is_short_liquidation():
@@ -109,7 +115,7 @@ def test_parse_force_order_buy_side_is_short_liquidation():
     result = parse_force_order_notional_event(raw)
     assert result is not None
     assert result["side"] == "BUY"
-    assert result["liquidation_side"] == "short"
+    assert result["liquidation_side"] == "short_liquidation"
 
 
 def test_build_force_order_raw_record_has_required_fields():
@@ -117,20 +123,35 @@ def test_build_force_order_raw_record_has_required_fields():
     parsed = {
         "symbol": "BTC/USDT",
         "side": "SELL",
-        "liquidation_side": "long",
+        "liquidation_side": "long_liquidation",
+        "quantity": 0.5,
+        "average_price": 60000.0,
         "notional_usdt": 30000.0,
         "timestamp_ms": 1716800000000,
+        "order_trade_time_ms": 1716800000000,
+        "source": "binance_forceorder_ws",
+        "source_quality": "self_collected_partial_history",
+        "liquidation_notional_semantics": "partial_snapshot_lower_bound",
     }
     record = build_force_order_raw_record(parsed)
     required = {
         "symbol",
         "side",
         "liquidation_side",
+        "quantity",
+        "average_price",
         "notional_usdt",
         "timestamp_ms",
+        "order_trade_time_ms",
+        "hour_bucket_ms",
         "hour_bucket_utc",
+        "source",
+        "source_quality",
+        "liquidation_notional_semantics",
+        "liquidation_bucket_semantics",
     }
     assert required.issubset(set(record.keys()))
     # hour_bucket_utc must be ISO-format string like '2024-05-27T10:00'
     assert "T" in record["hour_bucket_utc"]
     assert record["symbol"] == "BTC/USDT"
+    assert record["liquidation_notional_semantics"] == "partial_snapshot_lower_bound"

@@ -11,10 +11,26 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SEMANTICS_TAG = "forceOrder_aggregated_from_local_ws"
+SEMANTICS_TAG = "partial_snapshot_lower_bound"
+
+
+def hour_bucket_ms(timestamp_ms: int) -> int:
+    return timestamp_ms // 3_600_000 * 3_600_000
+
+
+def _hour_bucket_utc_to_ms(value: str) -> int | None:
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
+    except ValueError:
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return int(dt.timestamp() * 1000)
 
 
 def load_raw_jsonl(path: str) -> list[dict[str, Any]]:
@@ -35,41 +51,52 @@ def load_raw_jsonl(path: str) -> list[dict[str, Any]]:
 
 
 def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Aggregate raw forceOrder records into one row per (symbol, hour_bucket_utc)."""
-    # key: (symbol, hour_bucket_utc)
-    buckets: dict[tuple[str, str], dict[str, float]] = defaultdict(
-        lambda: {"long": 0.0, "short": 0.0}
+    """Aggregate raw forceOrder records into one row per (symbol, hour_bucket_ms)."""
+    # key: (symbol, hour_bucket_ms)
+    buckets: dict[tuple[str, int], dict[str, float | int]] = defaultdict(
+        lambda: {"long": 0.0, "short": 0.0, "long_count": 0, "short_count": 0}
     )
 
     for rec in records:
         symbol = str(rec.get("symbol") or "")
-        hour_bucket = str(rec.get("hour_bucket_utc") or "")
-        if not symbol or not hour_bucket:
+        hour_bucket = rec.get("hour_bucket_ms")
+        if hour_bucket is None:
+            legacy_bucket = str(rec.get("hour_bucket_utc") or "")
+            hour_bucket = _hour_bucket_utc_to_ms(legacy_bucket) if legacy_bucket else None
+        if not symbol or hour_bucket is None:
             continue
         notional = float(rec.get("notional_usdt") or 0.0)
         liq_side = str(rec.get("liquidation_side") or "unknown")
-        key = (symbol, hour_bucket)
-        if liq_side == "long":
+        key = (symbol, int(hour_bucket))
+        if liq_side in ("long", "long_liquidation"):
             buckets[key]["long"] += notional
-        elif liq_side == "short":
+            buckets[key]["long_count"] += 1
+        elif liq_side in ("short", "short_liquidation"):
             buckets[key]["short"] += notional
+            buckets[key]["short_count"] += 1
         # unknown side: skip directional attribution
 
     rows: list[dict[str, Any]] = []
     for (symbol, hour_bucket), sums in sorted(buckets.items()):
-        long_notional = sums["long"]
-        short_notional = sums["short"]
+        long_notional = float(sums["long"])
+        short_notional = float(sums["short"])
+        long_count = int(sums["long_count"])
+        short_count = int(sums["short_count"])
         total = long_notional + short_notional
-        dominant = "long" if long_notional >= short_notional else "short"
         rows.append(
             {
                 "symbol": symbol,
-                "hour_bucket_utc": hour_bucket,
-                "long_liquidation_notional_usdt": long_notional,
-                "short_liquidation_notional_usdt": short_notional,
-                "total_liquidation_notional_usdt": total,
-                "dominant_side": dominant,
-                "semantics": SEMANTICS_TAG,
+                "hour_bucket_ms": hour_bucket,
+                "liquidation_notional_1h_usdt": round(total, 10),
+                "long_liquidation_notional_1h_usdt": round(long_notional, 10),
+                "short_liquidation_notional_1h_usdt": round(short_notional, 10),
+                "long_liquidation_event_count": long_count,
+                "short_liquidation_event_count": short_count,
+                "event_count": long_count + short_count,
+                "liquidation_source": "binance_forceorder_ws",
+                "source_quality": "self_collected_partial_history",
+                "liquidation_notional_semantics": SEMANTICS_TAG,
+                "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
             }
         )
     return rows

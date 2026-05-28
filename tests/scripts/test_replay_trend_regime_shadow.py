@@ -285,23 +285,35 @@ def test_historical_replay_splits_missing_symbol_from_non_watchlist_rows():
 
 
 def test_apply_hourly_liquidation_history_joins_by_hour_bucket():
-    """apply_hourly_liquidation_history must join by (symbol, hour_bucket_utc)."""
+    """apply_hourly_liquidation_history must join by (symbol, hour_bucket_ms)."""
     from scripts.replay_trend_regime_shadow import apply_hourly_liquidation_history
 
+    hour_10 = 1716804000000 // 3_600_000 * 3_600_000
     rows = [
-        _row(timestamp_ms=1716804000000, symbol="BTC/USDT"),  # 2024-05-27 10:00 UTC
-        _row(timestamp_ms=1716807600000, symbol="BTC/USDT"),  # 2024-05-27 11:00 UTC
+        _row(timestamp_ms=1716804000000, symbol="BTC/USDT", liquidation_notional_1h_usdt=None),
+        _row(timestamp_ms=1716807600000, symbol="BTC/USDT", liquidation_notional_1h_usdt=None),
     ]
     hourly = [
         {
             "symbol": "BTC/USDT",
-            "hour_bucket_utc": "2024-05-27T10:00",
-            "total_liquidation_notional_usdt": 5_000_000.0,
+            "hour_bucket_ms": hour_10,
+            "liquidation_notional_1h_usdt": 5_000_000.0,
+            "long_liquidation_notional_1h_usdt": 3_000_000.0,
+            "short_liquidation_notional_1h_usdt": 2_000_000.0,
+            "liquidation_source": "binance_forceorder_ws",
+            "source_quality": "self_collected_partial_history",
+            "liquidation_notional_semantics": "partial_snapshot_lower_bound",
+            "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
         },
     ]
-    result = apply_hourly_liquidation_history(rows, hourly)
-    assert result[0]["liquidation_notional_1h_usdt"] == pytest.approx(5_000_000.0)
-    assert result[1]["liquidation_notional_1h_usdt"] is None  # no match for hour 11
+    patched, join_summary = apply_hourly_liquidation_history(rows, hourly)
+    assert patched[0]["liquidation_notional_1h_usdt"] == pytest.approx(5_000_000.0)
+    assert patched[0]["long_liquidation_notional_1h_usdt"] == pytest.approx(3_000_000.0)
+    assert patched[0]["short_liquidation_notional_1h_usdt"] == pytest.approx(2_000_000.0)
+    assert patched[0]["liquidation_notional_semantics"] == "partial_snapshot_lower_bound"
+    assert patched[1]["liquidation_notional_1h_usdt"] is None  # no match for hour 11
+    assert join_summary["liquidation_rows_joined_count"] == 1
+    assert join_summary["liquidation_notional_semantics"] == "partial_snapshot_lower_bound"
 
 
 def test_build_shadow_summary_reports_liquidation_coverage_ratio():
