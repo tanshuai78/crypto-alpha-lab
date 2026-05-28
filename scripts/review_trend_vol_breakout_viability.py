@@ -301,9 +301,9 @@ def main(argv: list[str] | None = None) -> int:
     # Ensure no detailed results array is committed
     summary.pop("results", None)
 
-    summary_path = Path(args.summary-summary_output if hasattr(args, "summary_output") else args.summary_output)
+    summary_path = Path(args.summary_output)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.summary_output, "w", encoding="utf-8") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2, sort_keys=True)
 
     # 2. Generate sensitivity summary

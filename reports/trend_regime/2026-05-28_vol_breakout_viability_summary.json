@@ -1,0 +1,154 @@
+{
+  "accepted_entries_with_path_count": 0,
+  "base_cost_bps": 30.0,
+  "capital_utilization_label": "too_sparse",
+  "classification_reject_counts": {
+    "oi_confirmation_below_min": 8,
+    "return_below_min": 172,
+    "vol_breakout_below_threshold": 2285,
+    "volume_below_min": 30
+  },
+  "coverage_quality": "historical_rows_replay_not_live_freshness_aware",
+  "edge_status": "unknown_until_shadow",
+  "end_timestamp_ms": 1779944399999,
+  "entry_event_count": 0,
+  "entry_event_count_by_regime": {},
+  "entry_event_count_by_symbol": {},
+  "events_per_30d": 0.0,
+  "events_per_symbol_30d": {
+    "BTC/USDT": 0.0,
+    "DOGE/USDT": 0.0,
+    "ETH/USDT": 0.0,
+    "SOL/USDT": 0.0,
+    "XRP/USDT": 0.0
+  },
+  "holding_hours": 12,
+  "input_row_count": 2495,
+  "mean_net_pnl_bps": 0.0,
+  "median_net_pnl_bps": 0.0,
+  "reject_counts_by_symbol": {
+    "BTC/USDT": {
+      "oi_confirmation_below_min": 1,
+      "return_below_min": 30,
+      "vol_breakout_below_threshold": 468
+    },
+    "DOGE/USDT": {
+      "oi_confirmation_below_min": 2,
+      "return_below_min": 27,
+      "vol_breakout_below_threshold": 440,
+      "volume_below_min": 30
+    },
+    "ETH/USDT": {
+      "oi_confirmation_below_min": 4,
+      "return_below_min": 30,
+      "vol_breakout_below_threshold": 465
+    },
+    "SOL/USDT": {
+      "return_below_min": 49,
+      "vol_breakout_below_threshold": 450
+    },
+    "XRP/USDT": {
+      "oi_confirmation_below_min": 1,
+      "return_below_min": 36,
+      "vol_breakout_below_threshold": 462
+    }
+  },
+  "shadow_by_holding_hours": {
+    "12": {
+      "base": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      },
+      "stress": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      }
+    },
+    "24": {
+      "base": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      },
+      "stress": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      }
+    },
+    "4": {
+      "base": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      },
+      "stress": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      }
+    },
+    "8": {
+      "base": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      },
+      "stress": {
+        "entry_event_count": 0,
+        "mean_net_pnl_bps": 0.0,
+        "median_net_pnl_bps": 0.0,
+        "shadow_trade_count": 0,
+        "stop_loss_exit_rate": 0.0,
+        "win_rate": 0.0,
+        "worst_trade_net_pnl_bps": 0.0
+      }
+    }
+  },
+  "shadow_trade_count": 0,
+  "start_timestamp_ms": 1778151599999,
+  "stop_loss_exit_rate": 0.0,
+  "strategy_slice": "vol_breakout_only",
+  "stress_cost_bps": 50.0,
+  "symbol_count": 5,
+  "symbols": [
+    "BTC/USDT",
+    "DOGE/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT"
+  ],
+  "time_span_hours": 498.0,
+  "win_rate": 0.0,
+  "worst_trade_net_pnl_bps": 0.0
+}
