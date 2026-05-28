@@ -77,6 +77,22 @@
 
 ## 策略规格（Strategy Specifications：三条主线）
 
+### 核心字段（Core Fields）
+
+| 字段（Field） | 英文（English） | 含义（Meaning） | 来源（Source） |
+|---|---|---|---|
+| timestamp_ms | timestamp_ms | 事件发生时间（毫秒） | 行情行生产器 |
+| symbol | symbol | 交易对（如 BTC/USDT） | 行情行生产器 |
+| close_price | close_price | 现货收盘价 | 行情行生产器 |
+| return_1h_pct | return_1h_pct | 1 小时收益率（%） | 行情行生产器 |
+| vol_1h_pct | vol_1h_pct | 1 小时成交量波动率（%） | 行情行生产器 |
+| vol_baseline_30d_pct | vol_baseline_30d_pct | 30 天平均成交量标准化波动率（%） | 行情行生产器 |
+| open_interest | open_interest | 持仓总量 | 行情行生产器 |
+| oi_change_1h_pct | oi_change_1h_pct | 1 小时持仓变化率（%） | 行情行生产器 |
+| volume_24h_usdt | volume_24h_usdt | 24 小时交易量（USDT） | 行情行生产器 |
+| data_age_sec | data_age_sec | 数据延迟秒数 | 行情行生产器 |
+| liquidation_notional_1h_usdt | liquidation_notional_1h_usdt | 1 小时清算名义价值（USDT） | 强制订单采集器 |
+
 ### 1. Extreme Funding Event Scanner（优先级 1）
 
 **假设（Hypothesis：假设）**：当资金费年化超过约 30% 时，在 1–3 次结算窗口内收取资金费，扣除基差波动与成本后仍可能为正期望。（expected value：期望值）

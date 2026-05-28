@@ -8,6 +8,7 @@ from statistics import mean, median
 from typing import Any
 
 from configs.base import (
+    TREND_REGIME_MAX_DATA_AGE_SEC,
     TREND_REGIME_MAX_HOLDING_HOURS,
     TREND_REGIME_OBSERVATION_COST_BPS,
     TREND_REGIME_STOP_LOSS_PCT,
@@ -22,26 +23,39 @@ from src.strategies.trend_regime.shadow_simulator import (
 
 def normalize_rows_for_historical_replay(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     normalized: list[dict[str, Any]] = []
-    stale_rows_normalized_count = 0
+    rows_originally_api_stale_count = 0
 
     for row in rows:
         patched = dict(row)
         value = _number_or_none(row.get("data_age_sec"))
-        if value is None or value > 0.0:
-            patched["data_age_sec"] = 0.0
-            stale_rows_normalized_count += 1
+        if value is None or value > float(TREND_REGIME_MAX_DATA_AGE_SEC):
+            rows_originally_api_stale_count += 1
+        patched["data_age_sec"] = 0.0
         normalized.append(patched)
 
-    return normalized, stale_rows_normalized_count
+    return normalized, rows_originally_api_stale_count
 
 
 def build_classification_audit(rows: list[dict[str, Any]]) -> dict[str, Any]:
     reject_counts: dict[str, int] = defaultdict(int)
+    reject_counts_by_symbol: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     entry_event_count = 0
+    entry_event_count_by_symbol: dict[str, int] = defaultdict(int)
+    entry_event_count_by_regime: dict[str, int] = defaultdict(int)
     rows_missing_liquidation_notional_count = 0
     rows_with_liquidation_notional_count = 0
+    symbols: set[str] = set()
+    timestamp_values: list[int] = []
 
     for row in rows:
+        symbol = str(row.get("symbol") or "")
+        if symbol:
+            symbols.add(symbol)
+
+        ts_ms = int(_number_or_none(row.get("timestamp_ms")) or 0)
+        if ts_ms > 0:
+            timestamp_values.append(ts_ms)
+
         liquidation_notional = _number_or_none(row.get("liquidation_notional_1h_usdt"))
         if liquidation_notional is None:
             rows_missing_liquidation_notional_count += 1
@@ -50,15 +64,43 @@ def build_classification_audit(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
         classification = classify_trend_regime_snapshot(row)
         if classification.event is None:
-            reject_counts[str(classification.reject_reason or "unknown")] += 1
+            reject_reason = str(classification.reject_reason or "unknown")
+            reject_counts[reject_reason] += 1
+            reject_counts_by_symbol[symbol or "unknown"][reject_reason] += 1
             continue
         entry_event_count += 1
+        entry_event_count_by_symbol[symbol or "unknown"] += 1
+        entry_event_count_by_regime[str(classification.event.regime)] += 1
+
+    start_timestamp_ms = min(timestamp_values) if timestamp_values else 0
+    end_timestamp_ms = max(timestamp_values) if timestamp_values else 0
+    time_span_hours = (
+        (end_timestamp_ms - start_timestamp_ms) / 3_600_000.0
+        if end_timestamp_ms > start_timestamp_ms
+        else 0.0
+    )
 
     return {
+        "input_row_count": len(rows),
+        "symbol_count": len(symbols),
+        "symbols": sorted(symbols),
+        "start_timestamp_ms": start_timestamp_ms,
+        "end_timestamp_ms": end_timestamp_ms,
+        "time_span_hours": round(time_span_hours, 10),
         "entry_event_count": entry_event_count,
+        "entry_event_count_by_symbol": dict(entry_event_count_by_symbol),
+        "entry_event_count_by_regime": dict(entry_event_count_by_regime),
         "classification_reject_counts": dict(reject_counts),
+        "reject_counts_by_symbol": {
+            key: dict(value) for key, value in reject_counts_by_symbol.items()
+        },
         "rows_missing_liquidation_notional_count": rows_missing_liquidation_notional_count,
         "rows_with_liquidation_notional_count": rows_with_liquidation_notional_count,
+        "liquidation_coverage_ratio": round(
+            rows_with_liquidation_notional_count / len(rows), 10
+        )
+        if rows
+        else 0.0,
     }
 
 
@@ -108,7 +150,7 @@ def _grouped_summary(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
 
 
 def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: float) -> dict[str, Any]:
-    normalized_rows, stale_rows_normalized_count = normalize_rows_for_historical_replay(rows)
+    normalized_rows, rows_originally_api_stale_count = normalize_rows_for_historical_replay(rows)
     audit = build_classification_audit(normalized_rows)
 
     results: list[dict[str, Any]] = []
@@ -132,7 +174,7 @@ def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: floa
 
         path_rows = [
             item
-            for item in rows[index + 1 :]
+            for item in normalized_rows[index + 1 :]
             if item.get("symbol") == event.symbol
             and int(_number_or_none(item.get("timestamp_ms")) or 0) > entry_time_ms
         ]
@@ -170,26 +212,33 @@ def build_shadow_summary(rows: list[dict[str, Any]], *, estimated_cost_bps: floa
         )
 
     summary = {
-        "input_row_count": len(rows),
+        "input_row_count": audit["input_row_count"],
+        "symbol_count": audit["symbol_count"],
+        "symbols": audit["symbols"],
+        "start_timestamp_ms": audit["start_timestamp_ms"],
+        "end_timestamp_ms": audit["end_timestamp_ms"],
+        "time_span_hours": audit["time_span_hours"],
         "entry_event_count": entry_event_count,
+        "entry_event_count_by_symbol": audit["entry_event_count_by_symbol"],
+        "entry_event_count_by_regime": audit["entry_event_count_by_regime"],
         "shadow_trade_count": len(results),
         "insufficient_path_count": insufficient_path_count,
         "missing_entry_price_count": missing_entry_price_count,
         "estimated_cost_bps": estimated_cost_bps,
-        "coverage_quality": "historical_basis_proxy_not_depth_aware",
+        "historical_mode": True,
+        "historical_freshness_normalized_count": len(normalized_rows),
+        "rows_originally_api_stale_count": rows_originally_api_stale_count,
+        "classification_reject_counts": audit["classification_reject_counts"],
+        "reject_counts_by_symbol": audit["reject_counts_by_symbol"],
+        "rows_missing_liquidation_notional_count": audit["rows_missing_liquidation_notional_count"],
+        "rows_with_liquidation_notional_count": audit["rows_with_liquidation_notional_count"],
+        "liquidation_coverage_ratio": audit["liquidation_coverage_ratio"],
+        "coverage_quality": "historical_rows_replay_not_live_freshness_aware",
         "depth_aware": False,
         "results": results,
         "grouped_summary": _grouped_summary(results),
     }
     summary.update(_summarize_pnl(results))
-    summary.update({
-        "historical_mode": True,
-        "stale_rows_normalized_count": stale_rows_normalized_count,
-        "classification_reject_counts": audit["classification_reject_counts"],
-        "rows_missing_liquidation_notional_count": audit["rows_missing_liquidation_notional_count"],
-        "rows_with_liquidation_notional_count": audit["rows_with_liquidation_notional_count"],
-        "coverage_quality": "historical_rows_replay_not_live_freshness_aware",
-    })
     return summary
 
 

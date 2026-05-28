@@ -171,22 +171,33 @@ def test_replay_outputs_base_and_stress_cost_summaries():
 
 def test_historical_replay_normalizes_stale_rows_before_classification():
     rows = [
-        _row(timestamp_ms=1000, data_age_sec=999999.0, close_price=100000.0),
         _row(
-            timestamp_ms=2000,
+            timestamp_ms=1000,
             data_age_sec=999999.0,
-            close_price=101000.0,
+            close_price=100000.0,
             return_1h_pct=0.1,
             vol_1h_pct=1.0,
             vol_baseline_30d_pct=1.0,
             oi_change_1h_pct=0.1,
+        ),
+        _row(
+            timestamp_ms=2000,
+            data_age_sec=999999.0,
+            close_price=101000.0,
+            return_1h_pct=2.4,
+            vol_1h_pct=2.8,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=2.0,
+            volume_24h_usdt=30_000_000_000.0,
+            estimated_slippage_bps=2.0,
         ),
     ]
 
     summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
 
     assert summary["historical_mode"] is True
-    assert summary["stale_rows_normalized_count"] == 2
+    assert summary["historical_freshness_normalized_count"] == 2
+    assert summary["rows_originally_api_stale_count"] == 2
     assert summary["entry_event_count"] == 1
 
 
@@ -200,6 +211,8 @@ def test_historical_replay_outputs_classification_reject_counts():
 
     assert "classification_reject_counts" in summary
     assert "vol_breakout_below_threshold" in summary["classification_reject_counts"]
+    assert "reject_counts_by_symbol" in summary
+    assert "BTC/USDT" in summary["reject_counts_by_symbol"]
 
 
 def test_historical_replay_reports_liquidation_coverage_gap():
@@ -212,3 +225,44 @@ def test_historical_replay_reports_liquidation_coverage_gap():
 
     assert summary["rows_missing_liquidation_notional_count"] == 1
     assert summary["rows_with_liquidation_notional_count"] == 1
+    assert summary["liquidation_coverage_ratio"] == 0.5
+
+
+def test_historical_replay_outputs_symbol_and_regime_breakdown_fields():
+    rows = [
+        _row(timestamp_ms=1000, symbol="BTC/USDT"),
+        _row(
+            timestamp_ms=2000,
+            symbol="BTC/USDT",
+            return_1h_pct=0.1,
+            vol_1h_pct=1.0,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=0.1,
+        ),
+        _row(
+            timestamp_ms=3000,
+            symbol="DOGE/USDT",
+            return_1h_pct=-3.0,
+            vol_1h_pct=4.0,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=-3.0,
+            liquidation_notional_1h_usdt=4_000_000.0,
+        ),
+        _row(
+            timestamp_ms=4000,
+            symbol="DOGE/USDT",
+            return_1h_pct=0.1,
+            vol_1h_pct=1.0,
+            vol_baseline_30d_pct=1.0,
+            oi_change_1h_pct=0.1,
+        ),
+    ]
+
+    summary = build_shadow_summary(rows, estimated_cost_bps=TREND_REGIME_OBSERVATION_COST_BPS)
+
+    assert summary["input_row_count"] == 4
+    assert summary["symbol_count"] == 2
+    assert summary["symbols"] == ["BTC/USDT", "DOGE/USDT"]
+    assert summary["time_span_hours"] > 0
+    assert "vol_breakout_long" in summary["entry_event_count_by_regime"]
+    assert "liquidation_cascade_short" in summary["entry_event_count_by_regime"]
