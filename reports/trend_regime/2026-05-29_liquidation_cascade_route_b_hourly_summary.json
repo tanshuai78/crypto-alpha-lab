@@ -1,0 +1,22 @@
+{
+  "vendor": "coinalyze",
+  "route_b_status": "no_api_key",
+  "symbol_count": 5,
+  "symbols": [
+    "BTC/USDT",
+    "DOGE/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT"
+  ],
+  "row_count": 0,
+  "start_timestamp_ms": 0,
+  "end_timestamp_ms": 0,
+  "time_span_hours": 0,
+  "rows_per_symbol": {},
+  "coverage_quality": "historical_vendor_dataset",
+  "deduplicated_rows_count": 0,
+  "convert_to_usd": true,
+  "vendor_granularity": "1hour",
+  "normalized_granularity": "1h"
+}

@@ -1,0 +1,26 @@
+{
+  "vendor_candidates": [
+    {
+      "vendor": "coinalyze",
+      "api_access": "unavailable",
+      "requires_paid_plan": false,
+      "granularity": "1hour",
+      "exchange_coverage": [
+        "binance",
+        "okx",
+        "bybit"
+      ],
+      "symbol_coverage": [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "XRP/USDT",
+        "DOGE/USDT"
+      ],
+      "historical_depth_days": 62,
+      "can_support_replay": true,
+      "blocker": "requires_coinalyze_api_key",
+      "route_b_status": "no_api_key"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "decision": "route_b_unavailable_no_key",
+  "route_a": {
+    "allowed_decisions_if_only_route_a": [
+      "continue_data_route_upgrade"
+    ],
+    "available": false,
+    "coverage_hours": 0.0,
+    "joined_count": 0,
+    "liquidation_notional_semantics": "partial_snapshot_lower_bound",
+    "quality": "not_connected",
+    "source": "binance_forceorder_hourly",
+    "source_quality": "not_connected"
+  },
+  "route_b": {
+    "available": false,
+    "coverage_hours": 0.0,
+    "joined_count": 0,
+    "quality": "not_connected",
+    "route_b_status": "no_api_key",
+    "source": "not_connected",
+    "source_quality": "not_connected",
+    "vendor": null,
+    "vendor_candidates": [
+      {
+        "api_access": "unavailable",
+        "blocker": "requires_coinalyze_api_key",
+        "can_support_replay": true,
+        "exchange_coverage": [
+          "binance",
+          "okx",
+          "bybit"
+        ],
+        "granularity": "1hour",
+        "historical_depth_days": 80,
+        "requires_paid_plan": false,
+        "symbol_coverage": [
+          "BTC/USDT",
+          "ETH/USDT",
+          "SOL/USDT",
+          "XRP/USDT",
+          "DOGE/USDT"
+        ],
+        "vendor": "coinalyze"
+      }
+    ]
+  },
+  "route_c": {
+    "available": false,
+    "definition": "route_a_and_route_b_overlap_on_symbol_hour",
+    "overlap_symbol_hour_count": 0,
+    "source_quality": "not_connected"
+  }
+}
