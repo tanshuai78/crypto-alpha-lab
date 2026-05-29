@@ -8,14 +8,14 @@
 ## 1. 策略定义
 
 为了克服旧混合分类器的方向模糊问题，我们将 `liquidation_cascade` 进行了物理方向的严格定义与解耦，不与波动突破逻辑混淆：
-* **多头强平级联 (long_liquidation)**：对应空头头寸爆仓（SELL 强平单，即价格下跌引起的爆仓），在回放中定义为：
+* **多头强平级联 (long_liquidation)**：对应多头头寸爆仓（SELL 强平单，即价格下跌引起的被动卖出），在回放中定义为：
   - Price Return < 0.0 (价格下跌)
-  - Open Interest Change < 0.0 (持仓量萎缩，空头平仓)
+  - Open Interest Change < 0.0 (持仓量萎缩，杠杆头寸被动出清)
   - `long_liquidation_notional_1h_usdt` 达到 symbol tier 门槛（SELL 强平金额触及强平压力上限）。
   - *对应交易假说*：顺势做空 (`continuation_direction = short`)，或逆势做多 (`mean_reversion_direction = long`)。
-* **空头强平级联 (short_liquidation)**：对应多头头寸爆仓（BUY 强平单，即价格上涨引起的爆仓），在回放中定义为：
+* **空头强平级联 (short_liquidation)**：对应空头头寸爆仓（BUY 强平单，即价格上涨引起的被动买回），在回放中定义为：
   - Price Return > 0.0 (价格上涨)
-  - Open Interest Change < 0.0 (持仓量萎缩，多头平仓)
+  - Open Interest Change < 0.0 (持仓量萎缩，杠杆头寸被动出清)
   - `short_liquidation_notional_1h_usdt` 达到 symbol tier 门槛（BUY 强平金额触及强平压力上限）。
   - *对应交易假说*：顺势做多 (`continuation_direction = long`)，或逆势做空 (`mean_reversion_direction = short`)。
 
@@ -28,7 +28,7 @@
 | 数据路线 (Data Route) | 可用性 | 来源质量评级 | 覆盖深度 (Hours) | 决策约束与影响 |
 | :--- | :---: | :--- | :---: | :--- |
 | **Route A**: 自采 forceOrder 唯一 | **True** | `self_collected_partial_history` | 498.0h | **仅能支持 `continue_data_route_upgrade`**。禁止因 Route A 零信号而直接淘汰策略。 |
-| **Route B**: 第三方历史唯一 | **False** | `not_connected` | 0.0h | 需要通过 feasibility 审计解决 API key、速率限制与付费计划问题。 |
+| **Route B**: 第三方历史唯一 | **False** | `not_connected` | 0.0h | feasibility 审计已完成：当前候选供应商为 Coinglass，具备 1h 粒度与 365d 历史深度潜力，但本环境缺少 paid API key，因此当前仍不可接通。 |
 | **Route C**: 混合自采+第三方历史 | **False** | `requires_route_b_and_route_a` | 0.0h | 理想终局方案，支持历史长窗口回放与未来实盘漂移校验。 |
 
 ---
@@ -89,9 +89,10 @@
 
 ## 8. 数据源推荐路线
 
-我们推荐走 **Route C (hybrid_forceorder_plus_third_party)** 路线：
-1. **历史回放 (Replay)**：采用 Route B（接入 Coinglass 等第三方历史 liquidation 数据）回填过去数月的爆仓量，完成顺势与均值回归策略的期望校验。
-2. **实盘校验 (Drift)**：采用 Route A（本地 WS 强平采集器）作为 live mode 运行时的低延迟触发流，并在重叠时段内对“第三方小时聚合数据”与“本地WS强平聚合”做漂移审计。
+当前**不应直接推荐 Route C 作为已可执行主线**。更准确的推荐是：
+1. **当前主动作**：继续执行 `continue_data_route_upgrade`，优先打通 Route B（第三方历史 liquidation 数据）。
+2. **历史回放 (Replay)**：若 Route B 接通，则先用第三方历史 liquidation 数据回填过去数月的爆仓量，完成顺势与均值回归策略的期望校验。
+3. **未来目标路线**：只有在 Route B 接通且能与本地自采 Route A 形成重叠窗口时，才升级为 **Route C (hybrid_forceorder_plus_third_party)**，用于后续 drift 校验。
 
 ---
 
@@ -102,5 +103,5 @@
 ### 决策依据与行动项
 * **禁止淘汰策略**：由于当前 Route A 的覆盖窗口极短（498h）且 liquidation 字段完全缺失，无法判定策略本身的 Alpha 潜力。因此，禁止做出 `retire_liquidation_cascade_branch` 决策。
 * **启动数据路线升级**：
-  - 启动 Coinglass 历史强平数据可行性开发，评估 paid key 或接口获取成本。
+  - 当前 feasibility 审计已确认 Coinglass 具备候选潜力，但缺少 paid developer API key；下一步应补齐凭证和接入条件，而不是继续假设 Route C 已可执行。
   - 在打通第三方强平数据（Route B）后，重新跑通 Task 4 中的 hypotheses 双模式回放，获取至少 720h 完整覆盖后再行做出去留审查决策。

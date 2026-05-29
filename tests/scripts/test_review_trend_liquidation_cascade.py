@@ -51,6 +51,32 @@ def test_data_source_comparison_reports_missing_third_party_as_upgrade_gap():
     assert route_b["source_quality"] == "not_connected"
 
 
+def test_data_source_comparison_includes_route_b_feasibility_candidates():
+    feasibility = {
+        "vendor_candidates": [
+            {
+                "vendor": "coinglass",
+                "api_access": "unavailable",
+                "requires_paid_plan": True,
+                "granularity": "1h",
+                "exchange_coverage": ["binance"],
+                "symbol_coverage": ["BTC/USDT"],
+                "historical_depth_days": 365,
+                "can_support_replay": True,
+                "blocker": "requires_paid_developer_api_plan_and_key",
+            }
+        ]
+    }
+    comparison = build_data_source_comparison(
+        coverage_hours=50.0,
+        route_b_available=False,
+        route_b_feasibility=feasibility,
+    )
+    route_b = comparison["route_b_third_party_historical_only"]
+    assert route_b["vendor_candidates"] == feasibility["vendor_candidates"]
+    assert route_b["source_quality"] == "not_connected"
+
+
 def test_data_source_comparison_keeps_routes_separate():
     comparison = build_data_source_comparison(coverage_hours=100.0, route_b_available=True)
     assert comparison["route_a_self_collected_forceorder_only"]["available"] is True

@@ -18,6 +18,7 @@ from scripts.replay_trend_regime_shadow import (
     apply_hourly_liquidation_history,
     load_optional_jsonl,
 )
+from scripts.fetch_third_party_liquidation_history import load_feasibility_audit
 from src.research.trend_liquidation_cascade_review import (
     LiquidationCascadeReviewThresholds,
     classify_liquidation_cascade_for_review,
@@ -48,6 +49,7 @@ def build_data_source_comparison(
     *,
     route_b_available: bool = False,
     route_a_available: bool = True,
+    route_b_feasibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     route_a = {
         "available": route_a_available,
@@ -57,10 +59,12 @@ def build_data_source_comparison(
         "allowed_decisions_if_only_route_a": ["continue_data_route_upgrade"],
     }
 
+    vendor_candidates = list((route_b_feasibility or {}).get("vendor_candidates") or [])
     route_b = {
         "available": route_b_available,
         "source_quality": "historical_vendor_dataset" if route_b_available else "not_connected",
         "coverage_hours": 0.0,
+        "vendor_candidates": vendor_candidates,
     }
 
     if route_a_available and route_b_available:
@@ -396,10 +400,16 @@ def main(argv: list[str] | None = None) -> int:
         estimated_cost_bps=float(TREND_REGIME_OBSERVATION_COST_BPS),
         holding_hours=int(TREND_REGIME_MAX_HOLDING_HOURS),
     )
-    route_b_available = False # Mocked in spike state
+    route_b_feasibility = load_feasibility_audit()
+    vendor_candidates = list(route_b_feasibility.get("vendor_candidates") or [])
+    route_b_available = any(
+        candidate.get("api_access") == "available" and candidate.get("can_support_replay") is True
+        for candidate in vendor_candidates
+    )
     comparison = build_data_source_comparison(
         coverage_hours=base_cont["time_span_hours"],
         route_b_available=route_b_available,
+        route_b_feasibility=route_b_feasibility,
     )
     decision = build_route_decision_snapshot(comparison)
     comparison["route_decision_snapshot"] = decision

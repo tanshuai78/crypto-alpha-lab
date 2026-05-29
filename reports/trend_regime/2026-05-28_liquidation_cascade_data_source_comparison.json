@@ -11,7 +11,30 @@
   "route_b_third_party_historical_only": {
     "available": false,
     "coverage_hours": 0.0,
-    "source_quality": "not_connected"
+    "source_quality": "not_connected",
+    "vendor_candidates": [
+      {
+        "api_access": "unavailable",
+        "blocker": "requires_paid_developer_api_plan_and_key",
+        "can_support_replay": true,
+        "exchange_coverage": [
+          "binance",
+          "okx",
+          "bybit"
+        ],
+        "granularity": "1h",
+        "historical_depth_days": 365,
+        "requires_paid_plan": true,
+        "symbol_coverage": [
+          "BTC/USDT",
+          "ETH/USDT",
+          "SOL/USDT",
+          "XRP/USDT",
+          "DOGE/USDT"
+        ],
+        "vendor": "coinglass"
+      }
+    ]
   },
   "route_c_hybrid_forceorder_plus_third_party": {
     "available": false,
