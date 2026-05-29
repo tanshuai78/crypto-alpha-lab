@@ -36,7 +36,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
 
 def test_data_source_comparison_reports_forceorder_partial_quality():
     comparison = build_data_source_comparison(coverage_hours=50.0, route_b_available=False)
-    route_a = comparison["route_a_self_collected_forceorder_only"]
+    route_a = comparison["route_a"]
     assert route_a["available"] is True
     assert route_a["source_quality"] == "self_collected_partial_history"
     assert route_a["coverage_hours"] == 50.0
@@ -46,24 +46,24 @@ def test_data_source_comparison_reports_forceorder_partial_quality():
 
 def test_data_source_comparison_reports_missing_third_party_as_upgrade_gap():
     comparison = build_data_source_comparison(coverage_hours=50.0, route_b_available=False)
-    route_b = comparison["route_b_third_party_historical_only"]
+    route_b = comparison["route_b"]
     assert route_b["available"] is False
-    assert route_b["source_quality"] == "not_connected"
+    assert route_b["quality"] == "not_connected"
 
 
 def test_data_source_comparison_includes_route_b_feasibility_candidates():
     feasibility = {
         "vendor_candidates": [
             {
-                "vendor": "coinglass",
+                "vendor": "coinalyze",
                 "api_access": "unavailable",
-                "requires_paid_plan": True,
-                "granularity": "1h",
+                "requires_paid_plan": False,
+                "granularity": "1hour",
                 "exchange_coverage": ["binance"],
                 "symbol_coverage": ["BTC/USDT"],
-                "historical_depth_days": 365,
+                "historical_depth_days": 80,
                 "can_support_replay": True,
-                "blocker": "requires_paid_developer_api_plan_and_key",
+                "blocker": "requires_coinalyze_api_key",
             }
         ]
     }
@@ -72,23 +72,117 @@ def test_data_source_comparison_includes_route_b_feasibility_candidates():
         route_b_available=False,
         route_b_feasibility=feasibility,
     )
-    route_b = comparison["route_b_third_party_historical_only"]
+    route_b = comparison["route_b"]
     assert route_b["vendor_candidates"] == feasibility["vendor_candidates"]
-    assert route_b["source_quality"] == "not_connected"
+    assert route_b["quality"] == "not_connected"
 
 
 def test_data_source_comparison_keeps_routes_separate():
-    comparison = build_data_source_comparison(coverage_hours=100.0, route_b_available=True)
-    assert comparison["route_a_self_collected_forceorder_only"]["available"] is True
-    assert comparison["route_b_third_party_historical_only"]["available"] is True
-    assert comparison["route_c_hybrid_forceorder_plus_third_party"]["available"] is True
+    comparison = build_data_source_comparison(coverage_hours=100.0, route_b_available=True, overlap_count=5)
+    assert comparison["route_a"]["available"] is True
+    assert comparison["route_b"]["available"] is True
+    assert comparison["route_c"]["available"] is True
 
 
 def test_route_a_short_partial_coverage_cannot_retire_strategy():
     comparison = build_data_source_comparison(coverage_hours=498.0, route_b_available=False)
     decision = build_route_decision_snapshot(comparison)
-    assert "continue_data_route_upgrade" in decision["allowed_decisions"]
-    assert "retire_liquidation_cascade_branch" in decision["forbidden_decisions"]
+    assert decision == "route_b_unavailable_no_key"
+
+
+def test_review_uses_route_b_hourly_history_when_provided(tmp_path):
+    import json
+    from scripts.review_trend_liquidation_cascade import main
+
+    rows_file = tmp_path / "rows.jsonl"
+    row_data = _row(timestamp_ms=1710000000000, symbol="BTC/USDT", close_price=100000.0)
+    future_row = _row(timestamp_ms=1710000000000 + 3600000, symbol="BTC/USDT", close_price=101000.0)
+    with open(rows_file, "w") as f:
+        f.write(json.dumps(row_data) + "\n")
+        f.write(json.dumps(future_row) + "\n")
+
+    hourly_file = tmp_path / "hourly_b.jsonl"
+    hourly_b_data = {
+        "symbol": "BTC/USDT",
+        "hour_bucket_ms": 1710000000000,
+        "liquidation_notional_1h_usdt": 50000.0,
+        "long_liquidation_notional_1h_usdt": 10000.0,
+        "short_liquidation_notional_1h_usdt": 40000.0,
+        "liquidation_source": "coinalyze_liquidation_history",
+        "source_quality": "historical_vendor_dataset",
+    }
+    with open(hourly_file, "w") as f:
+        f.write(json.dumps(hourly_b_data) + "\n")
+
+    route_out = tmp_path / "route.json"
+    summary_out = tmp_path / "summary.json"
+    sensitivity_out = tmp_path / "sensitivity.json"
+
+    argv = [
+        "--rows-input", str(rows_file),
+        "--third-party-hourly-input", str(hourly_file),
+        "--route-summary-output", str(route_out),
+        "--summary-output", str(summary_out),
+        "--sensitivity-output", str(sensitivity_out),
+    ]
+
+    import os
+    os.environ["COINALYZE_API_KEY"] = "mock_key"
+    try:
+        exit_code = main(argv)
+        assert exit_code == 0
+    finally:
+        if "COINALYZE_API_KEY" in os.environ:
+            del os.environ["COINALYZE_API_KEY"]
+
+    with open(route_out) as f:
+        comparison = json.load(f)
+
+    assert comparison["route_b"]["available"] is True
+    assert comparison["route_b"]["joined_count"] > 0
+
+
+def test_data_source_comparison_marks_route_b_available_when_hourly_rows_exist():
+    comparison = build_data_source_comparison(
+        coverage_hours=50.0,
+        route_b_joined_count=10,
+        route_b_status="api_ok_non_empty_rows"
+    )
+    route_b = comparison["route_b"]
+    assert route_b["available"] is True
+    assert route_b["joined_count"] == 10
+    assert route_b["source"] == "coinalyze_liquidation_history"
+    assert route_b["quality"] == "historical_vendor_dataset"
+    assert route_b["vendor"] == "coinalyze"
+    assert route_b["route_b_status"] == "api_ok_non_empty_rows"
+
+
+def test_route_c_available_only_when_route_a_and_route_b_overlap_on_symbol_hour():
+    comp1 = build_data_source_comparison(
+        coverage_hours=50.0,
+        route_a_available=True,
+        route_b_available=True,
+        overlap_count=5,
+    )
+    assert comp1["route_c"]["available"] is True
+    assert comp1["route_c"]["overlap_symbol_hour_count"] == 5
+
+    comp2 = build_data_source_comparison(
+        coverage_hours=50.0,
+        route_a_available=True,
+        route_b_available=True,
+        overlap_count=0,
+    )
+    assert comp2["route_c"]["available"] is False
+    assert comp2["route_c"]["overlap_symbol_hour_count"] == 0
+
+    comp3 = build_data_source_comparison(
+        coverage_hours=50.0,
+        route_a_available=False,
+        route_b_available=True,
+        overlap_count=5,
+    )
+    assert comp3["route_c"]["available"] is False
 
 
 def test_cascade_shadow_uses_only_accepted_entries():

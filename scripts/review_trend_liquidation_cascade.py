@@ -47,12 +47,46 @@ def load_rows_jsonl(path: str | Path) -> list[dict[str, Any]]:
 def build_data_source_comparison(
     coverage_hours: float,
     *,
-    route_b_available: bool = False,
     route_a_available: bool = True,
+    route_a_joined_count: int = 0,
+    route_b_available: bool = False,
+    route_b_joined_count: int = 0,
+    route_b_status: str | None = None,
     route_b_feasibility: dict[str, Any] | None = None,
+    overlap_count: int = 0,
 ) -> dict[str, Any]:
+    # Determine route_b availability
+    if route_b_joined_count > 0:
+        route_b_available = True
+    elif route_b_feasibility:
+        vendor_candidates = list(route_b_feasibility.get("vendor_candidates") or [])
+        route_b_available = any(
+            candidate.get("api_access") == "available" and candidate.get("can_support_replay") is True
+            for candidate in vendor_candidates
+        )
+
+    # Determine status
+    if not route_b_status:
+        if route_b_feasibility:
+            for candidate in route_b_feasibility.get("vendor_candidates", []):
+                if candidate.get("vendor") == "coinalyze" and candidate.get("route_b_status"):
+                    route_b_status = candidate["route_b_status"]
+                    break
+        if not route_b_status:
+            import os
+            coinalyze_api_key = os.environ.get("COINALYZE_API_KEY", "")
+            if not coinalyze_api_key:
+                route_b_status = "no_api_key"
+            elif route_b_joined_count > 0:
+                route_b_status = "api_ok_non_empty_rows"
+            else:
+                route_b_status = "api_ok_empty_rows"
+
     route_a = {
         "available": route_a_available,
+        "joined_count": route_a_joined_count,
+        "source": "binance_forceorder_hourly",
+        "quality": "self_collected_realtime_archive" if route_a_available else "not_connected",
         "source_quality": "self_collected_partial_history" if route_a_available else "not_connected",
         "coverage_hours": coverage_hours if route_a_available else 0.0,
         "liquidation_notional_semantics": "partial_snapshot_lower_bound",
@@ -62,48 +96,59 @@ def build_data_source_comparison(
     vendor_candidates = list((route_b_feasibility or {}).get("vendor_candidates") or [])
     route_b = {
         "available": route_b_available,
+        "joined_count": route_b_joined_count,
+        "source": "coinalyze_liquidation_history" if route_b_available else "not_connected",
+        "quality": "historical_vendor_dataset" if route_b_available else "not_connected",
+        "vendor": "coinalyze" if route_b_available else None,
+        "route_b_status": route_b_status,
         "source_quality": "historical_vendor_dataset" if route_b_available else "not_connected",
         "coverage_hours": 0.0,
         "vendor_candidates": vendor_candidates,
     }
 
-    if route_a_available and route_b_available:
-        route_c = {
-            "available": True,
-            "source_quality": "hybrid_reconstructed_history",
-        }
+    route_c = {
+        "available": (route_a_available and route_b_available and overlap_count > 0),
+        "definition": "route_a_and_route_b_overlap_on_symbol_hour",
+        "overlap_symbol_hour_count": overlap_count,
+        "source_quality": "hybrid_reconstructed_history" if (route_a_available and route_b_available) else "not_connected",
+    }
+
+    return {
+        "route_a": route_a,
+        "route_b": route_b,
+        "route_c": route_c,
+    }
+
+
+def build_route_decision_snapshot(
+    comparison: dict[str, Any],
+    *,
+    overlap_count: int = 0,
+    replay_median_net_pnl: float = 0.0,
+) -> str:
+    route_b = comparison.get("route_b", {})
+    status = route_b.get("route_b_status", "no_api_key")
+    joined_count = route_b.get("joined_count", 0)
+
+    # Check status
+    if status == "no_api_key":
+        return "route_b_unavailable_no_key"
+    elif status in ("api_auth_failed", "api_rate_limited", "api_error") or str(status).startswith("api_error_"):
+        return "route_b_unavailable_api_error"
+
+    # If status is ok/empty but Route B is not marked available
+    if not route_b.get("available", False):
+        return "route_b_unavailable_no_key"
+
+    # If Route B is available:
+    if joined_count == 0 or overlap_count == 0:
+        return "route_b_available_but_no_overlap"
+
+    # Check replay median net PnL
+    if replay_median_net_pnl > 0.0:
+        return "route_b_available_replay_positive_continue_shadow"
     else:
-        route_c = {
-            "available": False,
-            "reason": "requires_route_b_and_route_a",
-        }
-
-    return {
-        "route_a_self_collected_forceorder_only": route_a,
-        "route_b_third_party_historical_only": route_b,
-        "route_c_hybrid_forceorder_plus_third_party": route_c,
-    }
-
-
-def build_route_decision_snapshot(comparison: dict[str, Any]) -> dict[str, Any]:
-    route_a = comparison["route_a_self_collected_forceorder_only"]
-    route_b = comparison["route_b_third_party_historical_only"]
-
-    # Constraint: if only Route A is available and coverage < 720h, we cannot retire
-    if route_a["available"] and not route_b["available"] and route_a["coverage_hours"] < 720.0:
-        return {
-            "allowed_decisions": ["continue_data_route_upgrade"],
-            "forbidden_decisions": ["retire_liquidation_cascade_branch"],
-        }
-
-    return {
-        "allowed_decisions": [
-            "retain_for_phase1b_review",
-            "continue_data_route_upgrade",
-            "retire_liquidation_cascade_branch",
-        ],
-        "forbidden_decisions": [],
-    }
+        return "route_b_available_replay_still_negative"
 
 
 def build_cascade_audit_summary(
@@ -377,6 +422,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit liquidation cascade viability & sensitivity")
     parser.add_argument("--rows-input", required=True, help="Path to input historical rows JSONL")
     parser.add_argument("--forceorder-hourly-input", default=None, help="Path to hourly liquidation proxy JSONL")
+    parser.add_argument("--third-party-hourly-input", default=None, help="Path to Route B (third-party) hourly liquidation JSONL")
     parser.add_argument("--route-summary-output", required=True, help="Path to write comparison JSON")
     parser.add_argument("--summary-output", required=True, help="Path to write viability summary JSON")
     parser.add_argument("--sensitivity-output", required=True, help="Path to write sensitivity summary JSON")
@@ -387,32 +433,70 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     rows = load_rows_jsonl(args.rows_input)
 
-    join_summary = {}
-    if args.forceorder_hourly_input:
-        # Load and join liquidation hourly proxy
-        hourly_path = args.forceorder_hourly_input
-        hourly = load_optional_jsonl(hourly_path)
-        rows, join_summary = apply_hourly_liquidation_history(rows, hourly)
+    hourly_a = load_optional_jsonl(args.forceorder_hourly_input) if args.forceorder_hourly_input else []
+    hourly_b = load_optional_jsonl(args.third_party_hourly_input) if args.third_party_hourly_input else []
 
-    # 1. Route comparison
+    # 1. Run joint merge
+    patched_a, summary_a = apply_hourly_liquidation_history(rows, hourly_a)
+    patched_ab, summary_b = apply_hourly_liquidation_history(patched_a, hourly_b)
+    rows = patched_ab
+
+    route_a_joined_count = summary_a["liquidation_rows_joined_count"]
+    route_b_joined_count = summary_b["liquidation_rows_joined_count"]
+
+    # Calculate overlap_count
+    set_a = {(r.get("symbol"), int(_number_or_none(r.get("hour_bucket_ms")) or 0)) for r in hourly_a if r.get("symbol") and _number_or_none(r.get("hour_bucket_ms")) is not None}
+    set_b = {(r.get("symbol"), int(_number_or_none(r.get("hour_bucket_ms")) or 0)) for r in hourly_b if r.get("symbol") and _number_or_none(r.get("hour_bucket_ms")) is not None}
+    overlap_count = len(set_a.intersection(set_b))
+
+    # Base cost (12h max holding) for continuation hypothesis
     base_cont = build_cascade_shadow_summary(
         rows,
         estimated_cost_bps=float(TREND_REGIME_OBSERVATION_COST_BPS),
         holding_hours=int(TREND_REGIME_MAX_HOLDING_HOURS),
+        hypothesis="continuation",
     )
+
     route_b_feasibility = load_feasibility_audit()
-    vendor_candidates = list(route_b_feasibility.get("vendor_candidates") or [])
-    route_b_available = any(
-        candidate.get("api_access") == "available" and candidate.get("can_support_replay") is True
-        for candidate in vendor_candidates
-    )
+
+    route_a_available = True if args.forceorder_hourly_input and len(hourly_a) > 0 else False
+    if not args.forceorder_hourly_input:
+        route_a_available = any(_number_or_none(r.get("liquidation_notional_1h_usdt")) is not None for r in rows)
+
+    route_b_status = None
+    if route_b_feasibility and "vendor_candidates" in route_b_feasibility:
+        for candidate in route_b_feasibility["vendor_candidates"]:
+            if candidate.get("vendor") == "coinalyze" and candidate.get("route_b_status"):
+                route_b_status = candidate["route_b_status"]
+                break
+    
+    if not route_b_status:
+        import os
+        coinalyze_api_key = os.environ.get("COINALYZE_API_KEY", "")
+        if not coinalyze_api_key:
+            route_b_status = "no_api_key"
+        elif route_b_joined_count > 0:
+            route_b_status = "api_ok_non_empty_rows"
+        else:
+            route_b_status = "api_ok_empty_rows"
+
     comparison = build_data_source_comparison(
         coverage_hours=base_cont["time_span_hours"],
-        route_b_available=route_b_available,
+        route_a_available=route_a_available,
+        route_a_joined_count=route_a_joined_count,
+        route_b_joined_count=route_b_joined_count,
+        route_b_status=route_b_status,
         route_b_feasibility=route_b_feasibility,
+        overlap_count=overlap_count,
     )
-    decision = build_route_decision_snapshot(comparison)
-    comparison["route_decision_snapshot"] = decision
+    
+    replay_median_net_pnl = base_cont.get("median_net_pnl_bps", 0.0)
+    decision = build_route_decision_snapshot(
+        comparison,
+        overlap_count=overlap_count,
+        replay_median_net_pnl=replay_median_net_pnl,
+    )
+    comparison["decision"] = decision
 
     route_path = Path(args.route_summary_output)
     route_path.parent.mkdir(parents=True, exist_ok=True)
@@ -421,6 +505,30 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. Replay Summary (dual cost hypotheses)
     summary = build_dual_cost_cascade_viability_summary(rows)
+
+    if args.forceorder_hourly_input and args.third_party_hourly_input:
+        liquidation_history_source = "binance_forceorder_hourly+coinalyze_liquidation_history"
+        liquidation_history_source_quality = "hybrid_reconstructed_history"
+    elif args.forceorder_hourly_input:
+        liquidation_history_source = "binance_forceorder_hourly"
+        liquidation_history_source_quality = "self_collected_partial_history"
+    elif args.third_party_hourly_input:
+        liquidation_history_source = "coinalyze_liquidation_history"
+        liquidation_history_source_quality = "historical_vendor_dataset"
+    else:
+        liquidation_history_source = "none"
+        liquidation_history_source_quality = "missing"
+
+    join_summary = {
+        "liquidation_history_source": liquidation_history_source,
+        "liquidation_history_source_quality": liquidation_history_source_quality,
+        "liquidation_rows_joined_count": route_a_joined_count + route_b_joined_count,
+        "route_a_joined_count": route_a_joined_count,
+        "route_b_joined_count": route_b_joined_count,
+        "route_ab_overlap_symbol_hour_count": overlap_count,
+        "route_a_join_details": summary_a,
+        "route_b_join_details": summary_b,
+    }
     summary["liquidation_history_join_summary"] = join_summary
 
     summary_path = Path(args.summary_output)
