@@ -23,8 +23,9 @@ def test_load_feasibility_audit_reports_coinalyze_candidate():
 
 def test_missing_coinalyze_api_key_degrades_gracefully():
     with patch.dict(os.environ, {}, clear=True):
-        res = fetch_historical_liquidations(symbol="BTC/USDT", from_ts_sec=1716800000, to_ts_sec=1716803600)
-        assert res == []
+        payload, status = fetch_historical_liquidations(symbol="BTC/USDT", from_ts_sec=1716800000, to_ts_sec=1716803600)
+        assert payload == []
+        assert status == "no_api_key"
 
 
 @patch("urllib.request.urlopen")
@@ -133,3 +134,103 @@ def test_symbol_to_coinalyze_contract_maps_watchlist_symbols_with_audited_source
     assert res["input_symbol"] == "BTC/USDT"
     assert res["exchange"] == "binance"
     assert res["mapping_source"] == "supported_future_markets|static_fallback"
+
+
+def test_build_route_b_hourly_summary_reports_symbol_and_time_coverage():
+    from scripts.fetch_third_party_liquidation_history import build_route_b_hourly_summary
+    
+    rows = [
+        {"symbol": "BTC/USDT", "hour_bucket_ms": 1716800000000, "total_liquidation_notional_1h_usdt": 100},
+        {"symbol": "BTC/USDT", "hour_bucket_ms": 1716803600000, "total_liquidation_notional_1h_usdt": 200},
+        {"symbol": "ETH/USDT", "hour_bucket_ms": 1716807200000, "total_liquidation_notional_1h_usdt": 300},
+    ]
+    summary = build_route_b_hourly_summary(rows)
+    assert summary["symbol_count"] == 2
+    assert summary["symbols"] == ["BTC/USDT", "ETH/USDT"]
+    assert summary["row_count"] == 3
+    assert summary["start_timestamp_ms"] == 1716800000000
+    assert summary["end_timestamp_ms"] == 1716807200000
+    assert summary["time_span_hours"] == 2
+    assert summary["rows_per_symbol"] == {"BTC/USDT": 2, "ETH/USDT": 1}
+    assert summary["deduplicated_rows_count"] == 3
+
+
+def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(tmp_path):
+    from scripts.fetch_third_party_liquidation_history import main
+    import json
+    
+    output_jsonl = tmp_path / "output.jsonl"
+    summary_output = tmp_path / "summary.json"
+    feasibility_output = tmp_path / "feasibility.json"
+    
+    def mock_fetch(symbol, from_ts_sec, to_ts_sec, interval="1hour", api_key=None):
+        if symbol == "BTC/USDT":
+            return [{"t": 1716800000, "l": 1000.0, "s": 500.0}], "api_ok_non_empty_rows"
+        elif symbol == "ETH/USDT":
+            return [{"t": 1716803600, "l": 2000.0, "s": 1500.0}], "api_ok_non_empty_rows"
+        return [], "api_ok_empty_rows"
+
+    with patch.dict(os.environ, {"COINALYZE_API_KEY": "test_key"}):
+        with patch("scripts.fetch_third_party_liquidation_history.fetch_historical_liquidations", side_effect=mock_fetch):
+            argv = [
+                "--symbols", "BTC/USDT", "ETH/USDT",
+                "--interval", "1hour",
+                "--lookback-hours", "10",
+                "--output-jsonl", str(output_jsonl),
+                "--summary-output", str(summary_output),
+                "--feasibility-output", str(feasibility_output),
+            ]
+            
+            exit_code = main(argv)
+            assert exit_code == 0
+        
+    assert output_jsonl.exists()
+    assert summary_output.exists()
+    assert feasibility_output.exists()
+    
+    with open(summary_output, "r") as f:
+        summary_data = json.load(f)
+        
+    assert summary_data["vendor"] == "coinalyze"
+    assert summary_data["route_b_status"] == "api_ok_non_empty_rows"
+    assert summary_data["symbol_count"] == 2
+    assert set(summary_data["symbols"]) == {"BTC/USDT", "ETH/USDT"}
+    assert summary_data["row_count"] == 2
+    assert summary_data["start_timestamp_ms"] == 1716800000000
+    assert summary_data["end_timestamp_ms"] == 1716803600000
+    assert summary_data["time_span_hours"] == 1
+    assert summary_data["rows_per_symbol"] == {"BTC/USDT": 1, "ETH/USDT": 1}
+    assert summary_data["coverage_quality"] == "historical_vendor_dataset"
+    assert summary_data["deduplicated_rows_count"] == 2
+    
+    with open(feasibility_output, "r") as f:
+        feasibility_data = json.load(f)
+    assert "vendor_candidates" in feasibility_data
+    
+    with open(output_jsonl, "r") as f:
+        jsonl_lines = [json.loads(line) for line in f if line.strip()]
+        
+    assert len(jsonl_lines) == 2
+    for row in jsonl_lines:
+        assert "symbol" in row
+        assert "hour_bucket_ms" in row
+        assert "total_liquidation_notional_1h_usdt" in row
+
+
+def test_build_route_b_hourly_summary_reports_route_b_status():
+    from scripts.fetch_third_party_liquidation_history import build_route_b_hourly_summary
+    
+    with patch.dict(os.environ, {}, clear=True):
+        summary = build_route_b_hourly_summary([])
+        assert summary["route_b_status"] == "no_api_key"
+        
+    with patch.dict(os.environ, {"COINALYZE_API_KEY": "test_key"}):
+        summary = build_route_b_hourly_summary([])
+        assert summary["route_b_status"] == "api_ok_empty_rows"
+        
+        summary_with_rows = build_route_b_hourly_summary([{"symbol": "BTC/USDT", "hour_bucket_ms": 1716800000000}])
+        assert summary_with_rows["route_b_status"] == "api_ok_non_empty_rows"
+
+    for status in ["api_auth_failed", "api_rate_limited", "no_api_key", "api_ok_empty_rows", "api_ok_non_empty_rows"]:
+        summary = build_route_b_hourly_summary([], route_b_status=status)
+        assert summary["route_b_status"] == status
