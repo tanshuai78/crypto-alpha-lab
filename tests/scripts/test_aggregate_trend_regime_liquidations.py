@@ -106,6 +106,7 @@ def test_aggregate_raw_to_hourly_floors_non_hour_bucket_ms():
 
 def test_aggregate_raw_to_hourly_with_audit_prefers_event_timestamp_over_stale_hour_bucket_ms():
     from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_hourly_with_audit
+
     records = [
         {
             "symbol": "BTC/USDT",
@@ -118,20 +119,22 @@ def test_aggregate_raw_to_hourly_with_audit_prefers_event_timestamp_over_stale_h
 
     rows, audit = aggregate_raw_to_hourly_with_audit(records)
 
-    assert rows[0]["hour_bucket_ms"] == 1780000800000
+    assert rows[0]["hour_bucket_ms"] == 1779998400000
     assert audit["bucket_event_time_mismatch_count"] == 1
 
 
 def test_aggregate_raw_to_hourly_with_audit_skips_missing_all_timestamps():
     from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_hourly_with_audit
-    records = [{
-        "symbol": "BTC/USDT",
-        "notional_usdt": 34000.0,
-        "liquidation_side": "long_liquidation",
-    }]
+
+    records = [
+        {
+            "symbol": "BTC/USDT",
+            "notional_usdt": 34000.0,
+            "liquidation_side": "long_liquidation",
+        }
+    ]
 
     rows, audit = aggregate_raw_to_hourly_with_audit(records)
 
     assert rows == []
     assert audit["missing_timestamp_count"] == 1
-

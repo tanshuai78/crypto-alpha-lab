@@ -314,11 +314,18 @@ def apply_hourly_liquidation_history(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     lookup: dict[tuple[str, int], dict[str, Any]] = {}
     bucket_values: list[int] = []
+    invalid_hourly_bucket_count = 0
+
     for rec in hourly_records:
         symbol = str(rec.get("symbol") or "")
-        bucket = int(_number_or_none(rec.get("hour_bucket_ms")) or 0)
+        raw_bucket = _number_or_none(rec.get("hour_bucket_ms"))
+        if not symbol or raw_bucket is None or raw_bucket <= 0:
+            invalid_hourly_bucket_count += 1
+            continue
+
+        bucket = int(raw_bucket) // 3_600_000 * 3_600_000
         notional = _number_or_none(rec.get("liquidation_notional_1h_usdt"))
-        if symbol and bucket > 0 and notional is not None:
+        if notional is not None:
             lookup[(symbol, bucket)] = rec
             bucket_values.append(bucket)
 
@@ -352,8 +359,7 @@ def apply_hourly_liquidation_history(
                 matched.get("liquidation_notional_semantics") or "partial_snapshot_lower_bound"
             )
             r["liquidation_bucket_semantics"] = str(
-                matched.get("liquidation_bucket_semantics")
-                or "utc_hour_floor_of_row_timestamp"
+                matched.get("liquidation_bucket_semantics") or "utc_hour_floor_of_row_timestamp"
             )
             joined_count += 1
         patched.append(r)
@@ -364,6 +370,7 @@ def apply_hourly_liquidation_history(
     join_summary = {
         "liquidation_history_input_count": len(hourly_records),
         "liquidation_rows_joined_count": joined_count,
+        "invalid_hourly_bucket_count": invalid_hourly_bucket_count,
         "liquidation_history_source": "binance_forceorder_ws" if hourly_records else "none",
         "liquidation_history_source_quality": (
             "self_collected_partial_history" if hourly_records else "missing"

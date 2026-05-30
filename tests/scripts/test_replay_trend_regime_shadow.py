@@ -338,17 +338,22 @@ def test_load_optional_jsonl_returns_empty_when_file_missing():
 
 def test_apply_hourly_liquidation_history_floors_hourly_bucket_before_join():
     from scripts.replay_trend_regime_shadow import apply_hourly_liquidation_history
-    rows = [{
-        "symbol": "BTC/USDT",
-        "timestamp_ms": 1716851100000,
-    }]
-    hourly = [{
-        "symbol": "BTC/USDT",
-        "hour_bucket_ms": 1716852300000,
-        "liquidation_notional_1h_usdt": 34000.0,
-        "long_liquidation_notional_1h_usdt": 34000.0,
-        "short_liquidation_notional_1h_usdt": 0.0,
-    }]
+
+    rows = [
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": 1716851100000,
+        }
+    ]
+    hourly = [
+        {
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 1716852300000,
+            "liquidation_notional_1h_usdt": 34000.0,
+            "long_liquidation_notional_1h_usdt": 34000.0,
+            "short_liquidation_notional_1h_usdt": 0.0,
+        }
+    ]
 
     patched, summary = apply_hourly_liquidation_history(rows, hourly)
 
@@ -358,16 +363,18 @@ def test_apply_hourly_liquidation_history_floors_hourly_bucket_before_join():
 
 def test_apply_hourly_liquidation_history_skips_invalid_hourly_bucket():
     from scripts.replay_trend_regime_shadow import apply_hourly_liquidation_history
+
     rows = [{"symbol": "BTC/USDT", "timestamp_ms": 1716851100000}]
-    hourly = [{
-        "symbol": "BTC/USDT",
-        "hour_bucket_ms": 0,
-        "liquidation_notional_1h_usdt": 34000.0,
-    }]
+    hourly = [
+        {
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 0,
+            "liquidation_notional_1h_usdt": 34000.0,
+        }
+    ]
 
     patched, summary = apply_hourly_liquidation_history(rows, hourly)
 
     assert summary["invalid_hourly_bucket_count"] == 1
     assert summary["liquidation_rows_joined_count"] == 0
     assert "liquidation_notional_1h_usdt" not in patched[0]
-

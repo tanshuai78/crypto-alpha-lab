@@ -50,8 +50,39 @@ def load_raw_jsonl(path: str) -> list[dict[str, Any]]:
     return records
 
 
+def _int_or_none(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def canonical_liquidation_timestamp_ms(rec: dict[str, Any]) -> int | None:
+    for key in ("event_time_ms", "trade_time_ms", "E", "T", "timestamp_ms"):
+        value = _int_or_none(rec.get(key))
+        if value and value > 0:
+            return value
+    fallback = _int_or_none(rec.get("hour_bucket_ms"))
+    return fallback if fallback and fallback > 0 else None
+
+
 def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate raw forceOrder records into one row per (symbol, hour_bucket_ms)."""
+    rows, _ = aggregate_raw_to_hourly_with_audit(records)
+    return rows
+
+
+def aggregate_raw_to_hourly_with_audit(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    audit = {
+        "missing_timestamp_count": 0,
+        "bucket_event_time_mismatch_count": 0,
+        "non_hour_aligned_bucket_count": 0,
+    }
+
     # key: (symbol, hour_bucket_ms)
     buckets: dict[tuple[str, int], dict[str, float | int]] = defaultdict(
         lambda: {"long": 0.0, "short": 0.0, "long_count": 0, "short_count": 0}
@@ -59,15 +90,34 @@ def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any
 
     for rec in records:
         symbol = str(rec.get("symbol") or "")
-        hour_bucket = rec.get("hour_bucket_ms")
-        if hour_bucket is None:
-            legacy_bucket = str(rec.get("hour_bucket_utc") or "")
-            hour_bucket = _hour_bucket_utc_to_ms(legacy_bucket) if legacy_bucket else None
-        if not symbol or hour_bucket is None:
+        if not symbol:
             continue
+
+        event_ts_ms = canonical_liquidation_timestamp_ms(rec)
+        if event_ts_ms is None:
+            audit["missing_timestamp_count"] += 1
+            continue
+
+        computed_bucket_ms = hour_bucket_ms(event_ts_ms)
+
+        provided_bucket_ms = None
+        raw_provided = rec.get("hour_bucket_ms")
+        if raw_provided is not None:
+            provided_bucket_ms = _int_or_none(raw_provided)
+        else:
+            legacy_bucket = str(rec.get("hour_bucket_utc") or "")
+            provided_bucket_ms = _hour_bucket_utc_to_ms(legacy_bucket) if legacy_bucket else None
+
+        if provided_bucket_ms is not None:
+            if provided_bucket_ms % 3_600_000 != 0:
+                audit["non_hour_aligned_bucket_count"] += 1
+            if provided_bucket_ms != computed_bucket_ms:
+                audit["bucket_event_time_mismatch_count"] += 1
+
         notional = float(rec.get("notional_usdt") or 0.0)
         liq_side = str(rec.get("liquidation_side") or "unknown")
-        key = (symbol, int(hour_bucket))
+
+        key = (symbol, computed_bucket_ms)
         if liq_side in ("long", "long_liquidation"):
             buckets[key]["long"] += notional
             buckets[key]["long_count"] += 1
@@ -77,7 +127,7 @@ def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any
         # unknown side: skip directional attribution
 
     rows: list[dict[str, Any]] = []
-    for (symbol, hour_bucket), sums in sorted(buckets.items()):
+    for (symbol, computed_bucket), sums in sorted(buckets.items()):
         long_notional = float(sums["long"])
         short_notional = float(sums["short"])
         long_count = int(sums["long_count"])
@@ -86,7 +136,7 @@ def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any
         rows.append(
             {
                 "symbol": symbol,
-                "hour_bucket_ms": hour_bucket,
+                "hour_bucket_ms": computed_bucket,
                 "liquidation_notional_1h_usdt": round(total, 10),
                 "long_liquidation_notional_1h_usdt": round(long_notional, 10),
                 "short_liquidation_notional_1h_usdt": round(short_notional, 10),
@@ -99,7 +149,7 @@ def aggregate_raw_to_hourly(records: list[dict[str, Any]]) -> list[dict[str, Any
                 "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
             }
         )
-    return rows
+    return rows, audit
 
 
 def write_hourly_jsonl(rows: list[dict[str, Any]], path: str) -> None:
