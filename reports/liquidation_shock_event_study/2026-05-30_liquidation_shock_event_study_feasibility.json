@@ -1,0 +1,85 @@
+{
+  "vendor": "coinalyze",
+  "interval": "1min",
+  "symbols_requested": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT"
+  ],
+  "supports_24h_lookback": true,
+  "decision": "proceed",
+  "coverage_ratio": 0.9924,
+  "max_gap_minutes": 124,
+  "usable_eval_hours_after_lookback": 35.0,
+  "qualified_symbols": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT"
+  ],
+  "symbol_stats": {
+    "BTC/USDT": {
+      "qualified": true,
+      "rows_per_symbol": 861,
+      "min_bar_start_ms": 1779927660000,
+      "max_bar_start_ms": 1780142340000,
+      "span_hours_per_symbol": 59.63,
+      "expected_1m_bars": 3579,
+      "actual_1m_bars": 3579,
+      "coverage_ratio": 0.9939,
+      "max_gap_minutes": 42,
+      "usable_eval_hours_after_lookback": 35.63
+    },
+    "ETH/USDT": {
+      "qualified": true,
+      "rows_per_symbol": 934,
+      "min_bar_start_ms": 1779927060000,
+      "max_bar_start_ms": 1780142640000,
+      "span_hours_per_symbol": 59.88,
+      "expected_1m_bars": 3594,
+      "actual_1m_bars": 3594,
+      "coverage_ratio": 0.9981,
+      "max_gap_minutes": 55,
+      "usable_eval_hours_after_lookback": 35.88
+    },
+    "SOL/USDT": {
+      "qualified": true,
+      "rows_per_symbol": 513,
+      "min_bar_start_ms": 1779927060000,
+      "max_bar_start_ms": 1780142340000,
+      "span_hours_per_symbol": 59.8,
+      "expected_1m_bars": 3589,
+      "actual_1m_bars": 3589,
+      "coverage_ratio": 0.9967,
+      "max_gap_minutes": 112,
+      "usable_eval_hours_after_lookback": 35.8
+    },
+    "XRP/USDT": {
+      "qualified": true,
+      "rows_per_symbol": 499,
+      "min_bar_start_ms": 1779928860000,
+      "max_bar_start_ms": 1780142700000,
+      "span_hours_per_symbol": 59.4,
+      "expected_1m_bars": 3565,
+      "actual_1m_bars": 3565,
+      "coverage_ratio": 0.99,
+      "max_gap_minutes": 112,
+      "usable_eval_hours_after_lookback": 35.4
+    },
+    "DOGE/USDT": {
+      "qualified": true,
+      "rows_per_symbol": 301,
+      "min_bar_start_ms": 1779929940000,
+      "max_bar_start_ms": 1780142340000,
+      "span_hours_per_symbol": 59.0,
+      "expected_1m_bars": 3541,
+      "actual_1m_bars": 3541,
+      "coverage_ratio": 0.9833,
+      "max_gap_minutes": 124,
+      "usable_eval_hours_after_lookback": 35.0
+    }
+  }
+}
