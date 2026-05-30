@@ -297,3 +297,13 @@ def test_build_route_b_hourly_summary_reports_route_b_status():
     for status in ["api_auth_failed", "api_rate_limited", "no_api_key", "api_ok_empty_rows", "api_ok_non_empty_rows"]:
         summary = build_route_b_hourly_summary([], route_b_status=status)
         assert summary["route_b_status"] == status
+
+
+def test_hourly_normalization_regression():
+    raw_payload = [{"t": 1716800000, "l": 100.0, "s": 50.0}]
+    normalized = normalize_coinalyze_payload(raw_payload, symbol="BTC/USDT")
+    assert len(normalized) == 1
+    assert normalized[0]["hour_bucket_ms"] == 1716800000000
+    assert "long_liquidation_notional_1h_usdt" in normalized[0]
+    assert "long_liquidation_notional_5m_usdt" not in normalized[0]
+
