@@ -359,3 +359,35 @@ BASIS_DESK_MIN_MAKER_FILL_RATE = 0.70
 # Minimum fraction of entries that must be filled as maker (not taker).
 # Below this, the cost model breaks down and edge disappears.
 # Monitored in shadow mode; if below threshold, strategy is halted.
+
+
+# ─── Strategy: Liquidation-Only 5m Research ───────────────────────────────
+
+LIQUIDATION_ONLY_5M_MAJOR_ABS_THRESHOLD_USDT = 50_000.0
+# Minimum absolute liquidation notional for majors (BTC/ETH).
+# Excludes smaller signals that act as transient noise.
+
+LIQUIDATION_ONLY_5M_ALT_ABS_THRESHOLD_USDT = 10_000.0
+# Minimum absolute liquidation notional for large alts (SOL/XRP/DOGE).
+# Set lower due to smaller book size and lower average event notional.
+
+LIQUIDATION_ONLY_5M_RELATIVE_SCORE_THRESHOLD = 0.99
+# Percentile threshold against the rolling distribution.
+# 0.99 = Top 1% of liquidation events in the lookback window.
+
+LIQUIDATION_ONLY_5M_ROLLING_LOOKBACK_DAYS = 7
+# Rolling lookback window length in days for the baseline distribution.
+# 7 days of 5m intervals = 2016 bars.
+
+LIQUIDATION_ONLY_5M_FORWARD_HORIZONS_BARS = (1, 2, 3)
+# Holding periods to analyze after the event trigger (in 5m bars).
+
+LIQUIDATION_ONLY_5M_DOMINANCE_RATIO_MIN = 0.70
+# Minimum dominance ratio of the dominant liquidation direction.
+# Dominance = max(long_liq, short_liq) / (long_liq + short_liq).
+# Prevents taking signals in heavily mixed two-sided liquidation bars.
+
+LIQUIDATION_ONLY_5M_ASSUMED_MIN_ROUND_TRIP_COST_BPS = 16.0
+# Assumed minimum execution friction in bps (taker entries, commissions, slippage).
+# Used to adjust gross forward returns for viability screening.
+
