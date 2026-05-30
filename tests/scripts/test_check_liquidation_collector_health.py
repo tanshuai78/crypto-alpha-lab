@@ -68,14 +68,24 @@ def healthy_archive_dir(tmp_path):
 
 def test_health_check_reports_healthy_archive(healthy_archive_dir):
     data_dir, current_time_ms = healthy_archive_dir
-    summary = inspect_liquidation_collector_health(data_dir, now_ms=current_time_ms)
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=current_time_ms,
+        expected_symbols=["BTC/USDT"],
+    )
 
     assert summary["raw_exists"] is True
+    assert summary["raw_latest_timestamp_ms"] == current_time_ms
     assert summary["raw_invalid_json_line_count"] == 0
     assert summary["raw_last_line_valid"] is True
     assert summary["raw_duplicate_event_count"] == 0
     assert summary["raw_time_span_hours"] > 24.0
     assert summary["aggregate_1m_exists"] is True
+    assert summary["aggregate_1m_latest_bucket_ms"] == current_time_ms - 60_000
+    assert summary["aggregate_5m_row_count"] == 0
+    assert summary["aggregate_5m_latest_bucket_ms"] is None
+    assert summary["aggregate_1h_row_count"] == 0
+    assert summary["aggregate_1h_latest_bucket_ms"] is None
     assert summary["aggregate_1m_coverage_ratio_24h"] == pytest.approx(1.0)
     assert summary["aggregate_1m_missing_bucket_count_24h"] == 0
     assert (
@@ -95,7 +105,11 @@ def test_health_check_reports_invalid_json_lines(healthy_archive_dir):
         fh.write("{invalid_json_here\n")
         fh.write("\n")  # empty line should be ignored, not count as invalid
 
-    summary = inspect_liquidation_collector_health(data_dir, now_ms=current_time_ms)
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=current_time_ms,
+        expected_symbols=["BTC/USDT"],
+    )
     assert summary["raw_invalid_json_line_count"] == 1
     assert summary["raw_last_line_valid"] is False  # because the last text line is invalid JSON
 
@@ -120,7 +134,11 @@ def test_health_check_reports_duplicate_events(healthy_archive_dir):
     with open(raw_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
 
-    summary = inspect_liquidation_collector_health(data_dir, now_ms=current_time_ms)
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=current_time_ms,
+        expected_symbols=["BTC/USDT"],
+    )
     assert summary["raw_duplicate_event_count"] == 1
 
 
@@ -141,7 +159,11 @@ def test_health_check_reports_gaps_and_low_coverage(healthy_archive_dir):
         for r in rows:
             fh.write(json.dumps(r) + "\n")
 
-    summary = inspect_liquidation_collector_health(data_dir, now_ms=current_time_ms)
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=current_time_ms,
+        expected_symbols=["BTC/USDT"],
+    )
     # Coverage should be (1440 - 101) / 1440 = 1339 / 1440 ~ 0.93
     assert summary["aggregate_1m_coverage_ratio_24h"] == pytest.approx(1339 / 1440)
     assert summary["aggregate_1m_missing_bucket_count_24h"] == 101
@@ -159,5 +181,69 @@ def test_health_check_marks_research_ready_false_without_24h_coverage(tmp_path):
     data_dir.mkdir()
     (data_dir / "trend_regime_force_orders_raw.jsonl").write_text("", encoding="utf-8")
 
-    summary = inspect_liquidation_collector_health(data_dir, now_ms=1780000000000)
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=1780000000000,
+        expected_symbols=["BTC/USDT"],
+    )
+    assert summary["research_ready_1m_24h"] is False
+
+
+def test_health_check_marks_research_ready_false_when_one_symbol_is_missing(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    raw_path = data_dir / "trend_regime_force_orders_raw.jsonl"
+    now_ms = 1780086600000
+    start_24h_ago = now_ms - 24 * 3600 * 1000
+
+    raw_rows = []
+    for symbol in ("BTC/USDT", "ETH/USDT"):
+        for minute in range(0, 24 * 60, 30):
+            ts = start_24h_ago + minute * 60_000
+            raw_rows.append(
+                {
+                    "schema_version": 1,
+                    "source": "binance_forceorder_ws",
+                    "event_id": f"{symbol}|{ts}",
+                    "symbol": symbol,
+                    "event_time_ms": ts,
+                    "trade_time_ms": ts,
+                    "side": "SELL",
+                    "liquidated_position_side": "long",
+                    "liquidation_side": "long_liquidation",
+                    "price": 60000.0,
+                    "quantity": 0.1,
+                    "notional_usdt": 6000.0,
+                }
+            )
+    raw_path.write_text("\n".join(json.dumps(r) for r in raw_rows) + "\n", encoding="utf-8")
+
+    agg_1m_path = data_dir / "trend_regime_liquidation_1m.jsonl"
+    agg_rows = []
+    for minute in range(24 * 60):
+        bar_start = start_24h_ago + minute * 60_000
+        agg_rows.append(
+            {
+                "symbol": "BTC/USDT",
+                "bar_start_ms": bar_start,
+                "long_liquidation_notional_1m_usdt": 0.0,
+                "short_liquidation_notional_1m_usdt": 0.0,
+                "total_liquidation_notional_1m_usdt": 0.0,
+                "event_count_1m": 0,
+                "source": "binance_forceorder_raw_archive",
+                "filled_empty_bucket": True,
+            }
+        )
+    agg_1m_path.write_text("\n".join(json.dumps(r) for r in agg_rows) + "\n", encoding="utf-8")
+    (data_dir / "trend_regime_liquidation_5m.jsonl").write_text("", encoding="utf-8")
+    (data_dir / "trend_regime_liquidation_hourly.jsonl").write_text("", encoding="utf-8")
+
+    summary = inspect_liquidation_collector_health(
+        data_dir,
+        now_ms=now_ms,
+        expected_symbols=["BTC/USDT", "ETH/USDT"],
+    )
+    assert summary["aggregate_1m_symbol_stats_24h"]["BTC/USDT"]["coverage_ratio"] == pytest.approx(1.0)
+    assert summary["aggregate_1m_symbol_stats_24h"]["ETH/USDT"]["coverage_ratio"] == pytest.approx(0.0)
     assert summary["research_ready_1m_24h"] is False

@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from scripts.collect_trend_regime_force_orders import (
     RollingLiquidationAccumulator,
     build_force_order_raw_record,
@@ -239,3 +241,13 @@ def test_parse_args_accepts_raw_fsync_and_schema_version():
     assert args.fsync_raw is True
     assert args.raw_schema_version == 1
 
+
+def test_parse_args_help_marks_raw_as_primary_archive(capsys):
+    from scripts.collect_trend_regime_force_orders import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+
+    captured = capsys.readouterr()
+    assert "primary append-only archive" in captured.out
+    assert "legacy compatibility cache" in captured.out

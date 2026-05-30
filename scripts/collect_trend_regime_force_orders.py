@@ -232,9 +232,16 @@ def should_stop(*, start_ts: float, now_ts: float, max_seconds: int) -> bool:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Collect Binance forceOrder stream and write 1h liquidation cache"
+        description=(
+            "Collect Binance forceOrder stream, append the primary raw liquidation archive, "
+            "and maintain a legacy compatibility cache for watchlist consumers."
+        )
     )
-    parser.add_argument("--output", default="data/trend_regime_liquidation_cache.json")
+    parser.add_argument(
+        "--output",
+        default="data/trend_regime_liquidation_cache.json",
+        help="Rolling legacy compatibility cache for watchlist consumers.",
+    )
     parser.add_argument("--window-sec", type=int, default=3600)
     parser.add_argument("--flush-interval-sec", type=float, default=10.0)
     parser.add_argument("--max-seconds", type=int, default=0, help="0 means run forever")
@@ -248,7 +255,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--raw-output",
         default=f"data/{TREND_REGIME_FORCE_ORDER_RAW_JSONL}",
-        help="Optional path to append raw forceOrder JSONL records (one per event).",
+        help="Path to the primary append-only archive of raw forceOrder JSONL events.",
     )
     parser.add_argument(
         "--fsync-raw",

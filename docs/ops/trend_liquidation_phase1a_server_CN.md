@@ -183,6 +183,7 @@ docker run -d --name trend-forceorder \
   crypto-alpha-lab:latest \
   uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
     --output data/trend_regime_liquidation_cache.json \
+    --raw-output data/trend_regime_force_orders_raw.jsonl \
     --flush-interval-sec 5 \
     --max-seconds 0
 ```
@@ -251,7 +252,7 @@ ls -lh /root/crypto-alpha-lab/data/trend_regime_watch_events.jsonl
 
 ## Raw forceOrder 事件采集 (Raw ForceOrder Collection)
 
-除了生成滚动窗口清算缓存（`--output`）外，`collect_trend_regime_force_orders.py` 还支持 `--raw-output` 参数，将每条强平事件逐行追加到 JSONL 文件中，供后续小时级聚合使用。
+除了生成滚动窗口清算缓存（`--output`）外，`collect_trend_regime_force_orders.py` 还支持 `--raw-output` 参数，将每条强平事件逐行追加到 JSONL 文件中。这里的 raw JSONL 是 **primary append-only archive**；`trend_regime_liquidation_cache.json` 只是 **legacy compatibility cache**，仅供现有 watchlist 读取。
 
 ### 启动命令（附 `--raw-output`）
 
@@ -281,18 +282,26 @@ docker run -d --name trend-forceorder \
 
 ### 输出格式
 
-每条事件追加一行 JSON，字段如下：
+每条事件追加一行 JSON。当前 research raw schema 至少包含以下字段：
 
 | 字段 | 含义 |
 |---|---|
-| `symbol` | 交易对，如 `BTC/USDT`（含斜线，与 watchlist 对齐） |
-| `side` | 订单方向（`BUY` / `SELL`，即强平单的成交方向） |
-| `liquidation_side` | 被清算的仓位方向：`long`（多仓被强平，SELL 成交）或 `short`（空仓被强平，BUY 成交） |
+| `schema_version` | raw schema 版本号 |
+| `source` | 数据源标识，当前为 `binance_forceorder_ws` |
+| `event_id` | 原始事件稳定去重键 |
+| `symbol` | 规范化交易对，如 `BTC/USDT` |
+| `exchange_symbol` | 交易所原始交易对，如 `BTCUSDT` |
+| `event_time_ms` | WebSocket 事件时间戳（毫秒） |
+| `trade_time_ms` | 强平成交时间戳（毫秒） |
+| `side` | 强平单方向（`BUY` / `SELL`） |
+| `liquidated_position_side` | 被清算仓位方向：`long` 或 `short` |
+| `liquidation_side` | 研究语义方向：`long_liquidation` 或 `short_liquidation` |
+| `price` | 成交价格 |
+| `quantity` | 成交数量 |
 | `notional_usdt` | 本次事件的名义金额（USDT） |
-| `timestamp_ms` | 事件时间戳（毫秒） |
-| `hour_bucket_utc` | 所属小时桶，格式 `YYYY-MM-DDTHH:00`（无秒数和 Z 后缀） |
+| `raw_payload` | 原始 WebSocket payload |
 
-**语义说明**：`liquidation_side=long` 表示多仓被强平（产生 SELL 单）；`liquidation_side=short` 表示空仓被强平（产生 BUY 单）。
+**语义说明**：`liquidated_position_side=long` / `liquidation_side=long_liquidation` 表示多仓被强平（产生 `SELL` 单）；`liquidated_position_side=short` / `liquidation_side=short_liquidation` 表示空仓被强平（产生 `BUY` 单）。
 
 > [!CAUTION]
 > **[局限性 / 无历史回填]** Raw 文件仅从采集器**启动时刻**起累积事件，没有历史回填能力。若采集器在某段市场行情中未运行（容器重启、网络中断等），该时段的强平事件将**永久缺失**，导致对应小时桶的清算代理数据不完整。回放报告中出现 `liquidation_coverage_ratio` 偏低时，首先排查采集器运行时段。
@@ -368,7 +377,7 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 - `raw_duplicate_event_count` 必须为 `0` (或极低水平)
 - `aggregate_1m_exists` 为 `true`
 - `aggregate_1m_coverage_ratio_24h` 必须 `>= 0.99`
-- `aggregate_1m_max_gap_minutes_24h` 必须 `<= 10`
+- `aggregate_1m_max_gap_minutes_24h` 必须 `<= 1`
 - `aggregate_5m_exists` 为 `true`
 - `aggregate_1h_exists` 为 `true`
 - `research_ready_1m_24h` 必须为 `true`
