@@ -146,8 +146,21 @@ def normalize_coinalyze_payload(
     # We need to aggregate duplicate symbol + hour_bucket_ms rows by sum.
     aggregated: dict[int, dict[str, Any]] = {}
 
+    history_rows: list[dict[str, Any]] = []
     for row in payload:
-        t_sec = int(row.get("t") or 0)
+        if isinstance(row, dict) and isinstance(row.get("history"), list):
+            history_rows.extend(
+                item for item in row["history"] if isinstance(item, dict)
+            )
+        elif isinstance(row, dict):
+            history_rows.append(row)
+
+    for row in history_rows:
+        t_value = row.get("t")
+        if t_value in (None, ""):
+            continue
+
+        t_sec = int(t_value)
         hour_bucket_ms = t_sec * 1000
 
         long_liq = float(row.get("l") or 0.0)
@@ -191,10 +204,20 @@ def normalize_coinalyze_payload(
     return normalized
 
 
-def build_route_b_hourly_summary(rows: list[dict[str, Any]], route_b_status: str | None = None) -> dict[str, Any]:
+def build_route_b_hourly_summary(
+    rows: list[dict[str, Any]],
+    route_b_status: str | None = None,
+    *,
+    request_count: int = 0,
+    requested_symbols: list[str] | None = None,
+    interval: str = "1hour",
+    from_ts_sec: int = 0,
+    to_ts_sec: int = 0,
+) -> dict[str, Any]:
     symbols = sorted(list(set(row["symbol"] for row in rows)))
     symbol_count = len(symbols)
     row_count = len(rows)
+    requested_symbols = sorted(requested_symbols or [])
     
     if rows:
         start_ts = min(row["hour_bucket_ms"] for row in rows)
@@ -224,6 +247,11 @@ def build_route_b_hourly_summary(rows: list[dict[str, Any]], route_b_status: str
         "route_b_status": route_b_status,
         "symbol_count": symbol_count,
         "symbols": symbols,
+        "request_count": request_count,
+        "requested_symbols": requested_symbols,
+        "interval": normalize_interval(interval),
+        "from_ts_sec": from_ts_sec,
+        "to_ts_sec": to_ts_sec,
         "row_count": row_count,
         "start_timestamp_ms": start_ts,
         "end_timestamp_ms": end_ts,
@@ -312,7 +340,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         final_status = "api_ok_empty_rows"
         
-    summary = build_route_b_hourly_summary(all_normalized_rows, route_b_status=final_status)
+    summary = build_route_b_hourly_summary(
+        all_normalized_rows,
+        route_b_status=final_status,
+        request_count=len(symbols),
+        requested_symbols=symbols,
+        interval=args.interval,
+        from_ts_sec=from_ts_sec,
+        to_ts_sec=to_ts_sec,
+    )
     summary["symbol_count"] = len(symbols)
     summary["symbols"] = sorted(symbols)
     
@@ -322,6 +358,13 @@ def main(argv: list[str] | None = None) -> int:
             if candidate["vendor"] == "coinalyze":
                 candidate["route_b_status"] = final_status
                 candidate["historical_depth_days"] = args.lookback_hours // 24
+    feasibility.update({
+        "request_count": len(symbols),
+        "requested_symbols": sorted(symbols),
+        "interval": normalize_interval(args.interval),
+        "from_ts_sec": from_ts_sec,
+        "to_ts_sec": to_ts_sec,
+    })
                 
     if args.output_jsonl:
         os.makedirs(os.path.dirname(os.path.abspath(args.output_jsonl)), exist_ok=True)

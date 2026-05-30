@@ -2,7 +2,7 @@
   "vendor_candidates": [
     {
       "vendor": "coinalyze",
-      "api_access": "unavailable",
+      "api_access": "available",
       "requires_paid_plan": false,
       "granularity": "1hour",
       "exchange_coverage": [
@@ -19,8 +19,19 @@
       ],
       "historical_depth_days": 62,
       "can_support_replay": true,
-      "blocker": "requires_coinalyze_api_key",
-      "route_b_status": "no_api_key"
+      "blocker": "",
+      "route_b_status": "api_ok_non_empty_rows"
     }
-  ]
+  ],
+  "request_count": 5,
+  "requested_symbols": [
+    "BTC/USDT",
+    "DOGE/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT"
+  ],
+  "interval": "1hour",
+  "from_ts_sec": 1774707350,
+  "to_ts_sec": 1780107350
 }

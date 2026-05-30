@@ -2,7 +2,10 @@
   "base_cost_bps": 30.0,
   "capital_utilization_label": "too_sparse",
   "classification_reject_counts": {
-    "missing_liquidation_fields": 2465,
+    "missing_liquidation_fields": 101,
+    "oi_confirmation_below_min": 8,
+    "return_below_min": 172,
+    "vol_breakout_below_threshold": 2184,
     "volume_below_min": 30
   },
   "entry_event_count": 0,
@@ -188,49 +191,63 @@
   "liquidation_history_join_summary": {
     "liquidation_history_source": "binance_forceorder_hourly+coinalyze_liquidation_history",
     "liquidation_history_source_quality": "hybrid_reconstructed_history",
-    "liquidation_rows_joined_count": 0,
+    "liquidation_rows_joined_count": 2393,
     "route_a_join_details": {
       "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
-      "liquidation_history_input_count": 0,
-      "liquidation_history_source": "none",
-      "liquidation_history_source_quality": "missing",
-      "liquidation_notional_semantics": "missing",
+      "liquidation_history_input_count": 1,
+      "liquidation_history_source": "binance_forceorder_ws",
+      "liquidation_history_source_quality": "self_collected_partial_history",
+      "liquidation_notional_semantics": "partial_snapshot_lower_bound",
       "liquidation_raw_duration_hours": 0.0,
-      "liquidation_raw_end_ms": 0,
-      "liquidation_raw_start_ms": 0,
+      "liquidation_raw_end_ms": 1716852000000,
+      "liquidation_raw_start_ms": 1716852000000,
       "liquidation_rows_joined_count": 0
     },
     "route_a_joined_count": 0,
     "route_ab_overlap_symbol_hour_count": 0,
     "route_b_join_details": {
       "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
-      "liquidation_history_input_count": 0,
-      "liquidation_history_source": "none",
-      "liquidation_history_source_quality": "missing",
-      "liquidation_notional_semantics": "missing",
-      "liquidation_raw_duration_hours": 0.0,
-      "liquidation_raw_end_ms": 0,
-      "liquidation_raw_start_ms": 0,
-      "liquidation_rows_joined_count": 0
+      "liquidation_history_input_count": 7162,
+      "liquidation_history_source": "binance_forceorder_ws",
+      "liquidation_history_source_quality": "self_collected_partial_history",
+      "liquidation_notional_semantics": "partial_snapshot_lower_bound",
+      "liquidation_raw_duration_hours": 1499.0,
+      "liquidation_raw_end_ms": 1780106400000,
+      "liquidation_raw_start_ms": 1774710000000,
+      "liquidation_rows_joined_count": 2393
     },
-    "route_b_joined_count": 0
+    "route_b_joined_count": 2393
   },
   "reject_counts_by_symbol": {
     "BTC/USDT": {
-      "missing_liquidation_fields": 499
+      "missing_liquidation_fields": 4,
+      "oi_confirmation_below_min": 1,
+      "return_below_min": 30,
+      "vol_breakout_below_threshold": 464
     },
     "DOGE/USDT": {
-      "missing_liquidation_fields": 469,
+      "missing_liquidation_fields": 43,
+      "oi_confirmation_below_min": 2,
+      "return_below_min": 27,
+      "vol_breakout_below_threshold": 397,
       "volume_below_min": 30
     },
     "ETH/USDT": {
-      "missing_liquidation_fields": 499
+      "missing_liquidation_fields": 3,
+      "oi_confirmation_below_min": 4,
+      "return_below_min": 30,
+      "vol_breakout_below_threshold": 462
     },
     "SOL/USDT": {
-      "missing_liquidation_fields": 499
+      "missing_liquidation_fields": 15,
+      "return_below_min": 49,
+      "vol_breakout_below_threshold": 435
     },
     "XRP/USDT": {
-      "missing_liquidation_fields": 499
+      "missing_liquidation_fields": 36,
+      "oi_confirmation_below_min": 1,
+      "return_below_min": 36,
+      "vol_breakout_below_threshold": 426
     }
   },
   "strategy_slice": "liquidation_cascade_only",

@@ -95,6 +95,31 @@ def test_normalize_coinalyze_payload_maps_l_and_s_to_hourly_schema():
     assert row["timestamp_unit_source"] == "seconds"
 
 
+def test_normalize_coinalyze_payload_supports_vendor_history_wrapper():
+    raw_payload = [
+        {
+            "symbol": "BTCUSDT_PERP.A",
+            "history": [
+                {
+                    "t": 1716800000,
+                    "l": 600000.0,
+                    "s": 300000.0,
+                }
+            ],
+        }
+    ]
+
+    normalized = normalize_coinalyze_payload(raw_payload, symbol="BTC/USDT")
+    assert len(normalized) == 1
+    row = normalized[0]
+    assert row["symbol"] == "BTC/USDT"
+    assert row["vendor_symbol"] == "BTCUSDT_PERP.A"
+    assert row["hour_bucket_ms"] == 1716800000000
+    assert row["long_liquidation_notional_1h_usdt"] == 600000.0
+    assert row["short_liquidation_notional_1h_usdt"] == 300000.0
+    assert row["total_liquidation_notional_1h_usdt"] == 900000.0
+
+
 def test_normalize_converts_vendor_t_seconds_to_hour_bucket_ms():
     raw_payload = [{"t": 123456, "l": 0, "s": 0}]
     normalized = normalize_coinalyze_payload(raw_payload, symbol="BTC/USDT")
@@ -155,6 +180,29 @@ def test_build_route_b_hourly_summary_reports_symbol_and_time_coverage():
     assert summary["deduplicated_rows_count"] == 3
 
 
+def test_build_route_b_hourly_summary_includes_request_audit_fields():
+    from scripts.fetch_third_party_liquidation_history import build_route_b_hourly_summary
+
+    rows = [
+        {"symbol": "BTC/USDT", "hour_bucket_ms": 1716800000000},
+    ]
+    summary = build_route_b_hourly_summary(
+        rows,
+        route_b_status="api_ok_non_empty_rows",
+        request_count=5,
+        requested_symbols=["BTC/USDT", "ETH/USDT"],
+        interval="1hour",
+        from_ts_sec=1716700000,
+        to_ts_sec=1716800000,
+    )
+
+    assert summary["request_count"] == 5
+    assert summary["requested_symbols"] == ["BTC/USDT", "ETH/USDT"]
+    assert summary["interval"] == "1hour"
+    assert summary["from_ts_sec"] == 1716700000
+    assert summary["to_ts_sec"] == 1716800000
+
+
 def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(tmp_path):
     from scripts.fetch_third_party_liquidation_history import main
     import json
@@ -165,9 +213,15 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
     
     def mock_fetch(symbol, from_ts_sec, to_ts_sec, interval="1hour", api_key=None):
         if symbol == "BTC/USDT":
-            return [{"t": 1716800000, "l": 1000.0, "s": 500.0}], "api_ok_non_empty_rows"
+            return [{
+                "symbol": "BTCUSDT_PERP.A",
+                "history": [{"t": 1716800000, "l": 1000.0, "s": 500.0}],
+            }], "api_ok_non_empty_rows"
         elif symbol == "ETH/USDT":
-            return [{"t": 1716803600, "l": 2000.0, "s": 1500.0}], "api_ok_non_empty_rows"
+            return [{
+                "symbol": "ETHUSDT_PERP.A",
+                "history": [{"t": 1716803600, "l": 2000.0, "s": 1500.0}],
+            }], "api_ok_non_empty_rows"
         return [], "api_ok_empty_rows"
 
     with patch.dict(os.environ, {"COINALYZE_API_KEY": "test_key"}):
@@ -202,10 +256,18 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
     assert summary_data["rows_per_symbol"] == {"BTC/USDT": 1, "ETH/USDT": 1}
     assert summary_data["coverage_quality"] == "historical_vendor_dataset"
     assert summary_data["deduplicated_rows_count"] == 2
+    assert summary_data["request_count"] == 2
+    assert summary_data["requested_symbols"] == ["BTC/USDT", "ETH/USDT"]
+    assert summary_data["interval"] == "1hour"
+    assert summary_data["from_ts_sec"] < summary_data["to_ts_sec"]
     
     with open(feasibility_output, "r") as f:
         feasibility_data = json.load(f)
     assert "vendor_candidates" in feasibility_data
+    assert feasibility_data["request_count"] == 2
+    assert feasibility_data["requested_symbols"] == ["BTC/USDT", "ETH/USDT"]
+    assert feasibility_data["interval"] == "1hour"
+    assert feasibility_data["from_ts_sec"] < feasibility_data["to_ts_sec"]
     
     with open(output_jsonl, "r") as f:
         jsonl_lines = [json.loads(line) for line in f if line.strip()]

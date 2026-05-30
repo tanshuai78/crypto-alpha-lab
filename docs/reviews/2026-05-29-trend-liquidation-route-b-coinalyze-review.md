@@ -14,6 +14,7 @@
 * **适配层逻辑验证**：Coinalyze 的 Unix 时间戳秒（`t`）、做多爆仓量（`l`）和做空爆仓量（`s`）能够被完美映射并聚合（deduplicated by sum）为系统内毫秒级 `hour_bucket_ms` 架构及 `liquidation_notional_1h_usdt` 与 `total_liquidation_notional_1h_usdt` 字段。
 * **API 授权与限频**：Coinalyze 免费 API 限制为 **40 requests/min**，历史回溯深度约 **1500-2000 points**。对于 1h 粒度，1500 个数据点相当于 **1500 小时（约 62.5 天）**，能够完美覆盖并满足策略 **720h+** 历史深度审计的需求，无需任何付费订阅（`requires_paid_plan = false`）。
 * **接口参数锁定**：`from / to` 参数已在 fetch 适配器中锁定为以秒为单位发送，且固定参数 `convert_to_usd=true`。
+* **请求审计字段已落盘**：Route B summary / feasibility 已写入 `request_count`、`requested_symbols`、`interval`、`from_ts_sec`、`to_ts_sec`，后续可直接区分是凭证缺失、请求窗口错误、还是 symbol 选择错误。
 
 ---
 
@@ -23,12 +24,13 @@
 * **观察币种**：5 个 (`BTC/USDT`, `ETH/USDT`, `SOL/USDT`, `XRP/USDT`, `DOGE/USDT`)。
 * **Route B 实际强平数据导入 (Route B Joined Rows)**：0 行（降级导致）。
 * **与自采 Route A 重叠小时数 (Route AB Overlap)**：0 小时。
+* **本次 Route B 请求审计**：`request_count = 5`，`interval = 1hour`，`lookback = 1500h`，`route_b_status = no_api_key`。
 
 ---
 
 ## 4. Route A / B / C 路线状态
 根据本次运行生成的 `2026-05-29_liquidation_cascade_data_source_comparison.json` 结果：
-* **Route A (自采)**：`available = false`，`joined_count = 0`，`quality = not_connected`（本次回放未加载自采 forceOrder 缓存）。
+* **Route A (自采)**：`available = false`，`joined_count = 0`，`quality = not_connected`（本地 `data/trend_regime_liquidation_hourly.jsonl` 当前为空，因而没有可接入的 forceOrder 小时级历史）。
 * **Route B (第三方历史)**：`available = false`，`joined_count = 0`，`vendor = coinalyze`，`route_b_status = no_api_key`。
 * **Route C (混合)**：`available = false`，`overlap_symbol_hour_count = 0`。
 
@@ -60,7 +62,11 @@
 ## 8. 下一步路线建议
 1. **配置环境变量**：用户在本地终端中运行 `export COINALYZE_API_KEY=your_free_key_here`。
 2. **下载离线数据**：运行 `python scripts/fetch_third_party_liquidation_history.py` 脚本，将数据保存至本地。
-3. **重跑审计**：在 `scripts/review_trend_liquidation_cascade.py` 中传入 `--third-party-hourly-input data/trend_regime_liquidation_hourly_third_party.jsonl` 以开启真实的 Route B 审计回放，观察交易次数与期望 PnL。
+3. **补齐 Route A 档案**：如需重新判断 Route C，需先让 `data/trend_regime_liquidation_hourly.jsonl` 不再为空，否则 Route A 会继续保持 `not_connected`。
+4. **重跑审计**：在 `scripts/review_trend_liquidation_cascade.py` 中同时传入：
+   * `--forceorder-hourly-input data/trend_regime_liquidation_hourly.jsonl`
+   * `--third-party-hourly-input data/trend_regime_liquidation_hourly_third_party.jsonl`
+   这样才能真实评估 Route A / B / C 三者的 joined_count 与 overlap。
 
 ---
 
@@ -68,4 +74,4 @@
 本次审查执行的最终结论为：**`route_b_unavailable_no_key`**。
 
 ### 决策依据
-由于未配置 `COINALYZE_API_KEY`，Route B 接口返回降级为空。适配器在工程上已完工并通过 100% 契约测试，只要提供 API 密钥即可完成向 `route_b_available` 状态的迁移与策略验证。
+由于未配置 `COINALYZE_API_KEY`，Route B 接口返回降级为空；同时本地 Route A 小时级档案当前也为空，因此本轮仍不能对 Route C 做真实 overlap 验证。适配器与 route summary 审计字段在工程上已完工并通过契约测试，下一步阻塞点已经收敛为：`API key + 非空 Route A 小时级档案`。
