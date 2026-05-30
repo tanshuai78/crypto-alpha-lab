@@ -1,11 +1,9 @@
-import pytest
 from typing import Any
 
 from scripts.review_trend_liquidation_cascade import (
+    build_cascade_shadow_summary,
     build_data_source_comparison,
     build_route_decision_snapshot,
-    build_cascade_audit_summary,
-    build_cascade_shadow_summary,
     run_cascade_sensitivity,
 )
 from src.research.trend_liquidation_cascade_review import (
@@ -105,6 +103,7 @@ def test_route_b_joined_rows_take_precedence_over_missing_env_key():
 
 def test_review_uses_route_b_hourly_history_when_provided(tmp_path):
     import json
+
     from scripts.review_trend_liquidation_cascade import main
 
     rows_file = tmp_path / "rows.jsonl"
@@ -261,6 +260,7 @@ def test_shadow_outputs_continuation_and_mean_reversion_separately():
 
 def test_review_route_b_only_keeps_route_a_unavailable_and_route_b_metadata(tmp_path, monkeypatch):
     import json
+
     from scripts.review_trend_liquidation_cascade import main
 
     rows_file = tmp_path / "rows.jsonl"

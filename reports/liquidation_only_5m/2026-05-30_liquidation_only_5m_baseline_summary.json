@@ -1,0 +1,190 @@
+{
+  "vendor": "coinalyze",
+  "interval": "5min",
+  "data_span_days": 10.0,
+  "total_event_count": 54,
+  "events_per_30d": 162.0,
+  "symbol_counts": {
+    "BTC/USDT": 11,
+    "DOGE/USDT": 9,
+    "ETH/USDT": 12,
+    "SOL/USDT": 9,
+    "XRP/USDT": 13
+  },
+  "max_single_symbol_event_share": 0.241,
+  "aggregates": {
+    "1": {
+      "continuation": {
+        "event_count": 54,
+        "mean_gross_bps": -2.751361815692976,
+        "median_gross_bps": -0.28728643927888875,
+        "worst_gross_bps": -77.75857812885923,
+        "gross_win_rate": 0.46296296296296297,
+        "mean_cost_adjusted_bps": -18.75136181569298,
+        "median_cost_adjusted_bps": -16.287286439278887,
+        "worst_cost_adjusted_bps": -93.75857812885923,
+        "cost_adjusted_win_rate": 0.2222222222222222,
+        "mean_close_to_close_gross_bps": -2.702999135508713,
+        "median_close_to_close_gross_bps": -0.28728643927888875,
+        "worst_close_to_close_gross_bps": -76.51487103542021,
+        "close_to_close_gross_win_rate": 0.46296296296296297,
+        "mean_close_to_close_cost_adjusted_bps": -18.702999135508716,
+        "median_close_to_close_cost_adjusted_bps": -16.287286439278887,
+        "worst_close_to_close_cost_adjusted_bps": -92.51487103542021,
+        "close_to_close_cost_adjusted_win_rate": 0.2222222222222222,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      },
+      "mean_reversion": {
+        "event_count": 54,
+        "mean_gross_bps": 2.751361815692976,
+        "median_gross_bps": 0.28728643927888875,
+        "worst_gross_bps": -88.41393096025274,
+        "gross_win_rate": 0.5,
+        "mean_cost_adjusted_bps": -13.24863818430702,
+        "median_cost_adjusted_bps": -15.712713560721111,
+        "worst_cost_adjusted_bps": -104.41393096025274,
+        "cost_adjusted_win_rate": 0.2222222222222222,
+        "mean_close_to_close_gross_bps": 2.702999135508713,
+        "median_close_to_close_gross_bps": 0.28728643927888875,
+        "worst_close_to_close_gross_bps": -89.17589175891804,
+        "close_to_close_gross_win_rate": 0.5,
+        "mean_close_to_close_cost_adjusted_bps": -13.297000864491284,
+        "median_close_to_close_cost_adjusted_bps": -15.712713560721111,
+        "worst_close_to_close_cost_adjusted_bps": -105.17589175891804,
+        "close_to_close_cost_adjusted_win_rate": 0.2222222222222222,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      }
+    },
+    "2": {
+      "continuation": {
+        "event_count": 54,
+        "mean_gross_bps": 0.2713941977805296,
+        "median_gross_bps": 3.074998338752355,
+        "worst_gross_bps": -129.46979038224393,
+        "gross_win_rate": 0.5555555555555556,
+        "mean_cost_adjusted_bps": -15.728605802219473,
+        "median_cost_adjusted_bps": -12.925001661247645,
+        "worst_cost_adjusted_bps": -145.46979038224393,
+        "cost_adjusted_win_rate": 0.24074074074074073,
+        "mean_close_to_close_gross_bps": 0.31940602715870886,
+        "median_close_to_close_gross_bps": 3.218925927930827,
+        "worst_close_to_close_gross_bps": -129.46979038224393,
+        "close_to_close_gross_win_rate": 0.5555555555555556,
+        "mean_close_to_close_cost_adjusted_bps": -15.68059397284129,
+        "median_close_to_close_cost_adjusted_bps": -12.781074072069174,
+        "worst_close_to_close_cost_adjusted_bps": -145.46979038224393,
+        "close_to_close_cost_adjusted_win_rate": 0.24074074074074073,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      },
+      "mean_reversion": {
+        "event_count": 54,
+        "mean_gross_bps": -0.2713941977805296,
+        "median_gross_bps": -3.074998338752355,
+        "worst_gross_bps": -75.53921081403514,
+        "gross_win_rate": 0.4444444444444444,
+        "mean_cost_adjusted_bps": -16.271394197780527,
+        "median_cost_adjusted_bps": -19.074998338752355,
+        "worst_cost_adjusted_bps": -91.53921081403514,
+        "cost_adjusted_win_rate": 0.2222222222222222,
+        "mean_close_to_close_gross_bps": -0.31940602715870886,
+        "median_close_to_close_gross_bps": -3.218925927930827,
+        "worst_close_to_close_gross_bps": -75.53921081403514,
+        "close_to_close_gross_win_rate": 0.42592592592592593,
+        "mean_close_to_close_cost_adjusted_bps": -16.31940602715871,
+        "median_close_to_close_cost_adjusted_bps": -19.218925927930826,
+        "worst_close_to_close_cost_adjusted_bps": -91.53921081403514,
+        "close_to_close_cost_adjusted_win_rate": 0.2222222222222222,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      }
+    },
+    "3": {
+      "continuation": {
+        "event_count": 54,
+        "mean_gross_bps": 0.2676486514050874,
+        "median_gross_bps": 2.827786287525891,
+        "worst_gross_bps": -84.25811755034873,
+        "gross_win_rate": 0.5,
+        "mean_cost_adjusted_bps": -15.732351348594916,
+        "median_cost_adjusted_bps": -13.172213712474107,
+        "worst_cost_adjusted_bps": -100.25811755034873,
+        "cost_adjusted_win_rate": 0.3333333333333333,
+        "mean_close_to_close_gross_bps": 0.3154053983544448,
+        "median_close_to_close_gross_bps": 2.8346123357203545,
+        "worst_close_to_close_gross_bps": -84.25811755034873,
+        "close_to_close_gross_win_rate": 0.5,
+        "mean_close_to_close_cost_adjusted_bps": -15.684594601645552,
+        "median_close_to_close_cost_adjusted_bps": -13.165387664279645,
+        "worst_close_to_close_cost_adjusted_bps": -100.25811755034873,
+        "close_to_close_cost_adjusted_win_rate": 0.3333333333333333,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      },
+      "mean_reversion": {
+        "event_count": 54,
+        "mean_gross_bps": -0.2676486514050874,
+        "median_gross_bps": -2.827786287525891,
+        "worst_gross_bps": -91.4891981240873,
+        "gross_win_rate": 0.5,
+        "mean_cost_adjusted_bps": -16.267648651405093,
+        "median_cost_adjusted_bps": -18.827786287525893,
+        "worst_cost_adjusted_bps": -107.4891981240873,
+        "cost_adjusted_win_rate": 0.2962962962962963,
+        "mean_close_to_close_gross_bps": -0.3154053983544448,
+        "median_close_to_close_gross_bps": -2.8346123357203545,
+        "worst_close_to_close_gross_bps": -92.25092250922495,
+        "close_to_close_gross_win_rate": 0.5,
+        "mean_close_to_close_cost_adjusted_bps": -16.315405398354446,
+        "median_close_to_close_cost_adjusted_bps": -18.834612335720355,
+        "worst_close_to_close_cost_adjusted_bps": -108.25092250922495,
+        "close_to_close_cost_adjusted_win_rate": 0.2962962962962963,
+        "event_share_per_symbol": {
+          "BTC/USDT": 0.2037037037037037,
+          "DOGE/USDT": 0.16666666666666666,
+          "ETH/USDT": 0.2222222222222222,
+          "SOL/USDT": 0.16666666666666666,
+          "XRP/USDT": 0.24074074074074073
+        }
+      }
+    }
+  },
+  "period_consistency": {
+    "split_timestamp_ms": 1779938100000,
+    "best_hypothesis": "mean_reversion",
+    "first_half_median_cost_adjusted_bps": -20.941199723293987,
+    "second_half_median_cost_adjusted_bps": -4.708684048450692,
+    "consistent_sign": true
+  },
+  "decision": "retire_liquidation_only_5m_baseline",
+  "decision_reasons": [
+    "No hypothesis passed all performance gates on a cost-adjusted basis. Hypothesis continuation failed performance gates across horizons (passed only on []); Hypothesis mean_reversion failed performance gates across horizons (passed only on [])"
+  ]
+}

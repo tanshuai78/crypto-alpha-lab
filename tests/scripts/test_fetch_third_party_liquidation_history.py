@@ -1,7 +1,5 @@
 import os
 from unittest.mock import patch
-from typing import Any
-import pytest
 
 from scripts.fetch_third_party_liquidation_history import (
     fetch_historical_liquidations,
@@ -30,8 +28,8 @@ def test_missing_coinalyze_api_key_degrades_gracefully():
 
 @patch("urllib.request.urlopen")
 def test_fetch_uses_seconds_timestamps_and_convert_to_usd_true(mock_urlopen):
-    import urllib.parse
     import io
+    import urllib.parse
 
     # Mock return value of urlopen
     mock_response = io.BytesIO(b"[]")
@@ -61,7 +59,7 @@ def test_fetch_uses_seconds_timestamps_and_convert_to_usd_true(mock_urlopen):
     assert query_params["to"][0] == "1716803600"
     assert query_params["interval"][0] == "1hour"
     assert query_params["convert_to_usd"][0] == "true"
-    
+
     if "api_key" in query_params:
         assert query_params["api_key"][0] == "test_key"
     else:
@@ -164,7 +162,7 @@ def test_symbol_to_coinalyze_contract_maps_watchlist_symbols_with_audited_source
 
 def test_build_route_b_hourly_summary_reports_symbol_and_time_coverage():
     from scripts.fetch_third_party_liquidation_history import build_route_b_hourly_summary
-    
+
     rows = [
         {"symbol": "BTC/USDT", "hour_bucket_ms": 1716800000000, "total_liquidation_notional_1h_usdt": 100},
         {"symbol": "BTC/USDT", "hour_bucket_ms": 1716803600000, "total_liquidation_notional_1h_usdt": 200},
@@ -205,13 +203,14 @@ def test_build_route_b_hourly_summary_includes_request_audit_fields():
 
 
 def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(tmp_path):
-    from scripts.fetch_third_party_liquidation_history import main
     import json
-    
+
+    from scripts.fetch_third_party_liquidation_history import main
+
     output_jsonl = tmp_path / "output.jsonl"
     summary_output = tmp_path / "summary.json"
     feasibility_output = tmp_path / "feasibility.json"
-    
+
     def mock_fetch(symbol, from_ts_sec, to_ts_sec, interval="1hour", api_key=None):
         if symbol == "BTC/USDT":
             return [{
@@ -235,17 +234,17 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
                 "--summary-output", str(summary_output),
                 "--feasibility-output", str(feasibility_output),
             ]
-            
+
             exit_code = main(argv)
             assert exit_code == 0
-        
+
     assert output_jsonl.exists()
     assert summary_output.exists()
     assert feasibility_output.exists()
-    
+
     with open(summary_output, "r") as f:
         summary_data = json.load(f)
-        
+
     assert summary_data["vendor"] == "coinalyze"
     assert summary_data["route_b_status"] == "api_ok_non_empty_rows"
     assert summary_data["symbol_count"] == 2
@@ -261,7 +260,7 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
     assert summary_data["requested_symbols"] == ["BTC/USDT", "ETH/USDT"]
     assert summary_data["interval"] == "1hour"
     assert summary_data["from_ts_sec"] < summary_data["to_ts_sec"]
-    
+
     with open(feasibility_output, "r") as f:
         feasibility_data = json.load(f)
     assert "vendor_candidates" in feasibility_data
@@ -269,10 +268,10 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
     assert feasibility_data["requested_symbols"] == ["BTC/USDT", "ETH/USDT"]
     assert feasibility_data["interval"] == "1hour"
     assert feasibility_data["from_ts_sec"] < feasibility_data["to_ts_sec"]
-    
+
     with open(output_jsonl, "r") as f:
         jsonl_lines = [json.loads(line) for line in f if line.strip()]
-        
+
     assert len(jsonl_lines) == 2
     for row in jsonl_lines:
         assert "symbol" in row
@@ -282,15 +281,15 @@ def test_route_b_fetch_cli_aggregates_multiple_symbols_without_network_in_tests(
 
 def test_build_route_b_hourly_summary_reports_route_b_status():
     from scripts.fetch_third_party_liquidation_history import build_route_b_hourly_summary
-    
+
     with patch.dict(os.environ, {}, clear=True):
         summary = build_route_b_hourly_summary([])
         assert summary["route_b_status"] == "no_api_key"
-        
+
     with patch.dict(os.environ, {"COINALYZE_API_KEY": "test_key"}):
         summary = build_route_b_hourly_summary([])
         assert summary["route_b_status"] == "api_ok_empty_rows"
-        
+
         summary_with_rows = build_route_b_hourly_summary([{"symbol": "BTC/USDT", "hour_bucket_ms": 1716800000000}])
         assert summary_with_rows["route_b_status"] == "api_ok_non_empty_rows"
 
