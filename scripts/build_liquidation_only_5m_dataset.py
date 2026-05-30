@@ -60,15 +60,63 @@ def build_aligned_dataset(
 
         joined.append(row)
 
+    # Group joined rows by symbol and sort them by bar_start_ms to compute rolling metrics
+    by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for row in joined:
+        sym = row["symbol"]
+        by_symbol.setdefault(sym, []).append(row)
+
+    lookback = 2016  # 7 days of 5m bars
+
+    for sym, sym_rows in by_symbol.items():
+        sym_rows.sort(key=lambda x: x["bar_start_ms"])
+
+        # Keep track of total liquidation values for rolling window
+        total_liq_history = []
+
+        for i, row in enumerate(sym_rows):
+            long_liq = row["long_liquidation_notional_5m_usdt"]
+            short_liq = row["short_liquidation_notional_5m_usdt"]
+            total_liq = row["total_liquidation_notional_5m_usdt"]
+
+            # Compute dominance ratio
+            total_liq_val = long_liq + short_liq
+            row["dominance_ratio"] = (
+                max(long_liq, short_liq) / total_liq_val if total_liq_val > 0 else 0.0
+            )
+
+            # Compute rolling percentile rank (excluding the current bar)
+            if i >= lookback:
+                ref_window = total_liq_history[-lookback:]
+                less_than_current = sum(1 for x in ref_window if x < total_liq)
+                score = less_than_current / lookback
+
+                row["liquidation_relative_score"] = score
+                row["liquidation_relative_method"] = "trailing_7d_percentile_rank_excluding_current"
+                row["liquidation_reference_count"] = lookback
+                row["liquidation_reference_window_ms"] = 604800000
+            else:
+                row["liquidation_relative_score"] = None
+                row["liquidation_relative_method"] = "trailing_7d_percentile_rank_excluding_current"
+                row["liquidation_reference_count"] = None
+                row["liquidation_reference_window_ms"] = 604800000
+
+            total_liq_history.append(total_liq)
+
+    # Flatten back to list
+    enriched_joined = []
+    for sym_rows in by_symbol.values():
+        enriched_joined.extend(sym_rows)
+
     audit = {
         "price_rows": len(price_rows),
         "liquidation_rows": len(liq_rows),
-        "joined_rows": len(joined),
+        "joined_rows": len(enriched_joined),
         "missing_price_bar_count": 0,
         "missing_liquidation_bar_count": missing_liq_count,
     }
 
-    return joined, audit
+    return enriched_joined, audit
 
 
 def fetch_binance_5m_klines(

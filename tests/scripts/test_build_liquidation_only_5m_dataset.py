@@ -112,3 +112,79 @@ def test_build_dataset_cli_runs(tmp_path):
     assert exit_code == 0
     assert output_jsonl.exists()
     assert summary_json.exists()
+
+
+def test_rolling_anomaly_score_computation():
+    # We construct a dataset with 2016 reference bars (all with total_liq = 0.0 except one with 10.0)
+    # plus 1 target evaluation bar (with total_liq = 100.0)
+    price_rows = []
+    liq_rows = []
+
+    # 2016 historical bars
+    base_ts = 1716800000000
+    for i in range(2016):
+        ts = base_ts + i * 300_000
+        price_rows.append(
+            {
+                "symbol": "BTC/USDT",
+                "timestamp_ms": ts,
+                "open": 60000.0,
+                "high": 60000.0,
+                "low": 60000.0,
+                "close": 60000.0,
+            }
+        )
+        # Put one non-zero liquidation in the history
+        if i == 500:
+            liq_rows.append(
+                {
+                    "symbol": "BTC/USDT",
+                    "bar_start_ms": ts,
+                    "long_liquidation_notional_5m_usdt": 10.0,
+                    "short_liquidation_notional_5m_usdt": 0.0,
+                    "total_liquidation_notional_5m_usdt": 10.0,
+                }
+            )
+
+    # Evaluation bar
+    eval_ts = base_ts + 2016 * 300_000
+    price_rows.append(
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": eval_ts,
+            "open": 60000.0,
+            "high": 60000.0,
+            "low": 60000.0,
+            "close": 60000.0,
+        }
+    )
+    liq_rows.append(
+        {
+            "symbol": "BTC/USDT",
+            "bar_start_ms": eval_ts,
+            "long_liquidation_notional_5m_usdt": 100.0,
+            "short_liquidation_notional_5m_usdt": 0.0,
+            "total_liquidation_notional_5m_usdt": 100.0,
+        }
+    )
+
+    joined, audit = build_aligned_dataset(price_rows, liq_rows)
+
+    # Check that evaluation bar has 2016 reference count and is evaluated correctly
+    eval_row = joined[-1]
+    assert eval_row["liquidation_reference_count"] == 2016
+    assert (
+        eval_row["liquidation_relative_method"] == "trailing_7d_percentile_rank_excluding_current"
+    )
+    assert eval_row["liquidation_reference_window_ms"] == 604800000
+
+    # 2015 historical bars have liq = 0.0, 1 historical bar has liq = 10.0.
+    # The evaluation bar has liq = 100.0.
+    # Number of historical values < 100.0 is 2016.
+    # Percentile rank = 2016 / 2016 = 1.0
+    assert eval_row["liquidation_relative_score"] == 1.0
+    assert eval_row["dominance_ratio"] == 1.0
+
+    # Check that early bars (e.g. first 2015 bars) have relative score/ref count as None
+    assert joined[0]["liquidation_relative_score"] is None
+    assert joined[0]["liquidation_reference_count"] is None
