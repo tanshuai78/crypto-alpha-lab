@@ -4,17 +4,17 @@
     "allowed_decisions_if_only_route_a": [
       "continue_data_route_upgrade"
     ],
-    "available": true,
-    "coverage_hours": 498.0,
+    "available": false,
+    "coverage_hours": 0.0,
     "joined_count": 0,
     "liquidation_notional_semantics": "partial_snapshot_lower_bound",
-    "quality": "self_collected_realtime_archive",
+    "quality": "not_connected",
     "source": "binance_forceorder_hourly",
-    "source_quality": "self_collected_partial_history"
+    "source_quality": "not_connected"
   },
   "route_b": {
     "available": true,
-    "coverage_hours": 0.0,
+    "coverage_hours": 1499.0,
     "joined_count": 2393,
     "quality": "historical_vendor_dataset",
     "route_b_status": "api_ok_non_empty_rows",
@@ -23,8 +23,8 @@
     "vendor": "coinalyze",
     "vendor_candidates": [
       {
-        "api_access": "available",
-        "blocker": "",
+        "api_access": "unavailable",
+        "blocker": "requires_coinalyze_api_key",
         "can_support_replay": true,
         "exchange_coverage": [
           "binance",
@@ -49,6 +49,6 @@
     "available": false,
     "definition": "route_a_and_route_b_overlap_on_symbol_hour",
     "overlap_symbol_hour_count": 0,
-    "source_quality": "hybrid_reconstructed_history"
+    "source_quality": "not_connected"
   }
 }

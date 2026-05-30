@@ -51,6 +51,7 @@ def build_data_source_comparison(
     route_a_joined_count: int = 0,
     route_b_available: bool = False,
     route_b_joined_count: int = 0,
+    route_b_coverage_hours: float = 0.0,
     route_b_status: str | None = None,
     route_b_feasibility: dict[str, Any] | None = None,
     overlap_count: int = 0,
@@ -67,9 +68,15 @@ def build_data_source_comparison(
 
     # Determine status
     if not route_b_status:
+        if route_b_joined_count > 0:
+            route_b_status = "api_ok_non_empty_rows"
         if route_b_feasibility:
             for candidate in route_b_feasibility.get("vendor_candidates", []):
-                if candidate.get("vendor") == "coinalyze" and candidate.get("route_b_status"):
+                if (
+                    not route_b_status
+                    and candidate.get("vendor") == "coinalyze"
+                    and candidate.get("route_b_status")
+                ):
                     route_b_status = candidate["route_b_status"]
                     break
         if not route_b_status:
@@ -102,7 +109,7 @@ def build_data_source_comparison(
         "vendor": "coinalyze" if route_b_available else None,
         "route_b_status": route_b_status,
         "source_quality": "historical_vendor_dataset" if route_b_available else "not_connected",
-        "coverage_hours": 0.0,
+        "coverage_hours": route_b_coverage_hours if route_b_available else 0.0,
         "vendor_candidates": vendor_candidates,
     }
 
@@ -459,9 +466,7 @@ def main(argv: list[str] | None = None) -> int:
 
     route_b_feasibility = load_feasibility_audit()
 
-    route_a_available = True if args.forceorder_hourly_input and len(hourly_a) > 0 else False
-    if not args.forceorder_hourly_input:
-        route_a_available = any(_number_or_none(r.get("liquidation_notional_1h_usdt")) is not None for r in rows)
+    route_a_available = bool(args.forceorder_hourly_input and len(hourly_a) > 0)
 
     route_b_status = None
     if route_b_feasibility and "vendor_candidates" in route_b_feasibility:
@@ -470,7 +475,9 @@ def main(argv: list[str] | None = None) -> int:
                 route_b_status = candidate["route_b_status"]
                 break
     
-    if not route_b_status:
+    if route_b_joined_count > 0:
+        route_b_status = "api_ok_non_empty_rows"
+    elif not route_b_status:
         import os
         coinalyze_api_key = os.environ.get("COINALYZE_API_KEY", "")
         if not coinalyze_api_key:
@@ -485,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         route_a_available=route_a_available,
         route_a_joined_count=route_a_joined_count,
         route_b_joined_count=route_b_joined_count,
+        route_b_coverage_hours=summary_b["liquidation_raw_duration_hours"],
         route_b_status=route_b_status,
         route_b_feasibility=route_b_feasibility,
         overlap_count=overlap_count,

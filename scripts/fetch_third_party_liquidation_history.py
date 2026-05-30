@@ -194,6 +194,7 @@ def normalize_coinalyze_payload(
             "liquidation_notional_1h_usdt": total_liq,
             "liquidation_source": "third_party_historical",
             "liquidation_source_quality": "historical_vendor_dataset",
+            "liquidation_notional_semantics": "vendor_reported_hourly_liquidation_notional",
             "vendor_name": "coinalyze",
             "vendor_granularity": "1hour",
             "normalized_granularity": "1h",

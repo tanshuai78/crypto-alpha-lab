@@ -315,6 +315,9 @@ def apply_hourly_liquidation_history(
     lookup: dict[tuple[str, int], dict[str, Any]] = {}
     bucket_values: list[int] = []
     invalid_hourly_bucket_count = 0
+    summary_source = "none"
+    summary_source_quality = "missing"
+    summary_notional_semantics = "missing"
 
     for rec in hourly_records:
         symbol = str(rec.get("symbol") or "")
@@ -326,6 +329,21 @@ def apply_hourly_liquidation_history(
         bucket = int(raw_bucket) // 3_600_000 * 3_600_000
         notional = _number_or_none(rec.get("liquidation_notional_1h_usdt"))
         if notional is not None:
+            if summary_source == "none":
+                summary_source = str(rec.get("liquidation_source") or "binance_forceorder_ws")
+                summary_source_quality = str(
+                    rec.get("source_quality")
+                    or rec.get("liquidation_source_quality")
+                    or "self_collected_partial_history"
+                )
+                summary_notional_semantics = str(
+                    rec.get("liquidation_notional_semantics")
+                    or (
+                        "vendor_reported_hourly_liquidation_notional"
+                        if str(rec.get("liquidation_source") or "") == "third_party_historical"
+                        else "partial_snapshot_lower_bound"
+                    )
+                )
             lookup[(symbol, bucket)] = rec
             bucket_values.append(bucket)
 
@@ -371,13 +389,9 @@ def apply_hourly_liquidation_history(
         "liquidation_history_input_count": len(hourly_records),
         "liquidation_rows_joined_count": joined_count,
         "invalid_hourly_bucket_count": invalid_hourly_bucket_count,
-        "liquidation_history_source": "binance_forceorder_ws" if hourly_records else "none",
-        "liquidation_history_source_quality": (
-            "self_collected_partial_history" if hourly_records else "missing"
-        ),
-        "liquidation_notional_semantics": (
-            "partial_snapshot_lower_bound" if hourly_records else "missing"
-        ),
+        "liquidation_history_source": summary_source,
+        "liquidation_history_source_quality": summary_source_quality,
+        "liquidation_notional_semantics": summary_notional_semantics,
         "liquidation_bucket_semantics": "utc_hour_floor_of_row_timestamp",
         "liquidation_raw_start_ms": start_ms,
         "liquidation_raw_end_ms": end_ms,

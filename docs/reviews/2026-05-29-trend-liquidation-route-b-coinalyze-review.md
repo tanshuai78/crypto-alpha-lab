@@ -1,77 +1,174 @@
 # Trend Liquidation Route-B Coinalyze Review Report
 
-> **范围声明**
-> 本报告仅用于对 `liquidation_cascade`（爆仓瀑布）独立子策略在 Coinalyze 适配器（Route B 数据升级路线）接通后的可行性审查与决策。由于当前会话环境暂未配置环境变量 `COINALYZE_API_KEY`，导致实际数据拉取降级为 `"no_api_key"` 状态，因此本次审计回放依然处于强平数据缺失状态，所产生的回放统计并不代表实际策略交易表现。
+> 范围说明  
+> 本报告只审查 `liquidation_cascade` 子策略在 **Route B-only** 条件下的历史可行性。  
+> Route A 当前仍处于 `route_a_old_artifact_only` 状态，因此本报告不使用 Route C overlap 作为主判断门槛。
 
 ---
 
-## 1. 范围声明
-如范围声明所述，本期工作目标为：重构 Route B 的第三方数据适配器，实现由 Coinglass 临时实现向 Coinalyze 真实 API 适配器的平滑切换，并验证其数据转换与对齐逻辑的可行性。在配置有效的 API Key 之前，系统的决策边界仍受制于数据缺失。
+## 1. 核心结论
+
+- **Route B 数据链已打通**；
+- **Route B-only replay 没有给出继续保留当前版 `liquidation_cascade` 的正证据**；
+- **当前最合理的策略结论是：`retire_liquidation_cascade_branch`**。
+
+这不是因为“拿不到 liquidation 历史数据”，而是因为：
+
+1. baseline 阈值下没有任何入场事件；
+2. 适度放宽阈值后才出现极少量事件，但成本后仍为负；
+3. 再激进放宽时事件数上升，但仍为负，且尾部更差。
 
 ---
 
-## 2. Coinalyze Route B 可行性结果
-* **适配层逻辑验证**：Coinalyze 的 Unix 时间戳秒（`t`）、做多爆仓量（`l`）和做空爆仓量（`s`）能够被完美映射并聚合（deduplicated by sum）为系统内毫秒级 `hour_bucket_ms` 架构及 `liquidation_notional_1h_usdt` 与 `total_liquidation_notional_1h_usdt` 字段。
-* **API 授权与限频**：Coinalyze 免费 API 限制为 **40 requests/min**，历史回溯深度约 **1500-2000 points**。对于 1h 粒度，1500 个数据点相当于 **1500 小时（约 62.5 天）**，能够完美覆盖并满足策略 **720h+** 历史深度审计的需求，无需任何付费订阅（`requires_paid_plan = false`）。
-* **接口参数锁定**：`from / to` 参数已在 fetch 适配器中锁定为以秒为单位发送，且固定参数 `convert_to_usd=true`。
-* **请求审计字段已落盘**：Route B summary / feasibility 已写入 `request_count`、`requested_symbols`、`interval`、`from_ts_sec`、`to_ts_sec`，后续可直接区分是凭证缺失、请求窗口错误、还是 symbol 选择错误。
+## 2. Route B Data Status
+
+本轮 Route B-only 审计使用 Coinalyze 第三方历史 liquidation 数据，结果如下：
+
+- **数据源**：`coinalyze_liquidation_history`
+- **数据状态**：`api_ok_non_empty_rows`
+- **Route B joined_count**：`2393`
+- **Route B 覆盖时长**：`1499.0h`
+- **Route A joined_count**：`0`
+- **Route C overlap**：`0`
+
+对应产物：
+
+- `reports/trend_regime/2026-05-30_liquidation_cascade_route_b_only_data_source_comparison.json`
+- `reports/trend_regime/2026-05-30_liquidation_cascade_route_b_only_viability_summary.json`
+- `reports/trend_regime/2026-05-30_liquidation_cascade_route_b_only_sensitivity.json`
+
+解释：
+
+- Route B 数据接线已经不是 blocker；
+- Route A 当前仍未形成可用 overlap，不影响本轮 Route B-only 结论；
+- 本轮的主判断只依赖 Route B historical replay。
 
 ---
 
-## 3. 历史 hourly 覆盖
-* **历史回放区间**：2026-05-08 02:59:59.999 至 2026-05-28 21:59:59.999（共 498.0 小时，即 20.75 天）。
-* **时间覆盖**：498.0 小时。
-* **观察币种**：5 个 (`BTC/USDT`, `ETH/USDT`, `SOL/USDT`, `XRP/USDT`, `DOGE/USDT`)。
-* **Route B 实际强平数据导入 (Route B Joined Rows)**：0 行（降级导致）。
-* **与自采 Route A 重叠小时数 (Route AB Overlap)**：0 小时。
-* **本次 Route B 请求审计**：`request_count = 5`，`interval = 1hour`，`lookback = 1500h`，`route_b_status = no_api_key`。
+## 3. Event Density And Reject Pattern
+
+### Baseline 结果
+
+- **input_row_count**：`2495`
+- **entry_event_count**：`0`
+- **events_per_30d**：`0.0`
+- **capital_utilization_label**：`too_sparse`
+
+### 主拦截项
+
+- `vol_breakout_below_threshold`: `2184`
+- `return_below_min`: `172`
+- `missing_liquidation_fields`: `101`
+- `oi_confirmation_below_min`: `8`
+- `volume_below_min`: `30`
+
+这说明当前定义下，`liquidation_cascade` 仍然主要被：
+
+1. 波动突破门槛
+2. 价格变动门槛
+3. OI 确认门槛
+
+拦在上游，而不是被 Route B 历史数据缺失拦住。
+
+换句话说：
+
+- **数据问题已经被基本排除**
+- **当前更像是策略定义本身不过关**
 
 ---
 
-## 4. Route A / B / C 路线状态
-根据本次运行生成的 `2026-05-29_liquidation_cascade_data_source_comparison.json` 结果：
-* **Route A (自采)**：`available = false`，`joined_count = 0`，`quality = not_connected`（本地 `data/trend_regime_liquidation_hourly.jsonl` 当前为空，因而没有可接入的 forceOrder 小时级历史）。
-* **Route B (第三方历史)**：`available = false`，`joined_count = 0`，`vendor = coinalyze`，`route_b_status = no_api_key`。
-* **Route C (混合)**：`available = false`，`overlap_symbol_hour_count = 0`。
+## 4. Continuation / Mean Reversion Replay
+
+在 baseline current 条件下：
+
+- `continuation`: 所有持有周期 `4h / 8h / 12h / 24h` 下 `entry_event_count = 0`
+- `mean_reversion`: 所有持有周期 `4h / 8h / 12h / 24h` 下 `entry_event_count = 0`
+
+因此：
+
+- baseline 没有任何可交易样本；
+- 当前无法从 baseline replay 中证明 continuation 或 mean-reversion 任一方向存在可用 edge。
 
 ---
 
-## 5. continuation / mean_reversion 事件密度
-由于无有效强平数据导入，触发的事件数量为 0。
-### 拦截 Bottleneck 分析
-在总计 2,495 行回放记录中，拒绝原因分布如下：
-* `missing_liquidation_fields`: 2,465 行 (占比 **98.8%**) —— 数据链因缺少强平数值而被直接拦截。
-* `volume_below_min`: 30 行 (占比 **1.2%**) —— DOGE 等币种 24h 交易额未达最低门槛。
+## 5. Sensitivity Result
+
+### baseline_current
+
+- `entry_event_count = 0`
+- `mean_net_pnl_bps = 0.0`
+
+### moderately_relaxed
+
+- `entry_event_count = 1`
+- `mean_net_pnl_bps = -80.8969`
+- `median_net_pnl_bps = -80.8969`
+- `win_rate = 0.0`
+
+### aggressive_relaxed
+
+- `entry_event_count = 5`
+- `mean_net_pnl_bps = -71.7107`
+- `median_net_pnl_bps = -80.8969`
+- `win_rate = 0.2`
+- `worst_trade_net_pnl_bps = -214.2846`
+- `eligible_for_redefinition = false`
+
+解释：
+
+1. baseline 根本不出事件；
+2. moderate 才勉强出 1 笔，但直接亏损；
+3. aggressive 是噪音边界诊断，不具备重定义资格，而且结果仍然为负。
+
+所以 sensitivity 给出的信号非常一致：
+
+- **不是“阈值再微调一下就能救活”**
+- 更像是 **这条策略在当前定义下本身就没有可保留性**
 
 ---
 
-## 6. 成本后 replay 结果
-由于没有触发任何交易事件，在 4h、8h、12h 和 24h 的持仓周期以及 base_cost (30 bps) / stress_cost (50 bps) 成本下，
-* **模拟交易次数**：0
-* **中位数净收益**：0.0 bps
-* **平均净收益**：0.0 bps
-* **胜率 / 止损离场率**：0.0%
+## 6. Trading Interpretation
+
+从交易逻辑上看，这条策略想做的是：
+
+1. 价格在 1 小时内已有明显方向移动；
+2. OI 出现支持性的变化；
+3. 再叠加 liquidation imbalance，判断是否继续顺势或做反转。
+
+问题在于，本轮回放已经说明：
+
+- 真正满足这三层条件的样本几乎没有；
+- 就算通过放宽阈值“挤出”样本，成本后仍然不能转正；
+- 对个人投资者而言，事件密度太低，资本利用效率非常差；
+- 对研究流程而言，再继续堆数据工程已经不是当前主矛盾。
 
 ---
 
-## 7. 个人投资者视角评价
-对个人投资者而言，Coinalyze 的免费 API 是一个极具性价比的数据源路线。它打破了 Coinglass 付费 API （最低 $29/月）的硬性资金门槛，允许开发者直接用免费 Key 在本地重构长达 60 天以上的高频强平数据库。在工程上，利用 stdlib HTTP 请求与适配器结合，我们已为实盘和回放做好了零成本的接线准备。
+## 7. Final Decision
+
+本轮 Route B-only 审计建议的最终决策为：
+
+- **`retire_liquidation_cascade_branch`**
+
+原因：
+
+1. Route B 历史数据已接通，不再能把问题归因于“缺少 liquidation 数据”；
+2. baseline 没有事件；
+3. moderate / aggressive 放宽后仍为负；
+4. 事件密度与资本利用效率都不支持继续投入。
 
 ---
 
-## 8. 下一步路线建议
-1. **配置环境变量**：用户在本地终端中运行 `export COINALYZE_API_KEY=your_free_key_here`。
-2. **下载离线数据**：运行 `python scripts/fetch_third_party_liquidation_history.py` 脚本，将数据保存至本地。
-3. **补齐 Route A 档案**：如需重新判断 Route C，需先让 `data/trend_regime_liquidation_hourly.jsonl` 不再为空，否则 Route A 会继续保持 `not_connected`。
-4. **重跑审计**：在 `scripts/review_trend_liquidation_cascade.py` 中同时传入：
-   * `--forceorder-hourly-input data/trend_regime_liquidation_hourly.jsonl`
-   * `--third-party-hourly-input data/trend_regime_liquidation_hourly_third_party.jsonl`
-   这样才能真实评估 Route A / B / C 三者的 joined_count 与 overlap。
+## 8. Recommended Next Step
 
----
+当前最稳的下一步不是继续磨这条策略，而是二选一：
 
-## 9. 最终结论
-本次审查执行的最终结论为：**`route_b_unavailable_no_key`**。
+1. 归档 `liquidation_cascade`，停止作为候选策略推进；
+2. 如果仍想研究 liquidation 主题，则另起一条 **全新策略定义**，例如：
+   - 更短周期；
+   - 更纯粹的 liquidation-only signal；
+   - 不再绑定当前这套 1h trend/return/OI 门槛结构。
 
-### 决策依据
-由于未配置 `COINALYZE_API_KEY`，Route B 接口返回降级为空；同时本地 Route A 小时级档案当前也为空，因此本轮仍不能对 Route C 做真实 overlap 验证。适配器与 route summary 审计字段在工程上已完工并通过契约测试，下一步阻塞点已经收敛为：`API key + 非空 Route A 小时级档案`。
+本报告建议优先选择：
+
+- **归档当前版 `liquidation_cascade`**

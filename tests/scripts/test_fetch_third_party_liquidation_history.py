@@ -88,6 +88,7 @@ def test_normalize_coinalyze_payload_maps_l_and_s_to_hourly_schema():
     assert row["liquidation_notional_1h_usdt"] == 900000.0
     assert row["liquidation_source"] == "third_party_historical"
     assert row["liquidation_source_quality"] == "historical_vendor_dataset"
+    assert row["liquidation_notional_semantics"] == "vendor_reported_hourly_liquidation_notional"
     assert row["vendor_name"] == "coinalyze"
     assert row["vendor_granularity"] == "1hour"
     assert row["normalized_granularity"] == "1h"

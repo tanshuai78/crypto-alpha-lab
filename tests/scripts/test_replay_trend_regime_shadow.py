@@ -378,3 +378,32 @@ def test_apply_hourly_liquidation_history_skips_invalid_hourly_bucket():
     assert summary["invalid_hourly_bucket_count"] == 1
     assert summary["liquidation_rows_joined_count"] == 0
     assert "liquidation_notional_1h_usdt" not in patched[0]
+
+
+def test_apply_hourly_liquidation_history_summary_uses_hourly_record_metadata():
+    from scripts.replay_trend_regime_shadow import apply_hourly_liquidation_history
+
+    rows = [
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": 1716851100000,
+        }
+    ]
+    hourly = [
+        {
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 1716850800000,
+            "liquidation_notional_1h_usdt": 34000.0,
+            "long_liquidation_notional_1h_usdt": 1000.0,
+            "short_liquidation_notional_1h_usdt": 33000.0,
+            "liquidation_source": "third_party_historical",
+            "liquidation_source_quality": "historical_vendor_dataset",
+            "liquidation_notional_semantics": "vendor_reported_hourly_liquidation_notional",
+        }
+    ]
+
+    _, summary = apply_hourly_liquidation_history(rows, hourly)
+
+    assert summary["liquidation_history_source"] == "third_party_historical"
+    assert summary["liquidation_history_source_quality"] == "historical_vendor_dataset"
+    assert summary["liquidation_notional_semantics"] == "vendor_reported_hourly_liquidation_notional"

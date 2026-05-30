@@ -90,6 +90,19 @@ def test_route_a_short_partial_coverage_cannot_retire_strategy():
     assert decision == "route_b_unavailable_no_key"
 
 
+def test_route_b_joined_rows_take_precedence_over_missing_env_key():
+    comparison = build_data_source_comparison(
+        coverage_hours=498.0,
+        route_a_available=False,
+        route_b_joined_count=2393,
+        route_b_coverage_hours=1499.0,
+    )
+    decision = build_route_decision_snapshot(comparison, overlap_count=0, replay_median_net_pnl=0.0)
+    assert comparison["route_b"]["available"] is True
+    assert comparison["route_b"]["route_b_status"] == "api_ok_non_empty_rows"
+    assert decision == "route_b_available_but_no_overlap"
+
+
 def test_review_uses_route_b_hourly_history_when_provided(tmp_path):
     import json
     from scripts.review_trend_liquidation_cascade import main
@@ -146,7 +159,8 @@ def test_data_source_comparison_marks_route_b_available_when_hourly_rows_exist()
     comparison = build_data_source_comparison(
         coverage_hours=50.0,
         route_b_joined_count=10,
-        route_b_status="api_ok_non_empty_rows"
+        route_b_status="api_ok_non_empty_rows",
+        route_b_coverage_hours=1499.0,
     )
     route_b = comparison["route_b"]
     assert route_b["available"] is True
@@ -155,6 +169,7 @@ def test_data_source_comparison_marks_route_b_available_when_hourly_rows_exist()
     assert route_b["quality"] == "historical_vendor_dataset"
     assert route_b["vendor"] == "coinalyze"
     assert route_b["route_b_status"] == "api_ok_non_empty_rows"
+    assert route_b["coverage_hours"] == 1499.0
 
 
 def test_route_c_available_only_when_route_a_and_route_b_overlap_on_symbol_hour():
@@ -242,3 +257,67 @@ def test_shadow_outputs_continuation_and_mean_reversion_separately():
     # In mean reversion hypothesis: BUY pressure -> Enter SHORT -> Price goes to 101000 -> Loss
     assert rev["shadow_trade_count"] == 1
     assert rev["mean_net_pnl_bps"] < 0
+
+
+def test_review_route_b_only_keeps_route_a_unavailable_and_route_b_metadata(tmp_path, monkeypatch):
+    import json
+    from scripts.review_trend_liquidation_cascade import main
+
+    rows_file = tmp_path / "rows.jsonl"
+    row_data = _row(timestamp_ms=1710000000000, symbol="BTC/USDT", close_price=100000.0)
+    future_row = _row(timestamp_ms=1710000000000 + 3600000, symbol="BTC/USDT", close_price=101000.0)
+    with open(rows_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps(row_data) + "\n")
+        f.write(json.dumps(future_row) + "\n")
+
+    hourly_file = tmp_path / "hourly_b.jsonl"
+    with open(hourly_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 1710000000000,
+            "liquidation_notional_1h_usdt": 50000.0,
+            "long_liquidation_notional_1h_usdt": 10000.0,
+            "short_liquidation_notional_1h_usdt": 40000.0,
+            "liquidation_source": "coinalyze_liquidation_history",
+            "source_quality": "historical_vendor_dataset",
+            "liquidation_notional_semantics": "vendor_reported_hourly_liquidation_notional",
+        }) + "\n")
+        f.write(json.dumps({
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 1710000000000 + 3600000,
+            "liquidation_notional_1h_usdt": 60000.0,
+            "long_liquidation_notional_1h_usdt": 15000.0,
+            "short_liquidation_notional_1h_usdt": 45000.0,
+            "liquidation_source": "coinalyze_liquidation_history",
+            "source_quality": "historical_vendor_dataset",
+            "liquidation_notional_semantics": "vendor_reported_hourly_liquidation_notional",
+        }) + "\n")
+
+    route_out = tmp_path / "route.json"
+    summary_out = tmp_path / "summary.json"
+    sensitivity_out = tmp_path / "sensitivity.json"
+
+    argv = [
+        "--rows-input", str(rows_file),
+        "--third-party-hourly-input", str(hourly_file),
+        "--route-summary-output", str(route_out),
+        "--summary-output", str(summary_out),
+        "--sensitivity-output", str(sensitivity_out),
+    ]
+
+    monkeypatch.setenv("COINALYZE_API_KEY", "mock_key")
+    exit_code = main(argv)
+    assert exit_code == 0
+
+    with open(route_out, encoding="utf-8") as f:
+        comparison = json.load(f)
+    with open(summary_out, encoding="utf-8") as f:
+        summary = json.load(f)
+
+    assert comparison["route_a"]["available"] is False
+    assert comparison["route_a"]["joined_count"] == 0
+    assert comparison["route_b"]["available"] is True
+    assert comparison["route_b"]["coverage_hours"] == 1.0
+    assert summary["liquidation_history_join_summary"]["route_b_join_details"]["liquidation_history_source"] == "coinalyze_liquidation_history"
+    assert summary["liquidation_history_join_summary"]["route_b_join_details"]["liquidation_history_source_quality"] == "historical_vendor_dataset"
+    assert summary["liquidation_history_join_summary"]["route_b_join_details"]["liquidation_notional_semantics"] == "vendor_reported_hourly_liquidation_notional"
