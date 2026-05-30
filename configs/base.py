@@ -391,3 +391,74 @@ LIQUIDATION_ONLY_5M_ASSUMED_MIN_ROUND_TRIP_COST_BPS = 16.0
 # Assumed minimum execution friction in bps (taker entries, commissions, slippage).
 # Used to adjust gross forward returns for viability screening.
 
+
+# ─── Strategy: Liquidation Shock 1m Event Study ──────────────────────────────
+
+LIQUIDATION_SHOCK_1M_MAJOR_ABS_THRESHOLD_USDT = 50_000.0
+# Minimum absolute liquidation notional for majors (BTC/ETH).
+# Excludes smaller signals that act as transient noise.
+
+LIQUIDATION_SHOCK_1M_ALT_ABS_THRESHOLD_USDT = 10_000.0
+# Minimum absolute liquidation notional for large alts (SOL/XRP/DOGE).
+# Set lower due to smaller book size and lower average event notional.
+
+LIQUIDATION_SHOCK_1M_RELATIVE_SCORE_THRESHOLD = 0.99
+# Percentile threshold against the rolling distribution.
+# 0.99 = Top 1% of liquidation events in the lookback window.
+
+LIQUIDATION_SHOCK_1M_LOOKBACK_HOURS = 24
+# Trailing window size in hours for relative percentile shock scoring.
+
+LIQUIDATION_SHOCK_1M_REQUIRED_REFERENCE_BARS = 1440
+# Minimum number of 1m bars required in lookback window to calculate scores.
+
+LIQUIDATION_SHOCK_1M_DOMINANCE_RATIO_MIN = 0.70
+# Minimum dominance ratio of the dominant liquidation direction.
+# Dominance = max(long_liq, short_liq) / (long_liq + short_liq).
+
+LIQUIDATION_SHOCK_1M_DEDUP_BUCKET_MINUTES = 5
+# Deduplication window size in minutes to group events.
+
+LIQUIDATION_SHOCK_RESPONSE_HORIZONS_MINUTES = (5, 10, 15)
+# Response observation horizons in minutes (evaluated exits at M+5, M+10, M+15).
+
+LIQUIDATION_SHOCK_DIRECTION_MIN_MOVE_BPS = 10.0
+# Minimum return in bps to classify price response as directional (up or down).
+
+LIQUIDATION_SHOCK_FEASIBILITY_MIN_COVERAGE_RATIO = 0.80
+# Minimum required coverage ratio of data span for feasibility check.
+
+LIQUIDATION_SHOCK_FEASIBILITY_MAX_GAP_MINUTES = 180
+# Maximum allowed gap between returned liquidation event minutes.
+
+LIQUIDATION_SHOCK_FEASIBILITY_MIN_EVAL_HOURS = 24.0
+# Minimum evaluation hours required after lookback window.
+
+LIQUIDATION_SHOCK_MIN_TOTAL_EVENTS = 10
+# Minimum total events across all symbols to qualify the event study.
+
+LIQUIDATION_SHOCK_MIN_EVENTS_PER_24H = 1.0
+# Minimum normalized average events per 24 hours.
+
+LIQUIDATION_SHOCK_MIN_POSITIVE_SYMBOL_COUNT = 2
+# Minimum number of symbols that must have at least LIQUIDATION_SHOCK_MIN_SYMBOL_EVENTS.
+
+LIQUIDATION_SHOCK_MAX_SINGLE_SYMBOL_EVENT_SHARE = 0.70
+# Maximum fraction of total events contributed by a single symbol.
+
+LIQUIDATION_SHOCK_MIN_DIRECTIONAL_BIAS = 0.55
+# Minimum directional ratio (e.g. 55%) to indicate non-random edge.
+
+LIQUIDATION_SHOCK_MIN_MINMOVE_DIRECTIONAL_BIAS = 0.55
+# Minimum directional ratio under the minimum move filter.
+
+LIQUIDATION_SHOCK_MIN_ADJACENT_HORIZON_PASS_COUNT = 2
+# Minimum number of adjacent horizons passing directional bias checks.
+
+LIQUIDATION_SHOCK_MIN_SYMBOL_EVENTS = 2
+# Minimum number of events required for a single symbol to be included.
+
+LIQUIDATION_SHOCK_MIN_ABS_MEDIAN_RESPONSE_BPS = 2.0
+# Minimum absolute median return in bps to be economically non-trivial.
+
+
