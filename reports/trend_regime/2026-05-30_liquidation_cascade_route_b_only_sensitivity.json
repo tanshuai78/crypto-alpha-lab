@@ -1,0 +1,38 @@
+[
+  {
+    "assumption_level": "current_live_baseline",
+    "eligible_for_redefinition": true,
+    "entry_event_count": 0,
+    "mean_net_pnl_bps": 0.0,
+    "median_net_pnl_bps": 0.0,
+    "shadow_trade_count": 0,
+    "stop_loss_exit_rate": 0.0,
+    "threshold_set_name": "baseline_current",
+    "win_rate": 0.0,
+    "worst_trade_net_pnl_bps": 0.0
+  },
+  {
+    "assumption_level": "candidate_redefinition_boundary",
+    "eligible_for_redefinition": true,
+    "entry_event_count": 1,
+    "mean_net_pnl_bps": -80.8968877576,
+    "median_net_pnl_bps": -80.8968877576,
+    "shadow_trade_count": 1,
+    "stop_loss_exit_rate": 0.0,
+    "threshold_set_name": "moderately_relaxed",
+    "win_rate": 0.0,
+    "worst_trade_net_pnl_bps": -80.8968877576
+  },
+  {
+    "assumption_level": "diagnostic_noise_boundary",
+    "eligible_for_redefinition": false,
+    "entry_event_count": 5,
+    "mean_net_pnl_bps": -71.7106667706,
+    "median_net_pnl_bps": -80.8968877576,
+    "shadow_trade_count": 5,
+    "stop_loss_exit_rate": 0.2,
+    "threshold_set_name": "aggressive_relaxed",
+    "win_rate": 0.2,
+    "worst_trade_net_pnl_bps": -214.2846065673
+  }
+]

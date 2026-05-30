@@ -106,3 +106,113 @@ tail -n 5 /root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl
   1. 将当前加固后的代码部署至测试环境。
   2. 执行上述 **Server Reset** 复位流程清除历史残留。
   3. 待新数据流入后，观察并确认没有 `2024` 残留及分钟级非整点对齐现象。
+
+---
+
+## 6. Post-Restart Validation Status (重启后的即时验证状态)
+
+在 2026-05-30 的服务器重启与旧文件 rotate 完成后，服务器出现如下状态：
+
+- `data/trend_regime_force_orders_raw.jsonl` 未生成或仍为空；
+- `data/trend_regime_liquidation_hourly.jsonl` 未生成或仍为空；
+- `trend-forceorder` 日志持续表现为 `messages=0 accepted=0 symbols_with_liq=0`；
+- 旧的 `2024-05-27T23:20:00Z` 小时级脏记录未重新出现。
+
+这组现象的正确解释是：
+
+- **这不代表修复失败**；
+- **这代表 Route A 已处于干净重置后的“无新事件”状态**；
+- 当前尚未出现新的 Binance `forceOrder` 事件，因此新 raw / hourly 文件没有重新长出。
+
+换句话说，重启后的即时结论应表述为：
+
+- **部署已生效**
+- **旧脏 artifact 已隔离**
+- **collector live 路径仍等待第一条真实事件做最终闭环验证**
+
+---
+
+## 7. Immediate Post-Restart Checks (重启后立即巡检命令)
+
+完成容器重建后，先执行以下命令确认 Route A 已在干净状态运行：
+
+```bash
+cd /root/crypto-alpha-lab
+
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | egrep "trend-(forceorder|watchlist)"
+docker logs --tail 30 trend-forceorder
+ls -lh data/trend_regime_liquidation_cache.json
+ls -lh data/trend_regime_force_orders_raw.jsonl data/trend_regime_liquidation_hourly.jsonl 2>/dev/null || echo "route_a_files_not_created_yet"
+```
+
+正确解读：
+
+- 如果 `trend-forceorder`、`trend-watchlist` 都为 `Up`，说明容器已正常恢复；
+- 如果 `trend_regime_liquidation_cache.json` 已生成，说明 collector 已运行；
+- 如果 raw / hourly 文件尚未创建，或创建后仍为空，说明当前只是 **没有新 forceOrder 事件**，不是代码回退或修复失效。
+
+建议后续巡检使用最短命令：
+
+```bash
+cd /root/crypto-alpha-lab
+
+docker logs --tail 30 trend-forceorder
+ls -lh data/trend_regime_force_orders_raw.jsonl 2>/dev/null || echo "raw_not_created"
+wc -l data/trend_regime_force_orders_raw.jsonl 2>/dev/null || echo "raw=0"
+```
+
+---
+
+## 8. First-Event Acceptance Procedure (第一条新事件后的验收步骤)
+
+一旦 `data/trend_regime_force_orders_raw.jsonl` 出现第一条新记录，立刻执行下面的最小验收流程：
+
+```bash
+cd /root/crypto-alpha-lab
+
+wc -l data/trend_regime_force_orders_raw.jsonl
+tail -n 3 data/trend_regime_force_orders_raw.jsonl
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime_force_orders_raw.jsonl \
+  --output data/trend_regime_liquidation_hourly.jsonl
+
+wc -l data/trend_regime_liquidation_hourly.jsonl
+tail -n 5 data/trend_regime_liquidation_hourly.jsonl
+```
+
+通过标准：
+
+1. 新 raw 行中的事件时间应落在当前 2026 采集窗口内，而不是再次出现 2024；
+2. 新 hourly 文件中的 `hour_bucket_ms` 必须对应 UTC 整点小时；
+3. 不得再次出现 `:20:00` 这类分钟级非整点 bucket；
+4. 若新 hourly 文件正常生成，则可将 Route A 状态从 `route_a_old_artifact_only` 升级为：
+   - `route_a_current_code_clean_waiting_for_events`
+   - 或 `route_a_raw_timestamp_clean_aggregator_fixed`
+   具体取决于 snapshot 审计字段结果。
+
+---
+
+## 9. Handoff To Route B Mainline (切换回 Route B 主线)
+
+当前主线决策应当明确为：
+
+- **Route A**：继续后台监听，作为未来 cross-check 与 Route C overlap 的辅助来源；
+- **Route B**：作为当前 liquidation_cascade 研究主线继续推进；
+- **Route C**：在 Route A 尚无新样本前，不再作为主线阻塞条件。
+
+原因：
+
+1. Route A 当前受制于事件驱动特性，何时出现第一条新 `forceOrder` 无法由工程节奏控制；
+2. Route B 已成功拉取并 join：
+   - 约 `1499h` 历史覆盖；
+   - `7162` 行第三方 liquidation 小时级数据；
+   - `2393` 行成功 joined historical rows；
+3. 因此 liquidation_cascade 的下一阶段分析应基于 **Route B-only** 继续推进，而不是继续等待 Route A live overlap。
+
+对外部操作的具体建议：
+
+1. 保持 `trend-forceorder` 容器继续运行；
+2. 每隔数小时巡检一次 raw 行数；
+3. 研究主线转入 Route B-only replay / review；
+4. 待 Route A 出现新样本后，再回头执行 Route C overlap 验证。
