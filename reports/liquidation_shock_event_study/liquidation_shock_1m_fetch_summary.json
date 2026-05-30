@@ -1,0 +1,39 @@
+{
+  "vendor": "coinalyze",
+  "fetch_status": "api_ok_non_empty_rows",
+  "symbol_count": 5,
+  "symbols": [
+    "BTC/USDT",
+    "DOGE/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT"
+  ],
+  "request_count": 5,
+  "requested_symbols": [
+    "BTC/USDT",
+    "DOGE/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT"
+  ],
+  "interval": "1min",
+  "from_ts_sec": 1779883917,
+  "to_ts_sec": 1780143117,
+  "row_count": 3836,
+  "start_timestamp_ms": 1779884160000,
+  "end_timestamp_ms": 1780142700000,
+  "time_span_hours": 71,
+  "rows_per_symbol": {
+    "BTC/USDT": 1065,
+    "ETH/USDT": 1160,
+    "SOL/USDT": 636,
+    "XRP/USDT": 599,
+    "DOGE/USDT": 376
+  },
+  "coverage_quality": "historical_vendor_dataset",
+  "deduplicated_rows_count": 3836,
+  "convert_to_usd": true,
+  "vendor_granularity": "1min",
+  "normalized_granularity": "1m"
+}

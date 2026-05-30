@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from configs.base import (
-    LIQUIDATION_SHOCK_RESPONSE_HORIZONS_MINUTES,
     LIQUIDATION_SHOCK_DIRECTION_MIN_MOVE_BPS,
+    LIQUIDATION_SHOCK_RESPONSE_HORIZONS_MINUTES,
 )
 from src.research.liquidation_shock_event_study.event_contract import (
     LiquidationShockEvent,

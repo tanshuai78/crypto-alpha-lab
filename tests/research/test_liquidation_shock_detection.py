@@ -1,8 +1,7 @@
-import pytest
 from src.research.liquidation_shock_event_study.event_contract import LiquidationShockEvent
 from src.research.liquidation_shock_event_study.shock_detection import (
-    detect_shocks,
     deduplicate_events,
+    detect_shocks,
 )
 
 
@@ -45,17 +44,19 @@ def test_detect_shocks_successful_detection():
     ]
 
     # Add shock bar
-    aligned_rows.append({
-        "symbol": "BTC/USDT",
-        "bar_start_ms": 1716800000000 + 1440 * 60000,
-        "open_price": 60000.0,
-        "high_price": 60000.0,
-        "low_price": 60000.0,
-        "close_price": 60000.0,
-        "long_liquidation_notional_1m_usdt": 60000.0,
-        "short_liquidation_notional_1m_usdt": 0.0,
-        "total_liquidation_notional_1m_usdt": 60000.0,
-    })
+    aligned_rows.append(
+        {
+            "symbol": "BTC/USDT",
+            "bar_start_ms": 1716800000000 + 1440 * 60000,
+            "open_price": 60000.0,
+            "high_price": 60000.0,
+            "low_price": 60000.0,
+            "close_price": 60000.0,
+            "long_liquidation_notional_1m_usdt": 60000.0,
+            "short_liquidation_notional_1m_usdt": 0.0,
+            "total_liquidation_notional_1m_usdt": 60000.0,
+        }
+    )
 
     events = detect_shocks(aligned_rows)
     assert len(events) == 1

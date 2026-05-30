@@ -1,7 +1,6 @@
-import pytest
 from src.research.liquidation_shock_event_study.coinalyze_1m import (
-    normalize_interval,
     normalize_coinalyze_1m_payload,
+    normalize_interval,
 )
 
 

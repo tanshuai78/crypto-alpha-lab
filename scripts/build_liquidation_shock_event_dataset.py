@@ -11,8 +11,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from src.research.liquidation_shock_event_study.shock_detection import (
-    detect_shocks,
     deduplicate_events,
+    detect_shocks,
 )
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
 
             # Pad slightly to ensure full coverage (trailing window requires 24h, forward evaluations need ~2h)
             start_fetch = min_ts - 3600_000 * 25  # 25h safety padding before
-            end_fetch = max_ts + 3600_000 * 2     # 2h safety padding after
+            end_fetch = max_ts + 3600_000 * 2  # 2h safety padding after
 
             klines = fetch_binance_1m_klines(symbol, start_fetch, end_fetch)
             price_rows.extend(klines)
@@ -251,7 +251,9 @@ def main(argv: list[str] | None = None) -> int:
                 "expected_price_direction": ev.expected_price_direction,
             }
             f.write(json.dumps(ev_dict) + "\n")
-    logger.info(f"Saved {len(deduped_events)} deduplicated shock events to {args.events_output_jsonl}")
+    logger.info(
+        f"Saved {len(deduped_events)} deduplicated shock events to {args.events_output_jsonl}"
+    )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.summary_output)), exist_ok=True)
     with open(args.summary_output, "w") as f:

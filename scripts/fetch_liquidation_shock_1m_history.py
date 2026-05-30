@@ -137,7 +137,9 @@ def main(argv: list[str] | None = None) -> int:
                 if payload:
                     normalized = normalize_coinalyze_1m_payload(payload, symbol=symbol)
                     all_normalized_rows.extend(normalized)
-                    logger.info(f"Successfully fetched and normalized {len(normalized)} rows for {symbol}.")
+                    logger.info(
+                        f"Successfully fetched and normalized {len(normalized)} rows for {symbol}."
+                    )
                 else:
                     logger.warning(f"No payload returned for {symbol}, status: {status}")
             except Exception as e:

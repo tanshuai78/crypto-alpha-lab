@@ -1,0 +1,85 @@
+{
+  "event_count": 358,
+  "events_per_24h": 88.62,
+  "symbol_distribution": {
+    "BTC/USDT": 87,
+    "DOGE/USDT": 41,
+    "ETH/USDT": 83,
+    "SOL/USDT": 73,
+    "XRP/USDT": 74
+  },
+  "direction_distribution_by_horizon": {
+    "5": {
+      "up": 145,
+      "down": 206,
+      "flat": 7
+    },
+    "10": {
+      "up": 133,
+      "down": 221,
+      "flat": 4
+    },
+    "15": {
+      "up": 141,
+      "down": 213,
+      "flat": 4
+    }
+  },
+  "minimum_move_filtered_direction_distribution": {
+    "5": {
+      "up": 84,
+      "down": 126,
+      "flat": 148
+    },
+    "10": {
+      "up": 97,
+      "down": 149,
+      "flat": 112
+    },
+    "15": {
+      "up": 96,
+      "down": 162,
+      "flat": 100
+    }
+  },
+  "bps_distribution_by_horizon": {
+    "5": {
+      "min": -64.94,
+      "max": 85.69,
+      "mean": 3.21,
+      "median": 0.77
+    },
+    "10": {
+      "min": -84.55,
+      "max": 97.41,
+      "mean": 1.85,
+      "median": 4.52
+    },
+    "15": {
+      "min": -87.37,
+      "max": 142.08,
+      "mean": 1.77,
+      "median": 3.03
+    }
+  },
+  "directional_bias_by_horizon": {
+    "5": 0.4131054131054131,
+    "10": 0.3757062146892655,
+    "15": 0.3983050847457627
+  },
+  "minimum_move_filtered_directional_bias": {
+    "5": 0.4,
+    "10": 0.3943089430894309,
+    "15": 0.37209302325581395
+  },
+  "median_response_bps_by_horizon": {
+    "5": -3.84,
+    "10": -6.98,
+    "15": -8.26
+  },
+  "decision": "retire_liquidation_shock_event_study",
+  "primary_falsification_reason": "Failed checks: no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})",
+  "failed_checks": [
+    "no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})"
+  ]
+}

@@ -1,15 +1,34 @@
-import pytest
 from scripts.build_liquidation_shock_event_dataset import build_aligned_1m_dataset
 
 
 def test_build_aligned_1m_dataset_basic():
     price_rows = [
-        {"symbol": "BTC/USDT", "timestamp_ms": 1716800000000, "open": 60000.0, "high": 60100.0, "low": 59900.0, "close": 60050.0},
-        {"symbol": "BTC/USDT", "timestamp_ms": 1716800060000, "open": 60050.0, "high": 60200.0, "low": 60000.0, "close": 60150.0},
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": 1716800000000,
+            "open": 60000.0,
+            "high": 60100.0,
+            "low": 59900.0,
+            "close": 60050.0,
+        },
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": 1716800060000,
+            "open": 60050.0,
+            "high": 60200.0,
+            "low": 60000.0,
+            "close": 60150.0,
+        },
     ]
 
     liq_rows = [
-        {"symbol": "BTC/USDT", "bar_start_ms": 1716800000000, "long_liquidation_notional_1m_usdt": 10000.0, "short_liquidation_notional_1m_usdt": 0.0, "total_liquidation_notional_1m_usdt": 10000.0},
+        {
+            "symbol": "BTC/USDT",
+            "bar_start_ms": 1716800000000,
+            "long_liquidation_notional_1m_usdt": 10000.0,
+            "short_liquidation_notional_1m_usdt": 0.0,
+            "total_liquidation_notional_1m_usdt": 10000.0,
+        },
     ]
 
     joined, audit = build_aligned_1m_dataset(price_rows, liq_rows)

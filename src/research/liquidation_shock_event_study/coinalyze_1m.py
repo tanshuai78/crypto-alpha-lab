@@ -22,9 +22,7 @@ def normalize_coinalyze_1m_payload(
     history_rows: list[dict[str, Any]] = []
     for row in payload:
         if isinstance(row, dict) and isinstance(row.get("history"), list):
-            history_rows.extend(
-                item for item in row["history"] if isinstance(item, dict)
-            )
+            history_rows.extend(item for item in row["history"] if isinstance(item, dict))
         elif isinstance(row, dict):
             history_rows.append(row)
 
@@ -53,13 +51,15 @@ def normalize_coinalyze_1m_payload(
         short_liq = vals["short"]
         total_liq = long_liq + short_liq
 
-        normalized.append({
-            "symbol": symbol,
-            "bar_start_ms": ms,
-            "long_liquidation_notional_1m_usdt": long_liq,
-            "short_liquidation_notional_1m_usdt": short_liq,
-            "total_liquidation_notional_1m_usdt": total_liq,
-            "source_namespace": "liquidation_shock_event_study",
-        })
+        normalized.append(
+            {
+                "symbol": symbol,
+                "bar_start_ms": ms,
+                "long_liquidation_notional_1m_usdt": long_liq,
+                "short_liquidation_notional_1m_usdt": short_liq,
+                "total_liquidation_notional_1m_usdt": total_liq,
+                "source_namespace": "liquidation_shock_event_study",
+            }
+        )
 
     return normalized

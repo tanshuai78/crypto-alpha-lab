@@ -8,7 +8,6 @@ from typing import Any
 
 from scripts.fetch_third_party_liquidation_history import (
     fetch_historical_liquidations,
-    symbol_to_coinalyze_contract,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ LIQUIDATION_SHOCK_FEASIBILITY_MAX_GAP_MINUTES = 180
 LIQUIDATION_SHOCK_FEASIBILITY_MIN_EVAL_HOURS = 24.0
 
 REQUIRED_REFERENCE_BARS = 1440  # 24 hours
-EVALUATION_BARS = 1440          # 24 hours
+EVALUATION_BARS = 1440  # 24 hours
 
 
 def determine_decision(
@@ -77,9 +76,7 @@ def probe_feasibility(
         if payload:
             for row in payload:
                 if isinstance(row, dict) and isinstance(row.get("history"), list):
-                    history_rows.extend(
-                        item for item in row["history"] if isinstance(item, dict)
-                    )
+                    history_rows.extend(item for item in row["history"] if isinstance(item, dict))
                 elif isinstance(row, dict):
                     history_rows.append(row)
 
@@ -146,9 +143,13 @@ def probe_feasibility(
     max_gap_all = 0
     min_usable_eval_hours = 0.0
     if symbol_stats:
-        avg_coverage_ratio = sum(s["coverage_ratio"] for s in symbol_stats.values()) / len(symbol_stats)
+        avg_coverage_ratio = sum(s["coverage_ratio"] for s in symbol_stats.values()) / len(
+            symbol_stats
+        )
         max_gap_all = max(s["max_gap_minutes"] for s in symbol_stats.values())
-        min_usable_eval_hours = min(s["usable_eval_hours_after_lookback"] for s in symbol_stats.values())
+        min_usable_eval_hours = min(
+            s["usable_eval_hours_after_lookback"] for s in symbol_stats.values()
+        )
 
     return {
         "vendor": "coinalyze",
@@ -167,15 +168,15 @@ def probe_feasibility(
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
     symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT"]
-    
+
     # Run the probe with 2.5 days lookback to check compatibility
     res = probe_feasibility(symbols, lookback_days=2.5)
-    
+
     output_path = "reports/liquidation_shock_event_study/2026-05-30_liquidation_shock_event_study_feasibility.json"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(res, f, indent=2)
-        
+
     logger.info(f"Feasibility report written to {output_path}")
     logger.info(f"Decision: {res['decision']}, Qualified Symbols: {res['qualified_symbols']}")
     return 0
@@ -183,4 +184,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

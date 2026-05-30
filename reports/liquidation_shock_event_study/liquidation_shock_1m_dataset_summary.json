@@ -1,0 +1,16 @@
+{
+  "price_rows": 29080,
+  "liquidation_rows": 3836,
+  "joined_rows": 29080,
+  "missing_price_bar_count": 0,
+  "missing_liquidation_bar_count": 25244,
+  "raw_events_detected": 466,
+  "deduplicated_events": 358,
+  "events_per_symbol": {
+    "BTC/USDT": 87,
+    "DOGE/USDT": 41,
+    "ETH/USDT": 83,
+    "SOL/USDT": 73,
+    "XRP/USDT": 74
+  }
+}

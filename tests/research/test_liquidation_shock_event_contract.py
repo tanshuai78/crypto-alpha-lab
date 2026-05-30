@@ -1,4 +1,3 @@
-import pytest
 from src.research.liquidation_shock_event_study.event_contract import (
     LiquidationShockEvent,
     classify_liquidation_shock_event,
