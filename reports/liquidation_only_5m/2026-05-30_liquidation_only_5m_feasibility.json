@@ -1,0 +1,41 @@
+{
+  "vendor": "coinalyze",
+  "interval": "5min",
+  "symbols_requested": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT"
+  ],
+  "rows_per_symbol": {
+    "BTC/USDT": 2589,
+    "ETH/USDT": 2589,
+    "SOL/USDT": 2582,
+    "XRP/USDT": 2586,
+    "DOGE/USDT": 2573
+  },
+  "min_bar_start_ms": {
+    "BTC/USDT": 1779359700000,
+    "ETH/USDT": 1779359700000,
+    "SOL/USDT": 1779361200000,
+    "XRP/USDT": 1779359700000,
+    "DOGE/USDT": 1779360600000
+  },
+  "max_bar_start_ms": {
+    "BTC/USDT": 1780136100000,
+    "ETH/USDT": 1780136100000,
+    "SOL/USDT": 1780135500000,
+    "XRP/USDT": 1780135200000,
+    "DOGE/USDT": 1780132200000
+  },
+  "span_days_per_symbol": {
+    "BTC/USDT": 8.99,
+    "ETH/USDT": 8.99,
+    "SOL/USDT": 8.96,
+    "XRP/USDT": 8.98,
+    "DOGE/USDT": 8.93
+  },
+  "supports_7d_lookback": true,
+  "decision": "proceed"
+}
