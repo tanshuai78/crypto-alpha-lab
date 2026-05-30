@@ -176,7 +176,7 @@ def test_forceorder_raw_event_contains_required_research_fields():
     parsed = parse_force_order_notional_event(sample_payload)
     assert parsed is not None
     record = build_force_order_raw_record(parsed, schema_version=1)
-    
+
     REQUIRED_RAW_KEYS = {
         "schema_version",
         "source",
@@ -225,10 +225,10 @@ def test_raw_event_id_is_stable_for_same_exchange_event():
     }
     parsed_a = parse_force_order_notional_event(sample_payload)
     parsed_b = parse_force_order_notional_event(sample_payload)
-    
+
     record_a = build_force_order_raw_record(parsed_a)
     record_b = build_force_order_raw_record(parsed_b)
-    
+
     assert record_a["event_id"] == record_b["event_id"]
     assert record_a["event_id"] == "binance_forceorder_ws|BTC/USDT|1716800000123|1716800000000|SELL|60000.0|0.5"
 

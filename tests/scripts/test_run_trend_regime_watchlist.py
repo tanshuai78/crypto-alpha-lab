@@ -181,3 +181,56 @@ def test_load_rows_tail_from_jsonl_reads_tail_only(tmp_path):
     assert len(rows) == 2
     assert rows[0]["symbol"] == "ETH/USDT"
     assert rows[1]["symbol"] == "DOGE/USDT"
+
+
+def test_watchlist_cache_structure_compatibility(tmp_path):
+    import json
+
+    from scripts.run_trend_regime_watchlist import load_liquidation_cache
+
+    cache_file = tmp_path / "trend_regime_liquidation_cache.json"
+
+    # Write cache in the expected flat dict mapping uppercase symbols to float values
+    data = {"BTCUSDT": 150000.5, "DOGEUSDT": 3400.0}
+    cache_file.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_liquidation_cache(str(cache_file))
+
+    # Must preserve the keys in mapped formats
+    assert loaded["BTCUSDT"] == 150000.5
+    assert loaded["DOGEUSDT"] == 3400.0
+    assert len(loaded) == 2
+
+
+def test_aggregator_hourly_schema_preservation():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    # Aggregator hourly output should have exactly these keys to preserve compatibility
+    raw_record = {
+        "symbol": "BTC/USDT",
+        "event_time_ms": 1780000200000,
+        "notional_usdt": 100000.0,
+        "liquidation_side": "long_liquidation",
+    }
+
+    rows = aggregate_raw_to_bucket([raw_record], bucket="1h")
+    assert len(rows) == 1
+    row = rows[0]
+
+    # Verify legacy keys
+    assert "hour_bucket_ms" in row
+    assert row["hour_bucket_ms"] == 1779998400000  # flooring 1780000200000 to hourly grid
+    assert "liquidation_notional_1h_usdt" in row
+    assert row["liquidation_notional_1h_usdt"] == 100000.0
+    assert "long_liquidation_notional_1h_usdt" in row
+    assert row["long_liquidation_notional_1h_usdt"] == 100000.0
+    assert "short_liquidation_notional_1h_usdt" in row
+    assert row["short_liquidation_notional_1h_usdt"] == 0.0
+    assert "liquidation_source" in row
+    assert row["liquidation_source"] == "binance_forceorder_ws"
+
+    # Ensure new 1m/5m namespaces are not leaked into the 1h output
+    assert "bar_start_ms" not in row
+    assert "event_count_1m" not in row
+    assert "event_count_5m" not in row
+    assert "filled_empty_bucket" not in row

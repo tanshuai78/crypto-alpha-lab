@@ -138,3 +138,161 @@ def test_aggregate_raw_to_hourly_with_audit_skips_missing_all_timestamps():
 
     assert rows == []
     assert audit["missing_timestamp_count"] == 1
+
+
+def test_aggregate_raw_to_bucket_rejects_unsupported_bucket():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    with pytest.raises(ValueError):
+        aggregate_raw_to_bucket([], bucket="10m")
+
+
+def test_aggregate_prefers_event_time_over_stale_hour_bucket():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    record_with_wrong_hour_bucket = {
+        "symbol": "BTC/USDT",
+        "event_time_ms": 1780000000000 + 5 * 60 * 1000,  # 1780000300000
+        "hour_bucket_ms": 1716852300000,
+        "notional_usdt": 34000.0,
+        "liquidation_side": "long_liquidation",
+    }
+    # For 1h bucket, M+5m falls into 1780000000000 (computed from event_time_ms)
+    rows = aggregate_raw_to_bucket([record_with_wrong_hour_bucket], bucket="1h")
+    assert len(rows) == 1
+    assert rows[0]["hour_bucket_ms"] == 1779998400000
+
+
+def test_aggregate_raw_to_bucket_deduplicates_by_event_id():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    record = {
+        "event_id": "evt_1",
+        "symbol": "BTC/USDT",
+        "event_time_ms": 1780000000000,
+        "notional_usdt": 100000.0,
+        "liquidation_side": "long_liquidation",
+    }
+    duplicate_of_record = {
+        "event_id": "evt_1",
+        "symbol": "BTC/USDT",
+        "event_time_ms": 1780000000000,
+        "notional_usdt": 100000.0,
+        "liquidation_side": "long_liquidation",
+    }
+    rows = aggregate_raw_to_bucket([record, duplicate_of_record], bucket="1m")
+    assert len(rows) == 1
+    assert rows[0]["event_count_1m"] == 1
+    assert rows[0]["total_liquidation_notional_1m_usdt"] == 100000.0
+
+
+def test_aggregate_zero_fills_empty_1m_buckets_when_requested():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    records = [
+        {
+            "event_id": "evt_1",
+            "symbol": "BTC/USDT",
+            "event_time_ms": 1780000200000,  # Minute 0
+            "notional_usdt": 100000.0,
+            "liquidation_side": "long_liquidation",
+        },
+        {
+            "event_id": "evt_2",
+            "symbol": "BTC/USDT",
+            "event_time_ms": 1780000320000,  # Minute 2
+            "notional_usdt": 50000.0,
+            "liquidation_side": "short_liquidation",
+        },
+    ]
+    # We aggregate from Minute 0 to Minute 3. There should be 4 buckets: Minute 0, 1, 2, 3.
+    # Minute 1 and 3 are empty and should be zero-filled.
+    start_ms = 1780000200000
+    end_ms = 1780000380000
+    rows = aggregate_raw_to_bucket(
+        records,
+        bucket="1m",
+        fill_empty_buckets=True,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        symbols=["BTC/USDT"],
+    )
+    # Total 4 minute bars expected
+    assert len(rows) == 4
+
+    # Minute 0: contains event
+    m0 = next(r for r in rows if r["bar_start_ms"] == start_ms)
+    assert m0["total_liquidation_notional_1m_usdt"] == 100000.0
+    assert m0.get("filled_empty_bucket", False) is False
+
+    # Minute 1: empty, should be zero-filled
+    m1 = next(r for r in rows if r["bar_start_ms"] == start_ms + 60000)
+    assert m1["total_liquidation_notional_1m_usdt"] == 0.0
+    assert m1["long_liquidation_notional_1m_usdt"] == 0.0
+    assert m1["short_liquidation_notional_1m_usdt"] == 0.0
+    assert m1["event_count_1m"] == 0
+    assert m1["filled_empty_bucket"] is True
+
+    # Minute 2: contains event
+    m2 = next(r for r in rows if r["bar_start_ms"] == start_ms + 120000)
+    assert m2["total_liquidation_notional_1m_usdt"] == 50000.0
+    assert m2.get("filled_empty_bucket", False) is False
+
+    # Minute 3: empty, should be zero-filled
+    m3 = next(r for r in rows if r["bar_start_ms"] == start_ms + 180000)
+    assert m3["total_liquidation_notional_1m_usdt"] == 0.0
+    assert m3["filled_empty_bucket"] is True
+
+
+def test_aggregate_zero_fills_empty_5m_buckets_when_requested():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_bucket
+
+    records = [
+        {
+            "event_id": "evt_1",
+            "symbol": "BTC/USDT",
+            "event_time_ms": 1780000200000,  # 5m Bar 0
+            "notional_usdt": 100000.0,
+            "liquidation_side": "long_liquidation",
+        }
+    ]
+    # We ask for a range spanning two 5-minute bars: Bar 0 and Bar 1.
+    start_ms = 1780000200000
+    end_ms = 1780000500000  # 5 minutes later
+    rows = aggregate_raw_to_bucket(
+        records,
+        bucket="5m",
+        fill_empty_buckets=True,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        symbols=["BTC/USDT"],
+    )
+    assert len(rows) == 2
+    bar0 = next(r for r in rows if r["bar_start_ms"] == start_ms)
+    assert bar0["total_liquidation_notional_5m_usdt"] == 100000.0
+
+    bar1 = next(r for r in rows if r["bar_start_ms"] == start_ms + 300000)
+    assert bar1["total_liquidation_notional_5m_usdt"] == 0.0
+    assert bar1["event_count_5m"] == 0
+    assert bar1["filled_empty_bucket"] is True
+
+
+def test_parse_args_handles_zero_fill_options():
+    from scripts.aggregate_trend_regime_liquidations import parse_args
+
+    args = parse_args(
+        [
+            "--fill-empty-buckets",
+            "--start-ms",
+            "1780000200000",
+            "--end-ms",
+            "1780000380000",
+            "--symbols",
+            "BTC/USDT",
+            "ETH/USDT",
+        ]
+    )
+    assert args.fill_empty_buckets is True
+    assert args.start_ms == 1780000200000
+    assert args.end_ms == 1780000380000
+    assert args.symbols == ["BTC/USDT", "ETH/USDT"]

@@ -309,44 +309,71 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 
 ---
 
-## 小时级清算聚合 (Hourly Liquidation Aggregation)
+## 多粒度清算聚合与派生机制 (Multi-Granularity Liquidation Derivation & Aggregation)
 
-采集到足够 Raw 事件后（建议至少运行 1 小时），执行聚合脚本将原始事件压缩为小时级代理数据，供历史回放使用。
+在升级后的采集架构中：
+1. **Raw Event Archive 是唯一真实数据源 (Primary Fact Source)**：`trend_regime_force_orders_raw.jsonl` 中持久化了所有原始强平事件。
+2. **Cache 仅用于遗留兼容性 (Legacy Compatibility Only)**：`trend_regime_liquidation_cache.json` 仅用于为内存 Watchlist 快速提供 1h 滚动总清算额。
+3. **派生数据 (Derived Outputs)**：所有研究和回放用的清算指标都应从原始归档按 canonical timestamp 派生为以下三个文件：
+   - `trend_regime_liquidation_1m.jsonl`：1分钟级别清算聚合（含 zero-fill）。
+   - `trend_regime_liquidation_5m.jsonl`：5分钟级别清算聚合（含 zero-fill）。
+   - `trend_regime_liquidation_hourly.jsonl`：1小时级别清算聚合（保持遗留的 `hour_bucket_ms` 字段结构）。
 
-### 运行命令
+### 定期派生 Crontab 配置 (Cron-based Derivation Schedule)
 
-```bash
-cd /root/crypto-alpha-lab
-PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
-  --input data/trend_regime_force_orders_raw.jsonl \
-  --output data/trend_regime_liquidation_hourly.jsonl
+在服务器上配置 crontab 定期执行派生脚本。
+> [!WARNING]
+> 对于 `1m` 和 `5m` 颗粒度，由于使用了 `--fill-empty-buckets` 填充所有无交易时段的空桶，高频写入会占用一定的存储空间与 IOPS。请确保服务器磁盘性能充足。
+
+推荐的 crontab 调度配置：
+```cron
+# 每分钟执行一次 1m 聚合（填充最近24小时空桶）
+*/1 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 1m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_1m.jsonl
+
+# 每5分钟执行一次 5m 聚合（填充最近24小时空桶）
+*/5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 5m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_5m.jsonl
+
+# 每小时的第5分钟执行一次 1h 聚合（不进行填充空桶）
+5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 1h --output data/trend_regime_liquidation_hourly.jsonl
 ```
 
-建议在执行历史回放**之前**先运行一次聚合，确保回放能读取到最新的清算代理数据。
+### 归档备份与 Checksum 轮转策略 (Archive Backup & Checksum Rotation)
 
-### 输出格式
+为防止原始归档文件（`trend_regime_force_orders_raw.jsonl`）体积无限增长，建议每周进行一次轮转。轮转必须保证数据完整性，包含以下 sequence：
+1. **停止采集服务**。
+2. **计算原始文件校验和**：
+   ```bash
+   sha256sum data/trend_regime_force_orders_raw.jsonl > data/trend_regime_force_orders_raw.jsonl.sha256
+   ```
+3. **备份并重命名**：
+   ```bash
+   mv data/trend_regime_force_orders_raw.jsonl data/backup/trend_regime_force_orders_raw_$(date +\%Y\%m\%d).jsonl
+   mv data/trend_regime_force_orders_raw.jsonl.sha256 data/backup/
+   ```
+4. **重建空的 Raw 归档文件**：
+   ```bash
+   touch data/trend_regime_force_orders_raw.jsonl
+   ```
+5. **重启采集服务**。
 
-每行一条记录，按 `(symbol, hour_bucket_utc)` 分组，字段如下：
+---
 
-| 字段 | 含义 |
-|---|---|
-| `symbol` | 交易对 |
-| `hour_bucket_utc` | 小时桶（UTC），格式 `YYYY-MM-DDTHH:00:00Z` |
-| `long_liquidation_notional_usdt` | 该小时多仓强平名义金额（USDT） |
-| `short_liquidation_notional_usdt` | 该小时空仓强平名义金额（USDT） |
-| `total_liquidation_notional_usdt` | 总强平名义金额（USDT） |
-| `dominant_side` | 主导方向：`long` / `short` / `neutral` |
-| `semantics` | 人类可读说明字符串 |
+## 24小时部署后验收门禁 (24h Post-Deploy Acceptance Gate)
 
-### 检查聚合输出
+新采集链路部署并运行 24 小时后，运行 `scripts/check_liquidation_collector_health.py` 对链路进行验收。
+验收标准的健康检查输出必须满足以下条件，否则判定为部署不合格，严禁启动后续 `liquidation_shock_event_study` 的回放与研究：
+- `raw_exists` 为 `true`
+- `raw_time_span_hours` 必须 `>= 24.0`
+- `raw_invalid_json_line_count` 必须为 `0`
+- `raw_duplicate_event_count` 必须为 `0` (或极低水平)
+- `aggregate_1m_exists` 为 `true`
+- `aggregate_1m_coverage_ratio_24h` 必须 `>= 0.99`
+- `aggregate_1m_max_gap_minutes_24h` 必须 `<= 10`
+- `aggregate_5m_exists` 为 `true`
+- `aggregate_1h_exists` 为 `true`
+- `research_ready_1m_24h` 必须为 `true`
 
-```bash
-# 查看行数
-wc -l /root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl
-
-# 查看最新几行
-tail -5 /root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl | python3 -m json.tool
-```
+---
 
 ---
 
