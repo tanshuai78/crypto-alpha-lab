@@ -1,55 +1,90 @@
 # Liquidation Shock 1m Event Study Review
 
 **Review Date:** 2026-05-30  
-**Data Range:** 4.04 Days  
-**Decision:** `RETIRE_LIQUIDATION_SHOCK_EVENT_STUDY`  
-**Details:** Failed checks: no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})
+**Primary Decision:** `INSUFFICIENT_1M_DATA_DEPTH`  
+**Phase 2 Status:** `DO NOT PROCEED`  
+**Primary Reason:** Real Coinalyze `1m` liquidation coverage is too sparse and discontinuous to support the required `24h` trailing anomaly window plus a post-lookback evaluation window.
 
 ---
 
 ## 1. Executive Summary
 
-- **Total Deduplicated Shock Events:** 358
-- **Event Frequency (per 24h):** 88.62
-- **Success Criteria Checks:** Failed
+- **Feasibility outcome:** failed
+- **Qualified symbols:** `0 / 5`
+- **Route to Phase 2:** blocked
+- **Action:** stop this `1m shock -> fixed 5/10/15 minute response` line under the current data source
 
-### Symbol Distribution:
-- **BTC/USDT:** 87 events (24.3%)
-- **DOGE/USDT:** 41 events (11.5%)
-- **ETH/USDT:** 83 events (23.2%)
-- **SOL/USDT:** 73 events (20.4%)
-- **XRP/USDT:** 74 events (20.7%)
+This review supersedes the earlier intermediate `continue_to_context_bucketing` interpretation. That earlier result came from a response-map pass on an already-built dataset. After rerunning the feasibility probe with a real `COINALYZE_API_KEY`, the governing result is that the `1m` source itself does **not** satisfy the research plan’s data-depth and continuity requirements.
 
 ---
 
-## 2. Response Analysis by Horizon
+## 2. Feasibility Gate Result
 
-| Horizon | Raw Up Count | Raw Down Count | Raw Flat Count | Directional Bias | Min-Move Up | Min-Move Down | Min-Move Flat | Min-Move Bias | Median Dir Return (bps) |
-|---|---|---|---|---|---|---|---|---|---|
-| 5m | 145 | 206 | 7 | 41.3% | 84 | 126 | 148 | 40.0% | -3.84 bps |
-| 10m | 133 | 221 | 4 | 37.6% | 97 | 149 | 112 | 39.4% | -6.98 bps |
-| 15m | 141 | 213 | 4 | 39.8% | 96 | 162 | 100 | 37.2% | -8.26 bps |
+Source:
+- [2026-05-30_liquidation_shock_event_study_feasibility.json](/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/reports/liquidation_shock_event_study/2026-05-30_liquidation_shock_event_study_feasibility.json)
+
+Key fields:
+- `decision = insufficient_1m_data_depth`
+- `supports_24h_lookback = false`
+- `qualified_symbols = []`
+- `coverage_ratio = 0.1736`
+- `usable_eval_hours_after_lookback = 0.0`
+
+Per symbol:
+- `BTC/USDT`: `859 / 3596` observed vs expected `1m` bars, `coverage_ratio = 0.2389`
+- `ETH/USDT`: `933 / 3591`, `0.2598`
+- `SOL/USDT`: `511 / 3544`, `0.1442`
+- `XRP/USDT`: `499 / 3565`, `0.1400`
+- `DOGE/USDT`: `301 / 3541`, `0.0850`
+
+Interpretation:
+- none of the five symbols can support the plan’s required `24h` trailing reference with a usable evaluation window after lookback
+- the current free Coinalyze `1m` data is not merely “thin”; it is structurally insufficient for this study design
 
 ---
 
-## 3. Return Distribution Stats
+## 3. Structural Signal Note
 
-| Horizon | Min Return (bps) | Max Return (bps) | Mean Return (bps) | Median Return (bps) |
-|---|---|---|---|---|
-| 5m | -64.94 bps | +85.69 bps | +3.21 bps | +0.77 bps |
-| 10m | -84.55 bps | +97.41 bps | +1.85 bps | +4.52 bps |
-| 15m | -87.37 bps | +142.08 bps | +1.77 bps | +3.03 bps |
+Source:
+- [2026-05-30_liquidation_shock_event_study_summary.json](/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/reports/liquidation_shock_event_study/2026-05-30_liquidation_shock_event_study_summary.json)
+
+The response-map pass still contains a useful observation:
+- the built dataset shows a **mean-reversion-leaning** directional structure
+
+Examples from the current summary:
+- `directional_bias_by_horizon`
+  - `5m = 58.7%`
+  - `10m = 62.4%`
+  - `15m = 60.2%`
+- `median_response_bps_by_horizon`
+  - `5m = -3.84`
+  - `10m = -6.98`
+  - `15m = -8.26`
+
+But this signal note is **not actionable** for Phase 2, because the feasibility gate failed. In other words:
+- there may be a reversion-shaped response in the current constructed sample
+- but the underlying `1m` liquidation dataset is not reliable enough to justify further context bucketing or directional-alpha development
 
 ---
 
-## 4. Failed Checks Details
+## 4. Final Decision
 
-- [x] **FAIL**: no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})
+**`INSUFFICIENT_1M_DATA_DEPTH`**
+
+This line does **not** advance to Phase 2 context bucketing.
+
+Why this is the correct governing state:
+- the plan explicitly required `1m` data depth and continuity to pass before Phase 2
+- the real feasibility rerun with live API access failed that gate
+- therefore the study must stop on data sufficiency, even if the provisional response map appears structurally interesting
 
 ---
 
-## 5. Conclusion & Action Item
+## 5. Next Action
 
-Based on the quantitative criteria, the event study has determined that:
+`stop_liquidation_shock_line_under_current_vendor_constraints`
 
-**RETIRE (No Tradeable Edge)**: The directional signal structure failed due to: Failed checks: no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26}). We should retire liquidation directional alpha research as planned.
+That means:
+- do not continue context slicing on this `1m` Coinalyze-based line
+- do not treat the current response-map result as a valid strategy promotion signal
+- if liquidation research continues later, it must begin with a different data source or a materially different research design that does not require continuous `1m` liquidation history

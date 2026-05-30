@@ -34,6 +34,9 @@ def test_probe_feasibility_schema():
     assert "max_gap_minutes" in res
     assert "usable_eval_hours_after_lookback" in res
     assert "qualified_symbols" in res
+    btc_stats = res["symbol_stats"]["BTC/USDT"]
+    assert btc_stats["actual_1m_bars"] == len({row["t"] for row in dummy_history})
+    assert btc_stats["expected_1m_bars"] >= btc_stats["actual_1m_bars"]
 
 
 def test_probe_feasibility_fails_if_gaps_too_large():
@@ -61,6 +64,9 @@ def test_probe_feasibility_fails_if_gaps_too_large():
 
     assert res["supports_24h_lookback"] is False
     assert res["decision"] == "insufficient_1m_data_depth"
+    btc_stats = res["symbol_stats"]["BTC/USDT"]
+    assert btc_stats["actual_1m_bars"] == len({row["t"] for row in dummy_history})
+    assert btc_stats["coverage_ratio"] < 1.0
 
 
 def test_determine_decision_logic():

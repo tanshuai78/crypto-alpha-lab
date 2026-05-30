@@ -9,7 +9,7 @@ def test_evaluate_events_metrics():
     # 10 events:
     # 5m horizon: 8 expected direction, 2 opposite. Bias = 8 / 10 = 0.8
     # 10m horizon: 7 expected direction, 3 opposite. Bias = 0.7
-    # 15m horizon: 4 expected direction, 6 opposite. Bias = 0.4
+    # 15m horizon: 4 expected direction, 6 opposite. Structural bias = max(4, 6) / 10 = 0.6
     eval_results = []
     for i in range(10):
         # 5m
@@ -47,16 +47,17 @@ def test_evaluate_events_metrics():
     assert summary["symbol_distribution"] == {"BTC/USDT": 5, "ETH/USDT": 5}
     assert summary["directional_bias_by_horizon"][5] == 0.8
     assert summary["directional_bias_by_horizon"][10] == 0.7
-    assert summary["directional_bias_by_horizon"][15] == 0.4
+    assert summary["directional_bias_by_horizon"][15] == 0.6
 
     # Min-move filtered bias:
     # 5m: successes=6, failures=2. Bias = 6 / 8 = 0.75
     # 10m: successes=5, failures=3. Bias = 5 / 8 = 0.625
-    # 15m: successes=3, failures=6. Bias = 3 / 9 = 0.333
+    # 15m: successes=3, failures=6. Structural bias = max(3, 6) / 9 = 0.666...
     assert summary["minimum_move_filtered_direction_distribution"][5]["up"] == 6
     assert summary["minimum_move_filtered_direction_distribution"][5]["down"] == 2
     assert summary["minimum_move_filtered_direction_distribution"][5]["flat"] == 2
     assert summary["minimum_move_filtered_directional_bias"][5] == 0.75
+    assert round(summary["minimum_move_filtered_directional_bias"][15], 3) == 0.667
 
 
 def test_make_decision_rules():
@@ -70,22 +71,25 @@ def test_make_decision_rules():
         "median_response_bps_by_horizon": {5: 5.0, 10: 6.0, 15: 1.0},
     }
 
-    decision, reasons, failed_checks = make_decision(summary)
+    decision, reasons, failed_checks, next_action = make_decision(summary)
     assert decision == "continue_to_context_bucketing"
     assert len(failed_checks) == 0
+    assert next_action == "proceed_to_context_bucketing"
 
     # Fail path: too few events
     summary["event_count"] = 5
     # Adjust symbol distribution so concentration doesn't fail
     summary["symbol_distribution"] = {"BTC/USDT": 2, "ETH/USDT": 3}
-    decision, reasons, failed_checks = make_decision(summary)
+    decision, reasons, failed_checks, next_action = make_decision(summary)
     assert decision == "insufficient_event_density"
     assert any("event_count < 10" in x for x in failed_checks)
+    assert next_action == "improve_data_or_event_density"
 
     # Fail path: no directional bias (bias < 0.55 on all horizons)
     summary["event_count"] = 12
     summary["symbol_distribution"] = {"BTC/USDT": 6, "ETH/USDT": 6}
     summary["directional_bias_by_horizon"] = {5: 0.51, 10: 0.52, 15: 0.49}
-    decision, reasons, failed_checks = make_decision(summary)
+    decision, reasons, failed_checks, next_action = make_decision(summary)
     assert decision == "retire_liquidation_shock_event_study"
     assert any("no adjacent horizons passed criteria" in x for x in failed_checks)
+    assert next_action == "stop_liquidation_shock_line"

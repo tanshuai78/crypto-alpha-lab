@@ -6,18 +6,19 @@ import os
 import time
 from typing import Any
 
+from configs.base import (
+    LIQUIDATION_SHOCK_1M_REQUIRED_REFERENCE_BARS,
+    LIQUIDATION_SHOCK_FEASIBILITY_MAX_GAP_MINUTES,
+    LIQUIDATION_SHOCK_FEASIBILITY_MIN_COVERAGE_RATIO,
+    LIQUIDATION_SHOCK_FEASIBILITY_MIN_EVAL_HOURS,
+)
 from scripts.fetch_third_party_liquidation_history import (
     fetch_historical_liquidations,
 )
 
 logger = logging.getLogger(__name__)
 
-# Feasibility thresholds
-LIQUIDATION_SHOCK_FEASIBILITY_MIN_COVERAGE_RATIO = 0.80
-LIQUIDATION_SHOCK_FEASIBILITY_MAX_GAP_MINUTES = 180
-LIQUIDATION_SHOCK_FEASIBILITY_MIN_EVAL_HOURS = 24.0
-
-REQUIRED_REFERENCE_BARS = 1440  # 24 hours
+REQUIRED_REFERENCE_BARS = LIQUIDATION_SHOCK_1M_REQUIRED_REFERENCE_BARS
 EVALUATION_BARS = 1440  # 24 hours
 
 
@@ -104,14 +105,19 @@ def probe_feasibility(
         max_bar_start_ms = max_ts * 1000
         span_hours = (max_bar_start_ms - min_bar_start_ms) / 3600000.0
         expected_1m_bars = int((max_bar_start_ms - min_bar_start_ms) / 60000) + 1
-        actual_1m_bars = expected_1m_bars  # Count based on padded timeline
+        actual_1m_bars = len(unique_ts)
 
-        coverage_ratio = span_hours / (lookback_days * 24.0) if lookback_days > 0 else 0.0
+        coverage_ratio = (
+            actual_1m_bars / expected_1m_bars if expected_1m_bars > 0 else 0.0
+        )
 
-        gaps = [(unique_ts[i] - unique_ts[i - 1]) // 60 for i in range(1, len(unique_ts))]
+        gaps = [
+            max(0, ((unique_ts[i] - unique_ts[i - 1]) // 60) - 1)
+            for i in range(1, len(unique_ts))
+        ]
         max_gap = max(gaps) if gaps else 0
 
-        usable_eval_hours = max(0.0, span_hours - 24.0)
+        usable_eval_hours = max(0.0, (actual_1m_bars - REQUIRED_REFERENCE_BARS) / 60.0)
 
         # Check qualification
         actual_padded_bars_ok = actual_1m_bars >= (REQUIRED_REFERENCE_BARS + EVALUATION_BARS)

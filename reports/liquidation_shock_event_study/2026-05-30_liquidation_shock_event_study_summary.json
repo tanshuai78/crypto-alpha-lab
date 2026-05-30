@@ -63,23 +63,28 @@
     }
   },
   "directional_bias_by_horizon": {
-    "5": 0.4131054131054131,
-    "10": 0.3757062146892655,
-    "15": 0.3983050847457627
+    "5": 0.5868945868945868,
+    "10": 0.6242937853107344,
+    "15": 0.6016949152542372
   },
   "minimum_move_filtered_directional_bias": {
-    "5": 0.4,
-    "10": 0.3943089430894309,
-    "15": 0.37209302325581395
+    "5": 0.6,
+    "10": 0.6056910569105691,
+    "15": 0.627906976744186
   },
   "median_response_bps_by_horizon": {
     "5": -3.84,
     "10": -6.98,
     "15": -8.26
   },
-  "decision": "retire_liquidation_shock_event_study",
-  "primary_falsification_reason": "Failed checks: no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})",
+  "decision": "insufficient_1m_data_depth",
+  "primary_falsification_reason": "Real Coinalyze 1m liquidation coverage is insufficient to support the required 24h trailing anomaly window plus a usable post-lookback evaluation window.",
   "failed_checks": [
-    "no adjacent horizons passed criteria (passed: [], bias: {5: 0.4131054131054131, 10: 0.3757062146892655, 15: 0.3983050847457627}, mm_bias: {5: 0.4, 10: 0.3943089430894309, 15: 0.37209302325581395}, median_bps: {5: -3.84, 10: -6.98, 15: -8.26})"
-  ]
+    "feasibility_decision = insufficient_1m_data_depth",
+    "qualified_symbols = 0",
+    "supports_24h_lookback = false",
+    "usable_eval_hours_after_lookback = 0.0"
+  ],
+  "next_action": "stop_liquidation_shock_line_under_current_vendor_constraints",
+  "structure_signal_note": "The constructed response sample still shows a mean-reversion-leaning directional pattern, but this is not sufficient to advance because the governing 1m feasibility gate failed."
 }

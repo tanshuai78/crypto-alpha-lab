@@ -53,7 +53,9 @@ def evaluate_events(
 
         direction_dist[h] = {"up": up_count, "down": down_count, "flat": flat_count}
         total_directional = up_count + down_count
-        directional_bias[h] = up_count / total_directional if total_directional > 0 else 0.5
+        directional_bias[h] = (
+            max(up_count, down_count) / total_directional if total_directional > 0 else 0.5
+        )
 
         # Min-move filtered direction distributions
         mm_up = sum(1 for r in eval_results if r["min_move_directions"][h] == 1)
@@ -62,7 +64,7 @@ def evaluate_events(
 
         mm_direction_dist[h] = {"up": mm_up, "down": mm_down, "flat": mm_flat}
         total_mm = mm_up + mm_down
-        mm_directional_bias[h] = mm_up / total_mm if total_mm > 0 else 0.5
+        mm_directional_bias[h] = max(mm_up, mm_down) / total_mm if total_mm > 0 else 0.5
 
         # Bps statistics
         all_bps = [r["bps_changes"][h] for r in eval_results]
@@ -97,7 +99,7 @@ def evaluate_events(
     }
 
 
-def make_decision(summary: dict[str, Any]) -> tuple[str, str, list[str]]:
+def make_decision(summary: dict[str, Any]) -> tuple[str, str, list[str], str]:
     failed_checks = []
 
     # 1. Total event count check
@@ -163,7 +165,12 @@ def make_decision(summary: dict[str, Any]) -> tuple[str, str, list[str]]:
 
     # Determine decision state
     if not failed_checks:
-        return "continue_to_context_bucketing", "All success criteria satisfied.", []
+        return (
+            "continue_to_context_bucketing",
+            "All success criteria satisfied.",
+            [],
+            "proceed_to_context_bucketing",
+        )
 
     # If density or data depth failed
     if "event_count" in "".join(failed_checks) or "events_per_24h" in "".join(failed_checks):
@@ -174,7 +181,12 @@ def make_decision(summary: dict[str, Any]) -> tuple[str, str, list[str]]:
         decision = "retire_liquidation_shock_event_study"
 
     reason = f"Failed checks: {', '.join(failed_checks)}"
-    return decision, reason, failed_checks
+    next_action = (
+        "improve_data_or_event_density"
+        if decision == "insufficient_event_density"
+        else "stop_liquidation_shock_line"
+    )
+    return decision, reason, failed_checks, next_action
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,11 +275,12 @@ def main(argv: list[str] | None = None) -> int:
     summary = evaluate_events(eval_results, total_duration_days)
 
     # 4. Make decision
-    decision, reason, failed_checks = make_decision(summary)
+    decision, reason, failed_checks, next_action = make_decision(summary)
 
     summary["decision"] = decision
     summary["primary_falsification_reason"] = reason if failed_checks else ""
     summary["failed_checks"] = failed_checks
+    summary["next_action"] = next_action
 
     # Save summary report
     os.makedirs(os.path.dirname(os.path.abspath(args.summary_output)), exist_ok=True)
@@ -353,12 +366,13 @@ Based on the quantitative criteria, the event study has determined that:
     if decision == "continue_to_context_bucketing":
         markdown_report += (
             "\n**PROCEED TO CONTEXT BUCKETING (Phase 2)**: There is a statistically stable directional "
-            "bias across adjacent horizons. We should proceed to slice the response by trend or volatility filters.\n"
+            "bias across adjacent horizons. Next action: "
+            f"`{next_action}`.\n"
         )
     else:
         markdown_report += (
-            f"\n**RETIRE (No Tradeable Edge)**: The directional signal structure failed due to: {reason}. "
-            "We should retire liquidation directional alpha research as planned.\n"
+            f"\n**RETIRE / STOP CURRENT LINE**: The directional signal structure failed due to: {reason}. "
+            f"Next action: `{next_action}`.\n"
         )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.review_output_md)), exist_ok=True)
