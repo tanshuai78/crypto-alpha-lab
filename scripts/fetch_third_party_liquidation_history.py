@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
+import json
 import logging
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any
-import urllib.request
-import urllib.parse
-import urllib.error
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ def build_route_b_hourly_summary(
     symbol_count = len(symbols)
     row_count = len(rows)
     requested_symbols = sorted(requested_symbols or [])
-    
+
     if rows:
         start_ts = min(row["hour_bucket_ms"] for row in rows)
         end_ts = max(row["hour_bucket_ms"] for row in rows)
@@ -228,12 +228,12 @@ def build_route_b_hourly_summary(
         start_ts = 0
         end_ts = 0
         time_span_hours = 0
-        
+
     rows_per_symbol = {}
     for row in rows:
         sym = row["symbol"]
         rows_per_symbol[sym] = rows_per_symbol.get(sym, 0) + 1
-        
+
     if route_b_status is None:
         api_key = os.environ.get("COINALYZE_API_KEY", "")
         if not api_key:
@@ -242,7 +242,7 @@ def build_route_b_hourly_summary(
             route_b_status = "api_ok_empty_rows"
         else:
             route_b_status = "api_ok_non_empty_rows"
-            
+
     return {
         "vendor": "coinalyze",
         "route_b_status": route_b_status,
@@ -269,7 +269,7 @@ def build_route_b_hourly_summary(
 def main(argv: list[str] | None = None) -> int:
     import argparse
     import time
-    
+
     parser = argparse.ArgumentParser(description="Fetch third party liquidation history from Coinalyze.")
     parser.add_argument(
         "--symbols",
@@ -281,9 +281,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-jsonl", help="Output path for JSONL formatted rows")
     parser.add_argument("--summary-output", help="Output path for the hourly summary report")
     parser.add_argument("--feasibility-output", help="Output path for the feasibility report")
-    
+
     args = parser.parse_args(argv)
-    
+
     # Process symbols
     symbols = []
     if args.symbols:
@@ -294,23 +294,23 @@ def main(argv: list[str] | None = None) -> int:
                 symbols.append(s_arg.strip())
     else:
         symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT"]
-        
+
     # Calculate time window
     to_ts_sec = int(time.time())
     from_ts_sec = to_ts_sec - (args.lookback_hours * 3600)
-    
+
     symbol_statuses = []
     all_normalized_rows = []
-    
+
     api_key = os.environ.get("COINALYZE_API_KEY", "")
-    
+
     if not api_key:
         symbol_statuses.append("no_api_key")
     else:
         for idx, symbol in enumerate(symbols):
             if idx > 0:
                 time.sleep(1.0)
-                
+
             logger.info(f"Fetching liquidation history for {symbol}...")
             try:
                 payload, status = fetch_historical_liquidations(
@@ -321,14 +321,14 @@ def main(argv: list[str] | None = None) -> int:
                     api_key=api_key
                 )
                 symbol_statuses.append(status)
-                
+
                 if payload:
                     normalized = normalize_coinalyze_payload(payload, symbol=symbol)
                     all_normalized_rows.extend(normalized)
             except Exception as e:
                 logger.error(f"Error processing symbol {symbol}: {e}")
                 symbol_statuses.append("api_error")
-                
+
     # Resolve the final route_b_status
     if not api_key:
         final_status = "no_api_key"
@@ -340,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         final_status = "api_ok_non_empty_rows"
     else:
         final_status = "api_ok_empty_rows"
-        
+
     summary = build_route_b_hourly_summary(
         all_normalized_rows,
         route_b_status=final_status,
@@ -352,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary["symbol_count"] = len(symbols)
     summary["symbols"] = sorted(symbols)
-    
+
     feasibility = load_feasibility_audit()
     if "vendor_candidates" in feasibility:
         for candidate in feasibility["vendor_candidates"]:
@@ -366,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         "from_ts_sec": from_ts_sec,
         "to_ts_sec": to_ts_sec,
     })
-                
+
     if args.output_jsonl:
         os.makedirs(os.path.dirname(os.path.abspath(args.output_jsonl)), exist_ok=True)
         sorted_rows = sorted(all_normalized_rows, key=lambda x: (x["symbol"], x["hour_bucket_ms"]))
@@ -374,19 +374,19 @@ def main(argv: list[str] | None = None) -> int:
             for row in sorted_rows:
                 f.write(json.dumps(row) + "\n")
         logger.info(f"Saved normalized rows to {args.output_jsonl}")
-        
+
     if args.summary_output:
         os.makedirs(os.path.dirname(os.path.abspath(args.summary_output)), exist_ok=True)
         with open(args.summary_output, "w") as f:
             json.dump(summary, f, indent=2)
         logger.info(f"Saved summary report to {args.summary_output}")
-        
+
     if args.feasibility_output:
         os.makedirs(os.path.dirname(os.path.abspath(args.feasibility_output)), exist_ok=True)
         with open(args.feasibility_output, "w") as f:
             json.dump(feasibility, f, indent=2)
         logger.info(f"Saved feasibility report to {args.feasibility_output}")
-        
+
     return 0
 
 

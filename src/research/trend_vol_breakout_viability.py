@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from configs.base import (
-    RISK_MAX_SINGLE_POSITION_USDT,
     TREND_REGIME_MAX_DATA_AGE_SEC,
     TREND_REGIME_MAX_SLIPPAGE_BPS,
     TREND_REGIME_MIN_24H_VOLUME_USDT,

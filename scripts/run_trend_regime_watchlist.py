@@ -7,9 +7,9 @@ import time
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 from loguru import logger
 

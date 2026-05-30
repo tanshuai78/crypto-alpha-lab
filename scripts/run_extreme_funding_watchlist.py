@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
-from urllib.parse import urlencode
-import json
-from typing import Any, Callable
-from urllib.request import Request, urlopen
-from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 import argparse
 import asyncio
+import json
 import time
+from collections import Counter, defaultdict, deque
 from json import JSONDecodeError
 from pathlib import Path
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
 from loguru import logger
+
+from strategies.extreme_funding.scanner import ExtremeFundingWatchlistScanner
 
 PUBLIC_SNAPSHOT_FIELDS = {
     "symbol",

@@ -12,10 +12,10 @@ from configs.base import (
     RISK_MAX_SINGLE_POSITION_USDT,
 )
 from src.research.extreme_funding_basis_replay import HistoricalBasisRow
+from src.strategies.extreme_funding.admission import classify_extreme_funding_admission
 from src.strategies.extreme_funding.candidate_builder import (
     ExtremeFundingCandidateThresholds,
 )
-from src.strategies.extreme_funding.admission import classify_extreme_funding_admission
 from src.strategies.extreme_funding.shadow_simulator import (
     ExtremeFundingShadowPosition,
     simulate_extreme_funding_shadow,

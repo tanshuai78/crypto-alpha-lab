@@ -13,12 +13,12 @@ from configs.base import (
     TREND_REGIME_STOP_LOSS_PCT,
     TREND_REGIME_STRESS_COST_BPS,
 )
+from scripts.fetch_third_party_liquidation_history import load_feasibility_audit
 from scripts.replay_trend_regime_shadow import (
-    normalize_rows_for_historical_replay,
     apply_hourly_liquidation_history,
     load_optional_jsonl,
+    normalize_rows_for_historical_replay,
 )
-from scripts.fetch_third_party_liquidation_history import load_feasibility_audit
 from src.research.trend_liquidation_cascade_review import (
     LiquidationCascadeReviewThresholds,
     classify_liquidation_cascade_for_review,
@@ -474,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
             if candidate.get("vendor") == "coinalyze" and candidate.get("route_b_status"):
                 route_b_status = candidate["route_b_status"]
                 break
-    
+
     if route_b_joined_count > 0:
         route_b_status = "api_ok_non_empty_rows"
     elif not route_b_status:
@@ -497,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
         route_b_feasibility=route_b_feasibility,
         overlap_count=overlap_count,
     )
-    
+
     replay_median_net_pnl = base_cont.get("median_net_pnl_bps", 0.0)
     decision = build_route_decision_snapshot(
         comparison,

@@ -1,5 +1,4 @@
 from typing import Any
-import pytest
 
 from src.research.trend_vol_breakout_viability import (
     VolBreakoutReviewThresholds,
