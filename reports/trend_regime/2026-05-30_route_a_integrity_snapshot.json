@@ -1,0 +1,24 @@
+{
+  "route": "A",
+  "audit_date": "2026-05-30",
+  "raw_file": {
+    "path": "data/trend_regime_force_orders_raw.jsonl",
+    "line_count": 0,
+    "min_event_time_ms": null,
+    "max_event_time_ms": null,
+    "min_hour_bucket_ms": null,
+    "max_hour_bucket_ms": null,
+    "non_hour_aligned_bucket_count": 0,
+    "bucket_event_time_mismatch_count": 0
+  },
+  "hourly_file": {
+    "path": "data/trend_regime_liquidation_hourly.jsonl",
+    "line_count": 1,
+    "non_hour_aligned_bucket_count": 1
+  },
+  "replay_join": {
+    "liquidation_rows_joined_count": 0,
+    "invalid_hourly_bucket_count": 0
+  },
+  "decision": "route_a_old_artifact_only"
+}
