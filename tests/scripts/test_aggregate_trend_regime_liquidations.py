@@ -87,3 +87,51 @@ def test_write_and_load_round_trip(raw_jsonl, tmp_path):
     write_hourly_jsonl(rows, out_path)
     loaded = load_raw_jsonl(out_path)
     assert len(loaded) == 3
+
+
+def test_aggregate_raw_to_hourly_floors_non_hour_bucket_ms():
+    records = [
+        {
+            "symbol": "BTC/USDT",
+            "hour_bucket_ms": 1716852300000,  # explicit non-hour-aligned bucket
+            "notional_usdt": 34000.0,
+            "liquidation_side": "long_liquidation",
+        }
+    ]
+
+    rows = aggregate_raw_to_hourly(records)
+
+    assert rows[0]["hour_bucket_ms"] == 1716850800000
+
+
+def test_aggregate_raw_to_hourly_with_audit_prefers_event_timestamp_over_stale_hour_bucket_ms():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_hourly_with_audit
+    records = [
+        {
+            "symbol": "BTC/USDT",
+            "timestamp_ms": 1780001100000,
+            "hour_bucket_ms": 1716852300000,
+            "notional_usdt": 34000.0,
+            "liquidation_side": "long_liquidation",
+        }
+    ]
+
+    rows, audit = aggregate_raw_to_hourly_with_audit(records)
+
+    assert rows[0]["hour_bucket_ms"] == 1780000800000
+    assert audit["bucket_event_time_mismatch_count"] == 1
+
+
+def test_aggregate_raw_to_hourly_with_audit_skips_missing_all_timestamps():
+    from scripts.aggregate_trend_regime_liquidations import aggregate_raw_to_hourly_with_audit
+    records = [{
+        "symbol": "BTC/USDT",
+        "notional_usdt": 34000.0,
+        "liquidation_side": "long_liquidation",
+    }]
+
+    rows, audit = aggregate_raw_to_hourly_with_audit(records)
+
+    assert rows == []
+    assert audit["missing_timestamp_count"] == 1
+
