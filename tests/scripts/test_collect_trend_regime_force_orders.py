@@ -155,3 +155,87 @@ def test_build_force_order_raw_record_has_required_fields():
     assert "T" in record["hour_bucket_utc"]
     assert record["symbol"] == "BTC/USDT"
     assert record["liquidation_notional_semantics"] == "partial_snapshot_lower_bound"
+
+
+def test_forceorder_raw_event_contains_required_research_fields():
+    sample_payload = {
+        "stream": "btcusdt@forceOrder",
+        "data": {
+            "e": "forceOrder",
+            "E": 1716800000123,
+            "o": {
+                "s": "BTCUSDT",
+                "S": "SELL",
+                "ap": "60000.00",
+                "q": "0.500",
+                "z": "0.500",
+                "T": 1716800000000,
+            },
+        },
+    }
+    parsed = parse_force_order_notional_event(sample_payload)
+    assert parsed is not None
+    record = build_force_order_raw_record(parsed, schema_version=1)
+    
+    REQUIRED_RAW_KEYS = {
+        "schema_version",
+        "source",
+        "event_id",
+        "symbol",
+        "exchange_symbol",
+        "event_time_ms",
+        "trade_time_ms",
+        "side",
+        "liquidated_position_side",
+        "liquidation_side",
+        "price",
+        "quantity",
+        "notional_usdt",
+        "raw_payload",
+    }
+    assert REQUIRED_RAW_KEYS.issubset(set(record.keys()))
+    assert record["schema_version"] == 1
+    assert record["symbol"] == "BTC/USDT"
+    assert record["exchange_symbol"] == "BTCUSDT"
+    assert record["event_time_ms"] == 1716800000123
+    assert record["trade_time_ms"] == 1716800000000
+    assert record["side"] == "SELL"
+    assert record["liquidated_position_side"] == "long"
+    assert record["price"] == 60000.0
+    assert record["quantity"] == 0.5
+    assert record["notional_usdt"] == 30000.0
+    assert record["raw_payload"] == sample_payload
+
+
+def test_raw_event_id_is_stable_for_same_exchange_event():
+    sample_payload = {
+        "stream": "btcusdt@forceOrder",
+        "data": {
+            "e": "forceOrder",
+            "E": 1716800000123,
+            "o": {
+                "s": "BTCUSDT",
+                "S": "SELL",
+                "ap": "60000.00",
+                "q": "0.500",
+                "z": "0.500",
+                "T": 1716800000000,
+            },
+        },
+    }
+    parsed_a = parse_force_order_notional_event(sample_payload)
+    parsed_b = parse_force_order_notional_event(sample_payload)
+    
+    record_a = build_force_order_raw_record(parsed_a)
+    record_b = build_force_order_raw_record(parsed_b)
+    
+    assert record_a["event_id"] == record_b["event_id"]
+    assert record_a["event_id"] == "binance_forceorder_ws|BTC/USDT|1716800000123|1716800000000|SELL|60000.0|0.5"
+
+
+def test_parse_args_accepts_raw_fsync_and_schema_version():
+    from scripts.collect_trend_regime_force_orders import parse_args
+    args = parse_args(["--raw-output", "x.jsonl", "--fsync-raw", "--raw-schema-version", "1"])
+    assert args.fsync_raw is True
+    assert args.raw_schema_version == 1
+

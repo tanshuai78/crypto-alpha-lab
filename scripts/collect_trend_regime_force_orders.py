@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -58,6 +59,7 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
 
     Returns a dict with keys:
         symbol                – normalized like "BTC/USDT"
+        exchange_symbol       – raw exchange symbol like "BTCUSDT"
         side                  – "BUY" or "SELL" (forced order side)
         liquidation_side      – "long_liquidation" or "short_liquidation"
         quantity              – filled quantity
@@ -68,6 +70,7 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
         source                – binance_forceorder_ws
         source_quality        – self_collected_partial_history
         liquidation_notional_semantics – partial_snapshot_lower_bound
+        raw_payload           – the original websocket message
 
     Returns None on any parse failure.
     """
@@ -118,6 +121,7 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
 
     return {
         "symbol": symbol,
+        "exchange_symbol": raw_symbol,
         "side": side,
         "liquidation_side": liquidation_side,
         "quantity": float(quantity),
@@ -128,27 +132,49 @@ def parse_force_order_notional_event(message: dict[str, Any]) -> dict[str, Any] 
         "source": "binance_forceorder_ws",
         "source_quality": "self_collected_partial_history",
         "liquidation_notional_semantics": "partial_snapshot_lower_bound",
+        "raw_payload": message,
     }
 
 
-def build_force_order_raw_record(parsed: dict[str, Any]) -> dict[str, Any]:
+def build_force_order_raw_record(parsed: dict[str, Any], schema_version: int = 1) -> dict[str, Any]:
     """Build a flat JSONL record from a parsed forceOrder event dict."""
     ts_ms = int(parsed["timestamp_ms"])
     dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
     hour_bucket_utc = dt.strftime("%Y-%m-%dT%H:00")
     hour_bucket_ms = ts_ms // 3_600_000 * 3_600_000
+
+    source = str(parsed.get("source") or "binance_forceorder_ws")
+    symbol = parsed["symbol"]
+    event_time_ms = ts_ms
+    trade_time_ms = int(parsed.get("order_trade_time_ms") or ts_ms)
+    side = parsed["side"]
+    price = float(parsed.get("average_price") or parsed.get("price") or 0.0)
+    quantity = float(parsed.get("quantity") or 0.0)
+
+    event_id = f"{source}|{symbol}|{event_time_ms}|{trade_time_ms}|{side}|{price}|{quantity}"
+    liquidated_position_side = "long" if side == "SELL" else "short"
+
     return {
-        "symbol": parsed["symbol"],
-        "side": parsed["side"],
+        "schema_version": schema_version,
+        "source": source,
+        "event_id": event_id,
+        "symbol": symbol,
+        "exchange_symbol": parsed.get("exchange_symbol") or symbol.replace("/", ""),
+        "event_time_ms": event_time_ms,
+        "trade_time_ms": trade_time_ms,
+        "side": side,
+        "liquidated_position_side": liquidated_position_side,
         "liquidation_side": parsed["liquidation_side"],
-        "quantity": parsed["quantity"],
-        "average_price": parsed["average_price"],
+        "price": price,
+        "quantity": quantity,
         "notional_usdt": parsed["notional_usdt"],
-        "timestamp_ms": ts_ms,
-        "order_trade_time_ms": int(parsed.get("order_trade_time_ms") or ts_ms),
+        "raw_payload": parsed.get("raw_payload"),
+        # Legacy compatibility keys
+        "timestamp_ms": event_time_ms,
+        "order_trade_time_ms": trade_time_ms,
+        "average_price": price,
         "hour_bucket_ms": hour_bucket_ms,
         "hour_bucket_utc": hour_bucket_utc,
-        "source": str(parsed.get("source") or "binance_forceorder_ws"),
         "source_quality": str(parsed.get("source_quality") or "self_collected_partial_history"),
         "liquidation_notional_semantics": str(
             parsed.get("liquidation_notional_semantics") or "partial_snapshot_lower_bound"
@@ -157,11 +183,14 @@ def build_force_order_raw_record(parsed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def append_force_order_raw_jsonl(record: dict[str, Any], path: str) -> None:
+def append_force_order_raw_jsonl(record: dict[str, Any], path: str, fsync: bool = False) -> None:
     """Append a single JSONL record to *path*, creating directories as needed."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record) + "\n")
+        fh.flush()
+        if fsync:
+            os.fsync(fh.fileno())
 
 
 class RollingLiquidationAccumulator:
@@ -220,6 +249,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--raw-output",
         default=f"data/{TREND_REGIME_FORCE_ORDER_RAW_JSONL}",
         help="Optional path to append raw forceOrder JSONL records (one per event).",
+    )
+    parser.add_argument(
+        "--fsync-raw",
+        action="store_true",
+        help="Call os.fsync() on raw JSONL file descriptor after writing each event.",
+    )
+    parser.add_argument(
+        "--raw-schema-version",
+        type=int,
+        default=1,
+        help="Schema version for raw JSONL records.",
     )
     return parser.parse_args(argv)
 
@@ -286,8 +326,11 @@ async def run_collector(args: argparse.Namespace) -> int:
                                 )
                                 if raw_output_path is not None:
                                     append_force_order_raw_jsonl(
-                                        build_force_order_raw_record(parsed),
+                                        build_force_order_raw_record(
+                                            parsed, schema_version=args.raw_schema_version
+                                        ),
                                         raw_output_path,
+                                        fsync=args.fsync_raw,
                                     )
                                 accepted_count += 1
 
