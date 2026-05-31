@@ -462,3 +462,49 @@ LIQUIDATION_SHOCK_MIN_ABS_MEDIAN_RESPONSE_BPS = 2.0
 # Minimum absolute median return in bps to be economically non-trivial.
 
 
+# ─── Binance Liquidation Snapshot Event Study ──────────────────────────────────
+# All constants for the Phase 1 Binance Vision historical snapshot research.
+# Data semantics: liquidationSnapshot = largest-order snapshot proxy per symbol
+# per 1000ms interval. NOT a complete liquidation tape.
+# Sample window: 2024-01 to 2024-03 (Q1 2024 trending crypto market).
+# Generalization of results to other windows is explicitly disallowed.
+
+BINANCE_LIQUIDATION_SNAPSHOT_SYMBOLS = (
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+)
+# Futures perpetual symbols to study. USDT-margined Binance Futures.
+
+BINANCE_LIQUIDATION_SNAPSHOT_MONTHS = ("2024-01", "2024-02", "2024-03")
+# Calendar months to download and study. YYYY-MM format.
+
+BINANCE_LIQUIDATION_SNAPSHOT_RAW_DIR = "data/binance_liquidation_snapshot/raw"
+# Root directory for downloaded raw ZIP files (klines + liquidationSnapshot).
+# Do not commit ZIP files.
+
+BINANCE_LIQUIDATION_SNAPSHOT_EXTRACTED_DIR = "data/binance_liquidation_snapshot/extracted"
+# Root directory for extracted CSV files.
+# Do not commit extracted CSVs.
+
+BINANCE_LIQUIDATION_SNAPSHOT_PROCESSED_DIR = "data/binance_liquidation_snapshot/processed"
+# Directory for the final processed JSONL event-study dataset.
+# Do not commit processed JSONL.
+
+BINANCE_LIQUIDATION_SNAPSHOT_CONTINUITY_MIN_COVERAGE_RATIO = 0.99
+# Minimum required price data coverage ratio per symbol-month.
+# 0.99 = at most 1% of 1m bars may be missing from the expected minute grid.
+
+BINANCE_LIQUIDATION_SNAPSHOT_CONTINUITY_MAX_GAP_MINUTES = 1
+# Maximum allowed consecutive missing 1m price bars.
+# Any gap > 1m in the kline series causes that symbol-month to fail the price gate.
+
+BINANCE_LIQUIDATION_SNAPSHOT_MIN_TOTAL_EVENTS = 10
+# Minimum total shock events across all symbols to qualify the event density gate.
+
+BINANCE_LIQUIDATION_SNAPSHOT_MIN_EVENTS_PER_MONTH = 1
+# Minimum shock events per calendar month to qualify the event density gate.
+# Set low for Phase 1 to avoid false rejection of sparse snapshot data.
+
