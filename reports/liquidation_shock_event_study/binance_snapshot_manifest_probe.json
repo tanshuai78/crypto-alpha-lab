@@ -1,0 +1,136 @@
+{
+  "source": "binance_vision",
+  "market": "futures_um_kline_cm_liquidation",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT"
+  ],
+  "cm_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT"
+  ],
+  "months": [
+    "2024-01",
+    "2024-02",
+    "2024-03"
+  ],
+  "kline_monthly_available": {
+    "BTCUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "ETHUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "SOLUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "XRPUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "DOGEUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    }
+  },
+  "liquidation_monthly_available": {
+    "BTCUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    },
+    "ETHUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    },
+    "SOLUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    },
+    "XRPUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    },
+    "DOGEUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    }
+  },
+  "liquidation_daily_available": {
+    "BTCUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "ETHUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "SOLUSDT": {
+      "2024-01": true,
+      "2024-02": true,
+      "2024-03": true
+    },
+    "XRPUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    },
+    "DOGEUSDT": {
+      "2024-01": false,
+      "2024-02": false,
+      "2024-03": false
+    }
+  },
+  "selected_liquidation_download_mode": "daily",
+  "missing_symbol_months": [
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-01",
+      "missing": "no_cm_perp"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-02",
+      "missing": "no_cm_perp"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-03",
+      "missing": "no_cm_perp"
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-01",
+      "missing": "no_cm_perp"
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-02",
+      "missing": "no_cm_perp"
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-03",
+      "missing": "no_cm_perp"
+    }
+  ],
+  "decision": "proceed_with_daily_liquidation"
+}
