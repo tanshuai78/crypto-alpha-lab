@@ -1,0 +1,76 @@
+{
+  "data_source": "binance_vision_liquidation_snapshot",
+  "liquidation_data_semantics": "binance_forceorder_largest_order_snapshot_per_symbol_per_1000ms",
+  "not_complete_liquidation_tape": true,
+  "notional_interpretation": "snapshot_notional_proxy_not_total_market_liquidation",
+  "sample_window": "2024-01_to_2024-03",
+  "known_window_bias": "Q1_2024_trending_crypto_market",
+  "generalization_allowed": false,
+  "raw_events": 5502,
+  "deduplicated_events": 4398,
+  "density": {
+    "total_events": 4398,
+    "events_per_month": {
+      "2024-01": 1460,
+      "2024-02": 1147,
+      "2024-03": 1791
+    },
+    "events_by_symbol": {
+      "BTCUSDT": 2206,
+      "ETHUSDT": 1657,
+      "SOLUSDT": 535
+    },
+    "events_by_side": {
+      "short": 2003,
+      "long": 2395
+    },
+    "events_by_symbol_month": {
+      "BTCUSDT": {
+        "2024-01": 737,
+        "2024-02": 673,
+        "2024-03": 796
+      },
+      "ETHUSDT": {
+        "2024-01": 503,
+        "2024-02": 474,
+        "2024-03": 680
+      },
+      "SOLUSDT": {
+        "2024-01": 220,
+        "2024-03": 315
+      }
+    },
+    "events_by_symbol_side": {
+      "BTCUSDT": {
+        "short": 1091,
+        "long": 1115
+      },
+      "ETHUSDT": {
+        "short": 739,
+        "long": 918
+      },
+      "SOLUSDT": {
+        "short": 173,
+        "long": 362
+      }
+    }
+  },
+  "directional_bias": {
+    "5": {
+      "n": 4397,
+      "positive": 1914,
+      "directional_ratio": 0.43529679326813736
+    },
+    "10": {
+      "n": 4397,
+      "positive": 1861,
+      "directional_ratio": 0.4232431203093018
+    },
+    "15": {
+      "n": 4397,
+      "positive": 1884,
+      "directional_ratio": 0.4284739595178531
+    }
+  },
+  "decision": "binance_snapshot_structure_not_confirmed"
+}

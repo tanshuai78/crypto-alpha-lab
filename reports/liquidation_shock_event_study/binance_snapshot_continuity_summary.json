@@ -1,0 +1,229 @@
+{
+  "data_source": "binance_vision_liquidation_snapshot",
+  "liquidation_data_semantics": "binance_forceorder_largest_order_snapshot_per_symbol_per_1000ms",
+  "not_complete_liquidation_tape": true,
+  "sample_window": "2024-01_to_2024-03",
+  "results": {
+    "BTCUSDT": {
+      "2024-01": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 9034,
+        "zero_filled_liquidation_minutes": 42348,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      },
+      "2024-02": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 41760,
+        "liquidation_files_found": 29,
+        "liquidation_files_expected": 29,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 7816,
+        "zero_filled_liquidation_minutes": 39774,
+        "dataset_rows": 41760,
+        "joined_rows": 41760,
+        "passes_continuity_gate": true
+      },
+      "2024-03": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 13606,
+        "zero_filled_liquidation_minutes": 41113,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      }
+    },
+    "ETHUSDT": {
+      "2024-01": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 4286,
+        "zero_filled_liquidation_minutes": 43462,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      },
+      "2024-02": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 41760,
+        "liquidation_files_found": 29,
+        "liquidation_files_expected": 29,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 3616,
+        "zero_filled_liquidation_minutes": 40664,
+        "dataset_rows": 41760,
+        "joined_rows": 41760,
+        "passes_continuity_gate": true
+      },
+      "2024-03": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 7016,
+        "zero_filled_liquidation_minutes": 42748,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      }
+    },
+    "SOLUSDT": {
+      "2024-01": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 2700,
+        "zero_filled_liquidation_minutes": 43990,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      },
+      "2024-02": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 41760,
+        "liquidation_files_found": 28,
+        "liquidation_files_expected": 29,
+        "liquidation_file_coverage_ratio": 0.965517,
+        "liquidation_snapshot_rows": 1540,
+        "zero_filled_liquidation_minutes": 41339,
+        "dataset_rows": 41760,
+        "joined_rows": 41760,
+        "passes_continuity_gate": false
+      },
+      "2024-03": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 31,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 1.0,
+        "liquidation_snapshot_rows": 3332,
+        "zero_filled_liquidation_minutes": 43708,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": true
+      }
+    },
+    "XRPUSDT": {
+      "2024-01": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 44640,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": false
+      },
+      "2024-02": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 41760,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 29,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 41760,
+        "dataset_rows": 41760,
+        "joined_rows": 41760,
+        "passes_continuity_gate": false
+      },
+      "2024-03": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 44640,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": false
+      }
+    },
+    "DOGEUSDT": {
+      "2024-01": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 44640,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": false
+      },
+      "2024-02": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 41760,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 29,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 41760,
+        "dataset_rows": 41760,
+        "joined_rows": 41760,
+        "passes_continuity_gate": false
+      },
+      "2024-03": {
+        "price_coverage_ratio": 1.0,
+        "price_missing_bucket_count": 0,
+        "price_max_gap_minutes": 0,
+        "price_rows": 44640,
+        "liquidation_files_found": 0,
+        "liquidation_files_expected": 31,
+        "liquidation_file_coverage_ratio": 0.0,
+        "liquidation_snapshot_rows": 0,
+        "zero_filled_liquidation_minutes": 44640,
+        "dataset_rows": 44640,
+        "joined_rows": 44640,
+        "passes_continuity_gate": false
+      }
+    }
+  },
+  "all_symbol_months_pass": false
+}

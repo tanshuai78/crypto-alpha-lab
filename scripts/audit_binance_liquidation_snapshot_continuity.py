@@ -263,26 +263,41 @@ def _load_kline_csv(csv_path: Path) -> list[dict]:
 def _load_liquidation_csv(csv_path: Path) -> list[dict]:
     """
     Load a Binance liquidationSnapshot CSV.
-    Columns (with header): symbol,side,order_type,time_in_force,
-    original_quantity,price,average_price,order_status,last_filled_quantity,
-    accumulated_filled_quantity,time,update_time
+    Columns (with header): time,side,order_type,time_in_force,
+    original_quantity,price,average_price,order_status,
+    last_fill_quantity,accumulated_fill_quantity
+
+    Side mapping:
+        BUY  → exchange buys to close short positions → short liquidation
+        SELL → exchange sells long positions          → long liquidation
+
+    Notional: average_price × original_quantity.
+    For CM contracts, original_quantity is in number of contracts; for UM it
+    is in base currency units. We use average_price × original_quantity as a
+    consistent proxy across both markets.
     """
     rows = []
+    seen: set[tuple] = set()
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
-                ts_ms = int(row.get("time", row.get("Time", 0)))
-                side_raw = row.get("side", row.get("Side", "")).strip().lower()
-                # Map BUY → short liq (exchange buys to cover shorts)
-                # Map SELL → long liq (exchange sells long positions)
-                if side_raw in ("buy", "short"):
-                    side = "short"
-                else:
-                    side = "long"
+                ts_ms = int(row.get("time", row.get("Time", 0)) or 0)
+                side_raw = (row.get("side", row.get("Side", "")) or "").strip().upper()
+                side = "short" if side_raw == "BUY" else "long"
                 avg_price = float(row.get("average_price", row.get("averagePrice", 0)) or 0)
-                qty = float(row.get("last_filled_quantity", row.get("lastFilledQty", 0)) or 0)
-                notional = avg_price * qty
+                # Use original_quantity as the order size (works for both CM and UM).
+                # Note: CM uses last_fill_quantity (not last_filled_quantity).
+                orig_qty = float(row.get("original_quantity", row.get("origQty", 0)) or 0)
+                notional = avg_price * orig_qty
+
+                # Deduplicate: Binance Vision liquidationSnapshot sometimes
+                # emits the same row twice.
+                dedup_key = (ts_ms, side_raw, orig_qty, avg_price)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
                 rows.append({"timestamp_ms": ts_ms, "side": side, "notional_usdt": notional})
             except (ValueError, KeyError):
                 continue

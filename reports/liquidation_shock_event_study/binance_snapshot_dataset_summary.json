@@ -1,0 +1,43 @@
+{
+  "data_source": "binance_vision_liquidation_snapshot",
+  "liquidation_data_semantics": "binance_forceorder_largest_order_snapshot_per_symbol_per_1000ms",
+  "not_complete_liquidation_tape": true,
+  "notional_interpretation": "snapshot_notional_proxy_not_total_market_liquidation",
+  "sample_window": "2024-01_to_2024-03",
+  "known_window_bias": "Q1_2024_trending_crypto_market",
+  "generalization_allowed": false,
+  "symbols": {
+    "BTCUSDT": {
+      "passed_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03"
+      ],
+      "total_rows": 131040
+    },
+    "ETHUSDT": {
+      "passed_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03"
+      ],
+      "total_rows": 131040
+    },
+    "SOLUSDT": {
+      "passed_months": [
+        "2024-01",
+        "2024-03"
+      ],
+      "total_rows": 89280
+    },
+    "XRPUSDT": {
+      "passed_months": [],
+      "total_rows": 0
+    },
+    "DOGEUSDT": {
+      "passed_months": [],
+      "total_rows": 0
+    }
+  },
+  "total_rows": 351360
+}

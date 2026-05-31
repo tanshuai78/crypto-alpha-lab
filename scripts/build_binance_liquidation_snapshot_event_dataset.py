@@ -174,10 +174,16 @@ def _load_kline_csv(csv_path: Path) -> list[dict]:
 def _load_liquidation_csv(csv_path: Path) -> list[dict]:
     """
     Load Binance liquidationSnapshot CSV (with header).
-    Side mapping: BUY → exchange buys to close shorts → short liq
-                  SELL → exchange sells long positions → long liq
+    Columns: time,side,order_type,time_in_force,original_quantity,price,
+             average_price,order_status,last_fill_quantity,
+             accumulated_fill_quantity
+
+    Side mapping: BUY → short liq, SELL → long liq
+    Notional: average_price × original_quantity (proxy for CM and UM).
+    Deduplicates rows because Binance Vision sometimes emits each order twice.
     """
     rows = []
+    seen: set[tuple] = set()
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -186,8 +192,16 @@ def _load_liquidation_csv(csv_path: Path) -> list[dict]:
                 side_raw = (row.get("side", row.get("Side", "")) or "").strip().upper()
                 side = "short" if side_raw == "BUY" else "long"
                 avg_price = float(row.get("average_price", row.get("averagePrice", 0)) or 0)
-                qty = float(row.get("last_filled_quantity", row.get("lastFilledQty", 0)) or 0)
-                notional = avg_price * qty
+                # Use original_quantity (not last_fill_quantity — column names differ
+                # between CM and UM formats).
+                orig_qty = float(row.get("original_quantity", row.get("origQty", 0)) or 0)
+                notional = avg_price * orig_qty
+
+                dedup_key = (ts_ms, side_raw, orig_qty, avg_price)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
                 rows.append({"timestamp_ms": ts_ms, "side": side, "notional_usdt": notional})
             except (ValueError, KeyError):
                 continue
