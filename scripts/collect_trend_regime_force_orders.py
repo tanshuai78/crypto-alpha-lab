@@ -33,7 +33,7 @@ def _normalize_symbol(raw_symbol: str) -> str:
 
 
 def build_force_order_stream_url(
-    symbols: tuple[str, ...], *, base_url: str = "wss://fstream.binance.com"
+    symbols: tuple[str, ...], *, base_url: str = "wss://fstream.binance.com/market"
 ) -> str:
     streams = "/".join(f"{_symbol_key(symbol).lower()}@forceOrder" for symbol in symbols)
     return f"{base_url.rstrip('/')}/stream?streams={streams}"
@@ -245,7 +245,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--window-sec", type=int, default=3600)
     parser.add_argument("--flush-interval-sec", type=float, default=10.0)
     parser.add_argument("--max-seconds", type=int, default=0, help="0 means run forever")
-    parser.add_argument("--ws-base-url", default="wss://fstream.binance.com")
+    parser.add_argument("--ws-base-url", default="wss://fstream.binance.com/market")
     parser.add_argument(
         "--symbols",
         nargs="*",

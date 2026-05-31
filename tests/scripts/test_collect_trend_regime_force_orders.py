@@ -15,7 +15,7 @@ from scripts.collect_trend_regime_force_orders import (
 def test_build_force_order_stream_url_contains_all_symbols():
     url = build_force_order_stream_url(("BTC/USDT", "DOGE/USDT"))
 
-    assert url.startswith("wss://fstream.binance.com/stream?streams=")
+    assert url.startswith("wss://fstream.binance.com/market/stream?streams=")
     assert "btcusdt@forceOrder" in url
     assert "dogeusdt@forceOrder" in url
 
