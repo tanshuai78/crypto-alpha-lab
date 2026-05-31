@@ -45,6 +45,16 @@ import configs.base as cfg
 BINANCE_VISION_BASE = "https://data.binance.vision"
 REPORT_PATH = Path("reports/liquidation_shock_event_study/binance_snapshot_fetch_summary.json")
 
+# Mapping from UM symbol → CM perp symbol for liquidation.
+# Binance Vision only has liquidationSnapshot under /data/futures/cm/.
+UM_TO_CM_SYMBOL: dict[str, str | None] = {
+    "BTCUSDT": "BTCUSD_PERP",
+    "ETHUSDT": "ETHUSD_PERP",
+    "SOLUSDT": "SOLUSD_PERP",
+    "XRPUSDT": None,
+    "DOGEUSDT": None,
+}
+
 
 # ---------------------------------------------------------------------------
 # URL builders (pure — testable without network)
@@ -62,20 +72,24 @@ def build_um_monthly_kline_zip_url(binance_symbol: str, month: str) -> str:
 
 def build_um_daily_liquidation_zip_url(binance_symbol: str, date_str: str) -> str:
     """
-    Daily liquidationSnapshot ZIP.
-    e.g. https://data.binance.vision/data/futures/um/daily/liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2024-01-01.zip
+    Daily liquidationSnapshot ZIP (CM market).
+    NOTE: Binance Vision only publishes liquidationSnapshot under /data/futures/cm/.
+    binance_symbol must be a CM symbol (e.g. 'BTCUSD_PERP').
+    e.g. https://data.binance.vision/data/futures/cm/daily/liquidationSnapshot/BTCUSD_PERP/BTCUSD_PERP-liquidationSnapshot-2024-01-01.zip
     """
     fname = f"{binance_symbol}-liquidationSnapshot-{date_str}.zip"
-    return f"{BINANCE_VISION_BASE}/data/futures/um/daily/liquidationSnapshot/{binance_symbol}/{fname}"
+    return f"{BINANCE_VISION_BASE}/data/futures/cm/daily/liquidationSnapshot/{binance_symbol}/{fname}"
 
 
 def build_um_monthly_liquidation_zip_url(binance_symbol: str, month: str) -> str:
     """
-    Monthly liquidationSnapshot ZIP.
-    e.g. https://data.binance.vision/data/futures/um/monthly/liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2024-01.zip
+    Monthly liquidationSnapshot ZIP (CM market).
+    NOTE: Binance Vision only publishes liquidationSnapshot under /data/futures/cm/.
+    binance_symbol must be a CM symbol (e.g. 'BTCUSD_PERP').
+    e.g. https://data.binance.vision/data/futures/cm/monthly/liquidationSnapshot/BTCUSD_PERP/BTCUSD_PERP-liquidationSnapshot-2024-01.zip
     """
     fname = f"{binance_symbol}-liquidationSnapshot-{month}.zip"
-    return f"{BINANCE_VISION_BASE}/data/futures/um/monthly/liquidationSnapshot/{binance_symbol}/{fname}"
+    return f"{BINANCE_VISION_BASE}/data/futures/cm/monthly/liquidationSnapshot/{binance_symbol}/{fname}"
 
 
 def build_checksum_url(zip_url: str) -> str:
@@ -109,6 +123,7 @@ def build_download_plan(
     symbols: list[str],
     months: list[str],
     liquidation_mode: str = "daily",
+    um_to_cm_map: dict[str, str | None] | None = None,
 ) -> list[dict]:
     """
     Build a list of download entries (no I/O).
@@ -117,20 +132,27 @@ def build_download_plan(
         url           — ZIP URL
         checksum_url  — .CHECKSUM URL
         kind          — 'kline' | 'liquidation'
-        symbol        — Binance symbol string
+        symbol        — UM Binance symbol string
         month         — YYYY-MM
         date          — YYYY-MM-DD (daily liq only) or None
+        liq_symbol    — CM perp symbol used for liquidation URL (may differ from symbol)
 
     Args:
-        symbols: Binance symbol strings (e.g. ["BTCUSDT"]).
+        symbols: UM Binance symbol strings (e.g. ["BTCUSDT"]).
         months:  List of YYYY-MM strings.
         liquidation_mode: 'daily' or 'monthly'.
+        um_to_cm_map: Override UM→CM symbol mapping.
     """
+    if um_to_cm_map is None:
+        um_to_cm_map = UM_TO_CM_SYMBOL
+
     plan: list[dict] = []
 
     for sym in symbols:
+        cm_sym = um_to_cm_map.get(sym)  # None if no CM perp
+
         for month in months:
-            # 1. Monthly kline entry
+            # 1. Monthly kline entry (always UM)
             kline_url = build_um_monthly_kline_zip_url(sym, month)
             plan.append(
                 {
@@ -140,12 +162,17 @@ def build_download_plan(
                     "symbol": sym,
                     "month": month,
                     "date": None,
+                    "liq_symbol": None,
                 }
             )
 
-            # 2. Liquidation entries
+            if cm_sym is None:
+                # No CM perp: skip liquidation for this symbol
+                continue
+
+            # 2. Liquidation entries (always CM)
             if liquidation_mode == "monthly":
-                liq_url = build_um_monthly_liquidation_zip_url(sym, month)
+                liq_url = build_um_monthly_liquidation_zip_url(cm_sym, month)
                 plan.append(
                     {
                         "url": liq_url,
@@ -154,12 +181,13 @@ def build_download_plan(
                         "symbol": sym,
                         "month": month,
                         "date": None,
+                        "liq_symbol": cm_sym,
                     }
                 )
             else:
                 # Daily mode — one entry per day
                 for day_str in _month_dates(month):
-                    liq_url = build_um_daily_liquidation_zip_url(sym, day_str)
+                    liq_url = build_um_daily_liquidation_zip_url(cm_sym, day_str)
                     plan.append(
                         {
                             "url": liq_url,
@@ -168,6 +196,7 @@ def build_download_plan(
                             "symbol": sym,
                             "month": month,
                             "date": day_str,
+                            "liq_symbol": cm_sym,
                         }
                     )
 

@@ -73,20 +73,21 @@ def test_builds_binance_um_monthly_kline_zip_url_for_eth():
 
 def test_builds_binance_um_daily_liquidation_snapshot_zip_url():
     mod = _load_fetch_module()
-    url = mod.build_um_daily_liquidation_zip_url("BTCUSDT", "2024-01-15")
+    # Must use CM perp symbol for liquidation
+    url = mod.build_um_daily_liquidation_zip_url("BTCUSD_PERP", "2024-01-15")
     assert "data.binance.vision" in url
-    assert "futures/um/daily/liquidationSnapshot" in url
-    assert "BTCUSDT" in url
+    assert "futures/cm/daily/liquidationSnapshot" in url
+    assert "BTCUSD_PERP" in url
     assert "2024-01-15" in url
     assert url.endswith(".zip")
 
 
 def test_builds_binance_um_monthly_liquidation_snapshot_zip_url():
     mod = _load_fetch_module()
-    url = mod.build_um_monthly_liquidation_zip_url("BTCUSDT", "2024-01")
+    url = mod.build_um_monthly_liquidation_zip_url("BTCUSD_PERP", "2024-01")
     assert "data.binance.vision" in url
-    assert "futures/um/monthly/liquidationSnapshot" in url
-    assert "BTCUSDT" in url
+    assert "futures/cm/monthly/liquidationSnapshot" in url
+    assert "BTCUSD_PERP" in url
     assert "2024-01" in url
     assert url.endswith(".zip")
 
@@ -111,19 +112,20 @@ def test_builds_checksum_url_from_zip_url():
 
 
 def test_manifest_selects_daily_liquidation_when_monthly_missing():
-    """build_download_plan with mode='daily' must include daily liq URLs."""
+    """build_download_plan with mode='daily' must include CM daily liq URLs."""
     mod = _load_fetch_module()
+    # Use BTCUSDT which has a CM perp (BTCUSD_PERP)
     plan = mod.build_download_plan(
         symbols=["BTCUSDT"],
         months=["2024-01"],
         liquidation_mode="daily",
     )
     assert len(plan) > 0
-    # All liquidation entries should be daily
+    # All liquidation entries should be CM daily
     liq_entries = [e for e in plan if e["kind"] == "liquidation"]
     assert len(liq_entries) > 0
     for entry in liq_entries:
-        assert "daily" in entry["url"], f"Expected daily URL, got: {entry['url']}"
+        assert "cm/daily" in entry["url"], f"Expected CM daily URL, got: {entry['url']}"
 
 
 def test_download_plan_includes_kline_entries():
@@ -162,7 +164,7 @@ def test_download_plan_monthly_mode_uses_monthly_liquidation():
     liq_entries = [e for e in plan if e["kind"] == "liquidation"]
     assert len(liq_entries) > 0
     for entry in liq_entries:
-        assert "monthly/liquidationSnapshot" in entry["url"]
+        assert "cm/monthly/liquidationSnapshot" in entry["url"]
 
 
 def test_download_summary_requires_checksum_verification_for_phase1_inputs():
@@ -185,6 +187,7 @@ def test_download_summary_requires_checksum_verification_for_phase1_inputs():
 
 def test_download_plan_covers_all_days_in_month_for_daily_mode():
     mod = _load_fetch_module()
+    # BTCUSDT has CM perp BTCUSD_PERP
     plan = mod.build_download_plan(
         symbols=["BTCUSDT"],
         months=["2024-01"],
@@ -197,6 +200,7 @@ def test_download_plan_covers_all_days_in_month_for_daily_mode():
 
 def test_download_plan_covers_all_months_for_monthly_kline():
     mod = _load_fetch_module()
+    # Use only symbols with CM perps (BTC/ETH/SOL) for a clean count
     plan = mod.build_download_plan(
         symbols=["BTCUSDT", "ETHUSDT"],
         months=["2024-01", "2024-02", "2024-03"],

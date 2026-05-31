@@ -31,6 +31,18 @@ import configs.base as cfg
 
 BINANCE_VISION_BASE = "https://data.binance.vision"
 
+# Mapping from UM USDT-margined symbol → CM Coin-Margined perp symbol.
+# Binance Vision ONLY publishes liquidationSnapshot under /data/futures/cm/.
+# UM futures liquidationSnapshot does not exist on Binance Vision.
+# XRP and DOGE have no CM perpetual contract on Binance.
+UM_TO_CM_SYMBOL: dict[str, str | None] = {
+    "BTCUSDT": "BTCUSD_PERP",
+    "ETHUSDT": "ETHUSD_PERP",
+    "SOLUSDT": "SOLUSD_PERP",
+    "XRPUSDT": None,   # No CM perp available
+    "DOGEUSDT": None,  # No CM perp available
+}
+
 REPORT_PATH = Path("reports/liquidation_shock_event_study/binance_snapshot_manifest_probe.json")
 
 
@@ -57,27 +69,33 @@ def build_kline_monthly_url(binance_symbol: str, month: str) -> str:
 
 def build_liquidation_monthly_url(binance_symbol: str, month: str) -> str:
     """
-    Build the Binance Vision URL for a monthly liquidationSnapshot ZIP.
+    Build the Binance Vision URL for a monthly liquidationSnapshot ZIP (CM market).
+
+    NOTE: Binance Vision only has liquidationSnapshot under /data/futures/cm/.
+    binance_symbol must be a CM symbol (e.g. 'BTCUSD_PERP'), not a UM symbol.
 
     Example:
-        https://data.binance.vision/data/futures/um/monthly/liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2024-01.zip
+        https://data.binance.vision/data/futures/cm/monthly/liquidationSnapshot/BTCUSD_PERP/BTCUSD_PERP-liquidationSnapshot-2024-01.zip
     """
     fname = f"{binance_symbol}-liquidationSnapshot-{month}.zip"
-    return f"{BINANCE_VISION_BASE}/data/futures/um/monthly/liquidationSnapshot/{binance_symbol}/{fname}"
+    return f"{BINANCE_VISION_BASE}/data/futures/cm/monthly/liquidationSnapshot/{binance_symbol}/{fname}"
 
 
 def build_liquidation_daily_url(binance_symbol: str, date_str: str) -> str:
     """
-    Build the Binance Vision URL for a daily liquidationSnapshot ZIP.
+    Build the Binance Vision URL for a daily liquidationSnapshot ZIP (CM market).
+
+    NOTE: Binance Vision only has liquidationSnapshot under /data/futures/cm/.
+    binance_symbol must be a CM symbol (e.g. 'BTCUSD_PERP'), not a UM symbol.
 
     Args:
         date_str: YYYY-MM-DD formatted date string.
 
     Example:
-        https://data.binance.vision/data/futures/um/daily/liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2024-01-15.zip
+        https://data.binance.vision/data/futures/cm/daily/liquidationSnapshot/BTCUSD_PERP/BTCUSD_PERP-liquidationSnapshot-2024-01-15.zip
     """
     fname = f"{binance_symbol}-liquidationSnapshot-{date_str}.zip"
-    return f"{BINANCE_VISION_BASE}/data/futures/um/daily/liquidationSnapshot/{binance_symbol}/{fname}"
+    return f"{BINANCE_VISION_BASE}/data/futures/cm/daily/liquidationSnapshot/{binance_symbol}/{fname}"
 
 
 # ---------------------------------------------------------------------------
@@ -127,21 +145,31 @@ def probe_manifest(
     months: list[str],
     url_head_fn: Callable[[str], bool] = _http_head_check,
     sleep_between_checks: float = 0.3,
+    um_to_cm_map: dict[str, str | None] | None = None,
 ) -> dict:
     """
     Probe Binance Vision for data availability and determine download mode.
 
+    Key architecture note:
+        Binance Vision only publishes liquidationSnapshot under /data/futures/cm/
+        (Coin-Margined). USD-Margined (UM) futures liquidation snapshots do NOT
+        exist on Binance Vision. The probe uses UM klines for price and CM
+        liquidationSnapshot as a proxy for symbols that have a CM perpetual.
+
     Args:
-        symbols: List of Binance symbol strings (e.g. ["BTCUSDT"]).
-                 Accepts either raw ("BTCUSDT") or ccxt ("BTC/USDT") format.
-        months:  List of YYYY-MM month strings.
-        url_head_fn: Callable(url) -> bool. Injected for testing.
+        symbols:        UM symbol strings (e.g. ["BTCUSDT"]).
+        months:         List of YYYY-MM month strings.
+        url_head_fn:    Callable(url) -> bool. Injected for testing.
         sleep_between_checks: Seconds to sleep between HTTP HEAD requests.
+        um_to_cm_map:   Override the UM→CM symbol mapping (default: UM_TO_CM_SYMBOL).
 
     Returns:
         dict with all required manifest keys and a final `decision`.
     """
-    # Normalise symbols to Binance format
+    if um_to_cm_map is None:
+        um_to_cm_map = UM_TO_CM_SYMBOL
+
+    # Normalise symbols to Binance UM format
     binance_symbols = [_ccxt_to_binance_symbol(s) for s in symbols]
 
     kline_monthly_available: dict[str, dict[str, bool]] = {}
@@ -150,28 +178,39 @@ def probe_manifest(
     missing_symbol_months: list[dict] = []
 
     for sym in binance_symbols:
+        cm_sym = um_to_cm_map.get(sym)  # None if no CM perp exists
+
         kline_monthly_available[sym] = {}
         liq_monthly_available[sym] = {}
         liq_daily_available[sym] = {}
 
         for month in months:
-            # 1. Probe monthly kline
+            # 1. Probe monthly kline (UM)
             kline_url = build_kline_monthly_url(sym, month)
             kline_ok = url_head_fn(kline_url)
             kline_monthly_available[sym][month] = kline_ok
             if sleep_between_checks:
                 time.sleep(sleep_between_checks)
 
-            # 2. Probe monthly liquidation
-            liq_monthly_url = build_liquidation_monthly_url(sym, month)
+            if cm_sym is None:
+                # No CM perp: liquidation data simply unavailable
+                liq_monthly_available[sym][month] = False
+                liq_daily_available[sym][month] = False
+                missing_symbol_months.append(
+                    {"symbol": sym, "month": month, "missing": "no_cm_perp"}
+                )
+                continue
+
+            # 2. Probe monthly CM liquidation
+            liq_monthly_url = build_liquidation_monthly_url(cm_sym, month)
             liq_monthly_ok = url_head_fn(liq_monthly_url)
             liq_monthly_available[sym][month] = liq_monthly_ok
             if sleep_between_checks:
                 time.sleep(sleep_between_checks)
 
-            # 3. Probe daily liquidation (check first day of month as sample)
+            # 3. Probe daily CM liquidation (check first day of month as sample)
             first_day = _month_dates(month)[0]
-            liq_daily_url = build_liquidation_daily_url(sym, first_day)
+            liq_daily_url = build_liquidation_daily_url(cm_sym, first_day)
             liq_daily_ok = url_head_fn(liq_daily_url)
             liq_daily_available[sym][month] = liq_daily_ok
             if sleep_between_checks:
@@ -187,18 +226,24 @@ def probe_manifest(
                     {"symbol": sym, "month": month, "missing": "liquidation_all"}
                 )
 
-    # Decide download mode for liquidation:
-    # Prefer monthly if available for ALL symbol-month pairs; otherwise daily.
-    all_monthly_liq_ok = all(
-        liq_monthly_available[sym][month]
-        for sym in binance_symbols
-        for month in months
-    )
-    any_daily_liq_ok = any(
-        liq_daily_available[sym][month]
-        for sym in binance_symbols
-        for month in months
-    )
+    # Decide download mode for liquidation (only over symbols with CM perp)
+    cm_symbols = [s for s in binance_symbols if um_to_cm_map.get(s) is not None]
+
+    if not cm_symbols:
+        # No CM perps at all
+        all_monthly_liq_ok = False
+        any_daily_liq_ok = False
+    else:
+        all_monthly_liq_ok = all(
+            liq_monthly_available[sym][month]
+            for sym in cm_symbols
+            for month in months
+        )
+        any_daily_liq_ok = any(
+            liq_daily_available[sym][month]
+            for sym in cm_symbols
+            for month in months
+        )
 
     if all_monthly_liq_ok:
         selected_mode = "monthly"
@@ -222,8 +267,9 @@ def probe_manifest(
 
     return {
         "source": "binance_vision",
-        "market": "futures_um",
+        "market": "futures_um_kline_cm_liquidation",
         "symbols": binance_symbols,
+        "cm_symbols": cm_symbols,
         "months": months,
         "kline_monthly_available": kline_monthly_available,
         "liquidation_monthly_available": liq_monthly_available,
@@ -247,12 +293,17 @@ def main() -> None:
     binance_symbols = [_ccxt_to_binance_symbol(s) for s in symbols_raw]
 
     logger.info(f"Probing Binance Vision manifest for {binance_symbols} × {months}")
+    logger.info(
+        "Note: liquidationSnapshot only exists under /data/futures/cm/ on Binance Vision. "
+        "Using CM perp proxy for BTC/ETH/SOL. XRP/DOGE have no CM perp and will be excluded."
+    )
 
     result = probe_manifest(
         symbols=binance_symbols,
         months=months,
         url_head_fn=_http_head_check,
         sleep_between_checks=0.5,
+        um_to_cm_map=UM_TO_CM_SYMBOL,
     )
 
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
