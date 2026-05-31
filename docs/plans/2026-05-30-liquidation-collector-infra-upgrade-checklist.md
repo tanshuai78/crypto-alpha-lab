@@ -38,6 +38,27 @@
 
 ---
 
+## Ops 文档索引
+
+下面这份索引把本 checklist 的检查命令和 [trend_liquidation_phase1a_server_CN.md](/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/docs/ops/trend_liquidation_phase1a_server_CN.md) 里的章节一一对应，后面排查时可以直接按章节跳。
+
+1. `Post-Deploy Check Commands`
+   - 对应 ops 章节：
+     - `快速验证 (Smoke Checks)`
+     - `Raw forceOrder 事件采集 (Raw ForceOrder Collection)`
+     - `多粒度清算聚合与派生机制 (Multi-Granularity Liquidation Derivation & Aggregation)`
+2. `24h Acceptance Command Checklist`
+   - 对应 ops 章节：
+     - `24小时部署后验收门禁 (24h Post-Deploy Acceptance Gate)`
+     - `定期回拉与本地复核 (Pullback & Local Review)`
+3. `Deployment Sequence After Code Is Ready`
+   - 对应 ops 章节：
+     - `部署前检查 (Preflight)`
+     - `Docker 运行 (Run)`
+     - `24小时部署后验收门禁 (24h Post-Deploy Acceptance Gate)`
+
+---
+
 ## Checklist
 
 ### 1. 固化 raw event contract
@@ -199,6 +220,197 @@
 8. 运行健康检查脚本
 9. 确认 raw 开始在干净状态下积累
 10. 等待 24h acceptance gate
+
+---
+
+## Post-Deploy Check Commands
+
+部署完成后，先不要急着判断“研究就绪”。先用下面这组命令确认：
+
+- 容器已经按新命令启动
+- `--raw-output` 已经生效
+- cron 派生链路在跑
+- host 上的 `python3` / `PYTHONPATH=.` 命令口径是可用的
+
+### 1. 容器状态
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | egrep "trend-(rows|forceorder|watchlist)"
+```
+
+### 2. 核对 `trend-forceorder` 实际启动命令
+
+```bash
+docker inspect trend-forceorder --format '{{json .Config.Cmd}}'
+```
+
+必须包含：
+
+- `--output data/trend_regime_liquidation_cache.json`
+- `--raw-output data/trend_regime_force_orders_raw.jsonl`
+
+### 3. 查看 `trend-forceorder` 日志
+
+```bash
+docker logs --tail 100 trend-forceorder
+```
+
+重点看：
+
+- 是否有 traceback / reconnect loop
+- 是否持续 `messages=0 accepted=0`
+- 是否已经出现首条有效 liquidation event
+
+### 4. 查看宿主机 `data/` 目录关键文件
+
+```bash
+cd /root/crypto-alpha-lab
+ls -lh data | egrep "trend_regime_force_orders_raw|trend_regime_liquidation_cache|trend_regime_liquidation_1m|trend_regime_liquidation_5m|trend_regime_liquidation_hourly"
+```
+
+### 5. 查看容器内 `/app/data`，排除 volume 挂载问题
+
+```bash
+docker exec trend-forceorder ls -lh /app/data
+```
+
+### 6. 手工跑一次 host-side 健康检查
+
+注意：服务器宿主机命令统一使用 `PYTHONPATH=. python3 ...`，不要依赖 host 安装 `uv`。
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=. python3 scripts/check_liquidation_collector_health.py \
+  --data-dir data \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT
+```
+
+### 7. 手工验证派生脚本至少能跑通一次
+
+#### 1m
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime_force_orders_raw.jsonl \
+  --bucket 1m \
+  --fill-empty-buckets \
+  --start-ms $(($(date +%s)*1000 - 86400000)) \
+  --end-ms $(($(date +%s)*1000)) \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/trend_regime_liquidation_1m.jsonl
+```
+
+#### 5m
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime_force_orders_raw.jsonl \
+  --bucket 5m \
+  --fill-empty-buckets \
+  --start-ms $(($(date +%s)*1000 - 86400000)) \
+  --end-ms $(($(date +%s)*1000)) \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/trend_regime_liquidation_5m.jsonl
+```
+
+#### 1h
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime_force_orders_raw.jsonl \
+  --bucket 1h \
+  --output data/trend_regime_liquidation_hourly.jsonl
+```
+
+---
+
+## 24h Acceptance Command Checklist
+
+只有在 cron 已经稳定运行一段时间后，下面这组命令才有意义。它们的目标不是确认“容器活着”，而是确认：
+
+- raw 是否真的开始沉淀
+- `1m / 5m / 1h` 是否持续派生
+- `research_ready_1m_24h` 是否达标
+
+### 1. 检查 cron 日志
+
+```bash
+cd /root/crypto-alpha-lab
+tail -n 20 logs/liquidation_1m_cron.log
+tail -n 20 logs/liquidation_5m_cron.log
+tail -n 20 logs/liquidation_1h_cron.log
+tail -n 20 logs/liquidation_health_cron.log
+```
+
+期望：
+
+- `1m / 5m` 日志持续更新
+- `1h` 日志不应长期停留在 `No records found...`
+- `health` 日志为空也可能正常，因为 stdout 写入 JSON、stderr 才写日志
+
+### 2. 检查 raw 是否开始出现
+
+```bash
+cd /root/crypto-alpha-lab
+ls -lh data/trend_regime_force_orders_raw.jsonl 2>/dev/null || echo "raw_not_created"
+wc -l data/trend_regime_force_orders_raw.jsonl 2>/dev/null || echo "raw=0"
+```
+
+### 3. 查看最新健康快照
+
+```bash
+cat /root/crypto-alpha-lab/data/trend_regime_liquidation_health.json
+```
+
+重点字段：
+
+- `raw_exists`
+- `raw_row_count`
+- `raw_recent_event_count_1h`
+- `raw_recent_event_count_24h`
+- `aggregate_1m_exists`
+- `aggregate_1m_coverage_ratio_24h`
+- `aggregate_1m_max_gap_minutes_24h`
+- `aggregate_5m_exists`
+- `aggregate_1h_exists`
+- `research_ready_1m_24h`
+
+### 4. 必要时再手工重跑一次健康检查
+
+```bash
+cd /root/crypto-alpha-lab
+PYTHONPATH=. python3 scripts/check_liquidation_collector_health.py \
+  --data-dir data \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT
+```
+
+### 5. 24h acceptance gate 的最低通过口径
+
+至少满足：
+
+- `raw_exists == true`
+- `raw_invalid_json_line_count == 0`
+- `raw_duplicate_event_count` 在可接受范围内
+- `aggregate_1m_exists == true`
+- `aggregate_1m_coverage_ratio_24h >= 0.99`
+- `aggregate_1m_max_gap_minutes_24h <= 1`
+- `aggregate_5m_exists == true`
+- `aggregate_1h_exists == true`
+- `research_ready_1m_24h == true`
+
+如果当前还是：
+
+- `raw_exists == false`
+- 或 `raw_row_count == 0`
+
+那么应判断为：
+
+- 部署成功
+- 派生成功
+- **但尚未进入研究就绪状态**
 
 ---
 

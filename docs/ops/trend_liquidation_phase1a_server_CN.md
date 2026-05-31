@@ -12,6 +12,23 @@
 
 ---
 
+## 章节目录 (Table of Contents)
+
+1. 目的与术语
+1. 运行边界与部署前检查
+1. 本地同步与 Docker 部署
+1. 快速验证与 24 小时巡检
+1. Raw forceOrder 事件采集
+1. 多粒度清算聚合与派生
+1. 24 小时部署后验收门禁
+1. 定期回拉与本地复核
+1. 本地历史回放
+1. 常见问题与处理
+1. 运维命令
+1. 建议执行顺序
+
+---
+
 ## 术语说明 (Terminology)
 
 1. **Observation-only (仅观察模式)**：只产生观测证据，不生成可执行交易。
@@ -337,13 +354,13 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 推荐的 crontab 调度配置：
 ```cron
 # 每分钟执行一次 1m 聚合（填充最近24小时空桶）
-*/1 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 1m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_1m.jsonl
+*/1 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 1m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_1m.jsonl
 
 # 每5分钟执行一次 5m 聚合（填充最近24小时空桶）
-*/5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 5m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_5m.jsonl
+*/5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 5m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_5m.jsonl
 
 # 每小时的第5分钟执行一次 1h 聚合（不进行填充空桶）
-5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py --bucket 1h --output data/trend_regime_liquidation_hourly.jsonl
+5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 1h --output data/trend_regime_liquidation_hourly.jsonl
 ```
 
 ### 归档备份与 Checksum 轮转策略 (Archive Backup & Checksum Rotation)
@@ -505,7 +522,7 @@ rsync -avzP \
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
-PYTHONPATH=src uv run python scripts/replay_trend_regime_shadow.py \
+PYTHONPATH=. python3 scripts/replay_trend_regime_shadow.py \
   --input data/trend_regime_historical_rows.jsonl \
   --output reports/trend_regime/replay_summary.json \
   --liquidation-hourly-jsonl data/trend_regime/trend_regime_liquidation_hourly.jsonl
@@ -514,7 +531,7 @@ PYTHONPATH=src uv run python scripts/replay_trend_regime_shadow.py \
 ### 不带清算数据的冒烟回放（仅验证流程）
 
 ```bash
-PYTHONPATH=src uv run python scripts/replay_trend_regime_shadow.py \
+PYTHONPATH=. python3 scripts/replay_trend_regime_shadow.py \
   --input data/trend_regime_historical_rows.jsonl \
   --output reports/trend_regime/replay_summary.json
 ```
