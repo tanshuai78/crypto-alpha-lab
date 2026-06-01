@@ -1,0 +1,393 @@
+{
+  "required_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT"
+  ],
+  "candidate_quarters": [
+    "2023-Q1",
+    "2023-Q2",
+    "2023-Q3",
+    "2023-Q4",
+    "2024-Q1"
+  ],
+  "quarter_results": [
+    {
+      "quarter": "2023-Q1",
+      "months": [
+        "2023-01",
+        "2023-02",
+        "2023-03"
+      ],
+      "available_symbol_months": 0,
+      "price_continuity_pass_symbol_months": 0,
+      "liq_file_pass_symbol_months": 0,
+      "continuity_pass_symbol_months": 0,
+      "quarter_universe_integrity_ok": false,
+      "total_events": 0,
+      "events_per_month": {
+        "2023-01": 0,
+        "2023-02": 0,
+        "2023-03": 0
+      },
+      "events_by_symbol": {},
+      "event_density_ok": false,
+      "passes_screening": false,
+      "fail_reasons": [
+        "universe_integrity_failed",
+        "total_event_density_failed",
+        "monthly_event_density_failed",
+        "symbol_event_density_failed"
+      ],
+      "manifest_decision": "data_unavailable",
+      "manifest_missing_symbol_months": [
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-01",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-02",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-03",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-01",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-02",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-03",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-01",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-02",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-03",
+          "missing": "liquidation_all"
+        }
+      ]
+    },
+    {
+      "quarter": "2023-Q2",
+      "months": [
+        "2023-04",
+        "2023-05",
+        "2023-06"
+      ],
+      "available_symbol_months": 0,
+      "price_continuity_pass_symbol_months": 0,
+      "liq_file_pass_symbol_months": 0,
+      "continuity_pass_symbol_months": 0,
+      "quarter_universe_integrity_ok": false,
+      "total_events": 0,
+      "events_per_month": {
+        "2023-04": 0,
+        "2023-05": 0,
+        "2023-06": 0
+      },
+      "events_by_symbol": {},
+      "event_density_ok": false,
+      "passes_screening": false,
+      "fail_reasons": [
+        "universe_integrity_failed",
+        "total_event_density_failed",
+        "monthly_event_density_failed",
+        "symbol_event_density_failed"
+      ],
+      "manifest_decision": "data_unavailable",
+      "manifest_missing_symbol_months": [
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-04",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-05",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "BTCUSDT",
+          "month": "2023-06",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-04",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-05",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "ETHUSDT",
+          "month": "2023-06",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-04",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-05",
+          "missing": "liquidation_all"
+        },
+        {
+          "symbol": "SOLUSDT",
+          "month": "2023-06",
+          "missing": "liquidation_all"
+        }
+      ]
+    },
+    {
+      "quarter": "2023-Q3",
+      "months": [
+        "2023-07",
+        "2023-08",
+        "2023-09"
+      ],
+      "available_symbol_months": 9,
+      "price_continuity_pass_symbol_months": 9,
+      "liq_file_pass_symbol_months": 3,
+      "continuity_pass_symbol_months": 3,
+      "quarter_universe_integrity_ok": false,
+      "total_events": 1308,
+      "events_per_month": {
+        "2023-07": 819,
+        "2023-08": 489,
+        "2023-09": 0
+      },
+      "events_by_symbol": {
+        "BTCUSDT": 999,
+        "ETHUSDT": 309
+      },
+      "event_density_ok": false,
+      "passes_screening": false,
+      "fail_reasons": [
+        "universe_integrity_failed",
+        "monthly_event_density_failed",
+        "symbol_event_density_failed"
+      ],
+      "manifest_decision": "proceed_with_daily_liquidation",
+      "manifest_missing_symbol_months": [],
+      "density": {
+        "total_events": 1308,
+        "events_per_month": {
+          "2023-07": 819,
+          "2023-08": 489,
+          "2023-09": 0
+        },
+        "events_by_symbol": {
+          "BTCUSDT": 999,
+          "ETHUSDT": 309
+        },
+        "events_by_side": {
+          "long": 757,
+          "short": 551
+        },
+        "events_by_symbol_month": {
+          "BTCUSDT": {
+            "2023-07": 510,
+            "2023-08": 489
+          },
+          "ETHUSDT": {
+            "2023-07": 309
+          }
+        },
+        "events_by_symbol_side": {
+          "BTCUSDT": {
+            "long": 577,
+            "short": 422
+          },
+          "ETHUSDT": {
+            "short": 129,
+            "long": 180
+          }
+        }
+      }
+    },
+    {
+      "quarter": "2023-Q4",
+      "months": [
+        "2023-10",
+        "2023-11",
+        "2023-12"
+      ],
+      "available_symbol_months": 9,
+      "price_continuity_pass_symbol_months": 9,
+      "liq_file_pass_symbol_months": 8,
+      "continuity_pass_symbol_months": 8,
+      "quarter_universe_integrity_ok": false,
+      "total_events": 3873,
+      "events_per_month": {
+        "2023-10": 961,
+        "2023-11": 1394,
+        "2023-12": 1518
+      },
+      "events_by_symbol": {
+        "BTCUSDT": 2119,
+        "ETHUSDT": 1303,
+        "SOLUSDT": 451
+      },
+      "event_density_ok": true,
+      "passes_screening": false,
+      "fail_reasons": [
+        "universe_integrity_failed"
+      ],
+      "manifest_decision": "proceed_with_daily_liquidation",
+      "manifest_missing_symbol_months": [],
+      "density": {
+        "total_events": 3873,
+        "events_per_month": {
+          "2023-10": 961,
+          "2023-11": 1394,
+          "2023-12": 1518
+        },
+        "events_by_symbol": {
+          "BTCUSDT": 2119,
+          "ETHUSDT": 1303,
+          "SOLUSDT": 451
+        },
+        "events_by_side": {
+          "long": 2194,
+          "short": 1679
+        },
+        "events_by_symbol_month": {
+          "BTCUSDT": {
+            "2023-10": 643,
+            "2023-11": 714,
+            "2023-12": 762
+          },
+          "ETHUSDT": {
+            "2023-10": 318,
+            "2023-11": 482,
+            "2023-12": 503
+          },
+          "SOLUSDT": {
+            "2023-11": 198,
+            "2023-12": 253
+          }
+        },
+        "events_by_symbol_side": {
+          "BTCUSDT": {
+            "long": 1131,
+            "short": 988
+          },
+          "ETHUSDT": {
+            "long": 769,
+            "short": 534
+          },
+          "SOLUSDT": {
+            "long": 294,
+            "short": 157
+          }
+        }
+      }
+    },
+    {
+      "quarter": "2024-Q1",
+      "months": [
+        "2024-01",
+        "2024-02",
+        "2024-03"
+      ],
+      "available_symbol_months": 9,
+      "price_continuity_pass_symbol_months": 9,
+      "liq_file_pass_symbol_months": 8,
+      "continuity_pass_symbol_months": 8,
+      "quarter_universe_integrity_ok": false,
+      "total_events": 4391,
+      "events_per_month": {
+        "2024-01": 1460,
+        "2024-02": 1147,
+        "2024-03": 1784
+      },
+      "events_by_symbol": {
+        "BTCUSDT": 2206,
+        "ETHUSDT": 1657,
+        "SOLUSDT": 528
+      },
+      "event_density_ok": true,
+      "passes_screening": false,
+      "fail_reasons": [
+        "universe_integrity_failed"
+      ],
+      "manifest_decision": "proceed_with_daily_liquidation",
+      "manifest_missing_symbol_months": [],
+      "density": {
+        "total_events": 4391,
+        "events_per_month": {
+          "2024-01": 1460,
+          "2024-02": 1147,
+          "2024-03": 1784
+        },
+        "events_by_symbol": {
+          "BTCUSDT": 2206,
+          "ETHUSDT": 1657,
+          "SOLUSDT": 528
+        },
+        "events_by_side": {
+          "short": 2002,
+          "long": 2389
+        },
+        "events_by_symbol_month": {
+          "BTCUSDT": {
+            "2024-01": 737,
+            "2024-02": 673,
+            "2024-03": 796
+          },
+          "ETHUSDT": {
+            "2024-01": 503,
+            "2024-02": 474,
+            "2024-03": 680
+          },
+          "SOLUSDT": {
+            "2024-01": 220,
+            "2024-03": 308
+          }
+        },
+        "events_by_symbol_side": {
+          "BTCUSDT": {
+            "short": 1091,
+            "long": 1115
+          },
+          "ETHUSDT": {
+            "short": 739,
+            "long": 918
+          },
+          "SOLUSDT": {
+            "short": 172,
+            "long": 356
+          }
+        }
+      }
+    }
+  ],
+  "decision": "route_a_quarter_not_found",
+  "selected_quarter": null
+}
