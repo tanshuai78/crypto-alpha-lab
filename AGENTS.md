@@ -18,6 +18,20 @@ When multiple instructions exist, apply them in this order:
 
 If two rules conflict, follow the higher-priority rule and state the conflict explicitly.
 
+## Instruction Merge Policy
+
+General anti-mistake coding guidelines are subordinate to L0 Financial Safety Rules and project-specific workflow rules.
+
+When a general guideline conflicts with project policy:
+
+- follow the project-specific rule;
+- state the conflict explicitly;
+- choose the safer no-op if the risk impact is unclear.
+
+If uncertainty affects financial risk, implementation scope, data semantics, public API behavior, deployment behavior, or test validity, stop and ask before editing.
+
+If uncertainty is minor and reversible, choose the smallest safe implementation and state the assumption.
+
 ## Source Of Truth
 
 Always sync from the workspace before making claims or decisions.
@@ -27,6 +41,17 @@ Always sync from the workspace before making claims or decisions.
   then check `configs/base.py` (all thresholds and limits).
 - Treat `.agent/rules/` and `.agent/workflows/` as project policy.
 - Do NOT reference `src/main.py` or `src/config.py` — they do not exist in this project.
+- Before implementing, state material assumptions that affect:
+  - risk;
+  - public API behavior;
+  - data schema;
+  - strategy semantics;
+  - test scope;
+  - deployment behavior.
+- If multiple interpretations would lead to different code, different risk exposure, or different validation requirements,
+  present the interpretations and ask before editing.
+- If a simpler approach solves the problem, state it and prefer it unless it violates project safety or verification rules.
+- If the workspace contradicts memory or prior conversation context, trust the workspace and state the discrepancy.
 
 ## Role
 
@@ -51,6 +76,8 @@ This is an **alpha discovery + safe execution** role, not an arbitrage system ma
 - Avoid generic advice. Use concrete thresholds, trigger conditions, and operating constraints.
 - Always account for real trading constraints: fee drag, slippage, liquidity depth, API limits,
   order rejection paths, Funding Flip risk, Basis expansion risk, black swan behavior.
+- Do not hide confusion. Surface tradeoffs, uncertainties, and implementation consequences before coding.
+- Push back when the requested change is over-scoped, under-specified, risky, or inconsistent with project invariants.
 
 ## L0 Financial Safety Rules
 
@@ -82,6 +109,17 @@ These govern how work is executed.
    invariants, YAGNI, or risk controls.
 8. Completion requires hard verification through tests, logs, or reproducible evidence.
 9. Always sync state from `configs/base.py` and the relevant strategy module at session start.
+10. Convert every non-trivial task into verifiable goals before implementation.
+    Examples:
+    - "fix bug" → reproduce with a failing test or minimal log evidence, then make it pass.
+    - "add validation" → write invalid-input tests, then implement validation.
+    - "refactor" → capture current behavior with tests first, then preserve behavior.
+11. For multi-step work, each step must include:
+    - intended change;
+    - verification command;
+    - expected result.
+12. Do not continue to later steps if an earlier gate fails, unless the user explicitly approves a reduced scope.
+13. If a task starts to exceed its approved scope, stop and split it into a new plan before continuing.
 
 ## Workflow Mapping
 
@@ -136,15 +174,47 @@ These rules apply to all strategy and execution discussions and code changes.
 ## Change Management
 
 - Prefer small, reversible changes.
+- Touch only files required by the user's request or the approved plan.
+- Every changed line must trace directly to the request, the plan, or a failing verification.
+- Do not refactor adjacent code, comments, formatting, names, or structure unless required.
+- Match existing style even if a different style would be preferable.
+- Remove only unused imports, variables, functions, or files created by the current change.
+- Do not remove pre-existing dead code unless explicitly asked; mention it in the final notes instead.
+- Prefer the minimum code that satisfies the verified goal.
+- Do not add speculative abstractions, configurability, extension points, or new dependencies.
+- If a simpler approach solves the task, state it and prefer it.
+- If a change grows beyond the intended scope, stop and split it into a separate plan.
 - All thresholds must be in `configs/base.py`. No magic numbers inside `src/`.
 - Prefer readable code over clever abstractions.
 - Ensure important state transitions are logged at appropriate levels using `loguru`.
 - Fail gracefully on remote API or data issues. Never crash the main loop on a network error.
 
+## Anti-Overengineering Rules
+
+These rules reduce common LLM coding mistakes.
+
+1. Implement the smallest solution that satisfies the current verified goal.
+2. Do not add a new abstraction for single-use code.
+3. Do not add optional parameters, generic registries, plugin systems, or configuration knobs unless the approved plan requires them.
+4. Do not add defensive code for purely imaginary scenarios.
+5. Do handle realistic exchange, network, data corruption, partial-fill, duplicate-event, and rate-limit failure modes.
+6. If the implementation becomes much larger than the problem requires, reassess and simplify before continuing.
+7. Prefer explicit, local, boring code over clever generalized code in research scripts.
+8. For research code, optimize for auditability and reproducibility before reuse.
+9. For execution/risk code, optimize for invariant preservation before convenience.
+10. Do not simplify proven execution/risk recovery logic just to reduce line count.
+
 ## Documentation Policy
 
 - All future project documents (including plans, operational guides, roadmap updates, and checklists) may be written in Chinese to facilitate human review.
 - To prevent any semantic misalignment or comprehension differences for AI agents, all code-level identifiers—including variables, classes, configurations (e.g. from `configs/base.py`), error keys, file paths, and API keys—must retain their exact English names (e.g., `raw_mark_index_premium`, `TradeIntent`, `docs/ops/`) within the Chinese text.
+- Documentation must distinguish facts, assumptions, open questions, and decisions.
+- Review documents must clearly separate:
+  - data failure;
+  - density failure;
+  - structure failure;
+  - execution/cost failure;
+  - confirmed next action.
 
 ## Response Style
 
@@ -162,6 +232,19 @@ When making recommendations, prefer this format implicitly:
 2. Why it matters in live trading (or alpha discovery)
 3. Concrete action
 4. Verification method
+
+Before implementation of non-trivial work, include:
+
+1. Assumptions that affect scope or risk
+2. Minimal plan
+3. Verification gates
+
+After implementation, include:
+
+1. Files changed
+2. Tests or commands run
+3. Evidence of success or exact failure
+4. Remaining risks or safe no-op decision
 
 ## File References
 
