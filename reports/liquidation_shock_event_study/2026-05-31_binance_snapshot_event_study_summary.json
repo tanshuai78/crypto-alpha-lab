@@ -6,23 +6,23 @@
   "sample_window": "2024-01_to_2024-03",
   "known_window_bias": "Q1_2024_trending_crypto_market",
   "generalization_allowed": false,
-  "raw_events": 5502,
-  "deduplicated_events": 4398,
+  "raw_events": 5493,
+  "deduplicated_events": 4391,
   "density": {
-    "total_events": 4398,
+    "total_events": 4391,
     "events_per_month": {
       "2024-01": 1460,
       "2024-02": 1147,
-      "2024-03": 1791
+      "2024-03": 1784
     },
     "events_by_symbol": {
       "BTCUSDT": 2206,
       "ETHUSDT": 1657,
-      "SOLUSDT": 535
+      "SOLUSDT": 528
     },
     "events_by_side": {
-      "short": 2003,
-      "long": 2395
+      "short": 2002,
+      "long": 2389
     },
     "events_by_symbol_month": {
       "BTCUSDT": {
@@ -37,7 +37,7 @@
       },
       "SOLUSDT": {
         "2024-01": 220,
-        "2024-03": 315
+        "2024-03": 308
       }
     },
     "events_by_symbol_side": {
@@ -50,26 +50,68 @@
         "long": 918
       },
       "SOLUSDT": {
-        "short": 173,
-        "long": 362
+        "short": 172,
+        "long": 356
       }
     }
   },
+  "universe_integrity": {
+    "required_symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT",
+      "DOGEUSDT"
+    ],
+    "required_symbol_months": 15,
+    "passed_symbol_months": 8,
+    "missing_symbol_months": [
+      {
+        "symbol": "SOLUSDT",
+        "month": "2024-02"
+      },
+      {
+        "symbol": "XRPUSDT",
+        "month": "2024-01"
+      },
+      {
+        "symbol": "XRPUSDT",
+        "month": "2024-02"
+      },
+      {
+        "symbol": "XRPUSDT",
+        "month": "2024-03"
+      },
+      {
+        "symbol": "DOGEUSDT",
+        "month": "2024-01"
+      },
+      {
+        "symbol": "DOGEUSDT",
+        "month": "2024-02"
+      },
+      {
+        "symbol": "DOGEUSDT",
+        "month": "2024-03"
+      }
+    ],
+    "universe_integrity_ok": false
+  },
   "directional_bias": {
     "5": {
-      "n": 4397,
-      "positive": 1914,
-      "directional_ratio": 0.43529679326813736
+      "n": 4390,
+      "positive": 1913,
+      "directional_ratio": 0.4357630979498861
     },
     "10": {
-      "n": 4397,
-      "positive": 1861,
-      "directional_ratio": 0.4232431203093018
+      "n": 4390,
+      "positive": 1860,
+      "directional_ratio": 0.42369020501138954
     },
     "15": {
-      "n": 4397,
+      "n": 4390,
       "positive": 1884,
-      "directional_ratio": 0.4284739595178531
+      "directional_ratio": 0.42915717539863324
     }
   },
   "decision": "binance_snapshot_structure_not_confirmed"

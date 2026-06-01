@@ -5,10 +5,9 @@ All tests are unit-level: no real HTTP requests. Network and filesystem
 operations are injected or mocked.
 """
 
-import sys
-import os
-import json
 import importlib.util
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -209,3 +208,39 @@ def test_download_plan_covers_all_months_for_monthly_kline():
     kline_entries = [e for e in plan if e["kind"] == "kline"]
     # 2 symbols × 3 months = 6 kline entries
     assert len(kline_entries) == 6
+
+
+def test_resolve_download_config_uses_manifest_selected_mode_when_auto():
+    mod = _load_fetch_module()
+    manifest = {
+        "symbols": ["BTCUSDT", "ETHUSDT"],
+        "months": ["2024-01", "2024-02"],
+        "selected_liquidation_download_mode": "daily",
+        "decision": "proceed_with_daily_liquidation",
+    }
+    resolved = mod.resolve_download_config(
+        manifest=manifest,
+        cli_symbols=None,
+        cli_months=None,
+        cli_liquidation_mode="auto",
+    )
+    assert resolved["symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert resolved["months"] == ["2024-01", "2024-02"]
+    assert resolved["liquidation_mode"] == "daily"
+
+
+def test_resolve_download_config_rejects_data_unavailable_manifest():
+    mod = _load_fetch_module()
+    manifest = {
+        "symbols": ["BTCUSDT"],
+        "months": ["2024-01"],
+        "selected_liquidation_download_mode": "daily",
+        "decision": "data_unavailable",
+    }
+    with pytest.raises(ValueError):
+        mod.resolve_download_config(
+            manifest=manifest,
+            cli_symbols=None,
+            cli_months=None,
+            cli_liquidation_mode="auto",
+        )

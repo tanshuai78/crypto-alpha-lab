@@ -1,6 +1,6 @@
 # Binance Liquidation Snapshot Event Study — Phase 1 Review
 
-**Generated:** 2026-05-31T14:13:00Z
+**Generated:** 2026-05-31T15:17:41Z
 
 ---
 
@@ -24,6 +24,14 @@ This is a **data-source replacement validation study**, not a live strategy prom
 It evaluates whether Binance Vision historical `liquidationSnapshot` data can replace
 Coinalyze 1m liquidation data for the purposes of the existing shock event-study pipeline,
 within the Q1 2024 sample window only.
+
+Two implementation corrections were applied before finalizing this review:
+
+- **Gap-reset lookback protection**: shock detection is now run on contiguous per-symbol
+  segments only, so a failed or missing middle month cannot leak stale rows into a later
+  month's `24h` reference window.
+- **Reduced-universe downgrade**: a positive directional-bias result is no longer sufficient
+  for confirmation when required symbol-month coverage is incomplete.
 
 ---
 
@@ -49,9 +57,35 @@ within the Q1 2024 sample window only.
 
 ---
 
+## Universe Integrity
+
+**Universe integrity pass:** `false`
+
+- Required symbol-months: 15
+- Passed symbol-months: 8
+- Missing or failed symbol-months:
+  - `SOLUSDT / 2024-02`
+  - `XRPUSDT / 2024-01`
+  - `XRPUSDT / 2024-02`
+  - `XRPUSDT / 2024-03`
+  - `DOGEUSDT / 2024-01`
+  - `DOGEUSDT / 2024-02`
+  - `DOGEUSDT / 2024-03`
+
+Interpretation:
+
+- This branch no longer qualifies as the originally planned 5-symbol Binance-only replacement
+  study.
+- The effective research universe is a **reduced proxy universe** dominated by
+  `BTCUSDT / ETHUSDT / SOLUSDT`, with `SOLUSDT` itself missing one of the three target months.
+- Therefore, even if event density is high, this study cannot be upgraded to a confirmed
+  Q1 2024 structure result.
+
+---
+
 ## Event Density Summary
 
-**Total shock events (deduplicated):** 4398
+**Total shock events (deduplicated):** 4391
 
 ### By Month
 
@@ -59,7 +93,7 @@ within the Q1 2024 sample window only.
 | ----- | ------ |
 | 2024-01 | 1460 |
 | 2024-02 | 1147 |
-| 2024-03 | 1791 |
+| 2024-03 | 1784 |
 
 ### By Symbol
 
@@ -67,14 +101,14 @@ within the Q1 2024 sample window only.
 | ------ | ------ |
 | BTCUSDT | 2206 |
 | ETHUSDT | 1657 |
-| SOLUSDT | 535 |
+| SOLUSDT | 528 |
 
 ### By Side
 
 | Side | Events |
 | ---- | ------ |
-| long | 2395 |
-| short | 2003 |
+| long | 2389 |
+| short | 2002 |
 
 ---
 
@@ -82,9 +116,9 @@ within the Q1 2024 sample window only.
 
 | Horizon (min) | N | Positive | Directional Ratio |
 | ------------- | - | -------- | ----------------- |
-| 5 | 4397 | 1914 | 0.435 |
-| 10 | 4397 | 1861 | 0.423 |
-| 15 | 4397 | 1884 | 0.428 |
+| 5 | 4390 | 1913 | 0.436 |
+| 10 | 4390 | 1860 | 0.424 |
+| 15 | 4390 | 1884 | 0.429 |
 
 ---
 
@@ -93,3 +127,18 @@ within the Q1 2024 sample window only.
 **`binance_snapshot_structure_not_confirmed`**
 
 > Decision: `binance_snapshot_structure_not_confirmed`. See density and continuity tables above for root cause.
+> Reduced-universe / failed-symbol-month scope prevented a confirmed result.
+
+More specifically:
+
+- The branch **does not fail on raw event density**. There are enough events to study.
+- The branch **does fail as a full-scope replacement validation**, because required
+  symbol-month integrity is incomplete.
+- After the gap-reset correction, the remaining directional-bias result is still weak:
+  - `5m = 0.436`
+  - `10m = 0.424`
+  - `15m = 0.429`
+- So the current evidence supports:
+  - `Q1 2024 Binance snapshot proxy data does not confirm the original 5-symbol 1m shock structure`
+  - rather than:
+  - `liquidation alpha is globally disproven`

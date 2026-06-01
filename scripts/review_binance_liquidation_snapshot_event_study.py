@@ -25,19 +25,17 @@ Usage:
 """
 
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import configs.base as cfg
+from src.research.liquidation_shock_event_study.response_map import build_response_map
 from src.research.liquidation_shock_event_study.shock_detection import (
     deduplicate_events,
     detect_shocks,
 )
-from src.research.liquidation_shock_event_study.response_map import build_response_map
 
 DATASET_JSONL = Path(cfg.BINANCE_LIQUIDATION_SNAPSHOT_PROCESSED_DIR) / "binance_snapshot_dataset.jsonl"
 CONTINUITY_REPORT = Path("reports/liquidation_shock_event_study/binance_snapshot_continuity_summary.json")
@@ -114,6 +112,68 @@ def compute_event_density(events: list[dict], months: list[str]) -> dict:
     }
 
 
+def detect_shocks_with_gap_resets(aligned_rows: list[dict]) -> list:
+    """
+    Run shock detection separately on each contiguous per-symbol segment.
+
+    A gap > 1 minute indicates a broken time series. We must reset the
+    24h lookback there, otherwise later rows can incorrectly use stale
+    history from an earlier month/segment.
+    """
+    by_symbol: dict[str, list[dict]] = {}
+    for row in aligned_rows:
+        by_symbol.setdefault(row["symbol"], []).append(row)
+
+    events = []
+    for sym_rows in by_symbol.values():
+        sym_rows = sorted(sym_rows, key=lambda r: r["bar_start_ms"])
+        current_segment: list[dict] = []
+        prev_ts: int | None = None
+
+        for row in sym_rows:
+            ts = row["bar_start_ms"]
+            if prev_ts is not None and ts - prev_ts > _MS_PER_MIN:
+                if current_segment:
+                    events.extend(detect_shocks(current_segment))
+                current_segment = []
+            current_segment.append(row)
+            prev_ts = ts
+
+        if current_segment:
+            events.extend(detect_shocks(current_segment))
+
+    events.sort(key=lambda e: (e.symbol, e.shock_bar_start_ms))
+    return events
+
+
+def compute_universe_integrity(
+    continuity_summary: dict,
+    required_symbols: list[str],
+    months: list[str],
+) -> dict:
+    results = continuity_summary.get("results", {})
+    required_symbol_months = len(required_symbols) * len(months)
+    passed_symbol_months = 0
+    missing_symbol_months: list[dict] = []
+
+    for sym in required_symbols:
+        for month in months:
+            month_data = results.get(sym, {}).get(month, {})
+            passed = month_data.get("passes_continuity_gate", False)
+            if passed:
+                passed_symbol_months += 1
+            else:
+                missing_symbol_months.append({"symbol": sym, "month": month})
+
+    return {
+        "required_symbols": required_symbols,
+        "required_symbol_months": required_symbol_months,
+        "passed_symbol_months": passed_symbol_months,
+        "missing_symbol_months": missing_symbol_months,
+        "universe_integrity_ok": passed_symbol_months == required_symbol_months,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Decision logic (pure)
 # ---------------------------------------------------------------------------
@@ -125,6 +185,7 @@ def compute_review_decision(
     min_total_events: int,
     min_events_per_month: int,
     directional_bias_results: dict | None = None,
+    universe_integrity_ok: bool = True,
 ) -> str:
     """
     Determine the final review decision state.
@@ -158,6 +219,9 @@ def compute_review_decision(
 
     # Gate 4: directional bias (optional — requires response map results)
     if directional_bias_results is None:
+        return "binance_snapshot_structure_not_confirmed"
+
+    if not universe_integrity_ok:
         return "binance_snapshot_structure_not_confirmed"
 
     # Check if at least min_adjacent_horizons pass the directional bias threshold
@@ -233,6 +297,7 @@ def _write_review_md(
     directional_bias: dict,
     months: list[str],
     continuity_summary: dict,
+    universe_integrity: dict,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -284,6 +349,15 @@ def _write_review_md(
             )
 
     lines += [
+        "",
+        "---",
+        "",
+        "## Universe Integrity",
+        "",
+        f"**Universe integrity pass:** `{str(universe_integrity.get('universe_integrity_ok', False)).lower()}`",
+        "",
+        f"- Required symbol-months: {universe_integrity.get('required_symbol_months', 0)}",
+        f"- Passed symbol-months: {universe_integrity.get('passed_symbol_months', 0)}",
         "",
         "---",
         "",
@@ -355,6 +429,8 @@ def _write_review_md(
         lines += [
             f"> Decision: `{decision}`. See density and continuity tables above for root cause.",
         ]
+        if not universe_integrity.get("universe_integrity_ok", True):
+            lines.append("> Reduced-universe / failed-symbol-month scope prevented a confirmed result.")
 
     path.write_text("\n".join(lines) + "\n")
 
@@ -376,6 +452,7 @@ def _month_for_ms(ts_ms: int, months: list[str]) -> str:
 
 def main() -> None:
     months = list(cfg.BINANCE_LIQUIDATION_SNAPSHOT_MONTHS)
+    required_symbols = [s.replace("/", "") for s in cfg.BINANCE_LIQUIDATION_SNAPSHOT_SYMBOLS]
 
     # Load continuity summary
     continuity_summary: dict = {}
@@ -399,7 +476,7 @@ def main() -> None:
     logger.info(f"Loaded {len(aligned_rows)} aligned rows from dataset")
 
     # Detect shocks using existing pipeline
-    raw_events = detect_shocks(aligned_rows)
+    raw_events = detect_shocks_with_gap_resets(aligned_rows)
     dedup_events = deduplicate_events(raw_events)
     logger.info(f"Raw events: {len(raw_events)}, deduplicated: {len(dedup_events)}")
 
@@ -418,6 +495,11 @@ def main() -> None:
         )
 
     density = compute_event_density(event_dicts, months=months)
+    universe_integrity = compute_universe_integrity(
+        continuity_summary=continuity_summary,
+        required_symbols=required_symbols,
+        months=months,
+    )
 
     # Compute response stats (directional bias)
     directional_bias: dict | None = None
@@ -430,6 +512,7 @@ def main() -> None:
         min_total_events=cfg.BINANCE_LIQUIDATION_SNAPSHOT_MIN_TOTAL_EVENTS,
         min_events_per_month=cfg.BINANCE_LIQUIDATION_SNAPSHOT_MIN_EVENTS_PER_MONTH,
         directional_bias_results=directional_bias,
+        universe_integrity_ok=universe_integrity["universe_integrity_ok"],
     )
 
     logger.info(f"Decision: {decision}")
@@ -446,6 +529,7 @@ def main() -> None:
         "raw_events": len(raw_events),
         "deduplicated_events": len(dedup_events),
         "density": density,
+        "universe_integrity": universe_integrity,
         "directional_bias": directional_bias,
         "decision": decision,
     }
@@ -462,6 +546,7 @@ def main() -> None:
         directional_bias=directional_bias or {},
         months=months,
         continuity_summary=continuity_summary,
+        universe_integrity=universe_integrity,
     )
     logger.info(f"Review written to: {REVIEW_MD}")
 

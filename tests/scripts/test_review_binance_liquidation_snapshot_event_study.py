@@ -4,12 +4,10 @@ Tests for review_binance_liquidation_snapshot_event_study.py
 All tests use synthetic in-memory data. No file I/O in unit tests.
 """
 
-import sys
-import os
 import importlib.util
+import os
+import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -239,3 +237,70 @@ def test_compute_review_decision_returns_allowed_state():
             min_events_per_month=1,
         )
         assert decision in allowed, f"Unexpected decision '{decision}' for {n_events} events"
+
+
+def test_compute_review_decision_downgrades_when_universe_integrity_fails():
+    mod = _load_review_module()
+    events = (
+        [_make_event(**{"month": "2024-01"}) for _ in range(20)]
+        + [_make_event(**{"month": "2024-02"}) for _ in range(20)]
+        + [_make_event(**{"month": "2024-03"}) for _ in range(20)]
+    )
+    density = mod.compute_event_density(events, months=["2024-01", "2024-02", "2024-03"])
+    directional_bias = {
+        5: {"directional_ratio": 0.60},
+        10: {"directional_ratio": 0.61},
+        15: {"directional_ratio": 0.40},
+    }
+    decision = mod.compute_review_decision(
+        density=density,
+        months=["2024-01", "2024-02", "2024-03"],
+        min_total_events=10,
+        min_events_per_month=1,
+        directional_bias_results=directional_bias,
+        universe_integrity_ok=False,
+    )
+    assert decision == "binance_snapshot_structure_not_confirmed"
+
+
+def test_detect_shocks_with_gap_resets_does_not_leak_prior_segment_lookback():
+    mod = _load_review_module()
+    jan_start = _JAN_2024_START_MS
+    mar_start = _JAN_2024_START_MS + 60 * 1440 * _MS_PER_MIN
+
+    rows = []
+    for i in range(1440):
+        rows.append(
+            {
+                "symbol": "BTCUSDT",
+                "bar_start_ms": jan_start + i * _MS_PER_MIN,
+                "long_liquidation_notional_1m_usdt": 0.0,
+                "short_liquidation_notional_1m_usdt": 0.0,
+                "open_price": 50000.0,
+                "close_price": 50000.0,
+            }
+        )
+    rows.append(
+        {
+            "symbol": "BTCUSDT",
+            "bar_start_ms": jan_start + 1440 * _MS_PER_MIN,
+            "long_liquidation_notional_1m_usdt": 100000.0,
+            "short_liquidation_notional_1m_usdt": 0.0,
+            "open_price": 50000.0,
+            "close_price": 49900.0,
+        }
+    )
+    rows.append(
+        {
+            "symbol": "BTCUSDT",
+            "bar_start_ms": mar_start,
+            "long_liquidation_notional_1m_usdt": 100000.0,
+            "short_liquidation_notional_1m_usdt": 0.0,
+            "open_price": 48000.0,
+            "close_price": 47900.0,
+        }
+    )
+
+    events = mod.detect_shocks_with_gap_resets(rows)
+    assert len(events) == 1
+    assert events[0].shock_bar_start_ms == jan_start + 1440 * _MS_PER_MIN

@@ -28,14 +28,12 @@ CLI flags:
 import argparse
 import hashlib
 import json
-import os
 import sys
 import time
 import urllib.request
 import zipfile
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Callable
 
 from loguru import logger
 
@@ -44,6 +42,7 @@ import configs.base as cfg
 
 BINANCE_VISION_BASE = "https://data.binance.vision"
 REPORT_PATH = Path("reports/liquidation_shock_event_study/binance_snapshot_fetch_summary.json")
+MANIFEST_PATH = Path("reports/liquidation_shock_event_study/binance_snapshot_manifest_probe.json")
 
 # Mapping from UM symbol → CM perp symbol for liquidation.
 # Binance Vision only has liquidationSnapshot under /data/futures/cm/.
@@ -201,6 +200,45 @@ def build_download_plan(
                     )
 
     return plan
+
+
+def resolve_download_config(
+    manifest: dict | None,
+    cli_symbols: list[str] | None,
+    cli_months: list[str] | None,
+    cli_liquidation_mode: str,
+) -> dict:
+    """
+    Resolve effective download settings.
+
+    Rules:
+      - explicit CLI symbols/months override manifest
+      - explicit CLI liquidation mode ('daily'/'monthly') overrides manifest
+      - 'auto' liquidation mode requires a successful manifest probe
+    """
+    manifest = manifest or {}
+
+    if cli_liquidation_mode == "auto":
+        if not manifest:
+            raise ValueError("Manifest probe is required when liquidation mode is 'auto'")
+        if manifest.get("decision") == "data_unavailable":
+            raise ValueError("Manifest probe reported data_unavailable")
+        liquidation_mode = manifest.get("selected_liquidation_download_mode")
+        if liquidation_mode not in ("daily", "monthly"):
+            raise ValueError("Manifest probe did not provide a valid selected_liquidation_download_mode")
+    else:
+        liquidation_mode = cli_liquidation_mode
+
+    symbols = cli_symbols or manifest.get("symbols") or [
+        _ccxt_to_binance(s) for s in cfg.BINANCE_LIQUIDATION_SNAPSHOT_SYMBOLS
+    ]
+    months = cli_months or manifest.get("months") or list(cfg.BINANCE_LIQUIDATION_SNAPSHOT_MONTHS)
+
+    return {
+        "symbols": symbols,
+        "months": months,
+        "liquidation_mode": liquidation_mode,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -396,23 +434,36 @@ def main() -> None:
     parser.add_argument("--skip-existing", action="store_true", default=True)
     parser.add_argument(
         "--liquidation-mode",
-        choices=["daily", "monthly"],
-        default="daily",
-        help="Download daily or monthly liquidationSnapshot ZIPs (default: daily)",
+        choices=["auto", "daily", "monthly"],
+        default="auto",
+        help="Use manifest-selected liquidation mode or override with daily/monthly",
     )
     args = parser.parse_args()
 
-    symbols = args.symbols or [_ccxt_to_binance(s) for s in cfg.BINANCE_LIQUIDATION_SNAPSHOT_SYMBOLS]
-    months = args.months or list(cfg.BINANCE_LIQUIDATION_SNAPSHOT_MONTHS)
+    manifest = None
+    if MANIFEST_PATH.exists():
+        with open(MANIFEST_PATH) as f:
+            manifest = json.load(f)
+
+    resolved = resolve_download_config(
+        manifest=manifest,
+        cli_symbols=args.symbols,
+        cli_months=args.months,
+        cli_liquidation_mode=args.liquidation_mode,
+    )
+
+    symbols = resolved["symbols"]
+    months = resolved["months"]
+    liquidation_mode = resolved["liquidation_mode"]
     raw_dir = Path(args.raw_dir)
     extracted_dir = Path(args.extracted_dir)
 
     logger.info(f"Symbols: {symbols}")
     logger.info(f"Months: {months}")
-    logger.info(f"Liquidation mode: {args.liquidation_mode}")
+    logger.info(f"Liquidation mode: {liquidation_mode}")
     logger.info(f"Dry run: {args.dry_run}")
 
-    plan = build_download_plan(symbols, months, liquidation_mode=args.liquidation_mode)
+    plan = build_download_plan(symbols, months, liquidation_mode=liquidation_mode)
     logger.info(f"Download plan: {len(plan)} entries")
 
     results = execute_download_plan(
@@ -434,7 +485,7 @@ def main() -> None:
     summary = {
         "symbols": symbols,
         "months": months,
-        "liquidation_mode": args.liquidation_mode,
+        "liquidation_mode": liquidation_mode,
         "total_entries": total,
         "downloaded": downloaded,
         "checksum_verified": verified,

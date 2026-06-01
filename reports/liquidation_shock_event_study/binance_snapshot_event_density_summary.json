@@ -1,19 +1,19 @@
 {
   "density": {
-    "total_events": 4398,
+    "total_events": 4391,
     "events_per_month": {
       "2024-01": 1460,
       "2024-02": 1147,
-      "2024-03": 1791
+      "2024-03": 1784
     },
     "events_by_symbol": {
       "BTCUSDT": 2206,
       "ETHUSDT": 1657,
-      "SOLUSDT": 535
+      "SOLUSDT": 528
     },
     "events_by_side": {
-      "short": 2003,
-      "long": 2395
+      "short": 2002,
+      "long": 2389
     },
     "events_by_symbol_month": {
       "BTCUSDT": {
@@ -28,7 +28,7 @@
       },
       "SOLUSDT": {
         "2024-01": 220,
-        "2024-03": 315
+        "2024-03": 308
       }
     },
     "events_by_symbol_side": {
@@ -41,8 +41,8 @@
         "long": 918
       },
       "SOLUSDT": {
-        "short": 173,
-        "long": 362
+        "short": 172,
+        "long": 356
       }
     }
   },
