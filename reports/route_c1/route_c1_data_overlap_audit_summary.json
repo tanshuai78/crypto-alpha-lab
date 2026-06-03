@@ -1,0 +1,14 @@
+{
+  "mode": "live_overlap",
+  "liquidation_input_exists": false,
+  "price_input_exists": true,
+  "orderbook_dir_exists": true,
+  "primary_blocker": "missing_liquidation_1m_input",
+  "liquidation_1m_zero_fill_coverage_24h": 0.0,
+  "orderbook_snapshot_coverage_24h": 0.0,
+  "price_1m_coverage_24h": 20.194444444444443,
+  "overlap_hours_by_symbol": {},
+  "ready_for_price_only": false,
+  "ready_for_orderbook_aware": false,
+  "decision": "route_c1_overlap_not_ready"
+}
