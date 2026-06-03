@@ -29,6 +29,7 @@ import json
 import math
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 
@@ -125,7 +126,7 @@ def compute_coverage_ratio(rows: list[dict], expected_minutes: int) -> float:
     """
     if not rows or expected_minutes <= 0:
         return 0.0
-    return len(rows) / expected_minutes
+    return min(1.0, len(rows) / expected_minutes)
 
 
 def compute_overlap_decision(summary: dict) -> dict:
@@ -219,9 +220,39 @@ def _load_jsonl(path: str) -> list[dict]:
     return rows
 
 
+def _extract_timestamp_ms(row: dict, preferred_key: str) -> int | None:
+    value = row.get(preferred_key)
+    if value is None:
+        value = row.get("bar_start_ms")
+    if value is None:
+        value = row.get("timestamp_ms")
+    if value is None:
+        value = row.get("timestamp")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _compute_24h_coverage(rows: list[dict], timestamp_key: str = "timestamp_ms") -> float:
-    """Return coverage ratio assuming we want 1440 bars (24h × 60 1m bars)."""
-    return compute_coverage_ratio(rows, expected_minutes=1440)
+    """Return coverage ratio over the latest 24h using unique minute buckets."""
+    timestamps = []
+    for row in rows:
+        ts = _extract_timestamp_ms(row, timestamp_key)
+        if ts is not None:
+            timestamps.append(ts)
+    if not timestamps:
+        return 0.0
+
+    latest_ts = max(timestamps)
+    window_start = latest_ts - 24 * 60 * 60 * 1000
+    unique_minutes = {ts for ts in timestamps if window_start <= ts <= latest_ts}
+    return compute_coverage_ratio(
+        [{"timestamp_ms": ts} for ts in unique_minutes],
+        expected_minutes=1440,
+    )
 
 
 def _build_spans_from_rows(
@@ -236,53 +267,132 @@ def _build_spans_from_rows(
         if raw_sym is None:
             continue
         sym = normalize_symbol(str(raw_sym))
-        ts = row.get(timestamp_key)
+        ts = _extract_timestamp_ms(row, timestamp_key)
         if ts is None:
             continue
-        by_sym.setdefault(sym, []).append(int(ts))
+        by_sym.setdefault(sym, []).append(ts)
 
     return {sym: (min(tss), max(tss)) for sym, tss in by_sym.items()}
 
 
-def _build_orderbook_spans(orderbook_dir: str, target_symbols: list[str]) -> dict[str, tuple[int, int]]:
-    """Scan orderbook_dir for per-symbol subdirs and build spans from filenames or JSON files.
-
-    Heuristic: each file is named YYYY-MM-DD or UNIX-timestamp-based.
-    We parse any integer-looking stem as a timestamp_ms.
-    Falls back to directory mtime for date-named files.
-    """
-    spans: dict[str, tuple[int, int]] = {}
+def _iter_orderbook_files(orderbook_dir: str, target_symbols: list[str]):
     ob_path = Path(orderbook_dir)
     if not ob_path.is_dir():
-        return spans
+        return
 
+    ob_path = Path(orderbook_dir)
     norm_targets = {normalize_symbol(s) for s in target_symbols}
-
-    for sym_dir in ob_path.iterdir():
-        if not sym_dir.is_dir():
+    for orderbook_file in ob_path.glob("*.jsonl"):
+        stem_parts = orderbook_file.stem.split("_")
+        if len(stem_parts) < 3:
             continue
-        sym = normalize_symbol(sym_dir.name)
+        exchange = stem_parts[0]
+        raw_symbol = stem_parts[1]
+        if raw_symbol.lower() == "funding":
+            continue
+        sym = normalize_symbol(raw_symbol)
         if norm_targets and sym not in norm_targets:
             continue
+        yield exchange, sym, orderbook_file
 
+
+def _orderbook_file_date(orderbook_file: Path) -> str | None:
+    stem_parts = orderbook_file.stem.split("_")
+    if len(stem_parts) < 3:
+        return None
+    return stem_parts[-1]
+
+
+def _read_orderbook_file_boundary_timestamps(orderbook_file: Path) -> tuple[int | None, int | None]:
+    first_ts: int | None = None
+    last_ts: int | None = None
+    with open(orderbook_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = _extract_timestamp_ms(row, "timestamp")
+            if ts is None:
+                continue
+            if first_ts is None:
+                first_ts = ts
+            last_ts = ts
+    return first_ts, last_ts
+
+
+def _read_orderbook_file_timestamps(orderbook_file: Path, fallback_symbol: str) -> dict[str, list[int]]:
+    timestamps_by_symbol: dict[str, list[int]] = defaultdict(list)
+    with open(orderbook_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = _extract_timestamp_ms(row, "timestamp")
+            if ts is None:
+                continue
+            row_symbol = normalize_symbol(str(row.get("symbol", fallback_symbol)))
+            timestamps_by_symbol[row_symbol].append(ts)
+    return timestamps_by_symbol
+
+
+def _build_orderbook_stats(
+    orderbook_dir: str,
+    target_symbols: list[str],
+) -> tuple[dict[str, tuple[int, int]], dict[str, float], list[str]]:
+    """Build orderbook spans and latest-24h minute coverage from flat JSONL files."""
+    spans: dict[str, tuple[int, int]] = {}
+    coverage_by_symbol = {normalize_symbol(sym): 0.0 for sym in target_symbols}
+    files_by_symbol: dict[str, list[Path]] = defaultdict(list)
+    for _, file_symbol, orderbook_file in _iter_orderbook_files(orderbook_dir, target_symbols) or []:
+        files_by_symbol[file_symbol].append(orderbook_file)
+
+    symbols_with_data: list[str] = []
+    for sym, symbol_files in files_by_symbol.items():
+        if not symbol_files:
+            continue
+        symbols_with_data.append(sym)
+
+        symbol_files = sorted(symbol_files, key=lambda path: (_orderbook_file_date(path) or "", path.name))
+        earliest_file = symbol_files[0]
+        latest_file = symbol_files[-1]
+
+        earliest_first_ts, _ = _read_orderbook_file_boundary_timestamps(earliest_file)
+        _, latest_last_ts = _read_orderbook_file_boundary_timestamps(latest_file)
+        if earliest_first_ts is not None and latest_last_ts is not None:
+            spans[sym] = (earliest_first_ts, latest_last_ts)
+
+        latest_dates = sorted(
+            {date_str for date_str in (_orderbook_file_date(path) for path in symbol_files) if date_str},
+        )[-2:]
         timestamps: list[int] = []
-        for f in sym_dir.iterdir():
-            if f.is_file():
-                # Try parsing stem as integer (ms timestamp)
-                try:
-                    ts = int(f.stem)
-                    timestamps.append(ts)
-                    continue
-                except ValueError:
-                    pass
-                # Try mtime
-                mtime_ms = int(f.stat().st_mtime * 1000)
-                timestamps.append(mtime_ms)
+        for orderbook_file in symbol_files:
+            if _orderbook_file_date(orderbook_file) not in latest_dates:
+                continue
+            timestamps.extend(_read_orderbook_file_timestamps(orderbook_file, sym).get(sym, []))
+        if not timestamps:
+            continue
 
-        if timestamps:
-            spans[sym] = (min(timestamps), max(timestamps))
+        latest = max(timestamps)
+        window_start = latest - 24 * 60 * 60 * 1000
+        unique_minutes = {
+            (ts // 60_000) * 60_000
+            for ts in timestamps
+            if window_start <= ts <= latest
+        }
+        coverage_by_symbol[sym] = compute_coverage_ratio(
+            [{"timestamp_ms": minute_ts} for minute_ts in unique_minutes],
+            expected_minutes=1440,
+        )
 
-    return spans
+    return spans, coverage_by_symbol, sorted(symbols_with_data)
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -352,7 +462,15 @@ def run_audit(args: argparse.Namespace) -> dict:
     # --- Build spans per symbol ---
     liq_spans = _build_spans_from_rows(liq_rows, "symbol", "timestamp_ms") if liq_rows else {}
     price_spans = _build_spans_from_rows(price_rows, "symbol", "timestamp_ms") if price_rows else {}
-    ob_spans = _build_orderbook_spans(ob_dir, args.symbols) if ob_exists else {}
+    if ob_exists:
+        ob_spans, ob_coverage_by_symbol, ob_symbols_with_data = _build_orderbook_stats(
+            ob_dir,
+            args.symbols,
+        )
+    else:
+        ob_spans = {}
+        ob_coverage_by_symbol = {sym: 0.0 for sym in target_symbols}
+        ob_symbols_with_data = []
 
     # Filter to target symbols only
     liq_spans = {s: v for s, v in liq_spans.items() if s in target_symbols}
@@ -362,7 +480,12 @@ def run_audit(args: argparse.Namespace) -> dict:
     # --- Compute coverages ---
     liq_coverage_24h = _compute_24h_coverage(liq_rows)
     price_coverage_24h = _compute_24h_coverage(price_rows)
-    ob_coverage_24h: float = 0.0  # TODO: implement proper per-snapshot coverage
+    if ob_symbols_with_data:
+        ob_coverage_24h = sum(
+            ob_coverage_by_symbol[sym] for sym in ob_symbols_with_data
+        ) / len(ob_symbols_with_data)
+    else:
+        ob_coverage_24h = 0.0
 
     # --- Compute overlap ---
     overlap_hours_by_symbol = compute_overlap_hours_by_symbol(
@@ -378,6 +501,8 @@ def run_audit(args: argparse.Namespace) -> dict:
         "primary_blocker": None,
         "liquidation_1m_zero_fill_coverage_24h": liq_coverage_24h,
         "orderbook_snapshot_coverage_24h": ob_coverage_24h,
+        "orderbook_snapshot_coverage_by_symbol_24h": ob_coverage_by_symbol,
+        "orderbook_symbols_with_data": ob_symbols_with_data,
         "price_1m_coverage_24h": price_coverage_24h,
         "overlap_hours_by_symbol": overlap_hours_by_symbol,
         "ready_for_price_only": False,

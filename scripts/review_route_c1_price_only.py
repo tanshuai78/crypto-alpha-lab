@@ -25,7 +25,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
+import datetime
 import json
 import math
 import random
@@ -106,19 +108,10 @@ def compute_price_risk_metrics(
     window = sorted(window, key=lambda r: r["bar_start_ms"])
 
     entry = window[0]["open_price"]
-    # Use high/low if available; fallback to open/close when kline merge was not done
-    high = max(
-        r.get("high_price")
-        if r.get("high_price") is not None
-        else r.get("open_price", r.get("close_price", entry))
-        for r in window
-    )
-    low = min(
-        r.get("low_price")
-        if r.get("low_price") is not None
-        else r.get("close_price", r.get("open_price", entry))
-        for r in window
-    )
+    if any(r.get("high_price") is None or r.get("low_price") is None for r in window):
+        return None
+    high = max(float(r["high_price"]) for r in window)
+    low = min(float(r["low_price"]) for r in window)
 
     # Direction-agnostic metrics
     high_low_range_bps = (high / low - 1) * 10_000
@@ -193,7 +186,7 @@ def detect_c1_events(rows: list[dict]) -> list[dict]:
 
     for sym, sym_rows in by_sym.items():
         abs_threshold = _get_abs_threshold(sym)
-        reference: list[float] = []
+        side_reference: dict[str, list[float]] = {"long": [], "short": []}
 
         for row in sym_rows:
             long_notional = float(row.get("long_liquidation_notional_1m_usdt", 0.0) or 0.0)
@@ -204,20 +197,20 @@ def detect_c1_events(rows: list[dict]) -> list[dict]:
                 float(_raw_total) if _raw_total is not None else long_notional + short_notional
             )
             bar_ms = int(row["bar_start_ms"])
+            dominant_side = "long" if long_notional >= short_notional else "short"
+            dominant_notional = max(long_notional, short_notional)
+            dominant_reference = side_reference[dominant_side]
 
-            # Check reference window is sufficient (must have 1440 reference bars)
-            if len(reference) >= cfg.ROUTE_C1_REQUIRED_REFERENCE_BARS:
-                # Percentile rank against the last 1440 reference bars
-                ref_window = reference[-cfg.ROUTE_C1_REQUIRED_REFERENCE_BARS :]
-                pct_rank = compute_percentile_rank(total_notional, ref_window)
+            # Check reference window is sufficient (must have 1440 reference bars for the same side)
+            if len(dominant_reference) >= cfg.ROUTE_C1_REQUIRED_REFERENCE_BARS:
+                ref_window = dominant_reference[-cfg.ROUTE_C1_REQUIRED_REFERENCE_BARS :]
+                pct_rank = compute_percentile_rank(dominant_notional, ref_window)
 
                 if pct_rank >= cfg.ROUTE_C1_EVENT_PERCENTILE_THRESHOLD:
                     # Absolute threshold check
                     if total_notional >= abs_threshold:
                         # Dominance check
                         if total_notional > 0:
-                            dominant_side = "long" if long_notional >= short_notional else "short"
-                            dominant_notional = max(long_notional, short_notional)
                             dominance_ratio = dominant_notional / total_notional
                         else:
                             dominance_ratio = 0.0
@@ -241,7 +234,8 @@ def detect_c1_events(rows: list[dict]) -> list[dict]:
                                 }
                             )
 
-            reference.append(total_notional)
+            side_reference["long"].append(long_notional)
+            side_reference["short"].append(short_notional)
 
     # Deduplicate
     return deduplicate_c1_events(raw_events)
@@ -364,11 +358,34 @@ def _guard_is_clean(cand_ms: int, contaminated: set[int]) -> bool:
     return True
 
 
+def has_complete_response_window(rows_by_ms: dict[int, dict], cand_ms: int) -> bool:
+    """Return True when the first complete post-candidate 5m response window exists."""
+    response_start_ms = first_complete_5m_response_start_ms(cand_ms)
+    for i in range(5):
+        if response_start_ms + i * _MS_PER_MIN not in rows_by_ms:
+            return False
+    return True
+
+
+def _compute_vol_bucket(
+    vol: float | None,
+    pre30_vols_sorted: list[float],
+    n_buckets: int = 10,
+) -> int | None:
+    if vol is None or not pre30_vols_sorted:
+        return None
+    rank = bisect.bisect_left(pre30_vols_sorted, vol) / len(pre30_vols_sorted)
+    return int(rank * n_buckets)
+
+
 def match_baselines_for_event(
     event: dict,
     candidate_rows: list[dict],
     k: int = 20,
     _contaminated: set[int] | None = None,
+    _rows_by_ms: dict[int, dict] | None = None,
+    _pre30_vols_sorted: list[float] | None = None,
+    _candidate_infos: list[tuple[int, int, int | None]] | None = None,
 ) -> list[dict]:
     """Match up to k baseline windows for a single event.
 
@@ -392,14 +409,17 @@ def match_baselines_for_event(
     Returns a list of baseline dicts with keys:
       candidate_bar_start_ms, has_complete_future_window, contamination_free
     """
-    import bisect
-
     event_shock_ms = int(event["shock_bar_start_ms"])
     event_response_start_ms = first_complete_5m_response_start_ms(event_shock_ms)
     event_response_end_ms = event_response_start_ms + 5 * _MS_PER_MIN
+    event_month = _month_key(event_shock_ms)
 
     # Index rows by bar_start_ms
-    rows_by_ms: dict[int, dict] = {int(r["bar_start_ms"]): r for r in candidate_rows}
+    rows_by_ms: dict[int, dict] = (
+        _rows_by_ms
+        if _rows_by_ms is not None
+        else {int(r["bar_start_ms"]): r for r in candidate_rows}
+    )
     all_bar_ms_sorted = sorted(rows_by_ms.keys())
 
     # ── Contamination set (O(n) build, O(1) lookup) ─────────────────────────
@@ -407,21 +427,17 @@ def match_baselines_for_event(
         _contaminated = _build_contaminated_bar_set(rows_by_ms)
 
     # ── Vol bucket: O(n log n) sort once, O(log n) per lookup ───────────────
-    pre30_vols_sorted: list[float] = sorted(
-        v for r in candidate_rows if (v := r.get("pre30_vol")) is not None
+    month_rows = [r for r in candidate_rows if _month_key(int(r["bar_start_ms"])) == event_month]
+    pre30_vols_sorted = (
+        _pre30_vols_sorted
+        if _pre30_vols_sorted is not None
+        else sorted(v for r in month_rows if (v := r.get("pre30_vol")) is not None)
     )
-    n_vols = len(pre30_vols_sorted)
     _MS_PER_HOUR = 3_600_000
-
-    def _vol_bucket(vol: float | None, n_buckets: int = 10) -> int | None:
-        if vol is None or n_vols == 0:
-            return None
-        rank = bisect.bisect_left(pre30_vols_sorted, vol) / n_vols
-        return int(rank * n_buckets)
 
     event_row = rows_by_ms.get(event_shock_ms)
     event_vol = event_row.get("pre30_vol") if event_row else None
-    event_vol_bucket = _vol_bucket(event_vol)
+    event_vol_bucket = _compute_vol_bucket(event_vol, pre30_vols_sorted)
     event_hour = (event_shock_ms % (24 * _MS_PER_HOUR)) // _MS_PER_HOUR
 
     # ── Pre-filter candidates once (most expensive checks first) ────────────
@@ -432,37 +448,40 @@ def match_baselines_for_event(
             cand_resp_end <= event_response_start_ms or cand_resp_start >= event_response_end_ms
         )
 
-    def _has_complete_future_window(cand_ms: int) -> bool:
-        for i in range(5):
-            if cand_ms + i * _MS_PER_MIN not in rows_by_ms:
-                return False
-        return True
-
-    rng = random.Random(_RANDOM_SEED)
-    # (bar_ms, hour, vol_bucket) — cheap attrs precomputed here
-    candidates_pre: list[tuple[int, int, int | None]] = []
-    for cand_ms in all_bar_ms_sorted:
-        if cand_ms >= event_shock_ms:
-            continue
-        if _overlaps_event_window(cand_ms):
-            continue
-        if not _has_complete_future_window(cand_ms):
-            continue
-        if not _guard_is_clean(cand_ms, _contaminated):
-            continue
-        cand_hour = (cand_ms % (24 * _MS_PER_HOUR)) // _MS_PER_HOUR
-        cand_row = rows_by_ms.get(cand_ms)
-        cand_bucket = _vol_bucket(cand_row.get("pre30_vol") if cand_row else None)
-        candidates_pre.append((cand_ms, cand_hour, cand_bucket))
-
-    # Shuffle once; fallbacks just re-scan with relaxed predicates
-    rng.shuffle(candidates_pre)
+    if _candidate_infos is None:
+        rng = random.Random(_RANDOM_SEED)
+        candidates_pre: list[tuple[int, int, int | None]] = []
+        for cand_ms in all_bar_ms_sorted:
+            if cand_ms >= event_shock_ms:
+                continue
+            if _month_key(cand_ms) != event_month:
+                continue
+            if _overlaps_event_window(cand_ms):
+                continue
+            if not has_complete_response_window(rows_by_ms, cand_ms):
+                continue
+            if not _guard_is_clean(cand_ms, _contaminated):
+                continue
+            cand_hour = (cand_ms % (24 * _MS_PER_HOUR)) // _MS_PER_HOUR
+            cand_row = rows_by_ms.get(cand_ms)
+            cand_bucket = _compute_vol_bucket(
+                cand_row.get("pre30_vol") if cand_row else None,
+                pre30_vols_sorted,
+            )
+            candidates_pre.append((cand_ms, cand_hour, cand_bucket))
+        rng.shuffle(candidates_pre)
+    else:
+        candidates_pre = _candidate_infos
 
     def _try_match(relax_time: bool, vol_bucket_slack: int) -> list[dict]:
         matched = []
         for cand_ms, cand_hour, cand_bucket in candidates_pre:
             if len(matched) >= k:
                 break
+            if cand_ms >= event_shock_ms:
+                continue
+            if _overlaps_event_window(cand_ms):
+                continue
             if not relax_time and abs(int(cand_hour) - int(event_hour)) > 1:
                 continue
             if cand_bucket is not None and event_vol_bucket is not None:
@@ -509,27 +528,61 @@ def build_event_baseline_pairs(
     """
     pairs = []
 
-    # Precompute contaminated bar sets per symbol (O(n) per symbol, not per event)
-    contaminated_by_sym: dict[str, set[int]] = {}
-    for sym, sym_rows in rows_by_symbol.items():
-        rows_by_ms_sym = {int(r["bar_start_ms"]): r for r in sym_rows}
-        contaminated_by_sym[sym] = _build_contaminated_bar_set(rows_by_ms_sym)
+    rows_by_sym_month: dict[tuple[str, str], list[dict]] = {}
+    rows_by_ms_by_sym_month: dict[tuple[str, str], dict[int, dict]] = {}
+    contaminated_by_sym_month: dict[tuple[str, str], set[int]] = {}
+    pre30_vols_sorted_by_sym_month: dict[tuple[str, str], list[float]] = {}
+    candidate_infos_by_sym_month: dict[tuple[str, str], list[tuple[int, int, int | None]]] = {}
 
-    # Also precompute rows_by_ms per symbol to avoid rebuilding per event
-    rows_by_ms_by_sym: dict[str, dict[int, dict]] = {
-        sym: {int(r["bar_start_ms"]): r for r in sym_rows}
-        for sym, sym_rows in rows_by_symbol.items()
-    }
+    for sym, sym_rows in rows_by_symbol.items():
+        month_buckets: dict[str, list[dict]] = defaultdict(list)
+        for row in sym_rows:
+            month_buckets[_month_key(int(row["bar_start_ms"]))].append(row)
+        for month_key, month_rows in month_buckets.items():
+            key = (sym, month_key)
+            rows_by_sym_month[key] = month_rows
+            rows_by_ms = {int(r["bar_start_ms"]): r for r in month_rows}
+            rows_by_ms_by_sym_month[key] = rows_by_ms
+            contaminated = _build_contaminated_bar_set(rows_by_ms)
+            contaminated_by_sym_month[key] = contaminated
+            pre30_vols_sorted = sorted(v for r in month_rows if (v := r.get("pre30_vol")) is not None)
+            pre30_vols_sorted_by_sym_month[key] = pre30_vols_sorted
+            rng = random.Random(_RANDOM_SEED)
+            candidate_infos: list[tuple[int, int, int | None]] = []
+            for cand_ms in sorted(rows_by_ms.keys()):
+                if not has_complete_response_window(rows_by_ms, cand_ms):
+                    continue
+                if not _guard_is_clean(cand_ms, contaminated):
+                    continue
+                cand_hour = (cand_ms % (24 * 3_600_000)) // 3_600_000
+                cand_row = rows_by_ms.get(cand_ms)
+                cand_bucket = _compute_vol_bucket(
+                    cand_row.get("pre30_vol") if cand_row else None,
+                    pre30_vols_sorted,
+                )
+                candidate_infos.append((cand_ms, cand_hour, cand_bucket))
+            rng.shuffle(candidate_infos)
+            candidate_infos_by_sym_month[key] = candidate_infos
 
     for event in events:
         sym = normalize_symbol(event["symbol"])
-        sym_rows = rows_by_symbol.get(sym, [])
+        month_key = _month_key(int(event["shock_bar_start_ms"]))
+        key = (sym, month_key)
+        sym_rows = rows_by_sym_month.get(key, [])
 
         if not sym_rows:
             continue
 
-        contaminated = contaminated_by_sym.get(sym)
-        baselines = match_baselines_for_event(event, sym_rows, k=k, _contaminated=contaminated)
+        contaminated = contaminated_by_sym_month.get(key)
+        baselines = match_baselines_for_event(
+            event,
+            sym_rows,
+            k=k,
+            _contaminated=contaminated,
+            _rows_by_ms=rows_by_ms_by_sym_month[key],
+            _pre30_vols_sorted=pre30_vols_sorted_by_sym_month[key],
+            _candidate_infos=candidate_infos_by_sym_month[key],
+        )
 
         if not baselines:
             continue  # unmatched → excluded from stats
@@ -537,7 +590,7 @@ def build_event_baseline_pairs(
         # Compute event price risk metrics
         shock_ms = int(event["shock_bar_start_ms"])
         response_start_ms = first_complete_5m_response_start_ms(shock_ms)
-        rows_by_ms = rows_by_ms_by_sym[sym]
+        rows_by_ms = rows_by_ms_by_sym_month[key]
         response_rows = [
             rows_by_ms[response_start_ms + i * _MS_PER_MIN]
             for i in range(5)
@@ -614,6 +667,7 @@ def build_c1_price_only_summary(
     data_source = metadata.get("data_source", "unknown")
 
     n_matched = len(pairs)
+    total_events = metadata.get("total_events", n_matched)
 
     # Collect per-event ratios
     vol_ratios: list[float] = []
@@ -663,10 +717,10 @@ def build_c1_price_only_summary(
         event_mae_short.append(em["mae_if_short_5m_bps"])
 
     # Concentration metrics
-    n_events = n_matched
-    max_sym_share = max(events_by_symbol.values()) / n_events if n_events > 0 else 0.0
-    max_month_share = max(events_by_month.values()) / n_events if n_events > 0 else 0.0
-    max_day_share = max(events_by_day.values()) / n_events if n_events > 0 else 0.0
+    matched_events = n_matched
+    max_sym_share = max(events_by_symbol.values()) / matched_events if matched_events > 0 else 0.0
+    max_month_share = max(events_by_month.values()) / matched_events if matched_events > 0 else 0.0
+    max_day_share = max(events_by_day.values()) / matched_events if matched_events > 0 else 0.0
 
     # Gate inputs
     post_event_vol_ratio_median = _median_safe(vol_ratios)
@@ -703,12 +757,12 @@ def build_c1_price_only_summary(
         "data_semantics": "snapshot_proxy_not_complete_liquidation_tape",
         "generalization_allowed": False,
         "can_promote_live_filter": False,
-        "event_count": n_events,
+        "event_count": total_events,
         "matched_event_count": n_matched,
-        "unmatched_event_count": metadata.get("total_events", n_events) - n_matched,
+        "unmatched_event_count": total_events - n_matched,
         "matched_baseline_count": sum(len(p["baseline_metrics"]) for p in pairs),
-        "baseline_match_rate": (n_matched / metadata.get("total_events", n_events))
-        if metadata.get("total_events", n_events) > 0
+        "baseline_match_rate": (n_matched / total_events)
+        if total_events > 0
         else 0.0,
         "post_event_vol_ratio_median": post_event_vol_ratio_median,
         "post_event_range_ratio_median": post_event_range_ratio_median,
@@ -940,6 +994,22 @@ def load_dataset(
             if (sym, row.get("bar_start_ms")) in kline_index:
                 continue  # already indexed
 
+        def _parse_kline_row(krow: dict) -> tuple[int, float, float] | None:
+            if "bar_start_ms" in krow:
+                ts_key = "bar_start_ms"
+                high_key = "high_price"
+                low_key = "low_price"
+            elif "open_time" in krow:
+                ts_key = "open_time"
+                high_key = "high"
+                low_key = "low"
+            else:
+                return None
+            try:
+                return (int(krow[ts_key]), float(krow[high_key]), float(krow[low_key]))
+            except (KeyError, TypeError, ValueError):
+                return None
+
         # Load klines per symbol
         if target_symbols:
             sym_dirs = [kline_root_path / sym for sym in target_symbols]
@@ -950,19 +1020,19 @@ def load_dataset(
             if not sym_dir.is_dir():
                 continue
             sym = normalize_symbol(sym_dir.name)
-            for csv_file in sym_dir.glob("*.csv"):
+            for csv_file in sym_dir.rglob("*.csv"):
                 try:
                     with open(csv_file, newline="", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
                         for krow in reader:
-                            try:
-                                bar_ms = int(krow["bar_start_ms"])
-                                kline_index[(sym, bar_ms)] = {
-                                    "high_price": float(krow["high_price"]),
-                                    "low_price": float(krow["low_price"]),
-                                }
-                            except (KeyError, ValueError):
+                            parsed = _parse_kline_row(krow)
+                            if parsed is None:
                                 continue
+                            bar_ms, high_price, low_price = parsed
+                            kline_index[(sym, bar_ms)] = {
+                                "high_price": high_price,
+                                "low_price": low_price,
+                            }
                 except (OSError, IOError):
                     continue
 
@@ -978,6 +1048,12 @@ def load_dataset(
                     row["high_price"] = kline_data["high_price"]
                 if "low_price" not in row or row["low_price"] is None:
                     row["low_price"] = kline_data["low_price"]
+
+    missing_hilo = [
+        row for row in rows if row.get("high_price") is None or row.get("low_price") is None
+    ]
+    if missing_hilo:
+        raise ValueError("high_price/low_price missing after dataset load; kline merge required")
 
     return rows
 
@@ -1104,10 +1180,13 @@ def render_review_markdown(summary: dict, output_path: str) -> None:
 
 def _ms_to_date_str(ms: int) -> str:
     """Return YYYY-MM-DD string from ms timestamp."""
-    import datetime
-
     dt = datetime.datetime.utcfromtimestamp(ms / 1000.0)
     return dt.strftime("%Y-%m-%d")
+
+
+def _month_key(ms: int) -> str:
+    dt = datetime.datetime.utcfromtimestamp(ms / 1000.0)
+    return dt.strftime("%Y-%m")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

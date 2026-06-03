@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import pytest
 
 from scripts.audit_route_c1_data_overlap import (
-    normalize_symbol,
-    compute_time_span,
-    compute_overlap_hours_by_symbol,
     compute_coverage_ratio,
     compute_overlap_decision,
+    compute_overlap_hours_by_symbol,
+    compute_time_span,
+    normalize_symbol,
+    run_audit,
 )
 
 
@@ -58,6 +62,12 @@ def test_compute_coverage_ratio():
 
     # Empty rows
     assert compute_coverage_ratio([], expected_minutes=10) == 0.0
+
+
+def test_compute_coverage_ratio_caps_at_one():
+    rows = [{"timestamp_ms": i} for i in range(2000)]
+    ratio = compute_coverage_ratio(rows, expected_minutes=1440)
+    assert ratio == 1.0
 
 
 def test_overlap_audit_marks_price_only_ready_without_orderbook():
@@ -140,3 +150,115 @@ def test_overlap_audit_reports_missing_liquidation_input_blocker():
     updated = compute_overlap_decision(summary)
     assert updated["primary_blocker"] == "missing_liquidation_1m_input"
     assert updated["decision"] == "route_c1_overlap_not_ready"
+
+
+def test_run_audit_uses_bar_start_ms_when_timestamp_ms_absent(tmp_path):
+    liq_path = tmp_path / "liq.jsonl"
+    price_path = tmp_path / "price.jsonl"
+
+    liq_row = {"symbol": "BTC/USDT", "bar_start_ms": 1_700_000_000_000}
+    price_row = {"symbol": "BTCUSDT", "bar_start_ms": 1_700_000_000_000}
+
+    liq_path.write_text(json.dumps(liq_row) + "\n", encoding="utf-8")
+    price_path.write_text(json.dumps(price_row) + "\n", encoding="utf-8")
+
+    args = SimpleNamespace(
+        mode="live_overlap",
+        liquidation_1m=str(liq_path),
+        price_1m=str(price_path),
+        orderbook_dir=None,
+        symbols=["BTC/USDT"],
+        output=str(tmp_path / "out.json"),
+    )
+
+    summary = run_audit(args)
+    assert summary["liquidation_input_exists"] is True
+    assert summary["price_input_exists"] is True
+    assert "BTCUSDT" in summary["overlap_hours_by_symbol"]
+
+
+def test_run_audit_reads_flat_orderbook_jsonl_files_and_builds_overlap(tmp_path):
+    liq_path = tmp_path / "liq.jsonl"
+    price_path = tmp_path / "price.jsonl"
+    orderbook_dir = tmp_path / "historical_orderbook"
+    orderbook_dir.mkdir()
+
+    liq_rows = [
+        {"symbol": "BTC/USDT", "bar_start_ms": 1_700_000_000_000},
+        {"symbol": "BTC/USDT", "bar_start_ms": 1_700_003_600_000},
+    ]
+    price_rows = [
+        {"symbol": "BTCUSDT", "bar_start_ms": 1_700_000_000_000},
+        {"symbol": "BTCUSDT", "bar_start_ms": 1_700_003_600_000},
+    ]
+    ob_rows = [
+        {"timestamp": 1_700_000_000_500, "exchange": "binance", "symbol": "BTC/USDT", "bids": [[1, 1]], "asks": [[2, 1]]},
+        {"timestamp": 1_700_003_600_500, "exchange": "binance", "symbol": "BTC/USDT", "bids": [[1, 1]], "asks": [[2, 1]]},
+    ]
+
+    liq_path.write_text("\n".join(json.dumps(r) for r in liq_rows) + "\n", encoding="utf-8")
+    price_path.write_text("\n".join(json.dumps(r) for r in price_rows) + "\n", encoding="utf-8")
+    (orderbook_dir / "binance_BTCUSDT_2023-11-14.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in ob_rows) + "\n",
+        encoding="utf-8",
+    )
+
+    args = SimpleNamespace(
+        mode="live_overlap",
+        liquidation_1m=str(liq_path),
+        price_1m=str(price_path),
+        orderbook_dir=str(orderbook_dir),
+        symbols=["BTC/USDT"],
+        output=str(tmp_path / "out.json"),
+    )
+
+    summary = run_audit(args)
+    assert summary["orderbook_dir_exists"] is True
+    assert summary["overlap_hours_by_symbol"]["BTCUSDT"] > 0.0
+
+
+def test_run_audit_reports_orderbook_coverage_from_latest_24h_minutes(tmp_path):
+    liq_path = tmp_path / "liq.jsonl"
+    price_path = tmp_path / "price.jsonl"
+    orderbook_dir = tmp_path / "historical_orderbook"
+    orderbook_dir.mkdir()
+
+    liq_path.write_text(json.dumps({"symbol": "BTC/USDT", "bar_start_ms": 1_700_000_000_000}) + "\n", encoding="utf-8")
+    price_path.write_text(json.dumps({"symbol": "BTCUSDT", "bar_start_ms": 1_700_000_000_000}) + "\n", encoding="utf-8")
+
+    start_ms = 1_700_000_000_000
+    btc_rows = [
+        {"timestamp": start_ms + i * 60_000, "exchange": "binance", "symbol": "BTC/USDT", "bids": [[1, 1]], "asks": [[2, 1]]}
+        for i in range(1440)
+    ]
+    eth_rows = [
+        {"timestamp": start_ms + i * 60_000, "exchange": "okx", "symbol": "ETH/USDT:USDT", "bids": [[1, 1]], "asks": [[2, 1]]}
+        for i in range(720)
+    ]
+
+    (orderbook_dir / "binance_BTCUSDT_2023-11-14.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in btc_rows) + "\n",
+        encoding="utf-8",
+    )
+    (orderbook_dir / "okx_ETHUSDT_2023-11-14.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in eth_rows) + "\n",
+        encoding="utf-8",
+    )
+    (orderbook_dir / "binance_funding_2023-11-14.jsonl").write_text(
+        json.dumps({"timestamp": start_ms, "symbol": "BTC/USDT"}) + "\n",
+        encoding="utf-8",
+    )
+
+    args = SimpleNamespace(
+        mode="live_overlap",
+        liquidation_1m=str(liq_path),
+        price_1m=str(price_path),
+        orderbook_dir=str(orderbook_dir),
+        symbols=["BTC/USDT", "ETH/USDT"],
+        output=str(tmp_path / "out.json"),
+    )
+
+    summary = run_audit(args)
+    assert summary["orderbook_snapshot_coverage_by_symbol_24h"]["BTCUSDT"] == pytest.approx(1.0)
+    assert summary["orderbook_snapshot_coverage_by_symbol_24h"]["ETHUSDT"] == pytest.approx(0.5)
+    assert summary["orderbook_snapshot_coverage_24h"] == pytest.approx(0.75)

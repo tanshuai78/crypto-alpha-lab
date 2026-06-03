@@ -16,5 +16,9 @@ logs/
 .env
 secrets.toml
 
+# Route C1 local operational artifacts
+reports/route_c1/route_c1_live_tmp_events.jsonl
+reports/route_c1/route_c1_live_price_build_summary.json
+
 # Local git worktrees
 .worktrees/

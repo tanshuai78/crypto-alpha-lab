@@ -14,6 +14,7 @@ Tasks covered:
 
 from __future__ import annotations
 
+import datetime
 import json
 
 import pytest
@@ -28,6 +29,7 @@ from scripts.review_route_c1_price_only import (
     compute_price_risk_metrics,
     detect_c1_events,
     first_complete_5m_response_start_ms,
+    has_complete_response_window,
     load_dataset,
     match_baselines_for_event,
     parse_args,
@@ -41,6 +43,11 @@ _MS_PER_5M = 300_000
 def _bar_start(hh: int, mm: int) -> int:
     """Return a bar start in ms given hour and minute offsets from epoch zero."""
     return (hh * 60 + mm) * _MS_PER_MIN
+
+
+def _utc_ms(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> int:
+    dt = datetime.datetime(year, month, day, hour, minute, tzinfo=datetime.timezone.utc)
+    return int(dt.timestamp() * 1000)
 
 
 def test_first_complete_5m_response_bar_excludes_event_bar():
@@ -396,6 +403,34 @@ def test_detect_c1_events_reads_thresholds_from_config():
     assert cfg.ROUTE_C1_DOMINANCE_RATIO_MIN == 0.65
 
 
+def test_detect_c1_events_scores_against_same_side_reference():
+    """A short-side shock must be ranked against prior short-side history, not total notional."""
+    rows = []
+    for i in range(1440):
+        rows.append(
+            {
+                "symbol": "BTCUSDT",
+                "bar_start_ms": i * _MS_PER_MIN,
+                "total_liquidation_notional_1m_usdt": 200_000.0,
+                "long_liquidation_notional_1m_usdt": 190_000.0,
+                "short_liquidation_notional_1m_usdt": 10_000.0,
+            }
+        )
+    rows.append(
+        {
+            "symbol": "BTCUSDT",
+            "bar_start_ms": 1440 * _MS_PER_MIN,
+            "total_liquidation_notional_1m_usdt": 150_000.0,
+            "long_liquidation_notional_1m_usdt": 10_000.0,
+            "short_liquidation_notional_1m_usdt": 140_000.0,
+        }
+    )
+
+    events = detect_c1_events(rows)
+    assert len(events) == 1
+    assert events[0]["dominant_liquidation_side"] == "short"
+
+
 # ─── Task 4: Baseline Matching ────────────────────────────────────────────────
 
 
@@ -593,6 +628,47 @@ def test_match_baselines_falls_back_by_relaxing_time_then_vol_bucket():
     assert len(baselines) > 0
 
 
+def test_match_baselines_stays_within_same_month():
+    """Baseline matching must not pull January controls for a February event."""
+    symbol = "BTCUSDT"
+    jan_rows = _make_candidate_rows(symbol, _utc_ms(2024, 1, 31, 8, 0), 80)
+    feb_rows = _make_candidate_rows(symbol, _utc_ms(2024, 2, 1, 8, 0), 40)
+    all_rows = annotate_pre30_vol_buckets(jan_rows + feb_rows)
+
+    event = {
+        "symbol": symbol,
+        "shock_bar_start_ms": _utc_ms(2024, 2, 1, 8, 39),
+        "dominant_liquidation_side": "long",
+        "shock_notional_usdt": 100_000.0,
+        "relative_score": 0.999,
+        "reference_count": 1440,
+        "dominance_ratio": 0.80,
+        "dedup_bucket_start_ms": _utc_ms(2024, 2, 1, 8, 35),
+    }
+
+    baselines = match_baselines_for_event(event, all_rows, k=20)
+    assert baselines
+    for bl in baselines:
+        dt = datetime.datetime.utcfromtimestamp(bl["candidate_bar_start_ms"] / 1000.0)
+        assert dt.month == 2
+
+
+def test_has_complete_response_window_checks_first_complete_5m_window():
+    """Future completeness must be evaluated from the first complete 5m response start."""
+    rows_by_ms = {
+        33 * _MS_PER_MIN: {"bar_start_ms": 33 * _MS_PER_MIN},
+        34 * _MS_PER_MIN: {"bar_start_ms": 34 * _MS_PER_MIN},
+        35 * _MS_PER_MIN: {"bar_start_ms": 35 * _MS_PER_MIN},
+        36 * _MS_PER_MIN: {"bar_start_ms": 36 * _MS_PER_MIN},
+        37 * _MS_PER_MIN: {"bar_start_ms": 37 * _MS_PER_MIN},
+    }
+    assert has_complete_response_window(rows_by_ms, 33 * _MS_PER_MIN) is False
+
+    rows_by_ms[38 * _MS_PER_MIN] = {"bar_start_ms": 38 * _MS_PER_MIN}
+    rows_by_ms[39 * _MS_PER_MIN] = {"bar_start_ms": 39 * _MS_PER_MIN}
+    assert has_complete_response_window(rows_by_ms, 33 * _MS_PER_MIN) is True
+
+
 def test_unmatched_events_are_excluded_from_main_statistics():
     """Events with no matched baseline must be excluded from summary stats."""
 
@@ -668,11 +744,12 @@ def _make_matched_pair(
 
 def test_build_c1_summary_reports_required_counts_and_ratios():
     pairs = [_make_matched_pair() for _ in range(10)]
-    metadata = {"run_mode": "proxy_snapshot", "data_source": "test"}
+    metadata = {"run_mode": "proxy_snapshot", "data_source": "test", "total_events": 13}
     summary = build_c1_price_only_summary(pairs, metadata)
 
-    assert summary["event_count"] == 10
+    assert summary["event_count"] == 13
     assert summary["matched_event_count"] == 10
+    assert summary["unmatched_event_count"] == 3
     assert "post_event_vol_ratio_median" in summary
     assert "post_event_range_ratio_median" in summary
     assert "post_event_abs_excursion_p90_ratio" in summary
@@ -871,6 +948,21 @@ def test_load_dataset_merges_high_low_from_kline_root_when_missing(tmp_path):
     assert rows[0]["low_price"] == pytest.approx(95.0)
 
 
+def test_load_dataset_requires_kline_merge_when_high_low_missing(tmp_path):
+    dataset_path = tmp_path / "dataset.jsonl"
+    row = {
+        "symbol": "BTCUSDT",
+        "bar_start_ms": 1_700_000_000_000,
+        "open_price": 100.0,
+        "close_price": 101.0,
+        "total_liquidation_notional_1m_usdt": 0.0,
+    }
+    dataset_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_dataset(str(dataset_path), kline_root=None, symbols=["BTCUSDT"])
+
+
 def test_load_dataset_normalizes_symbols_before_joining_kline_rows(tmp_path):
     """Symbol normalization must happen before kline join to avoid silent zero-matches."""
     import csv
@@ -900,6 +992,35 @@ def test_load_dataset_normalizes_symbols_before_joining_kline_rows(tmp_path):
     assert len(rows) == 1
     assert rows[0]["symbol"] == "BTCUSDT"
     assert rows[0]["high_price"] == pytest.approx(105.0)
+
+
+def test_load_dataset_merges_high_low_from_nested_monthly_binance_kline_csv(tmp_path):
+    symbol = "BTCUSDT"
+    bar_ms = 1_704_067_200_000
+
+    dataset_path = tmp_path / "dataset.jsonl"
+    row = {
+        "symbol": symbol,
+        "bar_start_ms": bar_ms,
+        "open_price": 42314.0,
+        "close_price": 42331.9,
+        "total_liquidation_notional_1m_usdt": 0.0,
+    }
+    dataset_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    kline_dir = tmp_path / "klines" / symbol / "2024-01"
+    kline_dir.mkdir(parents=True)
+    kline_csv = kline_dir / f"{symbol}-1m-2024-01.csv"
+    kline_csv.write_text(
+        "open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore\n"
+        f"{bar_ms},42314.00,42335.80,42289.60,42331.90,1,0,0,0,0,0,0\n",
+        encoding="utf-8",
+    )
+
+    rows = load_dataset(str(dataset_path), kline_root=str(tmp_path / "klines"), symbols=[symbol])
+    assert len(rows) == 1
+    assert rows[0]["high_price"] == pytest.approx(42335.80)
+    assert rows[0]["low_price"] == pytest.approx(42289.60)
 
 
 def test_review_markdown_includes_decision_and_next_path(tmp_path):
