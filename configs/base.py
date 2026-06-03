@@ -508,3 +508,38 @@ BINANCE_LIQUIDATION_SNAPSHOT_MIN_EVENTS_PER_MONTH = 1
 # Minimum shock events per calendar month to qualify the event density gate.
 # Set low for Phase 1 to avoid false rejection of sparse snapshot data.
 
+
+# ─── Strategy Research: Route C1 Post-Liquidation Price Risk ─────────────────
+
+ROUTE_C1_EVENT_PERCENTILE_THRESHOLD = 0.995
+# Event percentile threshold forSame-Symbol Same-Side 1m liquidations.
+
+ROUTE_C1_REQUIRED_REFERENCE_BARS = 1440
+# Reference window bars (24 hours of 1m bars).
+
+ROUTE_C1_DOMINANCE_RATIO_MIN = 0.65
+# Minimum dominance ratio to select direction.
+
+ROUTE_C1_DEDUP_BUCKET_MINUTES = 5
+# Deduplication window size in minutes.
+
+ROUTE_C1_MAJOR_ABS_THRESHOLD_USDT = 50_000.0
+# Major symbol (BTC/ETH) absolute liquidation threshold.
+
+ROUTE_C1_ALT_ABS_THRESHOLD_USDT = 10_000.0
+# Alt symbol (SOL/XRP/DOGE) absolute liquidation threshold.
+
+ROUTE_C1_BASELINE_MATCH_COUNT = 20
+# Matched control baseline sample size (K=20).
+
+ROUTE_C1_BASELINE_MATCH_RATE_MIN = 0.70
+# Minimum baseline match rate (70%).
+
+ROUTE_C1_PROXY_WEAK_VOL_RATIO_MAX = 1.2
+# Weak post-event volatility ratio threshold.
+
+ROUTE_C1_PROXY_WEAK_RANGE_RATIO_MAX = 1.2
+# Weak post-event high-low range ratio threshold.
+
+ROUTE_C1_PROXY_WEAK_ABS_EXCURSION_P90_RATIO_MAX = 1.1
+# Weak post-event absolute excursion ratio threshold.
