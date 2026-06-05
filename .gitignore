@@ -20,5 +20,8 @@ secrets.toml
 reports/route_c1/route_c1_live_tmp_events.jsonl
 reports/route_c1/route_c1_live_price_build_summary.json
 
+# Local production artifacts
+docs/production_artifacts/
+
 # Local git worktrees
 .worktrees/
