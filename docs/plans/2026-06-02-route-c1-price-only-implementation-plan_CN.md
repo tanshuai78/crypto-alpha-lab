@@ -1238,7 +1238,7 @@ The following ops update can be done after the proxy code loop is complete.
 
 **Files:**
 
-- Modify: `docs/ops/route_c_orderbook_weekly_sync_cleanup_CN.md`
+- Modify: `docs/ops/2026-06-05-route-c-orderbook-weekly-sync-cleanup_CN.md`
 - Modify: `docs/plans/2026-06-02-route-c1-price-only-implementation-plan_CN.md` if needed after execution
 
 **Step 1: Add live smoke commands to ops**
@@ -1279,7 +1279,7 @@ If price 1m live file is not available, use a dedicated Binance kline fetcher or
 **Step 3: Commit**
 
 ```bash
-git add docs/ops/route_c_orderbook_weekly_sync_cleanup_CN.md docs/plans/2026-06-02-route-c1-price-only-implementation-plan_CN.md
+git add docs/ops/2026-06-05-route-c-orderbook-weekly-sync-cleanup_CN.md docs/plans/2026-06-02-route-c1-price-only-implementation-plan_CN.md
 git commit -m "docs: add route c1 live smoke path"
 ```
 

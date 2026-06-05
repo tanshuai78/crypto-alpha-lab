@@ -62,7 +62,7 @@
 - Modify: `tests/scripts/test_build_trend_regime_market_rows.py`
 - Modify: `tests/scripts/test_replay_trend_regime_shadow.py`
 - Create: `tests/scripts/test_aggregate_trend_regime_liquidations.py`
-- Modify: `docs/ops/trend_liquidation_phase1a_server_CN.md`
+- Modify: `docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md`
 - Create: `docs/reviews/2026-05-28-trend-liquidation-universe-liquidation-history-review.md`
 
 ---
@@ -863,7 +863,7 @@ git commit -m "feat: join partial liquidation proxy into trend replay"
 ### Task 5: Update Server Guide For Raw And Hourly Artifacts
 
 **Files:**
-- Modify: `docs/ops/trend_liquidation_phase1a_server_CN.md`
+- Modify: `docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md`
 
 **Step 1: Update forceOrder container command**
 
@@ -935,7 +935,7 @@ Add an explicit note:
 Run:
 
 ```bash
-rg -n "TODO|TBD|待补|占位|PLAN_NEEDS_VALUE|UNRESOLVED" docs/ops/trend_liquidation_phase1a_server_CN.md
+rg -n "TODO|TBD|待补|占位|PLAN_NEEDS_VALUE|UNRESOLVED" docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md
 ```
 
 Expected: no output.
@@ -943,7 +943,7 @@ Expected: no output.
 **Step 7: Commit**
 
 ```bash
-git add docs/ops/trend_liquidation_phase1a_server_CN.md
+git add docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md
 git commit -m "docs: document trend liquidation proxy artifacts"
 ```
 

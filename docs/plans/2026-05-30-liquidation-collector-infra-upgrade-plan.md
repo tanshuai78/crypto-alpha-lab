@@ -40,7 +40,7 @@
 **Files:**
 - Modify: `scripts/collect_trend_regime_force_orders.py`
 - Modify: `tests/scripts/test_collect_trend_regime_force_orders.py`
-- Modify: `docs/ops/trend_liquidation_phase1a_server_CN.md`
+- Modify: `docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md`
 
 **Step 1: Write the failing tests**
 
@@ -135,7 +135,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add scripts/collect_trend_regime_force_orders.py tests/scripts/test_collect_trend_regime_force_orders.py docs/ops/trend_liquidation_phase1a_server_CN.md
+git add scripts/collect_trend_regime_force_orders.py tests/scripts/test_collect_trend_regime_force_orders.py docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md
 git commit -m "feat: lock raw liquidation event archive schema"
 ```
 
@@ -488,7 +488,7 @@ git commit -m "test: lock liquidation archive compatibility boundaries"
 ## Task 6: Update Ops Docs, Rotation Policy, And Aggregation Schedule
 
 **Files:**
-- Modify: `docs/ops/trend_liquidation_phase1a_server_CN.md`
+- Modify: `docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md`
 - Modify: `docs/reviews/2026-05-30-route-a-timestamp-and-join-integrity-audit-review.md`
 - Modify: `docs/plans/2026-05-30-liquidation-collector-infra-upgrade-checklist.md` (if wording must match final implementation)
 
@@ -534,7 +534,7 @@ Expected: new operational terms appear in the right docs.
 **Step 3: Commit**
 
 ```bash
-git add docs/ops/trend_liquidation_phase1a_server_CN.md docs/reviews/2026-05-30-route-a-timestamp-and-join-integrity-audit-review.md docs/plans/2026-05-30-liquidation-collector-infra-upgrade-checklist.md
+git add docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md docs/reviews/2026-05-30-route-a-timestamp-and-join-integrity-audit-review.md docs/plans/2026-05-30-liquidation-collector-infra-upgrade-checklist.md
 git commit -m "docs: finalize liquidation collector infra runbook"
 ```
 

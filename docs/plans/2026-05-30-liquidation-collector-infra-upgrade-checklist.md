@@ -40,7 +40,7 @@
 
 ## Ops 文档索引
 
-下面这份索引把本 checklist 的检查命令和 [trend_liquidation_phase1a_server_CN.md](/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/docs/ops/trend_liquidation_phase1a_server_CN.md) 里的章节一一对应，后面排查时可以直接按章节跳。
+下面这份索引把本 checklist 的检查命令和 [2026-06-05-trend-liquidation-phase1a-server_CN.md](/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/docs/ops/2026-06-05-trend-liquidation-phase1a-server_CN.md) 里的章节一一对应，后面排查时可以直接按章节跳。
 
 1. `Post-Deploy Check Commands`
    - 对应 ops 章节：
