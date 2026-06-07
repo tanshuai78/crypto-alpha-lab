@@ -22,11 +22,11 @@
   ],
   "price_1m_coverage_24h": 1.0,
   "overlap_hours_by_symbol": {
-    "BTCUSDT": 117.1,
-    "DOGEUSDT": 116.63333333333334,
-    "XRPUSDT": 116.65,
-    "SOLUSDT": 116.55,
-    "ETHUSDT": 117.08333333333333
+    "XRPUSDT": 170.25,
+    "ETHUSDT": 170.68333333333334,
+    "SOLUSDT": 170.15,
+    "BTCUSDT": 170.7,
+    "DOGEUSDT": 170.23333333333332
   },
   "ready_for_price_only": true,
   "ready_for_orderbook_aware": true,

@@ -1,0 +1,58 @@
+{
+  "run_mode": "live_smoke_7d",
+  "data_source": "binance_vision_liquidation_snapshot",
+  "data_semantics": "snapshot_proxy_not_complete_liquidation_tape",
+  "generalization_allowed": false,
+  "can_promote_live_filter": false,
+  "event_count": 603,
+  "matched_event_count": 89,
+  "unmatched_event_count": 514,
+  "matched_baseline_count": 1512,
+  "baseline_match_rate": 0.14759535655058043,
+  "post_event_vol_ratio_median": 1.479832332422228,
+  "post_event_range_ratio_median": 1.6037239269534014,
+  "post_event_abs_excursion_p90_ratio": 3.4580739529206497,
+  "max_abs_excursion_p90_bps": 45.96978429831467,
+  "mae_if_long_p90_bps": 38.755146221664205,
+  "mae_if_short_p90_bps": 31.827087373201397,
+  "events_by_symbol": {
+    "ETHUSDT": 14,
+    "BTCUSDT": 13,
+    "SOLUSDT": 15,
+    "XRPUSDT": 9,
+    "DOGEUSDT": 38
+  },
+  "events_by_month": {
+    "2026-05": 55,
+    "2026-06": 34
+  },
+  "events_by_day": {
+    "2026-05-31": 55,
+    "2026-06-01": 1,
+    "2026-06-02": 6,
+    "2026-06-03": 8,
+    "2026-06-04": 7,
+    "2026-06-05": 5,
+    "2026-06-06": 3,
+    "2026-06-07": 4
+  },
+  "sample_days": 8,
+  "max_single_symbol_event_share": 0.42696629213483145,
+  "max_single_month_event_share": 0.6179775280898876,
+  "max_single_day_event_share": 0.6179775280898876,
+  "route_c1_params": {
+    "ROUTE_C1_EVENT_PERCENTILE_THRESHOLD": 0.995,
+    "ROUTE_C1_REQUIRED_REFERENCE_BARS": 1440,
+    "ROUTE_C1_DOMINANCE_RATIO_MIN": 0.65,
+    "ROUTE_C1_DEDUP_BUCKET_MINUTES": 5,
+    "ROUTE_C1_MAJOR_ABS_THRESHOLD_USDT": 50000.0,
+    "ROUTE_C1_ALT_ABS_THRESHOLD_USDT": 10000.0,
+    "ROUTE_C1_BASELINE_MATCH_COUNT": 20,
+    "ROUTE_C1_BASELINE_MATCH_RATE_MIN": 0.7,
+    "ROUTE_C1_PROXY_WEAK_VOL_RATIO_MAX": 1.2,
+    "ROUTE_C1_PROXY_WEAK_RANGE_RATIO_MAX": 1.2,
+    "ROUTE_C1_PROXY_WEAK_ABS_EXCURSION_P90_RATIO_MAX": 1.1
+  },
+  "proxy_kill_switch_weak": false,
+  "decision": "route_c1_baseline_match_failed"
+}
