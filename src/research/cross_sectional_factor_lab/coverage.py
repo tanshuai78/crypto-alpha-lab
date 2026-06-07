@@ -5,9 +5,9 @@ from datetime import date, timedelta
 
 try:
     from configs.base import (
-        FACTOR_LAB_STAGE0_MIN_SYMBOLS_PASSING_LIQUIDITY,
         FACTOR_LAB_STAGE0_DAILY_OHLCV_COVERAGE_MIN,
         FACTOR_LAB_STAGE0_HISTORY_DAYS_REQUIRED,
+        FACTOR_LAB_STAGE0_MIN_SYMBOLS_PASSING_LIQUIDITY,
     )
 except ImportError:
     # Fallback to defaults in case config fails to import under isolated test environments

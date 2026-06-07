@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import pytest
 from research.cross_sectional_factor_lab.universe import (
-    normalize_symbol,
-    is_stablecoin_pair,
-    is_leveraged_token,
-    is_wrapped_or_synthetic,
-    filter_stage0_universe,
     UniverseAudit,
+    filter_stage0_universe,
+    is_leveraged_token,
+    is_stablecoin_pair,
+    is_wrapped_or_synthetic,
+    normalize_symbol,
 )
 
 
@@ -15,10 +14,12 @@ def test_normalize_symbol_removes_slash_and_uppercases() -> None:
     assert normalize_symbol("BTC/USDT") == "BTCUSDT"
     assert normalize_symbol("ethusdt") == "ETHUSDT"
     assert normalize_symbol("Sol/usdt") == "SOLUSDT"
+    assert normalize_symbol("BTC/USDT:USDT") == "BTCUSDT"
 
 
 def test_static_exclusion_removes_stablecoin_pairs() -> None:
     assert is_stablecoin_pair("USDCUSDT") is True
+    assert is_stablecoin_pair("USDC/USDT:USDT") is True
     assert is_stablecoin_pair("FDUSDUSDT") is True
     assert is_stablecoin_pair("TUSDUSDT") is True
     assert is_stablecoin_pair("EURUSDT") is True
@@ -28,6 +29,7 @@ def test_static_exclusion_removes_stablecoin_pairs() -> None:
 
 def test_static_exclusion_removes_leveraged_tokens() -> None:
     assert is_leveraged_token("BTCUPUSDT") is True
+    assert is_leveraged_token("BTCUP/USDT:USDT") is True
     assert is_leveraged_token("BTCDOWNUSDT") is True
     assert is_leveraged_token("ETHBULLUSDT") is True
     assert is_leveraged_token("ETHBEARUSDT") is True
@@ -71,3 +73,13 @@ def test_universe_summary_counts_total_excluded_and_remaining() -> None:
     assert "USDCUSDT" in audit.excluded_symbols["stablecoin"]
     assert "BTCUPUSDT" in audit.excluded_symbols["leveraged"]
     assert "WBTCUSDT" in audit.excluded_symbols["wrapped"]
+
+
+def test_universe_filter_excludes_ccxt_swap_stablecoin_and_leveraged_symbols() -> None:
+    symbols = ["BTC/USDT:USDT", "USDC/USDT:USDT", "BTCUP/USDT:USDT"]
+
+    audit = filter_stage0_universe(symbols)
+
+    assert audit.eligible_symbols == ("BTCUSDT",)
+    assert "USDCUSDT" in audit.excluded_symbols["stablecoin"]
+    assert "BTCUPUSDT" in audit.excluded_symbols["leveraged"]

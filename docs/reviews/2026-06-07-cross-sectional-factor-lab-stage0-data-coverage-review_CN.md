@@ -1,33 +1,66 @@
 # Cross-Sectional Factor Lab Stage 0 数据审计报告
 
-**日期**：2026-06-07  
-**审计阶段**：`Stage 0: Data Coverage + Bias Audit`  
-**数据源**：`Binance` (Spot & USDT perpetuals)  
-**审计时间戳**：2026-06-07T15:14:03.243419+00:00 (UTC)  
-**策略规格**：`docs/strategy_specs/cross_sectional_factor_lab_implementation_guide_CN_v3.md`
+日期：2026-06-07  
+审计阶段：`Stage 0: Data Coverage + Bias Audit`  
+数据源：`Binance public API`  
+策略规格：`docs/strategy_specs/cross_sectional_factor_lab_implementation_guide_CN_v3.md`
 
 ---
 
-## 1. 审计核心结论与决策
+## 1. 核心结论
 
-根据 Stage 0 的数据闸门决策逻辑，本阶段审计结论如下：
+本次 Stage 0 审计结论：
 
-* **最终决策 (Decision)**：`factor_lab_data_ready_with_bias`
-* **后续允许进入阶段 (Allowed Next Stage)**：`stage_a_exchange_only_fast_track` (允许进入 Stage A 编写计划与回测)
-* **主拦截器 (Primary Blocker)**：无 (Null)
-* **Stage A 允许运行的模式 (Allowed Modes)**：
-  * **价格/成交量回测 (price_volume_fast_track)**：`True` (允许进行价格和成交量因子的 Fast Track)
-  * **资金费率拦截 (funding_veto)**：`False` (由于历史资金费率数据在此样本范围表现处于 degraded 降级状态，暂不作为硬性 veto)
-  * **未平仓合约拦截 (oi_veto)**：`False` (币安免费接口仅提供最新 30 天的历史 OI，不支持 540d 完整回测拦截)
-  * **方向限制 (long_only_only)**：`True` (由于做空成本和借币利息未建模，Stage A 必须且只能跑 Long-only 多头回测)
-  * **C1 拦截器 (c1_entry_block)**：`diagnostic_only` (C1 仅用于记录诊断数据，不影响主回测收益)
-  * **偏差标签强制要求 (survivorship_bias_label_required)**：`True`
+```text
+decision = factor_lab_data_ready_with_bias
+allowed_next_stage = stage_a_exchange_only_fast_track
+primary_blocker = null
+```
+
+但这个通过结论必须精确理解为：
+
+```text
+Binance spot 数据足够支持 Stage A price + volume Fast Track；
+Binance USDT perpetual 数据暂不支持 Stage A price + volume Fast Track；
+funding / OI veto 暂不能作为 Stage A 主回测硬过滤；
+所有 Stage A 结果必须标注 survivorship_bias_not_controlled。
+```
+
+当前允许的 Stage A 模式：
+
+```json
+{
+  "price_volume_fast_track": true,
+  "funding_veto": false,
+  "oi_veto": false,
+  "long_only_only": true,
+  "c1_entry_block": "diagnostic_only",
+  "survivorship_bias_label_required": true
+}
+```
+
+按市场拆分：
+
+```json
+{
+  "spot": {
+    "price_volume_fast_track": true,
+    "funding_veto": false,
+    "oi_veto": false
+  },
+  "usdt_perp": {
+    "price_volume_fast_track": false,
+    "funding_veto": false,
+    "oi_veto": false
+  }
+}
+```
 
 ---
 
-## 2. 幸存者偏差状态 (Bias Contract)
+## 2. Bias Contract
 
-根据 Stage 0 偏差合同规范，本次数据审计声明如下：
+本次审计只使用当前 Binance 仍挂牌交易对，因此幸存者偏差未被控制。
 
 ```json
 {
@@ -38,61 +71,144 @@
 }
 ```
 
-> [!WARNING]
-> **幸存者偏差警告**：
-> 本策略由于仅提取了当前 Binance 挂牌交易的币种历史，漏掉了历史上已被下架（De-listed）的代币，因此存在**未受控的幸存者偏差**。
-> Stage A Fast Track 的所有回测结果只能用于“过滤不靠谱的策略假说（Hypothesis Screening）”，**绝对不能**作为该策略正式上线的收益凭证。
+这意味着：
+
+```text
+Stage A 可以用于快速杀假设；
+Stage A 不能作为 formal alpha 证明；
+Stage A 不能直接进入 paper shadow 或 live pilot。
+```
 
 ---
 
-## 3. 交易版图与覆盖率数据审计 (Universe & Coverage Audit)
+## 3. 审计结果
 
-本次审计涵盖了 Binance 的所有主流 USDT 交易对，并应用了静态排除（去除了稳定币、杠杆代币以及 wrapped 桥接代币）：
+Summary 文件：`reports/cross_sectional_factor_lab/factor_lab_data_coverage_summary.json`
 
-### 3.1 总体统计 (Aggregate Statistics)
+顶层结果：
 
-* **全市场初始交易对总数 (symbols_total)**：1,650 个
-* **静态排除后剩余交易对 (symbols_after_static_exclusions)**：1,462 个
-* **通过流动性门槛的交易对 (symbols_passing_liquidity)**：202 个 (当前 30d 中位数日成交额 $\ge 20,000,000\text{ USDT}$)
-* **要求的历史天数 (history_days_required)**：540 天 (约 18 个月)
-* **可用历史天数中位数 (history_days_available_median)**：540.0 天
-* **日 OHLCV 覆盖率中位数 (daily_ohlcv_coverage_ratio_median)**：1.00 (100% 覆盖)
-* **资金费率覆盖率中位数 (funding_coverage_ratio_median)**：1.00
-* **近期未平仓合约覆盖率中位数 (open_interest_coverage_ratio_median)**：0.00 (OI 数据降级)
+| 字段 | 结果 |
+|---|---:|
+| `symbols_total` | 1650 |
+| `symbols_after_static_exclusions` | 1138 |
+| `symbols_passing_liquidity` | 108 |
+| `history_days_required` | 540 |
+| `history_days_available_median` | 540.0 |
+| `daily_ohlcv_coverage_ratio_median` | 1.0 |
+| `api_errors_count` | 1 |
+| `rate_limited_count` | 0 |
+| `historical_liquidity_gate_ready` | false |
 
----
-
-### 3.2 现货与永续合约分账审计结果 (Market Breakdown)
-
-#### A. 现货市场 (Spot)
-* **现货交易对总数**：1,040 个
-* **静态排除后剩余**：921 个
-* **满足流动性的交易对数**：110 个
-* **日 OHLCV 覆盖率中位数**：1.00 (100% 覆盖)
-* **可用历史天数中位数**：540.0 天
-
-#### B. 永续合约市场 (USDT Swap)
-* **永续合约交易对总数**：610 个
-* **静态排除后剩余**：541 个
-* **满足流动性的交易对数**：92 个
-* **日 OHLCV 覆盖率中位数**：0.00 (由于大部分小市值永续合约在 540 天前尚未上市，拉长到 540 天中位数为 0.0)
-* **可用历史天数中位数**：0.0 天
-* **资金费率历史覆盖率中位数**：1.00 (在已上市期间)
-* **未平仓合约历史覆盖率中位数**：0.00 (免费接口仅保存最新 30 天，长周期覆盖率为 0.0)
+说明：顶层 `daily_ohlcv_coverage_ratio_median = 1.0` 来自当前允许进入 Stage A 的 spot market。perp market 单独分账，不能被顶层结果代表。
 
 ---
 
-## 4. 特殊声明
+## 4. Spot 审计
 
-* **流动性门槛仅用于当前筛选 (Current Liquidity Screening Only)**：
-  报告中的 `symbols_passing_liquidity = 202` 仅代表当前 30 天的成交量满足条件。它并不代表这些标的在 540 天前的历史成交量也满足门槛。在 Stage A 的正式回测中，必须实现 point-in-time rolling 30d quote volume（历史时点滚动滚动成交量筛选）来防止未来信息泄露。
+```json
+{
+  "symbols_total": 1040,
+  "symbols_after_static_exclusions": 597,
+  "symbols_passing_liquidity": 56,
+  "daily_ohlcv_coverage_ratio_median": 1.0,
+  "history_days_available_median": 540.0,
+  "decision": "factor_lab_data_ready_with_bias",
+  "primary_blocker": null
+}
+```
+
+结论：
+
+```text
+Binance spot 当前足够支持 Stage A price + volume Fast Track。
+```
+
+但流动性口径只是当前 30d median quote volume screening：
+
+```text
+usage = stage0_screening_only_not_historical_tradability
+```
+
+Stage A 必须重新实现 point-in-time rolling 30d quote volume，不能用当前流动性过滤历史。
 
 ---
 
-## 5. 下一步行动计划 (Next Steps)
+## 5. USDT Perpetual 审计
 
-由于 Stage 0 数据审计结果明确为 `factor_lab_data_ready_with_bias`，表示免费交易所数据在**静态排除且标注偏差**的前提下足够支持我们进行 Fast Track 假说验证。
+```json
+{
+  "symbols_total": 610,
+  "symbols_after_static_exclusions": 541,
+  "symbols_passing_liquidity": 52,
+  "daily_ohlcv_coverage_ratio_median": 0.0,
+  "history_days_available_median": 0.0,
+  "decision": "factor_lab_data_unavailable",
+  "primary_blocker": "insufficient_ohlcv_coverage",
+  "funding_oi_veto_readiness": "degraded",
+  "open_interest_history_mode": "recent_only"
+}
+```
 
-我们将采取以下行动：
-1. **结束 Stage 0 阶段**，将所有代码和审计产物提交至分支。
-2. **编写 Stage A: Exchange-only Fast Track 实施计划书**，主要基于 pandas 实现 `Daily Panel Builder`、`Baseline Factors`（包含 `cmom_14d`、`volume_ratio_7d_30d` 等）以及 `Portfolio Simulator`，且回测必须严格限制为 **Long-only** 模式。
+结论：
+
+```text
+Binance USDT perpetual 暂不允许进入 Stage A 主回测。
+```
+
+原因：
+
+```text
+大量当前可交易 perp 在 540 天前尚未上市；
+当前 O(1) 历史可用性探测下，perp 的 540d daily OHLCV 中位覆盖不足；
+OI 只能做 recent-only readiness，不能作为 540d coverage 硬门槛。
+```
+
+---
+
+## 6. API 异常
+
+本次 live audit 记录：
+
+```text
+api_errors_count = 1
+rate_limited_count = 0
+```
+
+已观察到 Binance public API 对个别 symbol 返回 invalid symbol，例如 `BSVUSDT`。该错误没有阻断 Stage 0，因为 spot market 已满足 Stage A price/volume Fast Track 的最低数据闸门。
+
+后续 Stage A 不应使用这些 API error symbol，必须从 Stage 0 summary 的可用 market/universe 重新构建候选集。
+
+---
+
+## 7. 下一步
+
+允许进入：
+
+```text
+Stage A exchange-only Fast Track implementation plan
+```
+
+Stage A 第一版必须限制为：
+
+```text
+Binance spot only
+long-only
+price + volume factors only
+no funding veto
+no OI veto
+C1 diagnostic_only
+survivorship_bias_not_controlled
+30 / 50 / 80 bps cost scenarios
+```
+
+不允许：
+
+```text
+perp 主回测
+funding/OI veto 主结论
+on-chain
+LightGBM
+paper shadow
+live pilot
+```
+

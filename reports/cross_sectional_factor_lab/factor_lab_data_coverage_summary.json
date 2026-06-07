@@ -9,7 +9,7 @@
   "survivorship_bias_control": "not_controlled",
   "delisted_symbols_included": false,
   "result_usage": "hypothesis_screening_only_not_final_evidence",
-  "generated_at_utc": "2026-06-07T15:14:03.243419+00:00",
+  "generated_at_utc": "2026-06-07T15:38:51.770572+00:00",
   "network_mode": "live",
   "api_errors_count": 1,
   "rate_limited_count": 0,
@@ -23,18 +23,42 @@
     "c1_entry_block": "diagnostic_only",
     "survivorship_bias_label_required": true
   },
+  "stage_a_allowed_modes_by_market": {
+    "spot": {
+      "price_volume_fast_track": true,
+      "funding_veto": false,
+      "oi_veto": false,
+      "long_only_only": true,
+      "c1_entry_block": "diagnostic_only",
+      "survivorship_bias_label_required": true
+    },
+    "usdt_perp": {
+      "price_volume_fast_track": false,
+      "funding_veto": false,
+      "oi_veto": false,
+      "long_only_only": true,
+      "c1_entry_block": "disabled",
+      "survivorship_bias_label_required": true
+    }
+  },
   "current_liquidity_gate": {
     "min_30d_median_quote_volume_usdt": 20000000.0,
-    "usage": "screening_only_not_historical_tradability"
+    "usage": "stage0_screening_only_not_historical_tradability"
   },
   "historical_liquidity_gate_ready": false,
   "symbols_total": 1650,
-  "symbols_after_static_exclusions": 1462,
-  "symbols_passing_liquidity": 202,
+  "symbols_after_static_exclusions": 1138,
+  "symbols_passing_liquidity": 108,
   "history_days_required": 540,
+  "expected_daily_grid": {
+    "timezone": "UTC",
+    "end_date": "2026-06-06",
+    "history_days": 540,
+    "excludes_incomplete_today": true
+  },
   "history_days_available_median": 540.0,
   "daily_ohlcv_coverage_ratio_median": 1.0,
-  "funding_coverage_ratio_median": 1.0,
+  "funding_coverage_ratio_median": 0.0,
   "open_interest_coverage_ratio_median": 0.0,
   "listing_metadata_available": true,
   "funding_oi_veto_readiness": "degraded",
@@ -49,19 +73,28 @@
   "markets": {
     "spot": {
       "symbols_total": 1040,
-      "symbols_after_static_exclusions": 921,
-      "symbols_passing_liquidity": 110,
+      "symbols_after_static_exclusions": 597,
+      "symbols_passing_liquidity": 56,
       "daily_ohlcv_coverage_ratio_median": 1.0,
-      "history_days_available_median": 540.0
+      "history_days_available_median": 540.0,
+      "decision": "factor_lab_data_ready_with_bias",
+      "primary_blocker": null,
+      "funding_coverage_ratio_median": null,
+      "open_interest_coverage_ratio_median": null,
+      "funding_oi_veto_readiness": "not_applicable"
     },
     "usdt_perp": {
       "symbols_total": 610,
       "symbols_after_static_exclusions": 541,
-      "symbols_passing_liquidity": 92,
+      "symbols_passing_liquidity": 52,
       "daily_ohlcv_coverage_ratio_median": 0.0,
       "history_days_available_median": 0.0,
-      "funding_coverage_ratio_median": 1.0,
-      "open_interest_coverage_ratio_median": 0.0
+      "decision": "factor_lab_data_unavailable",
+      "primary_blocker": "insufficient_ohlcv_coverage",
+      "funding_coverage_ratio_median": 0.0,
+      "open_interest_recent_coverage_ratio_median": 0.0,
+      "open_interest_history_mode": "recent_only",
+      "funding_oi_veto_readiness": "degraded"
     }
   },
   "decision": "factor_lab_data_ready_with_bias"

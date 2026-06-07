@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import configs.base
 
 STABLECOINS = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "EUR", "GBP", "USDP", "USD"}
@@ -9,15 +10,20 @@ REAL_W_TOKENS = {"WOO", "WIF", "WAVES", "WAXP", "WLD", "WTC", "WAN"}
 
 def get_base(symbol: str) -> str:
     """Helper to extract uppercase base asset from symbol string."""
-    clean = symbol.replace("/", "").upper()
+    clean = normalize_symbol(symbol)
     if clean.endswith("USDT"):
         return clean[:-4]
     return clean
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Normalize symbol to uppercase without slashes."""
-    return symbol.replace("/", "").upper()
+    """Normalize spot/perp symbols to uppercase base+quote form.
+
+    CCXT represents USDT-margined swaps as ``BTC/USDT:USDT``. The settlement
+    suffix is not part of the exchange symbol and must not leak into static
+    exclusion checks.
+    """
+    return symbol.split(":", 1)[0].replace("/", "").upper()
 
 
 def is_stablecoin_pair(symbol: str) -> bool:
