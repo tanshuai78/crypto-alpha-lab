@@ -1,0 +1,68 @@
+{
+  "run_mode": "stage0_data_coverage_audit",
+  "data_source": "binance",
+  "market_types": [
+    "spot",
+    "usdt_perp"
+  ],
+  "universe_scope": "current_tradable_universe_only",
+  "survivorship_bias_control": "not_controlled",
+  "delisted_symbols_included": false,
+  "result_usage": "hypothesis_screening_only_not_final_evidence",
+  "generated_at_utc": "2026-06-07T15:14:03.243419+00:00",
+  "network_mode": "live",
+  "api_errors_count": 1,
+  "rate_limited_count": 0,
+  "primary_blocker": null,
+  "allowed_next_stage": "stage_a_exchange_only_fast_track",
+  "stage_a_allowed_modes": {
+    "price_volume_fast_track": true,
+    "funding_veto": false,
+    "oi_veto": false,
+    "long_only_only": true,
+    "c1_entry_block": "diagnostic_only",
+    "survivorship_bias_label_required": true
+  },
+  "current_liquidity_gate": {
+    "min_30d_median_quote_volume_usdt": 20000000.0,
+    "usage": "screening_only_not_historical_tradability"
+  },
+  "historical_liquidity_gate_ready": false,
+  "symbols_total": 1650,
+  "symbols_after_static_exclusions": 1462,
+  "symbols_passing_liquidity": 202,
+  "history_days_required": 540,
+  "history_days_available_median": 540.0,
+  "daily_ohlcv_coverage_ratio_median": 1.0,
+  "funding_coverage_ratio_median": 1.0,
+  "open_interest_coverage_ratio_median": 0.0,
+  "listing_metadata_available": true,
+  "funding_oi_veto_readiness": "degraded",
+  "open_interest_history_mode": "recent_only",
+  "open_interest_coverage_note": "binance_open_interest_hist_latest_30_days_only",
+  "bias_contract": {
+    "universe_scope": "current_tradable_universe_only",
+    "survivorship_bias_control": "not_controlled",
+    "delisted_symbols_included": false,
+    "result_usage": "hypothesis_screening_only_not_final_evidence"
+  },
+  "markets": {
+    "spot": {
+      "symbols_total": 1040,
+      "symbols_after_static_exclusions": 921,
+      "symbols_passing_liquidity": 110,
+      "daily_ohlcv_coverage_ratio_median": 1.0,
+      "history_days_available_median": 540.0
+    },
+    "usdt_perp": {
+      "symbols_total": 610,
+      "symbols_after_static_exclusions": 541,
+      "symbols_passing_liquidity": 92,
+      "daily_ohlcv_coverage_ratio_median": 0.0,
+      "history_days_available_median": 0.0,
+      "funding_coverage_ratio_median": 1.0,
+      "open_interest_coverage_ratio_median": 0.0
+    }
+  },
+  "decision": "factor_lab_data_ready_with_bias"
+}

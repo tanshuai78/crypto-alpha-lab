@@ -543,3 +543,30 @@ ROUTE_C1_PROXY_WEAK_RANGE_RATIO_MAX = 1.2
 
 ROUTE_C1_PROXY_WEAK_ABS_EXCURSION_P90_RATIO_MAX = 1.1
 # Weak post-event absolute excursion ratio threshold.
+
+
+# ─── Strategy: Cross-Sectional Factor Lab Stage 0 ────────────────────────────
+
+FACTOR_LAB_STAGE0_HISTORY_DAYS_REQUIRED = 540
+# Number of historical days required for daily OHLCV coverage audit.
+
+FACTOR_LAB_STAGE0_MIN_SYMBOLS_PASSING_LIQUIDITY = 30
+# Minimum number of symbols passing static exclusion and liquidity threshold to proceed.
+
+FACTOR_LAB_STAGE0_DAILY_OHLCV_COVERAGE_MIN = 0.95
+# Minimum required daily OHLCV coverage ratio (valid daily count / expected daily count).
+
+FACTOR_LAB_STAGE0_FUNDING_COVERAGE_MIN = 0.90
+# Minimum required funding rate history coverage ratio for swappable perps.
+
+FACTOR_LAB_STAGE0_OPEN_INTEREST_RECENT_DAYS_REQUIRED = 30
+# Number of recent days required for checking open interest data readiness.
+
+FACTOR_LAB_STAGE0_OPEN_INTEREST_RECENT_COVERAGE_MIN = 0.90
+# Minimum required open interest coverage ratio over the recent days window.
+
+FACTOR_LAB_STAGE0_MIN_30D_MEDIAN_QUOTE_VOLUME_USDT = 20_000_000.0
+# Minimum 30-day median daily quote volume in USDT for static liquidity screening.
+
+FACTOR_LAB_STAGE0_EXCLUDE_WRAPPED_TOKENS = True
+# Whether to statically exclude wrapped/synthetic tokens (e.g. WBTC, WETH) from the universe.
