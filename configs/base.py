@@ -570,3 +570,48 @@ FACTOR_LAB_STAGE0_MIN_30D_MEDIAN_QUOTE_VOLUME_USDT = 20_000_000.0
 
 FACTOR_LAB_STAGE0_EXCLUDE_WRAPPED_TOKENS = True
 # Whether to statically exclude wrapped/synthetic tokens (e.g. WBTC, WETH) from the universe.
+
+
+# ─── Strategy: Cross-Sectional Factor Lab Stage A v1 ─────────────────────────
+
+FACTOR_LAB_STAGEA_HISTORY_DAYS = 540
+# Number of complete UTC daily bars used by Stage A v1.
+
+FACTOR_LAB_STAGEA_MOMENTUM_LOOKBACK_DAYS = 30
+# Momentum lookback excluding the skipped recent day.
+
+FACTOR_LAB_STAGEA_SKIP_RECENT_DAYS = 1
+# Number of most recent complete daily bars skipped before signal calculation.
+
+FACTOR_LAB_STAGEA_REBALANCE_WEEKDAY_UTC = 0
+# Monday in Python weekday convention. Rebalance is Monday 00:00 UTC.
+
+FACTOR_LAB_STAGEA_PRIMARY_TOP_N = 10
+# Primary long-only equal-weight portfolio size.
+
+FACTOR_LAB_STAGEA_DIAGNOSTIC_TOP_N = 5
+# Diagnostic-only concentrated portfolio size. Not used for primary pass/fail.
+
+FACTOR_LAB_STAGEA_COST_SCENARIOS_ROUND_TRIP_BPS = (30.0, 50.0, 80.0)
+# Base/stress/crash round-trip cost scenarios for weekly spot rotation.
+
+FACTOR_LAB_STAGEA_OPTIMISTIC_DIAGNOSTIC_PER_LEG_BPS = 10.0
+# Optimistic maker-like per-leg cost, diagnostic only and not part of primary decision.
+
+FACTOR_LAB_STAGEA_MIN_30D_MEDIAN_QUOTE_VOLUME_USDT = FACTOR_LAB_STAGE0_MIN_30D_MEDIAN_QUOTE_VOLUME_USDT
+# Point-in-time rolling 30d median quote volume gate for Stage A.
+
+FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT = 50
+# Minimum effective weekly rebalance count for a valid 540d backtest.
+
+FACTOR_LAB_STAGEA_MAX_DRAWDOWN_VS_EW_MULTIPLIER = 1.25
+# Strategy max drawdown must not exceed equal-weight drawdown by more than this multiplier.
+
+FACTOR_LAB_STAGEA_MAX_SINGLE_SYMBOL_PNL_CONTRIBUTION_SHARE = 0.35
+# Maximum allowed share of total PnL contribution from one symbol.
+
+FACTOR_LAB_STAGEA_MAX_SINGLE_MONTH_PNL_CONTRIBUTION_SHARE = 0.30
+# Maximum allowed share of total PnL contribution from one calendar month.
+
+FACTOR_LAB_STAGEA_MAX_INSUFFICIENT_UNIVERSE_RATIO = 0.10
+# Maximum allowed fraction of rebalance dates with fewer than top-N eligible symbols.
