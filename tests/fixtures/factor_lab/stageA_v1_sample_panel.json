@@ -1,0 +1,8 @@
+{
+  "daily_bars": [
+    {"symbol": "AAAUSDT", "date_utc": "2026-01-01", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "base_volume": 1000.0, "quote_volume": 25000000.0},
+    {"symbol": "AAAUSDT", "date_utc": "2026-01-02", "open": 101.0, "high": 102.0, "low": 100.0, "close": 101.0, "base_volume": 1000.0, "quote_volume": 26000000.0},
+    {"symbol": "BBBUSDT", "date_utc": "2026-01-01", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "base_volume": 1000.0, "quote_volume": 25000000.0},
+    {"symbol": "BBBUSDT", "date_utc": "2026-01-02", "open": 99.0, "high": 100.0, "low": 98.0, "close": 99.0, "base_volume": 1000.0, "quote_volume": 26000000.0}
+  ]
+}
