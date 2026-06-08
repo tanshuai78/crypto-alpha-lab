@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 import numpy as np
 
 import configs.base as cfg
@@ -33,7 +34,7 @@ def decide_stageA_v1(summary: dict[str, Any]) -> str:
     try:
         rebalance_quality = summary["rebalance_quality"]
         rebalance_count = rebalance_quality["rebalance_count"]
-        
+
         # Calculate ratio dynamically if not present
         insufficient_universe_ratio = rebalance_quality.get(
             "insufficient_universe_ratio",

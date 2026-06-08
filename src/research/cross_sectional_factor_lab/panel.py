@@ -24,7 +24,7 @@ def load_daily_panel(rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     if frame.empty:
         # Return empty dataframe with correct schema
         return pd.DataFrame(columns=list(REQUIRED_DAILY_COLUMNS))
-        
+
     missing = [col for col in REQUIRED_DAILY_COLUMNS if col not in frame.columns]
     if missing:
         raise ValueError(f"missing daily panel columns: {missing}")

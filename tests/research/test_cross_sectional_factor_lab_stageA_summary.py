@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from research.cross_sectional_factor_lab.summary import decide_stageA_v1, summarize_rebalance_quality
+from research.cross_sectional_factor_lab.summary import (
+    decide_stageA_v1,
+    summarize_rebalance_quality,
+)
 
 
 def _passing_summary() -> dict:

@@ -5,7 +5,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -124,14 +124,14 @@ def main(argv: list[str] | None = None) -> int:
                 # Binance returns up to 1000 bars
                 ohlcv = client.fetch_ohlcv(ccxt_sym, timeframe="1d", since=since_ms, limit=1000)
                 for bar in ohlcv:
-                    ts, o, h, l, c, v = bar
+                    ts, o, h, low, c, v = bar
                     date_str = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
                     daily_bars.append({
                         "symbol": normalized,
                         "date_utc": date_str,
                         "open": o,
                         "high": h,
-                        "low": l,
+                        "low": low,
                         "close": c,
                         "base_volume": v,
                         "quote_volume": v * c  # Estimate quote volume as base_volume * close
@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = run_stageA_v1_backtest(daily_bars)
 
     write_summary(summary, args.output)
-    
+
     logger.info(f"Summary written to {args.output}")
     logger.info(f"Decision: {summary['decision']}")
 
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             logger.error(f"Backtest failed decision gate: {summary.get('decision')}")
             return 1
-    
+
     return 0
 
 

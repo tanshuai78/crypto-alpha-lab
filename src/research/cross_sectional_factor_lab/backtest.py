@@ -69,12 +69,23 @@ def compute_strategy_period_return(
 
 
 def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
-    from research.cross_sectional_factor_lab.panel import load_daily_panel, forward_fill_close_by_symbol
-    from research.cross_sectional_factor_lab.portfolio import eligible_monday_rebalance_dates, build_equal_weight_targets
-    from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
-    from research.cross_sectional_factor_lab.summary import decide_stageA_v1, summarize_rebalance_quality
     from datetime import timedelta
+
     import numpy as np
+
+    from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
+    from research.cross_sectional_factor_lab.panel import (
+        forward_fill_close_by_symbol,
+        load_daily_panel,
+    )
+    from research.cross_sectional_factor_lab.portfolio import (
+        build_equal_weight_targets,
+        eligible_monday_rebalance_dates,
+    )
+    from research.cross_sectional_factor_lab.summary import (
+        decide_stageA_v1,
+        summarize_rebalance_quality,
+    )
 
     base_summary = {
         "run_mode": "stageA_v1_momentum_backtest",
@@ -133,7 +144,7 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
     top10_net_returns_30 = []
     top10_net_returns_50 = []
     top10_net_returns_80 = []
-    
+
     top5_net_returns_30 = []
     ew_net_returns_30 = []
 
@@ -150,7 +161,7 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
     for i, t_i in enumerate(rebalance_dates):
         # We need an exit date to compute return. Default is t_i + 7 days
         exit_date = t_i + timedelta(days=7)
-        
+
         # Check if exit date is present in the panel for at least one symbol
         if panel[panel["date_utc"] == exit_date].empty:
             # Drop final incomplete period
@@ -158,7 +169,7 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
 
         rebalance_count += 1
         factors = compute_rebalance_factor_frame(panel, t_i)
-        
+
         # Check insufficient universe
         if len(factors) < 10:
             insufficient_universe_count += 1
@@ -302,9 +313,9 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
     def get_concentration(contributions: dict[str, float]) -> tuple[float, float, float, float]:
         if not contributions:
             return 0.0, 0.0, 0.0, 0.0
-        
+
         contrib_values = list(contributions.values())
-        
+
         pos_contribs = [v for v in contrib_values if v > 0]
         sum_pos = sum(pos_contribs)
         max_pos_share = max(pos_contribs) / sum_pos if sum_pos > 0 and pos_contribs else 0.0
@@ -317,7 +328,7 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
 
     # Symbol concentration
     max_sym_pos_share, max_sym_abs_share, _, _ = get_concentration(symbol_pnl_contributions)
-    
+
     # Monthly concentration
     max_mon_pos_share, max_mon_abs_share, _, _ = get_concentration(month_pnl_contributions)
 

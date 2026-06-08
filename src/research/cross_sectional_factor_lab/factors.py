@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+
 import pandas as pd
 
 import configs.base as cfg
@@ -78,7 +79,7 @@ def compute_rebalance_factor_frame(
 
     for symbol in symbols:
         symbol_sub = sub_panel[sub_panel["symbol"] == symbol]
-        
+
         # Enforce that symbol must have exactly 30 days in the liquidity window
         if symbol_sub["date_utc"].nunique() < 30:
             continue

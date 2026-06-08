@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
+
 import pytest
+
 from research.cross_sectional_factor_lab.coverage import (
-    expected_utc_daily_dates,
+    Stage0CoverageSummary,
+    SymbolCoverage,
     compute_coverage_ratio,
     compute_history_days_available,
-    SymbolCoverage,
-    Stage0CoverageSummary,
     decide_stage0_readiness,
+    expected_utc_daily_dates,
 )
 
 

@@ -32,7 +32,7 @@ def test_momentum_30d_skip_1d_uses_t_minus_1_and_t_minus_31() -> None:
     closes = [100.0] * 31 + [150.0, 999.0]
     panel = pd.DataFrame(_rows("AAAUSDT", start, closes))
     panel["date_utc"] = pd.to_datetime(panel["date_utc"])
-    
+
     assert panel.loc[panel["date_utc"] == pd.Timestamp("2026-02-01"), "close"].item() == 150.0
     assert panel.loc[panel["date_utc"] == pd.Timestamp("2026-02-02"), "close"].item() == 999.0
 
