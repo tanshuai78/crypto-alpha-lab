@@ -615,3 +615,38 @@ FACTOR_LAB_STAGEA_MAX_SINGLE_MONTH_PNL_CONTRIBUTION_SHARE = 0.30
 
 FACTOR_LAB_STAGEA_MAX_INSUFFICIENT_UNIVERSE_RATIO = 0.10
 # Maximum allowed fraction of rebalance dates with fewer than top-N eligible symbols.
+
+
+# ─── Strategy: Cross-Sectional Factor Lab Stage A2 ─────────────────────────
+
+FACTOR_LAB_STAGEA2_BTC_MA_DAYS = 20
+# BTC regime filter lookback. Uses BTC close from t-20 through t-1.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS = 20
+# Alt universe regime filter lookback. Uses t-21 through t-1.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_COVERAGE_RATIO = 0.80
+# Minimum share of eligible symbols with valid 20d returns for alt universe regime.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS = FACTOR_LAB_STAGEA_PRIMARY_TOP_N
+# Minimum valid symbol count for alt universe regime decision.
+
+FACTOR_LAB_STAGEA2_MIN_DRAWDOWN_REDUCTION_PCT = 30.0
+# Minimum max drawdown reduction versus regime_none baseline.
+
+FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE = 0.60
+# Mostly-cash filters cannot unlock Stage A2 Round 2.
+
+FACTOR_LAB_STAGEA2_MAX_BENCHMARK_UNDERPERFORMANCE_PCT = 10.0
+# Strategy may not underperform BTC or ETH by more than 10 percentage points under base 30 bps cost.
+
+FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT = FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
+# Stage A2 inherits Stage A v1 minimum effective rebalance sample size.
+
+FACTOR_LAB_STAGEA2_ALLOWED_VARIANTS = (
+    "regime_none",
+    "btc_ma20_cash",
+    "alt_universe_20d_return_cash",
+)
+# Only these Stage A2 Round 1 variants are allowed.
+
