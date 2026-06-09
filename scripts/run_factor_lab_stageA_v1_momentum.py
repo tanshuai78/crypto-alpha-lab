@@ -23,6 +23,27 @@ def get_ccxt_symbol(client: ccxt.Exchange, normalized: str) -> str | None:
     return None
 
 
+def parse_binance_spot_klines_to_daily_bars(symbol: str, klines: list[list[Any]]) -> list[dict[str, Any]]:
+    daily_bars = []
+    for row in klines:
+        if len(row) < 8:
+            raise ValueError("Binance spot kline row missing quote asset volume")
+
+        ts = int(row[0])
+        date_str = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        daily_bars.append({
+            "symbol": normalize_symbol(symbol),
+            "date_utc": date_str,
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+            "base_volume": float(row[5]),
+            "quote_volume": float(row[7]),
+        })
+    return daily_bars
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Cross-Sectional Factor Lab Stage A v1 backtest.")
     parser.add_argument("--offline-sample", help="Path to offline daily bars JSON fixture")
@@ -121,21 +142,13 @@ def main(argv: list[str] | None = None) -> int:
 
             logger.info(f"[{idx+1}/{len(eligible_normalized)}] Fetching {normalized} ({ccxt_sym})...")
             try:
-                # Binance returns up to 1000 bars
-                ohlcv = client.fetch_ohlcv(ccxt_sym, timeframe="1d", since=since_ms, limit=1000)
-                for bar in ohlcv:
-                    ts, o, h, low, c, v = bar
-                    date_str = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-                    daily_bars.append({
-                        "symbol": normalized,
-                        "date_utc": date_str,
-                        "open": o,
-                        "high": h,
-                        "low": low,
-                        "close": c,
-                        "base_volume": v,
-                        "quote_volume": v * c  # Estimate quote volume as base_volume * close
-                    })
+                klines = client.publicGetKlines({
+                    "symbol": normalized,
+                    "interval": "1d",
+                    "startTime": since_ms,
+                    "limit": 1000,
+                })
+                daily_bars.extend(parse_binance_spot_klines_to_daily_bars(normalized, klines))
                 time.sleep(0.1)  # Sleep between calls to respect rate limits
             except Exception as e:
                 logger.warning(f"Failed to fetch {normalized}: {e}")

@@ -62,10 +62,18 @@ def decide_stageA_v1(summary: dict[str, Any]) -> str:
 
         # Benchmarks
         bench = summary["benchmarks"]
+        btc_return = bench["btc_buy_and_hold_net_with_entry_exit_cost_pct"]
+        eth_return = bench["eth_buy_and_hold_net_with_entry_exit_cost_pct"]
         ew_return = bench["universe_equal_weight_total_return_pct"]
         ew_dd = bench["universe_equal_weight_max_drawdown_pct"]
 
-        # Check 3: strategy beats equal weight benchmark under base cost
+        # Check 3: strategy beats BTC/ETH and equal-weight benchmarks under base cost
+        if strategy_return <= btc_return:
+            return "stageA_v1_failed"
+
+        if strategy_return <= eth_return:
+            return "stageA_v1_failed"
+
         if strategy_return <= ew_return:
             return "stageA_v1_failed"
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from scripts.run_factor_lab_stageA_v1_momentum import main
+from scripts.run_factor_lab_stageA_v1_momentum import main, parse_binance_spot_klines_to_daily_bars
 
 
 def test_cli_empty_fixture_writes_data_unavailable_summary(tmp_path) -> None:
@@ -38,3 +38,38 @@ def test_cli_fail_on_decision_returns_nonzero_for_data_unavailable(tmp_path) -> 
     result = main(["--offline-sample", str(fixture), "--output", str(output), "--fail-on-decision"])
 
     assert result == 1
+
+
+def test_parse_binance_spot_klines_uses_raw_quote_asset_volume() -> None:
+    rows = parse_binance_spot_klines_to_daily_bars(
+        symbol="AAAUSDT",
+        klines=[
+            [
+                1_704_067_200_000,
+                "10.0",
+                "12.0",
+                "9.0",
+                "11.0",
+                "100.0",
+                1_704_153_599_999,
+                "12345.67",
+                10,
+                "50.0",
+                "6000.0",
+                "0",
+            ]
+        ],
+    )
+
+    assert rows == [
+        {
+            "symbol": "AAAUSDT",
+            "date_utc": "2024-01-01",
+            "open": 10.0,
+            "high": 12.0,
+            "low": 9.0,
+            "close": 11.0,
+            "base_volume": 100.0,
+            "quote_volume": 12345.67,
+        }
+    ]

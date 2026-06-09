@@ -53,6 +53,26 @@ def test_stageA_v1_fails_when_base_cost_does_not_beat_equal_weight() -> None:
     assert decide_stageA_v1(summary) == "stageA_v1_failed"
 
 
+def test_stageA_v1_fails_when_base_cost_does_not_beat_btc() -> None:
+    summary = _passing_summary()
+    summary["performance"]["by_cost_scenario"]["base_30_bps_round_trip"]["strategy_total_return_pct"] = 20.0
+    summary["benchmarks"]["btc_buy_and_hold_net_with_entry_exit_cost_pct"] = 30.0
+    summary["benchmarks"]["eth_buy_and_hold_net_with_entry_exit_cost_pct"] = 12.0
+    summary["benchmarks"]["universe_equal_weight_total_return_pct"] = 18.0
+
+    assert decide_stageA_v1(summary) == "stageA_v1_failed"
+
+
+def test_stageA_v1_fails_when_base_cost_does_not_beat_eth() -> None:
+    summary = _passing_summary()
+    summary["performance"]["by_cost_scenario"]["base_30_bps_round_trip"]["strategy_total_return_pct"] = 20.0
+    summary["benchmarks"]["btc_buy_and_hold_net_with_entry_exit_cost_pct"] = 15.0
+    summary["benchmarks"]["eth_buy_and_hold_net_with_entry_exit_cost_pct"] = 25.0
+    summary["benchmarks"]["universe_equal_weight_total_return_pct"] = 18.0
+
+    assert decide_stageA_v1(summary) == "stageA_v1_failed"
+
+
 def test_stageA_v1_fails_on_symbol_concentration() -> None:
     summary = _passing_summary()
     summary["concentration"]["max_single_symbol_positive_pnl_share"] = 0.50
