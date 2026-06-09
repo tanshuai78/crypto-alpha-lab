@@ -101,3 +101,62 @@ def decide_stageA_v1(summary: dict[str, Any]) -> str:
 
     except KeyError:
         return "stageA_v1_failed"
+
+
+def decide_stageA2_variant(variant_summary: dict[str, Any]) -> str:
+    rebalance_quality = variant_summary.get("rebalance_quality", {})
+    rebalance_count = int(rebalance_quality.get("rebalance_count", 0))
+    if rebalance_count < cfg.FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT:
+        return "regime_filter_data_insufficient"
+
+    performance = variant_summary["performance"]
+    benchmarks = variant_summary["benchmarks"]
+    regime_filter = variant_summary["regime_filter"]
+    concentration = variant_summary["concentration"]
+
+    drawdown_reduction = performance["max_drawdown_vs_v1_reduction_pct"]
+    strategy_return = performance["base_30bps_total_return_pct"]
+    ew_return = benchmarks["universe_equal_weight_pct"]
+    btc_return = benchmarks["btc_buy_and_hold_net_pct"]
+    eth_return = benchmarks["eth_buy_and_hold_net_pct"]
+    cash_days_share = regime_filter["cash_days_share"]
+    month_share = concentration["max_single_month_positive_pnl_share"]
+
+    if drawdown_reduction < cfg.FACTOR_LAB_STAGEA2_MIN_DRAWDOWN_REDUCTION_PCT:
+        return "regime_filter_failed"
+
+    benchmark_floor = cfg.FACTOR_LAB_STAGEA2_MAX_BENCHMARK_UNDERPERFORMANCE_PCT
+    passes_alpha = strategy_return > ew_return
+    passes_btc = strategy_return >= btc_return - benchmark_floor
+    passes_eth = strategy_return >= eth_return - benchmark_floor
+    passes_cash = cash_days_share <= cfg.FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE
+    passes_month_concentration = (
+        month_share <= cfg.FACTOR_LAB_STAGEA_MAX_SINGLE_MONTH_PNL_CONTRIBUTION_SHARE
+    )
+
+    if passes_alpha and passes_btc and passes_eth and passes_cash and passes_month_concentration:
+        return "regime_filter_promising"
+
+    return "regime_filter_reduces_damage_but_no_alpha"
+
+
+def decide_stageA2_round1(variant_summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    promising = [
+        item
+        for item in variant_summaries
+        if item.get("variant") != "regime_none"
+        and item.get("decision") == "regime_filter_promising"
+    ]
+
+    if not promising:
+        return {"winner_variant": None, "can_enter_stageA2_round2": False}
+
+    winner = max(
+        promising,
+        key=lambda item: (
+            item["performance"]["max_drawdown_vs_v1_reduction_pct"],
+            item["performance"]["base_30bps_total_return_pct"],
+        ),
+    )
+    return {"winner_variant": winner["variant"], "can_enter_stageA2_round2": True}
+
