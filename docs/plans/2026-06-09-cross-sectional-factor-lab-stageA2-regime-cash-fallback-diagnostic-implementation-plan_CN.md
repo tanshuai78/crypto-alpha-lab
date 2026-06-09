@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 Stage A v1 已冻结失败的基础上，实现 Stage A2 Round 1 的 regime/cash fallback 诊断，判断 long-only alt rotation 是否应该在弱势市场中空仓。
+**Goal:** 实现 Stage A2 Round 1 的 regime/cash fallback 诊断，判断 Stage A v1 的 long-only alt rotation 是否应该在弱势 regime 下空仓。
 
-**Architecture:** 复用 Stage A v1 的 daily panel、momentum factor、weekly rebalance、top10 equal-weight、成本和 benchmark 逻辑，只新增一个 regime exposure 层：`regime_none`、`btc_ma20_cash`、`alt_universe_20d_return_cash`。本轮只做诊断，不接 live，不做 3d、14d、volume、funding/OI、on-chain 或模型融合。
+**Architecture:** 复用 Stage A v1 的 daily panel、30d momentum、weekly rebalance、top10 equal-weight、30/50/80 bps 成本和 benchmark 逻辑；新增一个 regime exposure 层，分别测试 `regime_none`、`btc_ma20_cash`、`alt_universe_20d_return_cash`。本轮只做诊断，不接 live/paper，不做 3d、14d、volume、funding/OI、on-chain 或模型融合。
 
 **Tech Stack:** Python 3.11, pandas, numpy, pytest, ruff, ccxt, Binance public spot kline API.
 
@@ -41,41 +41,52 @@ paper trading
 live trading
 ```
 
-如果执行过程中发现 `btc_ma20_cash` 或 `alt_universe_20d_return_cash` 有改善，也只能写入 diagnostic summary 和 review；不得修改阈值追结果。
+如果某个 regime filter 看起来改善结果，只能写入 diagnostic summary 和 review；不得修改阈值追结果。
 
 ---
 
-## 1. File Map
+## 1. Required Fixes Incorporated
+
+这版计划已经吸收 review feedback 中的硬修正：
+
+```text
+1. Stage A2 继承 rebalance_count >= 50 的有效样本门槛。
+2. BTC/ETH benchmark 使用 first rebalance open 到 last valid exit open，和策略 open-to-open 周期一致。
+3. alt_universe_20d_return_cash 增加 coverage gate 和 min valid symbols gate。
+4. regime_filter 同时输出 rebalance period share 和 days share。
+5. concentration 同时输出 positive PnL share 和 abs PnL share。
+6. regime_none 的 drawdown reduction 固定为 0.0，不通过双跑间接计算。
+7. review 生成脚本输出 failure taxonomy，不默认跳到 B-lite。
+8. weekly exit date 统一封装，避免脚本内散落 timedelta(days=7)。
+```
+
+---
+
+## 2. File Map
 
 ### Create
 
 - `src/research/cross_sectional_factor_lab/regime.py`
-  - 负责 Stage A2 regime 信号计算。
+  - Stage A2 regime 信号计算。
   - 只允许使用 `rebalance_date - 1 day` 及更早数据。
+  - 输出 alt universe coverage diagnostics。
 
 - `src/research/cross_sectional_factor_lab/stageA2.py`
-  - 负责 Stage A2 Round 1 组合回测和 summary 组装。
-  - 复用 Stage A v1 的 panel/factor/portfolio/cost helpers。
+  - Stage A2 Round 1 回测和 summary 组装。
+  - 单独计算真实 universe equal-weight benchmark。
+  - benchmark 使用 open-to-open 口径。
 
 - `scripts/run_factor_lab_stageA2_regime_cash_fallback.py`
   - Stage A2 CLI。
-  - 支持 `--offline-sample` 和 live Binance spot fetch。
+  - 支持 `--offline-sample` 与 live Binance spot fetch。
   - 输出 `reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json`。
 
 - `tests/research/test_cross_sectional_factor_lab_stageA2_regime.py`
-  - 测试 BTC MA20 和 alt universe 20d return 的时间口径。
-
 - `tests/research/test_cross_sectional_factor_lab_stageA2_backtest.py`
-  - 测试 cash fallback、turnover cost、summary 字段、空仓 period。
-
 - `tests/research/test_cross_sectional_factor_lab_stageA2_summary.py`
-  - 测试 Stage A2 variant decision 和 top-level decision。
-
 - `tests/scripts/test_run_factor_lab_stageA2_regime_cash_fallback.py`
-  - 测试 CLI 空 fixture、offline fixture、output JSON。
-
-- `docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md`
-  - Stage A2 Round 1 结果 review。
+- `tests/test_factor_lab_stageA2_config.py`
+- `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md`
 
 ### Modify
 
@@ -95,7 +106,7 @@ live trading
 
 ---
 
-## 2. Config Contract
+## 3. Config Contract
 
 新增配置必须进入 `configs/base.py`，不得写成脚本内隐藏常量。
 
@@ -106,16 +117,25 @@ FACTOR_LAB_STAGEA2_BTC_MA_DAYS = 20
 # BTC regime filter lookback. Uses BTC close from t-20 through t-1.
 
 FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS = 20
-# Alt universe regime filter lookback. Uses equal-weight eligible-universe return from t-21 to t-1.
+# Alt universe regime filter lookback. Uses t-21 through t-1.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_COVERAGE_RATIO = 0.80
+# Minimum share of eligible symbols with valid 20d returns for alt universe regime.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS = FACTOR_LAB_STAGEA_PRIMARY_TOP_N
+# Minimum valid symbol count for alt universe regime decision.
 
 FACTOR_LAB_STAGEA2_MIN_DRAWDOWN_REDUCTION_PCT = 30.0
-# Minimum max drawdown reduction versus Stage A v1/regime_none to treat a filter as meaningful.
+# Minimum max drawdown reduction versus regime_none baseline.
 
 FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE = 0.60
-# A filter that spends more than 60% of days in cash is marked mostly_cash_strategy and cannot unlock Round 2.
+# Mostly-cash filters cannot unlock Stage A2 Round 2.
 
 FACTOR_LAB_STAGEA2_MAX_BENCHMARK_UNDERPERFORMANCE_PCT = 10.0
-# Strategy may not underperform BTC or ETH buy-and-hold by more than 10 percentage points under base 30 bps cost.
+# Strategy may not underperform BTC or ETH by more than 10 percentage points under base 30 bps cost.
+
+FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT = FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
+# Stage A2 inherits Stage A v1 minimum effective rebalance sample size.
 
 FACTOR_LAB_STAGEA2_ALLOWED_VARIANTS = (
     "regime_none",
@@ -127,7 +147,7 @@ FACTOR_LAB_STAGEA2_ALLOWED_VARIANTS = (
 
 ---
 
-## 3. Task 1: Add Stage A2 Config Tests And Constants
+## 4. Task 1: Add Stage A2 Config Tests And Constants
 
 **Files:**
 
@@ -145,9 +165,12 @@ import configs.base as cfg
 def test_stageA2_regime_config_values_are_locked():
     assert cfg.FACTOR_LAB_STAGEA2_BTC_MA_DAYS == 20
     assert cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS == 20
+    assert cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_COVERAGE_RATIO == 0.80
+    assert cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS == cfg.FACTOR_LAB_STAGEA_PRIMARY_TOP_N
     assert cfg.FACTOR_LAB_STAGEA2_MIN_DRAWDOWN_REDUCTION_PCT == 30.0
     assert cfg.FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE == 0.60
     assert cfg.FACTOR_LAB_STAGEA2_MAX_BENCHMARK_UNDERPERFORMANCE_PCT == 10.0
+    assert cfg.FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT == cfg.FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
 
 
 def test_stageA2_allowed_variants_are_narrowed_to_round1_scope():
@@ -175,7 +198,7 @@ AttributeError: module 'configs.base' has no attribute 'FACTOR_LAB_STAGEA2_BTC_M
 
 - [ ] **Step 3: Add constants to `configs/base.py`**
 
-Append after the Stage A v1 config block:
+Append after Stage A v1 config block:
 
 ```python
 
@@ -185,16 +208,25 @@ FACTOR_LAB_STAGEA2_BTC_MA_DAYS = 20
 # BTC regime filter lookback. Uses BTC close from t-20 through t-1.
 
 FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS = 20
-# Alt universe regime filter lookback. Uses equal-weight eligible-universe return from t-21 to t-1.
+# Alt universe regime filter lookback. Uses t-21 through t-1.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_COVERAGE_RATIO = 0.80
+# Minimum share of eligible symbols with valid 20d returns for alt universe regime.
+
+FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS = FACTOR_LAB_STAGEA_PRIMARY_TOP_N
+# Minimum valid symbol count for alt universe regime decision.
 
 FACTOR_LAB_STAGEA2_MIN_DRAWDOWN_REDUCTION_PCT = 30.0
-# Minimum max drawdown reduction versus Stage A v1/regime_none to treat a filter as meaningful.
+# Minimum max drawdown reduction versus regime_none baseline.
 
 FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE = 0.60
-# A mostly-cash filter cannot unlock Stage A2 Round 2.
+# Mostly-cash filters cannot unlock Stage A2 Round 2.
 
 FACTOR_LAB_STAGEA2_MAX_BENCHMARK_UNDERPERFORMANCE_PCT = 10.0
 # Maximum allowed underperformance versus BTC/ETH buy-and-hold in percentage points.
+
+FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT = FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
+# Stage A2 inherits Stage A v1 minimum effective rebalance sample size.
 
 FACTOR_LAB_STAGEA2_ALLOWED_VARIANTS = (
     "regime_none",
@@ -227,7 +259,7 @@ git commit -m "config(factor-lab): add stage A2 regime defaults"
 
 ---
 
-## 4. Task 2: Implement Regime Signal Module
+## 5. Task 2: Implement Regime Signal Module
 
 **Files:**
 
@@ -243,21 +275,12 @@ BTC MA20 window = [t-20, t-1]
 alt universe return window = [t-21, t-1]
 ```
 
-`regime_none` always allows alt exposure.
-
-`btc_ma20_cash` allows exposure only when:
+`alt_universe_20d_return_cash` must not be decided by a tiny valid subset. It requires:
 
 ```text
-BTCUSDT close[t-1] > mean(BTCUSDT close[t-20:t-1])
+symbols_with_valid_20d_return / eligible_symbols_count >= 0.80
+symbols_with_valid_20d_return >= FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS
 ```
-
-`alt_universe_20d_return_cash` allows exposure only when:
-
-```text
-mean(close_symbol[t-1] / close_symbol[t-21] - 1 for eligible symbols) > 0
-```
-
-If required history is missing, return `False` and mark cash.
 
 - [ ] **Step 1: Write failing regime tests**
 
@@ -288,6 +311,18 @@ def _daily_row(symbol: str, dt: date, close: float) -> dict:
     }
 
 
+def _alt_rows(symbols: list[str], start: date, days: int, start_close: float, end_close: float) -> list[dict]:
+    rows = []
+    for i in range(days):
+        dt = start + timedelta(days=i)
+        close = start_close
+        if dt == date(2026, 1, 30):
+            close = end_close
+        for symbol in symbols:
+            rows.append(_daily_row(symbol, dt, close))
+    return rows
+
+
 def test_btc_ma20_uses_t_minus_1_and_excludes_rebalance_day_close():
     start = date(2026, 1, 1)
     rows = []
@@ -295,9 +330,9 @@ def test_btc_ma20_uses_t_minus_1_and_excludes_rebalance_day_close():
         dt = start + timedelta(days=i)
         close = 100.0
         if dt == date(2026, 1, 30):
-            close = 150.0  # t-1, should make regime true
+            close = 150.0
         if dt == date(2026, 1, 31):
-            close = 1.0  # rebalance day, must be ignored
+            close = 1.0
         rows.append(_daily_row("BTCUSDT", dt, close))
     panel = pd.DataFrame(rows)
 
@@ -305,52 +340,77 @@ def test_btc_ma20_uses_t_minus_1_and_excludes_rebalance_day_close():
 
 
 def test_btc_ma20_returns_false_when_required_history_missing():
-    rows = [_daily_row("BTCUSDT", date(2026, 1, 30), 150.0)]
-    panel = pd.DataFrame(rows)
+    panel = pd.DataFrame([_daily_row("BTCUSDT", date(2026, 1, 30), 150.0)])
 
     assert compute_btc_ma20_regime(panel, pd.Timestamp("2026-01-31")) is False
 
 
-def test_alt_universe_20d_return_uses_absolute_dates_and_eligible_symbols_only():
-    start = date(2026, 1, 1)
-    rows = []
-    for i in range(32):
-        dt = start + timedelta(days=i)
-        rows.append(_daily_row("AAAUSDT", dt, 100.0 if dt == date(2026, 1, 10) else 120.0))
-        rows.append(_daily_row("BBBUSDT", dt, 100.0 if dt == date(2026, 1, 10) else 110.0))
-        rows.append(_daily_row("CCCUSDT", dt, 1.0))
-    panel = pd.DataFrame(rows)
+def test_alt_universe_20d_return_returns_true_with_valid_positive_coverage():
+    symbols = [f"ALT{i:02d}USDT" for i in range(10)]
+    panel = pd.DataFrame(_alt_rows(symbols, date(2026, 1, 10), 22, 100.0, 120.0))
 
-    # rebalance = Jan 31, t-21 = Jan 10, t-1 = Jan 30.
     result = compute_alt_universe_20d_return_regime(
         panel,
         pd.Timestamp("2026-01-31"),
-        eligible_symbols=("AAAUSDT", "BBBUSDT"),
+        eligible_symbols=symbols,
     )
 
-    assert result is True
+    assert result.allow_exposure is True
+    assert result.eligible_symbols_count == 10
+    assert result.symbols_with_valid_20d_return == 10
+    assert result.coverage_ratio == 1.0
+
+
+def test_alt_universe_regime_returns_false_when_coverage_below_min():
+    valid_symbols = [f"ALT{i:02d}USDT" for i in range(7)]
+    all_symbols = valid_symbols + ["MISS1USDT", "MISS2USDT", "MISS3USDT"]
+    panel = pd.DataFrame(_alt_rows(valid_symbols, date(2026, 1, 10), 22, 100.0, 120.0))
+
+    result = compute_alt_universe_20d_return_regime(
+        panel,
+        pd.Timestamp("2026-01-31"),
+        eligible_symbols=all_symbols,
+    )
+
+    assert result.allow_exposure is False
+    assert result.symbols_with_valid_20d_return == 7
+    assert result.coverage_ratio == 0.7
+
+
+def test_alt_universe_regime_requires_min_valid_symbol_count():
+    symbols = [f"ALT{i:02d}USDT" for i in range(9)]
+    panel = pd.DataFrame(_alt_rows(symbols, date(2026, 1, 10), 22, 100.0, 120.0))
+
+    result = compute_alt_universe_20d_return_regime(
+        panel,
+        pd.Timestamp("2026-01-31"),
+        eligible_symbols=symbols,
+    )
+
+    assert result.allow_exposure is False
+    assert result.symbols_with_valid_20d_return == 9
 
 
 def test_alt_universe_20d_return_ignores_rebalance_day_pump():
-    start = date(2026, 1, 1)
     rows = []
-    for i in range(32):
-        dt = start + timedelta(days=i)
+    for i in range(22):
+        dt = date(2026, 1, 10) + timedelta(days=i)
         close = 100.0
         if dt == date(2026, 1, 30):
             close = 90.0
         if dt == date(2026, 1, 31):
             close = 999.0
-        rows.append(_daily_row("AAAUSDT", dt, close))
+        for symbol in [f"ALT{j:02d}USDT" for j in range(10)]:
+            rows.append(_daily_row(symbol, dt, close))
     panel = pd.DataFrame(rows)
 
     result = compute_alt_universe_20d_return_regime(
         panel,
         pd.Timestamp("2026-01-31"),
-        eligible_symbols=("AAAUSDT",),
+        eligible_symbols=[f"ALT{j:02d}USDT" for j in range(10)],
     )
 
-    assert result is False
+    assert result.allow_exposure is False
 
 
 def test_decide_stageA2_regime_exposure_rejects_unknown_variant():
@@ -390,6 +450,7 @@ Create `src/research/cross_sectional_factor_lab/regime.py`:
 ```python
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Iterable
 
@@ -397,6 +458,16 @@ import pandas as pd
 
 import configs.base as cfg
 from research.cross_sectional_factor_lab.universe import normalize_symbol
+
+
+@dataclass(frozen=True)
+class AltUniverseRegimeResult:
+    allow_exposure: bool
+    eligible_symbols_count: int
+    symbols_with_valid_20d_return: int
+    coverage_ratio: float
+    universe_return_20d: float | None
+    included_btc_eth: bool
 
 
 def _symbol_close_on(panel: pd.DataFrame, symbol: str, dt: pd.Timestamp) -> float | None:
@@ -411,43 +482,44 @@ def _symbol_close_on(panel: pd.DataFrame, symbol: str, dt: pd.Timestamp) -> floa
 def compute_btc_ma20_regime(panel: pd.DataFrame, rebalance_date: pd.Timestamp) -> bool:
     signal_asof_date = rebalance_date - timedelta(days=1)
     ma_start = rebalance_date - timedelta(days=cfg.FACTOR_LAB_STAGEA2_BTC_MA_DAYS)
-
     btc = panel[panel["symbol"] == "BTCUSDT"]
     window = btc[(btc["date_utc"] >= ma_start) & (btc["date_utc"] <= signal_asof_date)]
     if window["date_utc"].nunique() < cfg.FACTOR_LAB_STAGEA2_BTC_MA_DAYS:
         return False
-
     asof_close = _symbol_close_on(panel, "BTCUSDT", signal_asof_date)
     if asof_close is None:
         return False
-
-    ma = float(window["close"].mean())
-    return asof_close > ma
+    return asof_close > float(window["close"].mean())
 
 
 def compute_alt_universe_20d_return_regime(
     panel: pd.DataFrame,
     rebalance_date: pd.Timestamp,
     eligible_symbols: Iterable[str],
-) -> bool:
-    signal_asof_date = rebalance_date - timedelta(days=1)
-    lookback_start_date = rebalance_date - timedelta(
-        days=cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS + 1
-    )
+) -> AltUniverseRegimeResult:
+    normalized_symbols = tuple(normalize_symbol(symbol) for symbol in eligible_symbols)
+    eligible_count = len(normalized_symbols)
+    included_btc_eth = "BTCUSDT" in normalized_symbols or "ETHUSDT" in normalized_symbols
+    if eligible_count == 0:
+        return AltUniverseRegimeResult(False, 0, 0, 0.0, None, included_btc_eth)
 
+    signal_asof_date = rebalance_date - timedelta(days=1)
+    lookback_start_date = rebalance_date - timedelta(days=cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_RETURN_DAYS + 1)
     returns: list[float] = []
-    for symbol in eligible_symbols:
-        normalized = normalize_symbol(symbol)
-        start_close = _symbol_close_on(panel, normalized, lookback_start_date)
-        asof_close = _symbol_close_on(panel, normalized, signal_asof_date)
+    for symbol in normalized_symbols:
+        start_close = _symbol_close_on(panel, symbol, lookback_start_date)
+        asof_close = _symbol_close_on(panel, symbol, signal_asof_date)
         if start_close is None or asof_close is None:
             continue
         returns.append((asof_close / start_close) - 1.0)
 
-    if not returns:
-        return False
-
-    return float(sum(returns) / len(returns)) > 0.0
+    valid_count = len(returns)
+    coverage_ratio = valid_count / eligible_count if eligible_count else 0.0
+    universe_return = float(sum(returns) / valid_count) if valid_count else None
+    coverage_ok = coverage_ratio >= cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_COVERAGE_RATIO
+    count_ok = valid_count >= cfg.FACTOR_LAB_STAGEA2_ALT_UNIVERSE_MIN_SYMBOLS
+    allow = bool(coverage_ok and count_ok and universe_return is not None and universe_return > 0.0)
+    return AltUniverseRegimeResult(allow, eligible_count, valid_count, coverage_ratio, universe_return, included_btc_eth)
 
 
 def decide_stageA2_regime_exposure(
@@ -455,13 +527,14 @@ def decide_stageA2_regime_exposure(
     panel: pd.DataFrame,
     rebalance_date: pd.Timestamp,
     eligible_symbols: Iterable[str],
-) -> bool:
+) -> tuple[bool, AltUniverseRegimeResult | None]:
     if variant == "regime_none":
-        return True
+        return True, None
     if variant == "btc_ma20_cash":
-        return compute_btc_ma20_regime(panel, rebalance_date)
+        return compute_btc_ma20_regime(panel, rebalance_date), None
     if variant == "alt_universe_20d_return_cash":
-        return compute_alt_universe_20d_return_regime(panel, rebalance_date, eligible_symbols)
+        result = compute_alt_universe_20d_return_regime(panel, rebalance_date, eligible_symbols)
+        return result.allow_exposure, result
     raise ValueError(f"unsupported Stage A2 variant: {variant}")
 ```
 
@@ -476,7 +549,7 @@ PYTHONPATH=src uv run pytest -q tests/research/test_cross_sectional_factor_lab_s
 Expected:
 
 ```text
-5 passed
+7 passed
 ```
 
 - [ ] **Step 5: Commit Task 2**
@@ -488,26 +561,34 @@ git commit -m "feat(factor-lab): add stage A2 regime signals"
 
 ---
 
-## 5. Task 3: Add Stage A2 Summary Decision Helpers
+## 6. Task 3: Add Stage A2 Summary Decision Helpers
 
 **Files:**
 
 - Modify: `src/research/cross_sectional_factor_lab/summary.py`
 - Test: `tests/research/test_cross_sectional_factor_lab_stageA2_summary.py`
 
-### Decision Contract
+### Variant Decision Contract
 
-Per variant decision:
+Possible decisions:
 
 ```text
+regime_filter_data_insufficient
 regime_filter_promising
 regime_filter_reduces_damage_but_no_alpha
 regime_filter_failed
 ```
 
-A variant is `regime_filter_promising` only if all conditions hold:
+Data is insufficient when:
 
 ```text
+rebalance_quality.rebalance_count < FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT
+```
+
+A non-baseline variant is `regime_filter_promising` only if all conditions hold:
+
+```text
+rebalance_count >= 50
 max_drawdown_vs_v1_reduction_pct >= 30.0
 base_30bps_total_return_pct > universe_equal_weight_pct
 base_30bps_total_return_pct >= btc_buy_and_hold_net_pct - 10.0
@@ -516,35 +597,20 @@ cash_days_share <= 0.60
 max_single_month_positive_pnl_share <= 0.30
 ```
 
-If drawdown reduction passes but alpha/benchmark/cash/concentration gates fail, decision is:
-
-```text
-regime_filter_reduces_damage_but_no_alpha
-```
-
-If drawdown reduction fails:
-
-```text
-regime_filter_failed
-```
-
-Top-level `can_enter_stageA2_round2` is true only if at least one non-`regime_none` variant is `regime_filter_promising`.
-
 - [ ] **Step 1: Write failing summary tests**
 
 Create `tests/research/test_cross_sectional_factor_lab_stageA2_summary.py`:
 
 ```python
-from research.cross_sectional_factor_lab.summary import (
-    decide_stageA2_round1,
-    decide_stageA2_variant,
-)
+import configs.base as cfg
+from research.cross_sectional_factor_lab.summary import decide_stageA2_round1, decide_stageA2_variant
 
 
 def _variant(
     variant: str,
     drawdown_reduction: float,
     strategy_return: float,
+    rebalance_count: int | None = None,
     ew_return: float = -20.0,
     btc_return: float = -10.0,
     eth_return: float = -15.0,
@@ -569,56 +635,55 @@ def _variant(
         "concentration": {
             "max_single_month_positive_pnl_share": month_share,
         },
+        "rebalance_quality": {
+            "rebalance_count": rebalance_count if rebalance_count is not None else cfg.FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT,
+            "insufficient_universe_count": 0,
+            "insufficient_universe_ratio": 0.0,
+            "median_selected_symbol_count": 10.0,
+            "turnover_median": 0.5,
+        },
     }
 
 
-def test_stageA2_variant_promising_requires_drawdown_alpha_benchmark_cash_and_concentration():
-    variant = _variant(
-        "btc_ma20_cash",
-        drawdown_reduction=35.0,
-        strategy_return=-5.0,
-        ew_return=-20.0,
-        btc_return=-10.0,
-        eth_return=-15.0,
-        cash_days_share=0.40,
-        month_share=0.20,
-    )
+def test_stageA2_variant_data_insufficient_when_rebalance_count_below_gate():
+    variant = _variant("btc_ma20_cash", 35.0, -5.0, rebalance_count=10)
+
+    assert decide_stageA2_variant(variant) == "regime_filter_data_insufficient"
+
+
+def test_stageA2_variant_promising_requires_all_gates():
+    variant = _variant("btc_ma20_cash", 35.0, -5.0)
 
     assert decide_stageA2_variant(variant) == "regime_filter_promising"
 
 
 def test_stageA2_variant_reduces_damage_but_no_alpha_when_benchmark_gate_fails():
-    variant = _variant(
-        "btc_ma20_cash",
-        drawdown_reduction=35.0,
-        strategy_return=-30.0,
-        ew_return=-40.0,
-        btc_return=-10.0,
-        eth_return=-15.0,
-    )
+    variant = _variant("btc_ma20_cash", 35.0, -30.0, ew_return=-40.0, btc_return=-10.0, eth_return=-15.0)
 
     assert decide_stageA2_variant(variant) == "regime_filter_reduces_damage_but_no_alpha"
 
 
 def test_stageA2_variant_reduces_damage_but_no_alpha_when_mostly_cash():
-    variant = _variant(
-        "alt_universe_20d_return_cash",
-        drawdown_reduction=40.0,
-        strategy_return=-5.0,
-        cash_days_share=0.75,
-    )
+    variant = _variant("alt_universe_20d_return_cash", 40.0, -5.0, cash_days_share=0.75)
 
     assert decide_stageA2_variant(variant) == "regime_filter_reduces_damage_but_no_alpha"
 
 
 def test_stageA2_variant_failed_when_drawdown_reduction_is_too_small():
-    variant = _variant(
-        "alt_universe_20d_return_cash",
-        drawdown_reduction=20.0,
-        strategy_return=-5.0,
-    )
+    variant = _variant("alt_universe_20d_return_cash", 20.0, -5.0)
 
     assert decide_stageA2_variant(variant) == "regime_filter_failed"
+
+
+def test_stageA2_round1_cannot_unlock_round2_with_insufficient_rebalances():
+    variants = [
+        {**_variant("btc_ma20_cash", 35.0, -5.0, rebalance_count=10), "decision": "regime_filter_data_insufficient"},
+    ]
+
+    decision = decide_stageA2_round1(variants)
+
+    assert decision["winner_variant"] is None
+    assert decision["can_enter_stageA2_round2"] is False
 
 
 def test_stageA2_round1_unlocks_round2_only_for_non_baseline_promising_variant():
@@ -631,18 +696,6 @@ def test_stageA2_round1_unlocks_round2_only_for_non_baseline_promising_variant()
 
     assert decision["winner_variant"] == "btc_ma20_cash"
     assert decision["can_enter_stageA2_round2"] is True
-
-
-def test_stageA2_round1_does_not_unlock_when_only_baseline_is_promising():
-    variants = [
-        {**_variant("regime_none", 35.0, -5.0), "decision": "regime_filter_promising"},
-        {**_variant("btc_ma20_cash", 20.0, -30.0), "decision": "regime_filter_failed"},
-    ]
-
-    decision = decide_stageA2_round1(variants)
-
-    assert decision["winner_variant"] is None
-    assert decision["can_enter_stageA2_round2"] is False
 ```
 
 - [ ] **Step 2: Run tests and verify failure**
@@ -666,6 +719,11 @@ Append to `src/research/cross_sectional_factor_lab/summary.py`:
 ```python
 
 def decide_stageA2_variant(variant_summary: dict[str, Any]) -> str:
+    rebalance_quality = variant_summary.get("rebalance_quality", {})
+    rebalance_count = int(rebalance_quality.get("rebalance_count", 0))
+    if rebalance_count < cfg.FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT:
+        return "regime_filter_data_insufficient"
+
     performance = variant_summary["performance"]
     benchmarks = variant_summary["benchmarks"]
     regime_filter = variant_summary["regime_filter"]
@@ -703,11 +761,10 @@ def decide_stageA2_round1(variant_summaries: list[dict[str, Any]]) -> dict[str, 
         for item in variant_summaries
         if item.get("variant") != "regime_none"
         and item.get("decision") == "regime_filter_promising"
+        and item.get("rebalance_quality", {}).get("rebalance_count", 0) >= cfg.FACTOR_LAB_STAGEA2_MIN_REBALANCE_COUNT
     ]
-
     if not promising:
         return {"winner_variant": None, "can_enter_stageA2_round2": False}
-
     winner = max(
         promising,
         key=lambda item: (
@@ -729,7 +786,7 @@ PYTHONPATH=src uv run pytest -q tests/research/test_cross_sectional_factor_lab_s
 Expected:
 
 ```text
-6 passed
+7 passed
 ```
 
 - [ ] **Step 5: Commit Task 3**
@@ -741,7 +798,7 @@ git commit -m "feat(factor-lab): add stage A2 regime decisions"
 
 ---
 
-## 6. Task 4: Implement Stage A2 Backtest Orchestrator
+## 7. Task 4: Implement Stage A2 Backtest Orchestrator
 
 **Files:**
 
@@ -752,53 +809,17 @@ git commit -m "feat(factor-lab): add stage A2 regime decisions"
 
 For each weekly rebalance date:
 
-1. Compute the same Stage A v1 factor frame.
-2. Build top10 equal-weight target weights.
-3. Evaluate regime variant.
-4. If regime is true, hold top10 target weights.
-5. If regime is false, hold `{}` cash target.
-6. Compute turnover from previous weights to target weights.
-7. Apply 30/50/80 bps round-trip cost using existing `apply_turnover_cost()`.
-8. Cash period return is `0.0` before turnover cost.
-9. Drop final incomplete period if next rebalance open is missing.
+```text
+entry = rebalance_date open
+exit = next weekly rebalance date open
+cash gross return = 0.0
+cash still pays transition turnover cost
+```
 
-### Required Summary Fields
+`regime_none` must have:
 
-Each variant must include:
-
-```json
-{
-  "variant": "btc_ma20_cash",
-  "regime_filter": {
-    "filtered_rebalance_share": 0.0,
-    "cash_days_share": 0.0,
-    "alt_exposure_days_share": 1.0,
-    "strategy_return_when_exposed": 0.0,
-    "strategy_return_when_cash": 0.0,
-    "mostly_cash_strategy": false
-  },
-  "performance": {
-    "base_30bps_total_return_pct": 0.0,
-    "stress_50bps_total_return_pct": 0.0,
-    "crash_80bps_total_return_pct": 0.0,
-    "max_drawdown_pct": 0.0,
-    "max_drawdown_vs_v1_reduction_pct": 0.0,
-    "turnover_median": 0.0
-  },
-  "benchmarks": {
-    "btc_buy_and_hold_net_pct": 0.0,
-    "eth_buy_and_hold_net_pct": 0.0,
-    "universe_equal_weight_pct": 0.0,
-    "vs_btc_total_return_pct": 0.0,
-    "vs_eth_total_return_pct": 0.0,
-    "vs_universe_equal_weight_total_return_pct": 0.0
-  },
-  "concentration": {
-    "max_single_symbol_positive_pnl_share": 0.0,
-    "max_single_month_positive_pnl_share": 0.0
-  },
-  "decision": "regime_filter_failed"
-}
+```text
+max_drawdown_vs_v1_reduction_pct = 0.0 exactly
 ```
 
 - [ ] **Step 1: Write failing backtest tests**
@@ -811,6 +832,7 @@ from datetime import date, timedelta
 from research.cross_sectional_factor_lab.stageA2 import (
     compound_returns_pct,
     max_drawdown_pct,
+    next_weekly_exit_date,
     run_stageA2_regime_cash_fallback_diagnostic,
 )
 
@@ -828,20 +850,22 @@ def _row(symbol: str, dt: date, close: float, quote_volume: float = 100_000_000.
     }
 
 
-def _synthetic_rows(days: int = 140) -> list[dict]:
-    start = date(2026, 1, 1)
+def _synthetic_rows(days: int = 430) -> list[dict]:
+    start = date(2025, 1, 1)
     symbols = ["BTCUSDT", "ETHUSDT"] + [f"ALT{i:02d}USDT" for i in range(12)]
     rows = []
     for i in range(days):
         dt = start + timedelta(days=i)
-        btc = 100.0 + i * 0.2
-        eth = 100.0 + i * 0.1
-        rows.append(_row("BTCUSDT", dt, btc))
-        rows.append(_row("ETHUSDT", dt, eth))
+        rows.append(_row("BTCUSDT", dt, 100.0 + i * 0.2))
+        rows.append(_row("ETHUSDT", dt, 90.0 + i * 0.1))
         for j, symbol in enumerate(symbols[2:]):
             close = 50.0 + i * (0.05 + j * 0.002)
             rows.append(_row(symbol, dt, close))
     return rows
+
+
+def test_next_weekly_exit_date_centralizes_weekly_period():
+    assert next_weekly_exit_date(__import__("pandas").Timestamp("2026-01-05")) == __import__("pandas").Timestamp("2026-01-12")
 
 
 def test_compound_returns_pct_handles_empty_and_simple_returns():
@@ -856,7 +880,6 @@ def test_max_drawdown_pct_uses_compounded_equity_curve():
 def test_stageA2_empty_rows_returns_data_unavailable_summary():
     summary = run_stageA2_regime_cash_fallback_diagnostic([])
 
-    assert summary["run_mode"] == "stageA2_regime_cash_fallback_diagnostic"
     assert summary["decision"] == "stageA2_data_unavailable"
     assert summary["primary_blocker"] == "empty_daily_bars"
     assert summary["live_usage"] == "not_allowed"
@@ -865,7 +888,6 @@ def test_stageA2_empty_rows_returns_data_unavailable_summary():
 def test_stageA2_summary_contains_three_locked_variants():
     summary = run_stageA2_regime_cash_fallback_diagnostic(_synthetic_rows())
 
-    assert summary["scope"] == "regime_cash_fallback_only"
     assert [item["variant"] for item in summary["variants"]] == [
         "regime_none",
         "btc_ma20_cash",
@@ -873,27 +895,46 @@ def test_stageA2_summary_contains_three_locked_variants():
     ]
 
 
-def test_stageA2_variant_reports_cash_and_exposure_shares():
+def test_regime_none_drawdown_reduction_is_exactly_zero():
+    summary = run_stageA2_regime_cash_fallback_diagnostic(_synthetic_rows())
+    baseline = next(item for item in summary["variants"] if item["variant"] == "regime_none")
+
+    assert baseline["performance"]["max_drawdown_vs_v1_reduction_pct"] == 0.0
+
+
+def test_stageA2_variant_reports_period_and_day_shares():
     summary = run_stageA2_regime_cash_fallback_diagnostic(_synthetic_rows())
     variant = next(item for item in summary["variants"] if item["variant"] == "btc_ma20_cash")
-
     regime_filter = variant["regime_filter"]
-    assert 0.0 <= regime_filter["filtered_rebalance_share"] <= 1.0
+
+    assert 0.0 <= regime_filter["cash_rebalance_period_share"] <= 1.0
     assert 0.0 <= regime_filter["cash_days_share"] <= 1.0
-    assert 0.0 <= regime_filter["alt_exposure_days_share"] <= 1.0
+    assert regime_filter["cash_rebalance_period_share"] == regime_filter["cash_days_share"]
     assert round(regime_filter["cash_days_share"] + regime_filter["alt_exposure_days_share"], 6) == 1.0
+
+
+def test_stageA2_concentration_reports_abs_pnl_share():
+    summary = run_stageA2_regime_cash_fallback_diagnostic(_synthetic_rows())
+    baseline = next(item for item in summary["variants"] if item["variant"] == "regime_none")
+
+    assert "max_single_symbol_abs_pnl_share" in baseline["concentration"]
+    assert "max_single_month_abs_pnl_share" in baseline["concentration"]
 
 
 def test_stageA2_universe_equal_weight_benchmark_is_not_regime_none_top10():
     summary = run_stageA2_regime_cash_fallback_diagnostic(_synthetic_rows())
     baseline = next(item for item in summary["variants"] if item["variant"] == "regime_none")
 
-    assert "universe_equal_weight_pct" in baseline["benchmarks"]
-    assert round(
-        baseline["benchmarks"]["universe_equal_weight_pct"], 8
-    ) != round(
+    assert round(baseline["benchmarks"]["universe_equal_weight_pct"], 8) != round(
         baseline["performance"]["base_30bps_total_return_pct"], 8
     )
+
+
+def test_benchmark_uses_first_rebalance_open_and_last_exit_open():
+    rows = _synthetic_rows()
+    summary = run_stageA2_regime_cash_fallback_diagnostic(rows)
+
+    assert summary["benchmark_price_policy"] == "first_rebalance_open_to_last_valid_exit_open"
 
 
 def test_stageA2_top_level_keeps_live_and_paper_disabled():
@@ -918,9 +959,9 @@ Expected:
 ModuleNotFoundError: No module named 'research.cross_sectional_factor_lab.stageA2'
 ```
 
-- [ ] **Step 3: Create `stageA2.py` with minimal complete orchestrator**
+- [ ] **Step 3: Implement `stageA2.py`**
 
-Create `src/research/cross_sectional_factor_lab/stageA2.py`:
+Create `src/research/cross_sectional_factor_lab/stageA2.py` with these public functions and semantics:
 
 ```python
 from __future__ import annotations
@@ -934,7 +975,6 @@ import pandas as pd
 import configs.base as cfg
 from research.cross_sectional_factor_lab.backtest import (
     apply_turnover_cost,
-    compute_benchmark_buy_and_hold_net,
     compute_strategy_period_return,
     compute_turnover,
     universe_equal_weight_targets,
@@ -942,8 +982,12 @@ from research.cross_sectional_factor_lab.backtest import (
 from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
 from research.cross_sectional_factor_lab.panel import forward_fill_close_by_symbol, load_daily_panel
 from research.cross_sectional_factor_lab.portfolio import build_equal_weight_targets, eligible_monday_rebalance_dates
-from research.cross_sectional_factor_lab.regime import decide_stageA2_regime_exposure
+from research.cross_sectional_factor_lab.regime import AltUniverseRegimeResult, decide_stageA2_regime_exposure
 from research.cross_sectional_factor_lab.summary import decide_stageA2_round1, decide_stageA2_variant, summarize_rebalance_quality
+
+
+def next_weekly_exit_date(rebalance_date: pd.Timestamp) -> pd.Timestamp:
+    return rebalance_date + timedelta(days=7)
 
 
 def compound_returns_pct(returns: list[float]) -> float:
@@ -961,32 +1005,37 @@ def max_drawdown_pct(returns: list[float]) -> float:
     return float(np.max(drawdowns)) * 100.0
 
 
-def _concentration_share(contributions: dict[str, float]) -> float:
+def _positive_and_abs_concentration(contributions: dict[str, float]) -> tuple[float, float]:
     positives = [v for v in contributions.values() if v > 0]
-    total = sum(positives)
-    if total <= 0 or not positives:
-        return 0.0
-    return float(max(positives) / total)
+    positive_total = sum(positives)
+    positive_share = max(positives) / positive_total if positive_total > 0 and positives else 0.0
+    absolutes = [abs(v) for v in contributions.values()]
+    abs_total = sum(absolutes)
+    abs_share = max(absolutes) / abs_total if abs_total > 0 and absolutes else 0.0
+    return float(positive_share), float(abs_share)
 
 
-def _benchmark_return_pct(panel: pd.DataFrame, symbol: str, start_date: pd.Timestamp, end_date: pd.Timestamp) -> float:
+def _benchmark_open_to_open_net_pct(
+    panel: pd.DataFrame,
+    symbol: str,
+    start_date: pd.Timestamp,
+    exit_date: pd.Timestamp,
+    round_trip_cost_bps: float = 30.0,
+) -> float:
     data = panel[panel["symbol"] == symbol]
     start = data[data["date_utc"] == start_date]
-    end = data[data["date_utc"] == end_date]
+    end = data[data["date_utc"] == exit_date]
     if start.empty or end.empty:
         return 0.0
-    return compute_benchmark_buy_and_hold_net(
-        float(start["open"].iloc[0]),
-        float(end["close"].iloc[0]),
-        30.0,
-    ) * 100.0
+    gross = (float(end["open"].iloc[0]) / float(start["open"].iloc[0])) - 1.0
+    return (gross - round_trip_cost_bps / 10000.0) * 100.0
 
 
-def _compute_universe_equal_weight_benchmark_pct(panel: pd.DataFrame, rebalance_dates: list[pd.Timestamp]) -> float:
+def _universe_equal_weight_benchmark_pct(panel: pd.DataFrame, rebalance_dates: list[pd.Timestamp]) -> float:
     previous_weights: dict[str, float] = {}
     returns: list[float] = []
     for rebalance_date in rebalance_dates:
-        exit_date = rebalance_date + timedelta(days=7)
+        exit_date = next_weekly_exit_date(rebalance_date)
         if panel[panel["date_utc"] == exit_date].empty:
             continue
         factors = compute_rebalance_factor_frame(panel, rebalance_date)
@@ -999,6 +1048,26 @@ def _compute_universe_equal_weight_benchmark_pct(panel: pd.DataFrame, rebalance_
         returns.append(apply_turnover_cost(gross_return, turnover, 30.0))
         previous_weights = weights
     return compound_returns_pct(returns)
+
+
+def _empty_alt_diagnostics() -> dict[str, Any]:
+    return {
+        "eligible_symbols_count": 0,
+        "symbols_with_valid_20d_return": 0,
+        "coverage_ratio": 0.0,
+        "included_btc_eth": False,
+    }
+
+
+def _alt_diagnostics(result: AltUniverseRegimeResult | None) -> dict[str, Any]:
+    if result is None:
+        return _empty_alt_diagnostics()
+    return {
+        "eligible_symbols_count": result.eligible_symbols_count,
+        "symbols_with_valid_20d_return": result.symbols_with_valid_20d_return,
+        "coverage_ratio": result.coverage_ratio,
+        "included_btc_eth": result.included_btc_eth,
+    }
 
 
 def _run_variant(
@@ -1022,12 +1091,12 @@ def _run_variant(
     cash_period_count = 0
     symbol_contrib: dict[str, float] = {}
     month_contrib: dict[str, float] = {}
+    latest_alt_result: AltUniverseRegimeResult | None = None
 
     for rebalance_date in rebalance_dates:
-        exit_date = rebalance_date + timedelta(days=7)
+        exit_date = next_weekly_exit_date(rebalance_date)
         if panel[panel["date_utc"] == exit_date].empty:
             continue
-
         factors = compute_rebalance_factor_frame(panel, rebalance_date)
         if len(factors) < cfg.FACTOR_LAB_STAGEA_PRIMARY_TOP_N:
             insufficient_universe_count += 1
@@ -1036,7 +1105,9 @@ def _run_variant(
         targets = build_equal_weight_targets(factors, top_n=cfg.FACTOR_LAB_STAGEA_PRIMARY_TOP_N)
         alt_weights = dict(zip(targets["symbol"], targets["target_weight"])) if not targets.empty else {}
         eligible_symbols = tuple(factors["symbol"].tolist()) if not factors.empty else ()
-        is_exposed = decide_stageA2_regime_exposure(variant, panel, rebalance_date, eligible_symbols)
+        is_exposed, alt_result = decide_stageA2_regime_exposure(variant, panel, rebalance_date, eligible_symbols)
+        if alt_result is not None:
+            latest_alt_result = alt_result
         weights = alt_weights if is_exposed else {}
         if not is_exposed:
             cash_period_count += 1
@@ -1048,11 +1119,9 @@ def _run_variant(
         turnovers.append(turnover)
 
         net_30 = apply_turnover_cost(gross_return, turnover, 30.0)
-        net_50 = apply_turnover_cost(gross_return, turnover, 50.0)
-        net_80 = apply_turnover_cost(gross_return, turnover, 80.0)
         returns_30.append(net_30)
-        returns_50.append(net_50)
-        returns_80.append(net_80)
+        returns_50.append(apply_turnover_cost(gross_return, turnover, 50.0))
+        returns_80.append(apply_turnover_cost(gross_return, turnover, 80.0))
         if is_exposed:
             exposed_returns.append(net_30)
         else:
@@ -1062,24 +1131,31 @@ def _run_variant(
         month_contrib[month] = month_contrib.get(month, 0.0) + net_30
         for symbol, weight in weights.items():
             symbol_contrib[symbol] = symbol_contrib.get(symbol, 0.0) + net_30 * weight
-
         previous_weights = weights
 
     total_30 = compound_returns_pct(returns_30)
     dd = max_drawdown_pct(returns_30)
-    dd_reduction = ((baseline_drawdown_pct - dd) / baseline_drawdown_pct * 100.0) if baseline_drawdown_pct > 0 else 0.0
+    if variant == "regime_none":
+        dd_reduction = 0.0
+    else:
+        dd_reduction = ((baseline_drawdown_pct - dd) / baseline_drawdown_pct * 100.0) if baseline_drawdown_pct > 0 else 0.0
     cash_share = float(cash_period_count / len(returns_30)) if returns_30 else 0.0
+    symbol_pos, symbol_abs = _positive_and_abs_concentration(symbol_contrib)
+    month_pos, month_abs = _positive_and_abs_concentration(month_contrib)
 
     summary = {
         "variant": variant,
         "regime_filter": {
             "filtered_rebalance_share": cash_share,
+            "cash_rebalance_period_share": cash_share,
+            "alt_exposure_rebalance_period_share": 1.0 - cash_share if returns_30 else 0.0,
             "cash_days_share": cash_share,
             "alt_exposure_days_share": 1.0 - cash_share if returns_30 else 0.0,
             "strategy_return_when_exposed": compound_returns_pct(exposed_returns),
             "strategy_return_when_cash": compound_returns_pct(cash_returns),
             "mostly_cash_strategy": cash_share > cfg.FACTOR_LAB_STAGEA2_MAX_CASH_DAYS_SHARE,
         },
+        "alt_universe_regime_diagnostics": _alt_diagnostics(latest_alt_result),
         "performance": {
             "base_30bps_total_return_pct": total_30,
             "stress_50bps_total_return_pct": compound_returns_pct(returns_50),
@@ -1097,12 +1173,12 @@ def _run_variant(
             "vs_universe_equal_weight_total_return_pct": total_30 - universe_equal_weight_pct,
         },
         "concentration": {
-            "max_single_symbol_positive_pnl_share": _concentration_share(symbol_contrib),
-            "max_single_month_positive_pnl_share": _concentration_share(month_contrib),
+            "max_single_symbol_positive_pnl_share": symbol_pos,
+            "max_single_symbol_abs_pnl_share": symbol_abs,
+            "max_single_month_positive_pnl_share": month_pos,
+            "max_single_month_abs_pnl_share": month_abs,
         },
-        "rebalance_quality": summarize_rebalance_quality(
-            len(returns_30), insufficient_universe_count, selected_counts, turnovers
-        ),
+        "rebalance_quality": summarize_rebalance_quality(len(returns_30), insufficient_universe_count, selected_counts, turnovers),
     }
     summary["decision"] = decide_stageA2_variant(summary)
     return summary
@@ -1115,17 +1191,16 @@ def run_stageA2_regime_cash_fallback_diagnostic(daily_bars: list[dict]) -> dict[
         "live_usage": "not_allowed",
         "paper_shadow_allowed": False,
         "bias_label": "survivorship_bias_not_controlled",
+        "benchmark_price_policy": "first_rebalance_open_to_last_valid_exit_open",
+        "period_share_note": "weekly_equal_length_periods_make_period_share_equal_day_share_in_round1",
         "generated_at_utc": pd.Timestamp.now(tz="UTC").isoformat(),
     }
-
     if not daily_bars:
         return {**base, "decision": "stageA2_data_unavailable", "primary_blocker": "empty_daily_bars", "variants": []}
-
     try:
         panel = load_daily_panel(daily_bars)
     except Exception as exc:
         return {**base, "decision": "stageA2_data_unavailable", "primary_blocker": f"load_panel_failed: {exc}", "variants": []}
-
     if panel.empty:
         return {**base, "decision": "stageA2_data_unavailable", "primary_blocker": "empty_daily_bars", "variants": []}
 
@@ -1133,26 +1208,23 @@ def run_stageA2_regime_cash_fallback_diagnostic(daily_bars: list[dict]) -> dict[
     rebalance_dates = eligible_monday_rebalance_dates(panel["date_utc"].unique())
     if not rebalance_dates:
         return {**base, "decision": "stageA2_data_unavailable", "primary_blocker": "insufficient_rebalance_dates", "variants": []}
-
-    valid_exit_dates = [dt + timedelta(days=7) for dt in rebalance_dates if not panel[panel["date_utc"] == dt + timedelta(days=7)].empty]
+    valid_exit_dates = [next_weekly_exit_date(dt) for dt in rebalance_dates if not panel[panel["date_utc"] == next_weekly_exit_date(dt)].empty]
     if not valid_exit_dates:
         return {**base, "decision": "stageA2_data_unavailable", "primary_blocker": "no_complete_rebalance_periods", "variants": []}
 
     start_date = rebalance_dates[0]
-    end_close_date = valid_exit_dates[-1] - timedelta(days=1)
-    btc_return = _benchmark_return_pct(panel, "BTCUSDT", start_date, end_close_date)
-    eth_return = _benchmark_return_pct(panel, "ETHUSDT", start_date, end_close_date)
-    ew_return = _compute_universe_equal_weight_benchmark_pct(panel, rebalance_dates)
+    last_exit_date = valid_exit_dates[-1]
+    btc_return = _benchmark_open_to_open_net_pct(panel, "BTCUSDT", start_date, last_exit_date)
+    eth_return = _benchmark_open_to_open_net_pct(panel, "ETHUSDT", start_date, last_exit_date)
+    ew_return = _universe_equal_weight_benchmark_pct(panel, rebalance_dates)
 
-    baseline_probe = _run_variant(panel, rebalance_dates, "regime_none", 0.0, btc_return, eth_return, ew_return)
-    baseline_drawdown = baseline_probe["performance"]["max_drawdown_pct"]
+    regime_none = _run_variant(panel, rebalance_dates, "regime_none", 0.0, btc_return, eth_return, ew_return)
+    baseline_drawdown = regime_none["performance"]["max_drawdown_pct"]
+    variants = [regime_none]
+    for variant in ("btc_ma20_cash", "alt_universe_20d_return_cash"):
+        variants.append(_run_variant(panel, rebalance_dates, variant, baseline_drawdown, btc_return, eth_return, ew_return))
 
-    variants = [
-        _run_variant(panel, rebalance_dates, variant, baseline_drawdown, btc_return, eth_return, ew_return)
-        for variant in cfg.FACTOR_LAB_STAGEA2_ALLOWED_VARIANTS
-    ]
     round1 = decide_stageA2_round1(variants)
-
     return {
         **base,
         "decision": "stageA2_round1_completed",
@@ -1162,7 +1234,6 @@ def run_stageA2_regime_cash_fallback_diagnostic(daily_bars: list[dict]) -> dict[
         "winner_variant": round1["winner_variant"],
         "can_enter_stageA2_round2": round1["can_enter_stageA2_round2"],
     }
-
 ```
 
 - [ ] **Step 4: Run backtest tests and verify pass**
@@ -1176,24 +1247,10 @@ PYTHONPATH=src uv run pytest -q tests/research/test_cross_sectional_factor_lab_s
 Expected:
 
 ```text
-6 passed
+11 passed
 ```
 
-- [ ] **Step 5: Run existing Stage A v1 tests to guard regressions**
-
-Run:
-
-```bash
-PYTHONPATH=src uv run pytest -q tests/research/test_cross_sectional_factor_lab_stageA*.py tests/scripts/test_run_factor_lab_stageA_v1_momentum.py
-```
-
-Expected:
-
-```text
-all selected tests passed
-```
-
-- [ ] **Step 6: Commit Task 4**
+- [ ] **Step 5: Commit Task 4**
 
 ```bash
 git add src/research/cross_sectional_factor_lab/stageA2.py tests/research/test_cross_sectional_factor_lab_stageA2_backtest.py
@@ -1202,7 +1259,7 @@ git commit -m "feat(factor-lab): add stage A2 regime diagnostic backtest"
 
 ---
 
-## 7. Task 5: Add Stage A2 CLI
+## 8. Task 5: Add Stage A2 CLI
 
 **Files:**
 
@@ -1231,8 +1288,6 @@ PYTHONPATH=src uv run python scripts/run_factor_lab_stageA2_regime_cash_fallback
 ```text
 summary["decision"] != "stageA2_round1_completed"
 ```
-
-Round 1 completion does not mean strategy passed; it means the diagnostic ran successfully and wrote evidence.
 
 - [ ] **Step 1: Write failing CLI tests**
 
@@ -1320,10 +1375,7 @@ from loguru import logger
 
 from research.cross_sectional_factor_lab.stageA2 import run_stageA2_regime_cash_fallback_diagnostic
 from research.cross_sectional_factor_lab.universe import filter_stage0_universe, normalize_symbol
-from scripts.run_factor_lab_stageA_v1_momentum import (
-    get_ccxt_symbol,
-    parse_binance_spot_klines_to_daily_bars,
-)
+from scripts.run_factor_lab_stageA_v1_momentum import get_ccxt_symbol, parse_binance_spot_klines_to_daily_bars
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1362,17 +1414,11 @@ def write_summary(summary: dict[str, Any], output_path: str) -> None:
 def _fetch_live_binance_daily_bars(args: argparse.Namespace) -> list[dict[str, Any]]:
     client = ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
     client.load_markets()
-
-    spot_symbols = [
-        m["symbol"]
-        for m in client.markets.values()
-        if m["active"] and m["spot"] and m.get("quote") == "USDT"
-    ]
+    spot_symbols = [m["symbol"] for m in client.markets.values() if m["active"] and m["spot"] and m.get("quote") == "USDT"]
     audit = filter_stage0_universe(spot_symbols)
     eligible = list(audit.eligible_symbols)
     if args.max_symbols:
         eligible = eligible[: args.max_symbols]
-
     since_ms = client.milliseconds() - (args.history_days + 35) * 86400 * 1000
     daily_bars: list[dict[str, Any]] = []
     for idx, normalized in enumerate(eligible):
@@ -1381,12 +1427,7 @@ def _fetch_live_binance_daily_bars(args: argparse.Namespace) -> list[dict[str, A
             logger.warning(f"Could not map symbol {normalized} to CCXT")
             continue
         logger.info(f"[{idx + 1}/{len(eligible)}] Fetching {normalized}")
-        klines = client.publicGetKlines({
-            "symbol": normalize_symbol(normalized),
-            "interval": "1d",
-            "startTime": since_ms,
-            "limit": 1000,
-        })
+        klines = client.publicGetKlines({"symbol": normalize_symbol(normalized), "interval": "1d", "startTime": since_ms, "limit": 1000})
         daily_bars.extend(parse_binance_spot_klines_to_daily_bars(normalized, klines))
         time.sleep(0.1)
     return daily_bars
@@ -1394,7 +1435,6 @@ def _fetch_live_binance_daily_bars(args: argparse.Namespace) -> list[dict[str, A
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-
     if args.offline_sample:
         try:
             fixture = json.loads(Path(args.offline_sample).read_text(encoding="utf-8"))
@@ -1402,23 +1442,19 @@ def main(argv: list[str] | None = None) -> int:
             summary = _unavailable_summary("binance_spot", f"read_fixture_failed: {exc}")
             write_summary(summary, args.output)
             return 1 if args.fail_on_decision else 0
-        daily_bars = fixture.get("daily_bars", [])
-        summary = run_stageA2_regime_cash_fallback_diagnostic(daily_bars)
+        summary = run_stageA2_regime_cash_fallback_diagnostic(fixture.get("daily_bars", []))
     else:
         if args.exchange.lower() != "binance":
             summary = _unavailable_summary(f"{args.exchange}_spot", f"unsupported_exchange: {args.exchange}")
             write_summary(summary, args.output)
             return 1 if args.fail_on_decision else 0
         try:
-            daily_bars = _fetch_live_binance_daily_bars(args)
-            summary = run_stageA2_regime_cash_fallback_diagnostic(daily_bars)
+            summary = run_stageA2_regime_cash_fallback_diagnostic(_fetch_live_binance_daily_bars(args))
         except Exception as exc:
             summary = _unavailable_summary("binance_spot", f"live_fetch_failed: {exc}")
-
     write_summary(summary, args.output)
     logger.info(f"Summary written to {args.output}")
     logger.info(f"Decision: {summary.get('decision')}")
-
     if args.fail_on_decision and summary.get("decision") != "stageA2_round1_completed":
         return 1
     return 0
@@ -1451,12 +1487,12 @@ git commit -m "feat(factor-lab): add stage A2 regime diagnostic CLI"
 
 ---
 
-## 8. Task 6: Run Stage A2 Diagnostic And Write Review
+## 9. Task 6: Run Stage A2 Diagnostic And Write Review
 
 **Files:**
 
 - Generate: `reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json`
-- Create: `docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md`
+- Create: `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md`
 
 - [ ] **Step 1: Run live Stage A2 diagnostic**
 
@@ -1479,7 +1515,7 @@ Decision: stageA2_round1_completed
 Run:
 
 ```bash
-jq '{decision, winner_variant, can_enter_stageA2_round2, live_usage, paper_shadow_allowed, bias_label}' \
+jq '{decision, winner_variant, can_enter_stageA2_round2, live_usage, paper_shadow_allowed, bias_label, benchmark_price_policy}' \
   reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json
 ```
 
@@ -1492,7 +1528,8 @@ Expected shape:
   "can_enter_stageA2_round2": false,
   "live_usage": "not_allowed",
   "paper_shadow_allowed": false,
-  "bias_label": "survivorship_bias_not_controlled"
+  "bias_label": "survivorship_bias_not_controlled",
+  "benchmark_price_policy": "first_rebalance_open_to_last_valid_exit_open"
 }
 ```
 
@@ -1506,6 +1543,8 @@ Run:
 jq '.variants[] | {
   variant,
   decision,
+  rebalances: .rebalance_quality.rebalance_count,
+  cash_period_share: .regime_filter.cash_rebalance_period_share,
   cash_days_share: .regime_filter.cash_days_share,
   total_return_30bps: .performance.base_30bps_total_return_pct,
   max_drawdown: .performance.max_drawdown_pct,
@@ -1513,15 +1552,17 @@ jq '.variants[] | {
   vs_btc: .benchmarks.vs_btc_total_return_pct,
   vs_eth: .benchmarks.vs_eth_total_return_pct,
   vs_ew: .benchmarks.vs_universe_equal_weight_total_return_pct,
-  max_month_share: .concentration.max_single_month_positive_pnl_share
+  max_month_positive_share: .concentration.max_single_month_positive_pnl_share,
+  max_month_abs_share: .concentration.max_single_month_abs_pnl_share,
+  alt_coverage: .alt_universe_regime_diagnostics.coverage_ratio
 }' reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json
 ```
 
 Expected: three JSON objects for `regime_none`, `btc_ma20_cash`, `alt_universe_20d_return_cash`.
 
-- [ ] **Step 4: Write review document from measured summary**
+- [ ] **Step 4: Generate review document from measured summary**
 
-Run this command to generate `docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md` from the measured JSON summary:
+Run:
 
 ```bash
 PYTHONPATH=src uv run python - <<'PY'
@@ -1529,18 +1570,42 @@ import json
 from pathlib import Path
 
 summary_path = Path("reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json")
-review_path = Path("docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md")
+review_path = Path("docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md")
 summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
 def pct(value):
     return f"{float(value):.2f}%"
 
+def classify_failure(summary):
+    if summary.get("decision") != "stageA2_round1_completed":
+        return "data_failure", summary.get("primary_blocker", "diagnostic_not_completed")
+    variants = summary.get("variants", [])
+    if any(v.get("decision") == "regime_filter_data_insufficient" for v in variants):
+        return "data_failure", "rebalance_count_below_stageA2_minimum"
+    if not variants:
+        return "data_failure", "missing_variant_results"
+    if not summary.get("can_enter_stageA2_round2"):
+        reasons = []
+        for item in variants:
+            if item["variant"] == "regime_none":
+                continue
+            if item["performance"]["max_drawdown_vs_v1_reduction_pct"] < 30.0:
+                reasons.append(f"{item['variant']}:drawdown_reduction_insufficient")
+            if item["benchmarks"]["vs_universe_equal_weight_total_return_pct"] <= 0:
+                reasons.append(f"{item['variant']}:no_excess_vs_universe_equal_weight")
+            if item["regime_filter"]["cash_days_share"] > 0.60:
+                reasons.append(f"{item['variant']}:mostly_cash")
+        return "structure_failure", ", ".join(reasons) if reasons else "no_promising_regime_variant"
+    return "confirmed_next_action", "enter_stageA2_round2_design_gate_only"
+
+failure_type, failure_reason = classify_failure(summary)
 rows = []
 for item in summary.get("variants", []):
     rows.append(
-        "| {variant} | {decision} | {ret} | {dd} | {dd_red} | {cash} | {vs_btc} | {vs_eth} | {vs_ew} |".format(
+        "| {variant} | {decision} | {rebalance} | {ret} | {dd} | {dd_red} | {cash} | {vs_btc} | {vs_eth} | {vs_ew} |".format(
             variant=item["variant"],
             decision=item["decision"],
+            rebalance=item["rebalance_quality"]["rebalance_count"],
             ret=pct(item["performance"]["base_30bps_total_return_pct"]),
             dd=pct(item["performance"]["max_drawdown_pct"]),
             dd_red=pct(item["performance"]["max_drawdown_vs_v1_reduction_pct"]),
@@ -1551,15 +1616,14 @@ for item in summary.get("variants", []):
         )
     )
 
-can_round2 = bool(summary.get("can_enter_stageA2_round2"))
-if can_round2:
-    next_step = "进入 Stage A2 Round 2 design；第一优先级为 3d rebalance diagnostic，但仍不得接 live 或 paper shadow。"
+if summary.get("can_enter_stageA2_round2"):
+    next_step = "允许写 Stage A2 Round 2 design；第一优先级为 3d rebalance diagnostic，但仍不得接 live 或 paper shadow。"
 else:
-    next_step = "暂停 Stage A exchange-only momentum line 的扩展；先判断是否结束该路线，或另开 B-lite 非价格数据可行性设计。"
+    next_step = "暂停 Stage A exchange-only momentum line 的扩展；先做 closure decision：1. 是否执行 A2.2 3d diagnostic；2. 是否转向 B-lite 非价格因子可行性；3. 是否关闭当前 Factor Lab 路线。"
 
 review = f"""# Cross-Sectional Factor Lab Stage A2 Regime/Cash Fallback Review
 
-**日期**：2026-06-09  
+**日期**：2026-06-10  
 **阶段**：Stage A2 Round 1  
 **范围**：regime_cash_fallback_only  
 **输入报告**：reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json  
@@ -1570,23 +1634,31 @@ review = f"""# Cross-Sectional Factor Lab Stage A2 Regime/Cash Fallback Review
 - `decision`: `{summary.get('decision')}`
 - `winner_variant`: `{summary.get('winner_variant')}`
 - `can_enter_stageA2_round2`: `{summary.get('can_enter_stageA2_round2')}`
+- `failure_type`: `{failure_type}`
+- `failure_reason`: `{failure_reason}`
 
 ## 2. 三组变体结果
 
-| variant | decision | 30bps return | max DD | DD reduction | cash days | vs BTC | vs ETH | vs EW |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| variant | decision | rebalances | 30bps return | max DD | DD reduction | cash days | vs BTC | vs ETH | vs EW |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 {chr(10).join(rows)}
 
-## 3. 解释
+## 3. 失效类型与归因
 
-本轮只检验 `BTC MA20 -> cash` 和 `alt universe 20d return -> cash` 是否能降低 Stage A v1 的 alt beta 暴露。若变体只是依靠长时间空仓降低回撤，但仍未显著跑赢 BTC、ETH 或 universe equal-weight，则只能标记为风险降低，不可解释为进攻型 alpha。
+- `data_failure`: 数据不足、有效 rebalance 数不足、诊断未完成。
+- `density_failure`: 本轮不适用；Stage A2 不是事件密度研究。
+- `structure_failure`: regime filter 未能同时降低回撤、保持相对 benchmark 表现、避免 mostly-cash。
+- `execution_cost_failure`: 若 30/50/80 bps 成本场景下改善只在低成本成立，应归入该类。
+- `confirmed_next_action`: 只有 `can_enter_stageA2_round2 = true` 时成立。
 
-## 4. 风险边界
+本次归类：`{failure_type}`，原因：`{failure_reason}`。
 
+## 4. 口径说明
+
+- benchmark 使用 `{summary.get('benchmark_price_policy')}`。
+- Stage A2 Round 1 是 weekly equal-length period，因此 `cash_rebalance_period_share` 与 `cash_days_share` 等价。
 - 当前 universe 仍是 current tradable universe，存在 survivorship bias。
-- 结果不能进入实盘。
-- 结果不能作为 paper shadow 的准入依据。
-- 如果 cash_days_share 超过 60%，即使回撤改善，也不能视为进攻型 alpha。
+- 结果不能进入实盘，不能作为 paper shadow 准入依据。
 
 ## 5. 下一步
 
@@ -1602,23 +1674,19 @@ PY
 Expected:
 
 ```text
-Written: docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md
+Written: docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md
 ```
 
 - [ ] **Step 5: Commit Task 6**
 
 ```bash
-git add reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md
+git add reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-regime-cash-fallback-review_CN.md
 git commit -m "research(factor-lab): record stage A2 regime diagnostic"
 ```
 
 ---
 
-## 9. Task 7: Full Verification
-
-**Files:**
-
-- No new source files beyond prior tasks.
+## 10. Task 7: Full Verification
 
 - [ ] **Step 1: Run focused Stage A2 tests**
 
@@ -1701,23 +1769,26 @@ Expected:
 
 ---
 
-## 10. Completion Criteria
+## 11. Completion Criteria
 
-This plan is complete only when all of the following are true:
+This plan is complete only when all are true:
 
 ```text
 Stage A2 config constants are in configs/base.py.
 Regime functions use only t-1 and earlier data.
+Alt universe regime has coverage gate and min valid symbol gate.
 Unknown variants raise ValueError.
 Cash periods earn zero gross return and still pay transition turnover cost.
-Summary includes all required variant-level fields.
-Top-level summary includes winner_variant and can_enter_stageA2_round2.
+Benchmark uses open-to-open price policy.
+regime_none drawdown reduction is exactly 0.0.
+Variant decision includes rebalance_count >= 50 gate.
+Summary includes period shares and day shares.
+Summary includes positive and abs concentration shares.
+Summary includes failure taxonomy in review.
 CLI writes reports/cross_sectional_factor_lab/stageA2_regime_cash_fallback_summary.json.
-Review document records measured conclusions.
 Focused tests pass.
 Stage A regression tests pass.
 Ruff passes on changed files.
 Full pytest passes.
 No live or paper trading path is enabled.
 ```
-
