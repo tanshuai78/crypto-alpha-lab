@@ -1,0 +1,164 @@
+{
+  "run_mode": "stageA2_regime_cash_fallback_diagnostic",
+  "scope": "regime_cash_fallback_only",
+  "live_usage": "not_allowed",
+  "paper_shadow_allowed": false,
+  "bias_label": "survivorship_bias_not_controlled",
+  "benchmark_price_policy": "first_rebalance_open_to_last_valid_exit_open",
+  "period_share_note": "weekly_equal_length_periods_make_period_share_equal_day_share_in_round1",
+  "generated_at_utc": "2026-06-09T16:25:50.278111+00:00",
+  "decision": "stageA2_round1_completed",
+  "primary_blocker": null,
+  "ffill_count": 0,
+  "variants": [
+    {
+      "variant": "regime_none",
+      "regime_filter": {
+        "filtered_rebalance_share": 0.0,
+        "cash_rebalance_period_share": 0.0,
+        "alt_exposure_rebalance_period_share": 1.0,
+        "cash_days_share": 0.0,
+        "alt_exposure_days_share": 1.0,
+        "strategy_return_when_exposed": -84.05365262614777,
+        "strategy_return_when_cash": 0.0,
+        "mostly_cash_strategy": false
+      },
+      "alt_universe_regime_diagnostics": {
+        "eligible_symbols_count": 0,
+        "symbols_with_valid_20d_return": 0,
+        "coverage_ratio": 0.0,
+        "included_btc_eth": false
+      },
+      "performance": {
+        "base_30bps_total_return_pct": -84.05365262614777,
+        "stress_50bps_total_return_pct": -84.85589739474571,
+        "crash_80bps_total_return_pct": -85.98534431004461,
+        "max_drawdown_pct": 84.44056014709041,
+        "max_drawdown_vs_v1_reduction_pct": 0.0,
+        "turnover_median": 0.6
+      },
+      "benchmarks": {
+        "btc_buy_and_hold_net_pct": -39.67431453652115,
+        "eth_buy_and_hold_net_pct": -57.60079386929825,
+        "universe_equal_weight_pct": -84.60593404980668,
+        "vs_btc_total_return_pct": -44.379338089626614,
+        "vs_eth_total_return_pct": -26.452858756849515,
+        "vs_universe_equal_weight_total_return_pct": 0.5522814236589113
+      },
+      "concentration": {
+        "max_single_symbol_positive_pnl_share": 0.15742800122236236,
+        "max_single_symbol_abs_pnl_share": 0.03543234849433916,
+        "max_single_month_positive_pnl_share": 0.405195291783922,
+        "max_single_month_abs_pnl_share": 0.1441332202176792
+      },
+      "rebalance_quality": {
+        "rebalance_count": 77,
+        "insufficient_universe_count": 0,
+        "insufficient_universe_ratio": 0.0,
+        "median_selected_symbol_count": 10.0,
+        "median_turnover": 0.6
+      },
+      "decision": "regime_filter_failed"
+    },
+    {
+      "variant": "btc_ma20_cash",
+      "regime_filter": {
+        "filtered_rebalance_share": 0.5324675324675324,
+        "cash_rebalance_period_share": 0.5324675324675324,
+        "alt_exposure_rebalance_period_share": 0.4675324675324676,
+        "cash_days_share": 0.5324675324675324,
+        "alt_exposure_days_share": 0.4675324675324676,
+        "strategy_return_when_exposed": -60.194282576785184,
+        "strategy_return_when_cash": -2.226527873743378,
+        "mostly_cash_strategy": false
+      },
+      "alt_universe_regime_diagnostics": {
+        "eligible_symbols_count": 0,
+        "symbols_with_valid_20d_return": 0,
+        "coverage_ratio": 0.0,
+        "included_btc_eth": false
+      },
+      "performance": {
+        "base_30bps_total_return_pct": -61.08056797055663,
+        "stress_50bps_total_return_pct": -62.762771645428494,
+        "crash_80bps_total_return_pct": -65.15348013743781,
+        "max_drawdown_pct": 64.76823967624267,
+        "max_drawdown_vs_v1_reduction_pct": 23.297240611123055,
+        "turnover_median": 0.6
+      },
+      "benchmarks": {
+        "btc_buy_and_hold_net_pct": -39.67431453652115,
+        "eth_buy_and_hold_net_pct": -57.60079386929825,
+        "universe_equal_weight_pct": -84.60593404980668,
+        "vs_btc_total_return_pct": -21.406253434035477,
+        "vs_eth_total_return_pct": -3.4797741012583785,
+        "vs_universe_equal_weight_total_return_pct": 23.52536607925005
+      },
+      "concentration": {
+        "max_single_symbol_positive_pnl_share": 0.14455291350186203,
+        "max_single_symbol_abs_pnl_share": 0.05264024233440874,
+        "max_single_month_positive_pnl_share": 0.5273546370898355,
+        "max_single_month_abs_pnl_share": 0.2033268968602513
+      },
+      "rebalance_quality": {
+        "rebalance_count": 77,
+        "insufficient_universe_count": 0,
+        "insufficient_universe_ratio": 0.0,
+        "median_selected_symbol_count": 10.0,
+        "median_turnover": 0.6
+      },
+      "decision": "regime_filter_failed"
+    },
+    {
+      "variant": "alt_universe_20d_return_cash",
+      "regime_filter": {
+        "filtered_rebalance_share": 0.6103896103896104,
+        "cash_rebalance_period_share": 0.6103896103896104,
+        "alt_exposure_rebalance_period_share": 0.38961038961038963,
+        "cash_days_share": 0.6103896103896104,
+        "alt_exposure_days_share": 0.38961038961038963,
+        "strategy_return_when_exposed": -52.69907633987321,
+        "strategy_return_when_cash": -1.7852240000065578,
+        "mostly_cash_strategy": true
+      },
+      "alt_universe_regime_diagnostics": {
+        "eligible_symbols_count": 16,
+        "symbols_with_valid_20d_return": 16,
+        "coverage_ratio": 1.0,
+        "included_btc_eth": true
+      },
+      "performance": {
+        "base_30bps_total_return_pct": -53.54350378127859,
+        "stress_50bps_total_return_pct": -55.18435688132086,
+        "crash_80bps_total_return_pct": -57.540339082455105,
+        "max_drawdown_pct": 57.478621393418194,
+        "max_drawdown_vs_v1_reduction_pct": 31.930080410061386,
+        "turnover_median": 0.4
+      },
+      "benchmarks": {
+        "btc_buy_and_hold_net_pct": -39.67431453652115,
+        "eth_buy_and_hold_net_pct": -57.60079386929825,
+        "universe_equal_weight_pct": -84.60593404980668,
+        "vs_btc_total_return_pct": -13.869189244757436,
+        "vs_eth_total_return_pct": 4.057290088019663,
+        "vs_universe_equal_weight_total_return_pct": 31.06243026852809
+      },
+      "concentration": {
+        "max_single_symbol_positive_pnl_share": 0.18111916823050644,
+        "max_single_symbol_abs_pnl_share": 0.05262441221529779,
+        "max_single_month_positive_pnl_share": 0.6555370580974856,
+        "max_single_month_abs_pnl_share": 0.2552590035490469
+      },
+      "rebalance_quality": {
+        "rebalance_count": 77,
+        "insufficient_universe_count": 0,
+        "insufficient_universe_ratio": 0.0,
+        "median_selected_symbol_count": 10.0,
+        "median_turnover": 0.4
+      },
+      "decision": "regime_filter_reduces_damage_but_no_alpha"
+    }
+  ],
+  "winner_variant": null,
+  "can_enter_stageA2_round2": false
+}
