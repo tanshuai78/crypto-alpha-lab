@@ -5,15 +5,12 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
 import ccxt
 from loguru import logger
 
 from research.cross_sectional_factor_lab.backtest import run_stageA2_cmom_diagnostic
-from research.cross_sectional_factor_lab.universe import filter_stage0_universe, normalize_symbol
+from research.cross_sectional_factor_lab.universe import filter_stage0_universe
 from scripts.run_factor_lab_stageA_v1_momentum import (
     get_ccxt_symbol,
     parse_binance_spot_klines_to_daily_bars,

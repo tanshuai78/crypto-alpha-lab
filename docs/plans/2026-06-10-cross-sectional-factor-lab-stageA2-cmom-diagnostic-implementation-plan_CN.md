@@ -97,6 +97,14 @@ def test_factor_lab_stageA2_cmom_config_exists() -> None:
     assert cfg.FACTOR_LAB_STAGEA2_CMOM_SKIP_RECENT_DAYS == 1
     assert cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_RETURN_DIFF_PCT == 10.0
     assert cfg.FACTOR_LAB_STAGEA2_CMOM_MAX_BTC_UNDERPERFORMANCE_PCT == 10.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MAX_ETH_UNDERPERFORMANCE_PCT == 10.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_REBALANCE_COUNT == cfg.FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_EW_IMPROVEMENT_DIFF_PCT == 5.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_DRAWDOWN_WORSENING_PCT == 5.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_TOP5_UNDERPERFORMANCE_PCT == 10.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_MONTH_SHARE == 0.50
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_PROCEED_TOTAL_RETURN_PCT == -50.0
+    assert cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_PROCEED_STRESS_50BPS_RETURN_PCT == -60.0
 
 
 def test_factor_lab_stageA2_cmom_keeps_live_disabled() -> None:
@@ -122,6 +130,14 @@ FACTOR_LAB_STAGEA2_CMOM_LOOKBACK_DAYS = 14
 FACTOR_LAB_STAGEA2_CMOM_SKIP_RECENT_DAYS = 1
 FACTOR_LAB_STAGEA2_CMOM_MIN_RETURN_DIFF_PCT = 10.0
 FACTOR_LAB_STAGEA2_CMOM_MAX_BTC_UNDERPERFORMANCE_PCT = 10.0
+FACTOR_LAB_STAGEA2_CMOM_MAX_ETH_UNDERPERFORMANCE_PCT = 10.0
+FACTOR_LAB_STAGEA2_CMOM_MIN_REBALANCE_COUNT = FACTOR_LAB_STAGEA_MIN_REBALANCE_COUNT
+FACTOR_LAB_STAGEA2_CMOM_MIN_EW_IMPROVEMENT_DIFF_PCT = 5.0
+FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_DRAWDOWN_WORSENING_PCT = 5.0
+FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_TOP5_UNDERPERFORMANCE_PCT = 10.0
+FACTOR_LAB_STAGEA2_CMOM_MAX_3D_DIAGNOSTIC_MONTH_SHARE = 0.50
+FACTOR_LAB_STAGEA2_CMOM_MIN_PROCEED_TOTAL_RETURN_PCT = -50.0
+FACTOR_LAB_STAGEA2_CMOM_MIN_PROCEED_STRESS_50BPS_RETURN_PCT = -60.0
 FACTOR_LAB_STAGEA2_CMOM_LIVE_SAFE = False
 FACTOR_LAB_STAGEA2_CMOM_PAPER_SHADOW_ALLOWED = False
 FACTOR_LAB_STAGEA2_CMOM_VARIANTS = (
@@ -225,6 +241,40 @@ def test_cmom_14d_requires_complete_absolute_daily_lookback() -> None:
     assert result is None
 
 
+def test_cmom_missing_t_minus_15_returns_none() -> None:
+    start = date(2026, 1, 1)
+    rows = _rows("AAAUSDT", start, [100.0] * 17)
+    rows = [row for row in rows if row["date_utc"] != pd.Timestamp("2026-01-02")]
+    panel = pd.DataFrame(rows)
+
+    result = compute_cmom_14d_skip_1d(panel, "AAAUSDT", pd.Timestamp("2026-01-17"))
+
+    assert result is None
+
+
+def test_cmom_missing_t_minus_1_returns_none() -> None:
+    start = date(2026, 1, 1)
+    rows = _rows("AAAUSDT", start, [100.0] * 17)
+    rows = [row for row in rows if row["date_utc"] != pd.Timestamp("2026-01-16")]
+    panel = pd.DataFrame(rows)
+
+    result = compute_cmom_14d_skip_1d(panel, "AAAUSDT", pd.Timestamp("2026-01-17"))
+
+    assert result is None
+
+
+def test_rebalance_factor_frame_unsupported_factor_name_raises() -> None:
+    start = date(2026, 1, 1)
+    panel = pd.DataFrame(_rows("AAAUSDT", start, [100.0] * 40))
+
+    try:
+        compute_rebalance_factor_frame(panel, pd.Timestamp("2026-02-05"), factor_name="bad_factor")
+    except ValueError as exc:
+        assert "unsupported factor_name" in str(exc)
+    else:
+        raise AssertionError("expected unsupported factor_name to raise ValueError")
+
+
 def test_rebalance_factor_frame_can_compute_cmom_variant() -> None:
     start = date(2026, 1, 1)
     # Need 31+ days so existing 30d liquidity/momentum infrastructure can coexist.
@@ -319,6 +369,8 @@ git commit -m "feat(factor-lab): add 14d CMOM factor diagnostic"
 - Modify: `src/research/cross_sectional_factor_lab/backtest.py`
 - Test: `tests/research/test_cross_sectional_factor_lab_stageA2_cmom_backtest.py`
 
+**Implementation constraint:** `src/research/cross_sectional_factor_lab/portfolio.py::build_equal_weight_targets()` is frozen and sorts by `momentum_30d_skip_1d`. Do not modify this function for A2.2. Inside the new A2.2 backtest helper, rename the active factor column to `momentum_30d_skip_1d` before calling `build_equal_weight_targets()`.
+
 **Step 1: Write failing reusable backtest tests**
 
 Create `tests/research/test_cross_sectional_factor_lab_stageA2_cmom_backtest.py`:
@@ -331,11 +383,13 @@ from datetime import date, timedelta
 from research.cross_sectional_factor_lab.backtest import run_stageA2_cmom_diagnostic
 
 
-def _synthetic_panel(symbols: int = 12, days: int = 100) -> list[dict]:
+def _synthetic_panel(symbols: int = 12, days: int = 430, include_benchmarks: bool = True) -> list[dict]:
     rows = []
-    start = date(2026, 1, 1)
-    for s in range(symbols):
-        symbol = f"S{s:02d}USDT"
+    start = date(2025, 1, 1)
+    names = [f"ALT{s:02d}USDT" for s in range(symbols)]
+    if include_benchmarks:
+        names = ["BTCUSDT", "ETHUSDT"] + names
+    for s, symbol in enumerate(names):
         for i in range(days):
             dt = start + timedelta(days=i)
             price = 100.0 + i + s
@@ -373,14 +427,36 @@ def test_run_stageA2_cmom_diagnostic_empty_rows_returns_data_unavailable() -> No
     assert summary["paper_shadow_allowed"] is False
 
 
-def test_stageA2_cmom_uses_same_benchmark_for_both_variants() -> None:
+def test_stageA2_cmom_data_unavailable_when_btc_eth_missing() -> None:
+    summary = run_stageA2_cmom_diagnostic(_synthetic_panel(include_benchmarks=False))
+
+    assert summary["decision"] == "stageA2_cmom_data_unavailable"
+    assert summary["primary_blocker"] == "missing_btc_or_eth_benchmark"
+
+
+def test_stageA2_cmom_data_unavailable_when_rebalance_count_below_gate() -> None:
+    summary = run_stageA2_cmom_diagnostic(_synthetic_panel(days=100))
+
+    assert summary["decision"] == "stageA2_cmom_data_unavailable"
+    assert summary["primary_blocker"] == "insufficient_rebalance_count"
+
+
+def test_stageA2_cmom_uses_same_btc_eth_base_benchmarks_for_both_variants() -> None:
     rows = _synthetic_panel()
     summary = run_stageA2_cmom_diagnostic(rows)
 
     mom = summary["factor_variants"]["momentum_30d_skip_1d"]
     cmom = summary["factor_variants"]["cmom_14d_skip_1d"]
 
-    assert mom["benchmarks"] == cmom["benchmarks"]
+    base_keys = [
+        "btc_buy_and_hold_net_pct",
+        "eth_buy_and_hold_net_pct",
+        "universe_equal_weight_pct",
+    ]
+    for key in base_keys:
+        assert mom["benchmarks"][key] == cmom["benchmarks"][key]
+
+    assert mom["benchmarks"]["vs_btc_total_return_pct"] != cmom["benchmarks"]["vs_btc_total_return_pct"]
 
 
 def test_stageA2_cmom_top5_is_diagnostic_only() -> None:
@@ -389,6 +465,29 @@ def test_stageA2_cmom_top5_is_diagnostic_only() -> None:
     cmom = summary["factor_variants"]["cmom_14d_skip_1d"]
     assert "diagnostic_top5_performance" in cmom
     assert summary["decision"] != "strategy_confirmed"
+
+
+def test_stageA2_cmom_reports_abs_symbol_and_month_concentration() -> None:
+    summary = run_stageA2_cmom_diagnostic(_synthetic_panel())
+
+    cmom = summary["factor_variants"]["cmom_14d_skip_1d"]
+    assert "max_single_symbol_abs_pnl_share" in cmom["concentration"]
+    assert "max_single_month_abs_pnl_share" in cmom["concentration"]
+
+
+def test_stageA2_cmom_variant_does_not_raise_portfolio_sort_keyerror() -> None:
+    summary = run_stageA2_cmom_diagnostic(_synthetic_panel())
+
+    assert summary["decision"] != "stageA2_cmom_data_unavailable"
+    assert "cmom_14d_skip_1d" in summary["factor_variants"]
+
+
+def test_stageA2_cmom_concentration_handles_negative_total_pnl() -> None:
+    summary = run_stageA2_cmom_diagnostic(_synthetic_panel())
+
+    for variant in summary["factor_variants"].values():
+        assert 0.0 <= variant["concentration"]["max_single_symbol_abs_pnl_share"] <= 1.0
+        assert 0.0 <= variant["concentration"]["max_single_month_abs_pnl_share"] <= 1.0
 ```
 
 **Step 2: Run test to verify it fails**
@@ -414,8 +513,9 @@ It should reuse Stage A v1 logic but call:
 
 ```python
 compute_rebalance_factor_frame(panel, t_i, factor_name=factor_name)
-build_equal_weight_targets(factors, top_n=10)
-build_equal_weight_targets(factors, top_n=5)
+ranking_factors = factors.rename(columns={factor_name: "momentum_30d_skip_1d"}) if factor_name != "momentum_30d_skip_1d" else factors
+build_equal_weight_targets(ranking_factors, top_n=10)
+build_equal_weight_targets(ranking_factors, top_n=5)
 universe_equal_weight_targets(factors)
 ```
 
@@ -440,7 +540,13 @@ universe_equal_weight_targets(factors)
     "vs_universe_equal_weight_total_return_pct": ...
   },
   "concentration": {...},
-  "rebalance_quality": {...},
+  "rebalance_quality": {
+    "rebalance_count": ...,
+    "insufficient_universe_count": ...,
+    "insufficient_universe_ratio": ...,
+    "median_selected_symbol_count": ...,
+    "turnover_median": ...
+  },
   "diagnostic_top5_performance": {...}
 }
 ```
@@ -455,6 +561,8 @@ def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
 It should:
 
 - return `stageA2_cmom_data_unavailable` for empty/load failure/insufficient rebalance dates;
+- return `stageA2_cmom_data_unavailable` with `primary_blocker = missing_btc_or_eth_benchmark` if either `BTCUSDT` or `ETHUSDT` is missing;
+- return `stageA2_cmom_data_unavailable` with `primary_blocker = insufficient_rebalance_count` if either core variant has fewer than `FACTOR_LAB_STAGEA2_CMOM_MIN_REBALANCE_COUNT` rebalances;
 - load and forward-fill panel exactly like Stage A v1;
 - run variants `momentum_30d_skip_1d` and `cmom_14d_skip_1d`;
 - call summary decision helper from Task 4;
@@ -467,7 +575,7 @@ It should:
 "bias_label": "survivorship_bias_not_controlled"
 ```
 
-4. Preserve `run_stageA_v1_backtest` behavior. Do not rewrite it unless extracting shared helpers is necessary and tested.
+4. Preserve `run_stageA_v1_backtest` behavior and code path. Do not edit its internal loop for A2.2. Add `_run_factor_variant_backtest()` and call it only from `run_stageA2_cmom_diagnostic()` so Stage A v1 archival conclusions remain stable.
 
 **Step 4: Run focused tests**
 
@@ -505,44 +613,76 @@ from __future__ import annotations
 from research.cross_sectional_factor_lab.summary import decide_stageA2_cmom
 
 
-def _variant(return_pct: float, dd: float, vs_btc: float, vs_ew: float, top5_return: float, month_share: float = 0.20) -> dict:
+def _variant(
+    return_pct: float,
+    dd: float,
+    vs_btc: float,
+    vs_eth: float,
+    vs_ew: float,
+    top5_return: float,
+    stress_return: float | None = None,
+    month_share: float = 0.20,
+    abs_month_share: float = 0.20,
+    rebalance_count: int = 77,
+) -> dict:
     return {
         "performance": {
             "base_30bps_total_return_pct": return_pct,
+            "stress_50bps_total_return_pct": stress_return if stress_return is not None else return_pct - 2.0,
             "max_drawdown_pct": dd,
         },
         "benchmarks": {
             "vs_btc_total_return_pct": vs_btc,
+            "vs_eth_total_return_pct": vs_eth,
             "vs_universe_equal_weight_total_return_pct": vs_ew,
         },
         "diagnostic_top5_performance": {
             "strategy_total_return_pct": top5_return,
         },
         "concentration": {
+            "max_single_symbol_positive_pnl_share": 0.20,
+            "max_single_symbol_abs_pnl_share": 0.20,
             "max_single_month_positive_pnl_share": month_share,
+            "max_single_month_abs_pnl_share": abs_month_share,
+        },
+        "rebalance_quality": {
+            "rebalance_count": rebalance_count,
         },
     }
 
 
-def test_stageA2_cmom_proceeds_to_regime_gated_when_all_gates_pass() -> None:
+def test_stageA2_cmom_proceeds_to_regime_gated_diagnostic_when_all_gates_pass() -> None:
     summary = {
         "factor_variants": {
-            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, 2.0, -45.0),
-            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, 12.0, -26.0),
+            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, -18.0, 2.0, -45.0),
+            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, -6.0, 12.0, -26.0),
         }
     }
 
     decision = decide_stageA2_cmom(summary)
 
-    assert decision["next_action"] == "proceed_to_regime_gated_cmom_design"
+    assert decision["next_action"] == "proceed_to_regime_gated_cmom_diagnostic_design"
     assert decision["primary_comparison"]["cmom_beats_30d_after_30bps"] is True
 
 
-def test_stageA2_cmom_runs_3d_failure_diagnostic_when_cmom_improves_but_path_still_bad() -> None:
+def test_stageA2_cmom_does_not_proceed_when_eth_gate_fails() -> None:
     summary = {
         "factor_variants": {
-            "momentum_30d_skip_1d": _variant(-84.0, 84.0, -44.0, 0.5, -90.0),
-            "cmom_14d_skip_1d": _variant(-65.0, 80.0, -25.0, 8.0, -66.0),
+            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, -18.0, 2.0, -45.0),
+            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, -20.0, 12.0, -26.0),
+        }
+    }
+
+    decision = decide_stageA2_cmom(summary)
+
+    assert decision["next_action"] != "proceed_to_regime_gated_cmom_diagnostic_design"
+
+
+def test_stageA2_cmom_runs_3d_failure_diagnostic_only_when_improvement_is_material() -> None:
+    summary = {
+        "factor_variants": {
+            "momentum_30d_skip_1d": _variant(-84.0, 84.0, -44.0, -26.0, 0.5, -90.0),
+            "cmom_14d_skip_1d": _variant(-65.0, 80.0, -25.0, -12.0, 8.0, -70.0, month_share=0.40),
         }
     }
 
@@ -551,11 +691,24 @@ def test_stageA2_cmom_runs_3d_failure_diagnostic_when_cmom_improves_but_path_sti
     assert decision["next_action"] == "run_3d_failure_diagnostic"
 
 
+def test_stageA2_cmom_stops_when_improvement_is_only_small_damage_reduction() -> None:
+    summary = {
+        "factor_variants": {
+            "momentum_30d_skip_1d": _variant(-84.0, 84.0, -44.0, -26.0, 0.5, -90.0),
+            "cmom_14d_skip_1d": _variant(-73.0, 85.0, -33.0, -20.0, 2.0, -88.0, month_share=0.60),
+        }
+    }
+
+    decision = decide_stageA2_cmom(summary)
+
+    assert decision["next_action"] == "stop_price_only_momentum"
+
+
 def test_stageA2_cmom_stops_price_only_momentum_when_cmom_does_not_improve() -> None:
     summary = {
         "factor_variants": {
-            "momentum_30d_skip_1d": _variant(-84.0, 84.0, -44.0, 0.5, -90.0),
-            "cmom_14d_skip_1d": _variant(-82.0, 86.0, -42.0, 1.0, -88.0),
+            "momentum_30d_skip_1d": _variant(-84.0, 84.0, -44.0, -26.0, 0.5, -90.0),
+            "cmom_14d_skip_1d": _variant(-82.0, 86.0, -42.0, -24.0, 1.0, -88.0),
         }
     }
 
@@ -567,14 +720,41 @@ def test_stageA2_cmom_stops_price_only_momentum_when_cmom_does_not_improve() -> 
 def test_stageA2_cmom_does_not_promote_when_positive_month_concentration_too_high() -> None:
     summary = {
         "factor_variants": {
-            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, 2.0, -45.0),
-            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, 12.0, -26.0, month_share=0.80),
+            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, -18.0, 2.0, -45.0),
+            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, -6.0, 12.0, -26.0, month_share=0.80),
         }
     }
 
     decision = decide_stageA2_cmom(summary)
 
-    assert decision["next_action"] != "proceed_to_regime_gated_cmom_design"
+    assert decision["next_action"] != "proceed_to_regime_gated_cmom_diagnostic_design"
+
+
+def test_stageA2_cmom_does_not_promote_when_50bps_stress_fails() -> None:
+    summary = {
+        "factor_variants": {
+            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, -18.0, 2.0, -45.0),
+            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, -6.0, 12.0, -26.0, stress_return=-70.0),
+        }
+    }
+
+    decision = decide_stageA2_cmom(summary)
+
+    assert decision["next_action"] != "proceed_to_regime_gated_cmom_diagnostic_design"
+
+
+def test_stageA2_cmom_data_unavailable_when_rebalance_count_below_gate() -> None:
+    summary = {
+        "factor_variants": {
+            "momentum_30d_skip_1d": _variant(-40.0, 50.0, -20.0, -18.0, 2.0, -45.0, rebalance_count=10),
+            "cmom_14d_skip_1d": _variant(-25.0, 45.0, -8.0, -6.0, 12.0, -26.0, rebalance_count=10),
+        }
+    }
+
+    decision = decide_stageA2_cmom(summary)
+
+    assert decision["decision"] == "stageA2_cmom_data_unavailable"
+    assert decision["primary_blocker"] == "insufficient_rebalance_count"
 ```
 
 **Step 2: Run test to verify it fails**
@@ -603,15 +783,18 @@ cmom_vs_30d_return_diff_pct = cmom_return - mom_return
 cmom_vs_30d_drawdown_diff_pct = cmom_dd - mom_dd
 cmom_vs_30d_vs_universe_ew_diff_pct = cmom_vs_ew - mom_vs_ew
 cmom_beats_30d_after_30bps = return_diff >= cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_RETURN_DIFF_PCT
-cmom_top5_not_worse_than_top10 = cmom_top5_return >= cmom_return - 5.0
+cmom_top5_not_worse_than_top10 = cmom_top5_return >= cmom_return - 10.0
+cmom_material_ew_improvement = (cmom_vs_ew - mom_vs_ew) >= cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_EW_IMPROVEMENT_DIFF_PCT
 ```
 
 Decision:
 
 ```python
-if all hard gates pass:
-    next_action = "proceed_to_regime_gated_cmom_design"
-elif cmom_beats_30d_after_30bps and cmom_vs_ew > mom_vs_ew:
+if any core variant rebalance_count < cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_REBALANCE_COUNT:
+    return {"decision": "stageA2_cmom_data_unavailable", "primary_blocker": "insufficient_rebalance_count"}
+elif all hard gates pass:
+    next_action = "proceed_to_regime_gated_cmom_diagnostic_design"
+elif all stricter 3d diagnostic gates pass:
     next_action = "run_3d_failure_diagnostic"
 else:
     next_action = "stop_price_only_momentum"
@@ -624,8 +807,21 @@ return_diff >= 10 pct points
 cmom_dd <= mom_dd
 cmom_vs_ew > 0
 cmom_vs_btc >= -10
+cmom_vs_eth >= -10
+cmom_base_30bps_total_return_pct > -50
+cmom_stress_50bps_total_return_pct > -60
 cmom_top5_not_worse_than_top10 == true
 cmom_month_share <= 0.30
+```
+
+Stricter 3d failure diagnostic gates:
+
+```text
+cmom_return - mom_return >= 10 pct points
+cmom_vs_ew - mom_vs_ew >= 5 pct points
+cmom_max_drawdown <= mom_max_drawdown + 5 pct points
+cmom_top5_return >= cmom_top10_return - 10 pct points
+cmom_month_share <= 0.50
 ```
 
 Return:
@@ -861,8 +1057,8 @@ Create `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnost
 
 ## 2. 30d momentum vs 14d CMOM
 
-| factor | 30bps return | max DD | vs BTC | vs ETH | vs EW | top5 return | max month +PnL share |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| factor | 30bps return | max DD | vs BTC | vs ETH | vs EW | top5 return | max month +PnL share | max month abs PnL share |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 
 ## 3. 诊断解释
 
@@ -870,15 +1066,21 @@ Explain whether CMOM improved ranking quality or not.
 
 ## 4. 失效类型与归因
 
-Use one of:
-- data_failure
-- structure_failure
-- execution_cost_failure
-- diagnostic_improvement_without_strategy_confirmation
+Use exactly one primary failure type:
+- `data_failure`: daily bars/panel/API load failed, or BTC/ETH benchmark missing.
+- `density_failure`: data loads, but rebalance_count < 50 or eligible universe is too sparse.
+- `structure_failure`: diagnostic completed, but CMOM has no sufficient excess return or no drawdown/path improvement.
+- `execution_cost_failure`: 30bps looks acceptable, but 50/80bps stress removes the apparent edge.
+- `confirmed_next_action`: diagnostic gates pass and the next design action is explicitly unlocked.
 
 ## 5. 下一步
 
 Use summary.next_action exactly.
+
+Also state evidence boundaries:
+- OHLCV is a price proxy, not guaranteed executable quotes.
+- Fixed 30/50/80 bps costs are stress assumptions, not orderbook-depth simulation.
+- This result cannot enable live trading or paper shadow.
 ```
 
 **Step 4: Commit outputs**
@@ -969,7 +1171,7 @@ Do not claim strategy validity. This is diagnostic only.
 
 After implementation, interpret results as follows:
 
-### If `next_action = proceed_to_regime_gated_cmom_design`
+### If `next_action = proceed_to_regime_gated_cmom_diagnostic_design`
 
 Meaning:
 

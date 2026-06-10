@@ -133,7 +133,7 @@ A2.2 summary 至少输出：
     "cmom_beats_30d_after_30bps": false,
     "cmom_top5_not_worse_than_top10": false
   },
-  "next_action": "stop_price_only_momentum|proceed_to_regime_gated_cmom_design|run_3d_failure_diagnostic"
+  "next_action": "stop_price_only_momentum|proceed_to_regime_gated_cmom_diagnostic_design|run_3d_failure_diagnostic"
 }
 ```
 
@@ -161,11 +161,34 @@ A2.2 summary 至少输出：
   },
   "rebalance_quality": {
     "rebalance_count": 0,
+    "insufficient_universe_count": 0,
     "insufficient_universe_ratio": 0.0,
-    "median_selected_symbol_count": 0
+    "median_selected_symbol_count": 0,
+    "turnover_median": 0.0
   }
 }
 ```
+
+---
+
+## 4.1 Portfolio 排序兼容性
+
+现有 `build_equal_weight_targets()` 为 Stage A v1 服务，内部按 `momentum_30d_skip_1d` 排序。A2.2 不应修改该冻结函数，以免污染 Stage A v1 归档结论。实现 CMOM 变体时，应在 A2.2 backtest helper 内部将当前 factor 列临时重命名为 `momentum_30d_skip_1d` 后再调用 portfolio builder。
+
+---
+
+## 5.1 数据不可用条件
+
+A2.2 不能在 benchmark 不完整或样本不足时输出结构性结论。必须返回 `stageA2_cmom_data_unavailable` 的情况包括：
+
+```text
+BTCUSDT 或 ETHUSDT benchmark 缺失；
+任一核心 variant 的 rebalance_count < 50；
+可交易 universe 不足以形成 top10；
+输入 daily bars 为空或 panel 加载失败。
+```
+
+报告归因必须区分：`data_failure`、`density_failure`、`structure_failure`、`execution_cost_failure`、`confirmed_next_action`。
 
 ---
 
@@ -173,7 +196,7 @@ A2.2 summary 至少输出：
 
 A2.2 不允许直接输出 `strategy_confirmed`。它只能输出诊断结论。
 
-### 6.1 `proceed_to_regime_gated_cmom_design`
+### 6.1 `proceed_to_regime_gated_cmom_diagnostic_design`
 
 只有同时满足以下条件，才允许进入 regime-gated CMOM：
 
@@ -182,17 +205,27 @@ cmom_14d 30bps total return 优于 30d momentum >= 10 percentage points；
 cmom_14d max drawdown 不高于 30d momentum；
 cmom_14d vs universe equal-weight 明确为正；
 cmom_14d 不严重跑输 BTC，vs BTC >= -10 percentage points；
+cmom_14d 不严重跑输 ETH，vs ETH >= -10 percentage points；
+cmom_14d 30bps total return > -50%；
+cmom_14d 50bps stress return > -60%；
 cmom_14d top5 diagnostic 不显著差于 top10；
-max_single_month_positive_pnl_share <= 30%。
+max_single_month_positive_pnl_share <= 30%；
+两个核心 variant 的 rebalance_count 均 >= 50。
 ```
 
 ### 6.2 `run_3d_failure_diagnostic`
 
-如果 CMOM 明显优于 30d，但仍然收益/回撤路径差，则允许后续做 3d diagnostic：
+只有 CMOM 的改善足够“材料级”但仍未达到推进 regime-gated CMOM 的条件时，才允许后续做 3d diagnostic：
 
 ```text
-CMOM improves ranking quality, but weekly cadence may be too slow.
+return_diff >= 10 pct points；
+vs_universe_ew_diff >= 5 pct points；
+CMOM max drawdown 不比 30d 恶化超过 5 pct points；
+CMOM top5 不比 top10 差超过 10 pct points；
+CMOM max_single_month_positive_pnl_share <= 50%。
 ```
+
+否则即使少亏一点，也应视为 price-only momentum 结构不足，而不是继续滚到下一个 diagnostic。
 
 ### 6.3 `stop_price_only_momentum`
 
@@ -242,4 +275,5 @@ scope = 14d_cmom_vs_30d_momentum_only
 live_safe = false
 paper_shadow_allowed = false
 can_promote_strategy = false
+next_action_is_diagnostic_only = true
 ```

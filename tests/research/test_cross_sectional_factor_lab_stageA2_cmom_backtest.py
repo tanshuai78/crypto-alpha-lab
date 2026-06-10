@@ -1,11 +1,9 @@
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 
 from research.cross_sectional_factor_lab.backtest import run_stageA2_cmom_diagnostic
-
-
-import math
 
 
 def _synthetic_panel(symbols: int = 12, days: int = 430, include_benchmarks: bool = True) -> list[dict]:

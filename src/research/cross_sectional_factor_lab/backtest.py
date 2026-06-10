@@ -437,6 +437,7 @@ def _run_factor_variant_backtest(
     universe_equal_weight_pct: float,
 ) -> dict:
     from datetime import timedelta
+
     from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
     from research.cross_sectional_factor_lab.portfolio import build_equal_weight_targets
     from research.cross_sectional_factor_lab.summary import summarize_rebalance_quality
@@ -590,6 +591,7 @@ def _run_factor_variant_backtest(
 
 def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
     from datetime import timedelta
+
     import configs.base as cfg
     from research.cross_sectional_factor_lab.panel import (
         forward_fill_close_by_symbol,
