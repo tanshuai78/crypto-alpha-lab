@@ -59,17 +59,64 @@ def compute_momentum_30d_skip_1d(
     return (close_asof / close_start) - 1.0
 
 
+def compute_cmom_14d_skip_1d(
+    panel: pd.DataFrame, symbol: str, rebalance_date: pd.Timestamp
+) -> float | None:
+    # Filter for symbol
+    symbol_data = panel[panel["symbol"] == symbol]
+    if symbol_data.empty:
+        return None
+
+    # Calculate exact target dates
+    skip_days = cfg.FACTOR_LAB_STAGEA2_CMOM_SKIP_RECENT_DAYS
+    lookback_days = cfg.FACTOR_LAB_STAGEA2_CMOM_LOOKBACK_DAYS
+
+    signal_asof_date = rebalance_date - timedelta(days=skip_days)
+    lookback_start_date = rebalance_date - timedelta(days=skip_days + lookback_days)
+
+    # Use absolute date lookup
+    asof_rows = symbol_data[symbol_data["date_utc"] == signal_asof_date]
+    start_rows = symbol_data[symbol_data["date_utc"] == lookback_start_date]
+
+    if asof_rows.empty or start_rows.empty:
+        return None
+
+    close_asof = float(asof_rows["close"].iloc[0])
+    close_start = float(start_rows["close"].iloc[0])
+
+    if close_start <= 0:
+        return None
+
+    # Check if there are missing days in between to ensure full lookback coverage
+    # For lookback_days = 14, it is 15 days.
+    expected_days = lookback_days + 1
+    actual_days = symbol_data[
+        (symbol_data["date_utc"] >= lookback_start_date)
+        & (symbol_data["date_utc"] <= signal_asof_date)
+    ]["date_utc"].nunique()
+
+    if actual_days < expected_days:
+        return None
+
+    return (close_asof / close_start) - 1.0
+
+
 def compute_rebalance_factor_frame(
-    panel: pd.DataFrame, rebalance_date: pd.Timestamp
+    panel: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    *,
+    factor_name: str = "momentum_30d_skip_1d",
 ) -> pd.DataFrame:
     # 30d liquidity window: from rebalance_date - 30 days to rebalance_date - 1 day
     liq_start = rebalance_date - timedelta(days=30)
     liq_end = rebalance_date - timedelta(days=1)
 
+    cols = [c if c != "momentum_30d_skip_1d" else factor_name for c in REQUIRED_FACTOR_COLUMNS]
+
     # Filter panel for symbols and date range
     sub_panel = panel[(panel["date_utc"] >= liq_start) & (panel["date_utc"] <= liq_end)]
     if sub_panel.empty:
-        return pd.DataFrame(columns=list(REQUIRED_FACTOR_COLUMNS))
+        return pd.DataFrame(columns=cols)
 
     records = []
     symbols = sub_panel["symbol"].unique()
@@ -89,21 +136,33 @@ def compute_rebalance_factor_frame(
         if median_vol < min_volume:
             continue
 
-        # Compute momentum (which requires 31 days: rebalance_date - 31 to rebalance_date - 1)
-        mom = compute_momentum_30d_skip_1d(panel, symbol, rebalance_date)
+        # Compute factor based on requested variant
+        if factor_name == "momentum_30d_skip_1d":
+            mom = compute_momentum_30d_skip_1d(panel, symbol, rebalance_date)
+            lookback_start = rebalance_date - timedelta(
+                days=cfg.FACTOR_LAB_STAGEA_SKIP_RECENT_DAYS + cfg.FACTOR_LAB_STAGEA_MOMENTUM_LOOKBACK_DAYS
+            )
+        elif factor_name == "cmom_14d_skip_1d":
+            mom = compute_cmom_14d_skip_1d(panel, symbol, rebalance_date)
+            lookback_start = rebalance_date - timedelta(
+                days=cfg.FACTOR_LAB_STAGEA2_CMOM_SKIP_RECENT_DAYS + cfg.FACTOR_LAB_STAGEA2_CMOM_LOOKBACK_DAYS
+            )
+        else:
+            raise ValueError(f"unsupported factor_name: {factor_name}")
+
         if mom is None:
             continue
 
         records.append({
             "symbol": symbol,
-            "momentum_30d_skip_1d": mom,
+            factor_name: mom,
             "rolling_30d_median_quote_volume_usdt": median_vol,
             "signal_asof_date": rebalance_date - timedelta(days=1),
-            "lookback_start_date": rebalance_date - timedelta(days=31),
+            "lookback_start_date": lookback_start,
             "eligible_for_rank": True
         })
 
     if not records:
-        return pd.DataFrame(columns=list(REQUIRED_FACTOR_COLUMNS))
+        return pd.DataFrame(columns=cols)
 
     return pd.DataFrame(records)
