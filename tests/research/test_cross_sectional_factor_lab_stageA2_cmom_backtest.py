@@ -3,7 +3,11 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
+import pytest
+
 from research.cross_sectional_factor_lab.backtest import run_stageA2_cmom_diagnostic
+from research.cross_sectional_factor_lab.panel import load_daily_panel
+from research.cross_sectional_factor_lab.portfolio import eligible_monday_rebalance_dates
 
 
 def _synthetic_panel(symbols: int = 12, days: int = 430, include_benchmarks: bool = True) -> list[dict]:
@@ -111,3 +115,43 @@ def test_stageA2_cmom_concentration_handles_negative_total_pnl() -> None:
     for variant in summary["factor_variants"].values():
         assert 0.0 <= variant["concentration"]["max_single_symbol_abs_pnl_share"] <= 1.0
         assert 0.0 <= variant["concentration"]["max_single_month_abs_pnl_share"] <= 1.0
+
+
+def test_stageA2_cmom_does_not_swallow_decision_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import research.cross_sectional_factor_lab.summary as summary_module
+
+    def boom(summary: dict) -> dict:
+        raise RuntimeError("decision helper exploded")
+
+    monkeypatch.setattr(summary_module, "decide_stageA2_cmom", boom)
+
+    with pytest.raises(RuntimeError, match="decision helper exploded"):
+        run_stageA2_cmom_diagnostic(_synthetic_panel())
+
+
+def test_stageA2_cmom_benchmark_uses_last_exit_open_not_previous_close() -> None:
+    rows = _synthetic_panel()
+    panel = load_daily_panel(rows)
+    rebalance_dates = eligible_monday_rebalance_dates(panel["date_utc"].unique())
+    valid_exit_dates = [
+        dt + timedelta(days=7)
+        for dt in rebalance_dates
+        if not panel[panel["date_utc"] == dt + timedelta(days=7)].empty
+    ]
+    start_date = rebalance_dates[0].date().isoformat()
+    last_exit_date = valid_exit_dates[-1].date().isoformat()
+    previous_close_date = (valid_exit_dates[-1] - timedelta(days=1)).date().isoformat()
+
+    for row in rows:
+        if row["symbol"] == "BTCUSDT" and row["date_utc"] == start_date:
+            row["open"] = 100.0
+        if row["symbol"] == "BTCUSDT" and row["date_utc"] == last_exit_date:
+            row["open"] = 200.0
+        if row["symbol"] == "BTCUSDT" and row["date_utc"] == previous_close_date:
+            row["close"] = 9999.0
+
+    summary = run_stageA2_cmom_diagnostic(rows)
+    expected_btc_net_pct = ((200.0 / 100.0) - 1.0 - 0.003) * 100.0
+
+    actual = summary["factor_variants"]["momentum_30d_skip_1d"]["benchmarks"]["btc_buy_and_hold_net_pct"]
+    assert actual == pytest.approx(expected_btc_net_pct)

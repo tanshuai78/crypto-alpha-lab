@@ -6,7 +6,7 @@
   "live_usage": "not_allowed",
   "paper_shadow_allowed": false,
   "can_promote_strategy": false,
-  "generated_at_utc": "2026-06-10T07:05:17.720709+00:00",
+  "generated_at_utc": "2026-06-10T07:34:58.063136+00:00",
   "ffill_count": 0,
   "factor_variants": {
     "momentum_30d_skip_1d": {
@@ -20,10 +20,10 @@
       },
       "benchmarks": {
         "btc_buy_and_hold_net_pct": -39.67431453652115,
-        "eth_buy_and_hold_net_pct": -57.600541286002596,
+        "eth_buy_and_hold_net_pct": -57.60079386929825,
         "universe_equal_weight_pct": -84.60593404980668,
         "vs_btc_total_return_pct": -44.379338089626614,
-        "vs_eth_total_return_pct": -26.45311134014517,
+        "vs_eth_total_return_pct": -26.452858756849515,
         "vs_universe_equal_weight_total_return_pct": 0.5522814236589113
       },
       "concentration": {
@@ -55,10 +55,10 @@
       },
       "benchmarks": {
         "btc_buy_and_hold_net_pct": -39.67431453652115,
-        "eth_buy_and_hold_net_pct": -57.600541286002596,
+        "eth_buy_and_hold_net_pct": -57.60079386929825,
         "universe_equal_weight_pct": -84.60593404980668,
         "vs_btc_total_return_pct": -35.64742120496602,
-        "vs_eth_total_return_pct": -17.72119445548458,
+        "vs_eth_total_return_pct": -17.720941872188924,
         "vs_universe_equal_weight_total_return_pct": 9.284198308319503
       },
       "concentration": {

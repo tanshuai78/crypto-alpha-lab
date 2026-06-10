@@ -49,7 +49,7 @@
 
 根据计划定义的 Expected Final Interpretation Rules，由于 `next_action == stop_price_only_momentum`，我们将采取以下行动：
 1. **停止（Pause）**基于纯价格周频旋转的截面动量（price-only cross-sectional momentum）策略研究。
-2. **决策转换**：在 Factor Lab 框架下，要么转向探索非价格因子（如 Layer B-lite 阶段的可行性研究，引入 funding/OI 限制或链上指标），要么终止 Factor Lab。
+2. **决策转换**：本轮结论要求停止纯价格动量路线，而不是直接终止整个 Factor Lab。Factor Lab 不应继续通过调参挽救 14d/30d price-only momentum；下一步只允许进入非价格因子可行性研究，例如 funding/OI 拥挤度限制、成交量结构确认、链上活跃地址或 NVT 等。如果这些非价格因子也无法提供可验证的数据质量与结构优势，再考虑终止 Factor Lab。
 
 ---
 

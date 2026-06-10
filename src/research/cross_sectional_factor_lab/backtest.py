@@ -668,12 +668,10 @@ def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
     # Ensure start and end exit dates are present in benchmark data
     start_date = rebalance_dates[0]
     last_exit_date = valid_exit_dates[-1]
-    lookup_close_date = last_exit_date - timedelta(days=1)
-
     btc_start = btc_data[btc_data["date_utc"] == start_date]
-    btc_end = btc_data[btc_data["date_utc"] == lookup_close_date]
+    btc_end = btc_data[btc_data["date_utc"] == last_exit_date]
     eth_start = eth_data[eth_data["date_utc"] == start_date]
-    eth_end = eth_data[eth_data["date_utc"] == lookup_close_date]
+    eth_end = eth_data[eth_data["date_utc"] == last_exit_date]
 
     if btc_start.empty or btc_end.empty or eth_start.empty or eth_end.empty:
         base_summary.update({
@@ -685,13 +683,13 @@ def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
     # Compute shared benchmarks
     btc_bh_net = compute_benchmark_buy_and_hold_net(
         float(btc_start["open"].iloc[0]),
-        float(btc_end["close"].iloc[0]),
+        float(btc_end["open"].iloc[0]),
         30.0
     ) * 100.0
 
     eth_bh_net = compute_benchmark_buy_and_hold_net(
         float(eth_start["open"].iloc[0]),
-        float(eth_end["close"].iloc[0]),
+        float(eth_end["open"].iloc[0]),
         30.0
     ) * 100.0
 
@@ -744,17 +742,9 @@ def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
         "factor_variants": variants,
     })
 
-    # Call decide_stageA2_cmom
-    try:
-        from research.cross_sectional_factor_lab.summary import decide_stageA2_cmom
-        decision = decide_stageA2_cmom(base_summary)
-        base_summary.update(decision)
-    except Exception:
-        # Fallback if decide_stageA2_cmom is not implemented/fails (during task progression)
-        base_summary.update({
-            "decision": "cmom_diagnostic_completed",
-            "primary_comparison": {"cmom_beats_30d_after_30bps": False},
-            "next_action": "stop_price_only_momentum",
-        })
+    from research.cross_sectional_factor_lab.summary import decide_stageA2_cmom
+
+    decision = decide_stageA2_cmom(base_summary)
+    base_summary.update(decision)
 
     return base_summary
