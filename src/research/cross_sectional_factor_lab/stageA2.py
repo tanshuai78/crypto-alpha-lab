@@ -15,9 +15,19 @@ from research.cross_sectional_factor_lab.backtest import (
 )
 from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
 from research.cross_sectional_factor_lab.panel import forward_fill_close_by_symbol, load_daily_panel
-from research.cross_sectional_factor_lab.portfolio import build_equal_weight_targets, eligible_monday_rebalance_dates
-from research.cross_sectional_factor_lab.regime import AltUniverseRegimeResult, decide_stageA2_regime_exposure
-from research.cross_sectional_factor_lab.summary import decide_stageA2_round1, decide_stageA2_variant, summarize_rebalance_quality
+from research.cross_sectional_factor_lab.portfolio import (
+    build_equal_weight_targets,
+    eligible_monday_rebalance_dates,
+)
+from research.cross_sectional_factor_lab.regime import (
+    AltUniverseRegimeResult,
+    decide_stageA2_regime_exposure,
+)
+from research.cross_sectional_factor_lab.summary import (
+    decide_stageA2_round1,
+    decide_stageA2_variant,
+    summarize_rebalance_quality,
+)
 
 
 def next_weekly_exit_date(rebalance_date: pd.Timestamp) -> pd.Timestamp:
@@ -63,6 +73,24 @@ def _benchmark_open_to_open_net_pct(
         return 0.0
     gross = (float(end["open"].iloc[0]) / float(start["open"].iloc[0])) - 1.0
     return (gross - round_trip_cost_bps / 10000.0) * 100.0
+
+
+def _symbol_open_to_open_return(
+    panel: pd.DataFrame,
+    symbol: str,
+    entry_date: pd.Timestamp,
+    exit_date: pd.Timestamp,
+) -> float | None:
+    symbol_data = panel[panel["symbol"] == symbol]
+    entry_row = symbol_data[symbol_data["date_utc"] == entry_date]
+    exit_row = symbol_data[symbol_data["date_utc"] == exit_date]
+    if entry_row.empty or exit_row.empty:
+        return None
+    entry_open = float(entry_row["open"].iloc[0])
+    exit_open = float(exit_row["open"].iloc[0])
+    if entry_open <= 0:
+        return None
+    return (exit_open / entry_open) - 1.0
 
 
 def _universe_equal_weight_benchmark_pct(panel: pd.DataFrame, rebalance_dates: list[pd.Timestamp]) -> float:
@@ -163,8 +191,24 @@ def _run_variant(
 
         month = rebalance_date.strftime("%Y-%m")
         month_contrib[month] = month_contrib.get(month, 0.0) + net_30
+
+        one_way_30bps_cost = (30.0 / 10000.0) / 2.0
         for symbol, weight in weights.items():
-            symbol_contrib[symbol] = symbol_contrib.get(symbol, 0.0) + net_30 * weight
+            symbol_return = _symbol_open_to_open_return(panel, symbol, rebalance_date, exit_date)
+            if symbol_return is None:
+                continue
+            symbol_turnover = abs(weight - previous_weights.get(symbol, 0.0))
+            symbol_cost = symbol_turnover * one_way_30bps_cost
+            symbol_contrib[symbol] = (
+                symbol_contrib.get(symbol, 0.0)
+                + (symbol_return * weight)
+                - symbol_cost
+            )
+
+        for symbol in set(previous_weights) - set(weights):
+            symbol_cost = previous_weights[symbol] * one_way_30bps_cost
+            symbol_contrib[symbol] = symbol_contrib.get(symbol, 0.0) - symbol_cost
+
         previous_weights = weights
 
     total_30 = compound_returns_pct(returns_30)

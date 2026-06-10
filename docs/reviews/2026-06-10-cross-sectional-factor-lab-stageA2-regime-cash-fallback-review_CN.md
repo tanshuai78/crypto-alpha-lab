@@ -12,25 +12,25 @@
 - `winner_variant`: `None`
 - `can_enter_stageA2_round2`: `False`
 - `failure_type`: `structure_failure`
-- `failure_reason`: `btc_ma20_cash:drawdown_reduction_insufficient, alt_universe_20d_return_cash:mostly_cash`
+- `failure_reason`: `btc_ma20_cash:drawdown_reduction_insufficient|still_underperforms_btc_by_more_than_10pct|positive_pnl_month_concentration_above_30pct, alt_universe_20d_return_cash:still_underperforms_btc_by_more_than_10pct|mostly_cash|positive_pnl_month_concentration_above_30pct`
 
 ## 2. 三组变体结果
 
-| variant | decision | rebalances | 30bps return | max DD | DD reduction | cash days | vs BTC | vs ETH | vs EW |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| regime_none | regime_filter_failed | 77 | -84.05% | 84.44% | 0.00% | 0.00% | -44.38% | -26.45% | 0.55% |
-| btc_ma20_cash | regime_filter_failed | 77 | -61.08% | 64.77% | 23.30% | 53.25% | -21.41% | -3.48% | 23.53% |
-| alt_universe_20d_return_cash | regime_filter_reduces_damage_but_no_alpha | 77 | -53.54% | 57.48% | 31.93% | 61.04% | -13.87% | 4.06% | 31.06% |
+| variant | decision | rebalances | 30bps return | max DD | DD reduction | cash days | vs BTC | vs ETH | vs EW | max month +PnL share |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| regime_none | regime_filter_failed | 77 | -84.05% | 84.44% | 0.00% | 0.00% | -44.38% | -26.45% | 0.55% | 40.52% |
+| btc_ma20_cash | regime_filter_failed | 77 | -61.08% | 64.77% | 23.30% | 53.25% | -21.41% | -3.48% | 23.53% | 52.74% |
+| alt_universe_20d_return_cash | regime_filter_reduces_damage_but_no_alpha | 77 | -53.54% | 57.48% | 31.93% | 61.04% | -13.87% | 4.06% | 31.06% | 65.55% |
 
 ## 3. 失效类型与归因
 
 - `data_failure`: 数据不足、有效 rebalance 数不足、诊断未完成。
 - `density_failure`: 本轮不适用；Stage A2 不是事件密度研究。
-- `structure_failure`: regime filter 未能同时降低回撤、保持相对 benchmark 表现、避免 mostly-cash。
+- `structure_failure`: regime filter 未能同时降低回撤、保持相对 benchmark 表现、避免 mostly-cash，并且收益不应集中在单一月份。
 - `execution_cost_failure`: 若 30/50/80 bps 成本场景下改善只在低成本成立，应归入该类。
 - `confirmed_next_action`: 只有 `can_enter_stageA2_round2 = true` 时成立。
 
-本次归类：`structure_failure`，原因：`btc_ma20_cash:drawdown_reduction_insufficient, alt_universe_20d_return_cash:mostly_cash`。
+本次归类：`structure_failure`，原因：`btc_ma20_cash:drawdown_reduction_insufficient|still_underperforms_btc_by_more_than_10pct|positive_pnl_month_concentration_above_30pct, alt_universe_20d_return_cash:still_underperforms_btc_by_more_than_10pct|mostly_cash|positive_pnl_month_concentration_above_30pct`。
 
 ## 4. 口径说明
 

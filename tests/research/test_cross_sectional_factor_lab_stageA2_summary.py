@@ -1,5 +1,8 @@
 import configs.base as cfg
-from research.cross_sectional_factor_lab.summary import decide_stageA2_round1, decide_stageA2_variant
+from research.cross_sectional_factor_lab.summary import (
+    decide_stageA2_round1,
+    decide_stageA2_variant,
+)
 
 
 def _variant(

@@ -6,7 +6,7 @@
   "bias_label": "survivorship_bias_not_controlled",
   "benchmark_price_policy": "first_rebalance_open_to_last_valid_exit_open",
   "period_share_note": "weekly_equal_length_periods_make_period_share_equal_day_share_in_round1",
-  "generated_at_utc": "2026-06-09T16:25:50.278111+00:00",
+  "generated_at_utc": "2026-06-10T02:40:46.824661+00:00",
   "decision": "stageA2_round1_completed",
   "primary_blocker": null,
   "ffill_count": 0,
@@ -46,8 +46,8 @@
         "vs_universe_equal_weight_total_return_pct": 0.5522814236589113
       },
       "concentration": {
-        "max_single_symbol_positive_pnl_share": 0.15742800122236236,
-        "max_single_symbol_abs_pnl_share": 0.03543234849433916,
+        "max_single_symbol_positive_pnl_share": 0.1828219884228773,
+        "max_single_symbol_abs_pnl_share": 0.04199997798222219,
         "max_single_month_positive_pnl_share": 0.405195291783922,
         "max_single_month_abs_pnl_share": 0.1441332202176792
       },
@@ -95,8 +95,8 @@
         "vs_universe_equal_weight_total_return_pct": 23.52536607925005
       },
       "concentration": {
-        "max_single_symbol_positive_pnl_share": 0.14455291350186203,
-        "max_single_symbol_abs_pnl_share": 0.05264024233440874,
+        "max_single_symbol_positive_pnl_share": 0.25294531948680254,
+        "max_single_symbol_abs_pnl_share": 0.07883707733225144,
         "max_single_month_positive_pnl_share": 0.5273546370898355,
         "max_single_month_abs_pnl_share": 0.2033268968602513
       },
@@ -144,8 +144,8 @@
         "vs_universe_equal_weight_total_return_pct": 31.06243026852809
       },
       "concentration": {
-        "max_single_symbol_positive_pnl_share": 0.18111916823050644,
-        "max_single_symbol_abs_pnl_share": 0.05262441221529779,
+        "max_single_symbol_positive_pnl_share": 0.16767500645088226,
+        "max_single_symbol_abs_pnl_share": 0.05294796100318328,
         "max_single_month_positive_pnl_share": 0.6555370580974856,
         "max_single_month_abs_pnl_share": 0.2552590035490469
       },
