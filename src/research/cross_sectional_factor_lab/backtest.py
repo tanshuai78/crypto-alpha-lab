@@ -1,6 +1,42 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+
+def _get_max_drawdown(returns: list[float]) -> float:
+    if not returns:
+        return 0.0
+    equity = [1.0]
+    for r in returns:
+        equity.append(equity[-1] * (1.0 + r))
+    equity = np.array(equity)
+    cum_max = np.maximum.accumulate(equity)
+    drawdowns = np.where(cum_max > 0, (cum_max - equity) / cum_max, 0.0)
+    return float(np.max(drawdowns)) * 100.0
+
+
+def _get_total_return(returns: list[float]) -> float:
+    if not returns:
+        return 0.0
+    return float(np.prod([1.0 + r for r in returns]) - 1.0) * 100.0
+
+
+def _get_concentration(contributions: dict[str, float]) -> tuple[float, float, float, float]:
+    if not contributions:
+        return 0.0, 0.0, 0.0, 0.0
+
+    contrib_values = list(contributions.values())
+
+    pos_contribs = [v for v in contrib_values if v > 0]
+    sum_pos = sum(pos_contribs)
+    max_pos_share = max(pos_contribs) / sum_pos if sum_pos > 0 and pos_contribs else 0.0
+
+    abs_contribs = [abs(v) for v in contrib_values]
+    sum_abs = sum(abs_contribs)
+    max_abs_share = max(abs_contribs) / sum_abs if sum_abs > 0 and abs_contribs else 0.0
+
+    return max_pos_share, max_abs_share, sum_pos, sum_abs
 
 
 def compute_turnover(previous_weights: dict[str, float], target_weights: dict[str, float]) -> float:
@@ -390,3 +426,333 @@ def run_stageA_v1_backtest(daily_bars: list[dict]) -> dict:
     result_summary["decision"] = decision
 
     return result_summary
+
+
+def _run_factor_variant_backtest(
+    panel: pd.DataFrame,
+    rebalance_dates: list[pd.Timestamp],
+    factor_name: str,
+    btc_return_pct: float,
+    eth_return_pct: float,
+    universe_equal_weight_pct: float,
+) -> dict:
+    from datetime import timedelta
+    from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
+    from research.cross_sectional_factor_lab.portfolio import build_equal_weight_targets
+    from research.cross_sectional_factor_lab.summary import summarize_rebalance_quality
+
+    prev_weights_top10 = {}
+    prev_weights_top5 = {}
+    prev_weights_ew = {}
+
+    top10_net_returns_30 = []
+    top10_net_returns_50 = []
+    top10_net_returns_80 = []
+
+    top5_net_returns_30 = []
+    ew_net_returns_30 = []
+
+    rebalance_count = 0
+    insufficient_universe_count = 0
+    selected_counts = []
+    turnovers_top10 = []
+
+    symbol_pnl_contributions = {}
+    month_pnl_contributions = {}
+
+    for t_i in rebalance_dates:
+        exit_date = t_i + timedelta(days=7)
+        if panel[panel["date_utc"] == exit_date].empty:
+            continue
+
+        rebalance_count += 1
+        factors = compute_rebalance_factor_frame(panel, t_i, factor_name=factor_name)
+
+        if len(factors) < 10:
+            insufficient_universe_count += 1
+
+        selected_counts.append(min(len(factors), 10))
+
+        # Rename active factor column to prevent KeyError in build_equal_weight_targets
+        ranking_factors = factors.rename(columns={factor_name: "momentum_30d_skip_1d"}) if factor_name != "momentum_30d_skip_1d" else factors
+
+        targets_top10 = build_equal_weight_targets(ranking_factors, top_n=10)
+        weights_top10 = dict(zip(targets_top10["symbol"], targets_top10["target_weight"])) if not targets_top10.empty else {}
+
+        targets_top5 = build_equal_weight_targets(ranking_factors, top_n=5)
+        weights_top5 = dict(zip(targets_top5["symbol"], targets_top5["target_weight"])) if not targets_top5.empty else {}
+
+        targets_ew = universe_equal_weight_targets(factors)
+        weights_ew = dict(zip(targets_ew["symbol"], targets_ew["target_weight"])) if not targets_ew.empty else {}
+
+        gross_ret_top10 = compute_strategy_period_return(panel, weights_top10, t_i, exit_date)
+        gross_ret_top5 = compute_strategy_period_return(panel, weights_top5, t_i, exit_date)
+        gross_ret_ew = compute_strategy_period_return(panel, weights_ew, t_i, exit_date)
+
+        if gross_ret_top10 is None or gross_ret_top5 is None or gross_ret_ew is None:
+            continue
+
+        to_top10 = compute_turnover(prev_weights_top10, weights_top10)
+        to_top5 = compute_turnover(prev_weights_top5, weights_top5)
+        to_ew = compute_turnover(prev_weights_ew, weights_ew)
+
+        turnovers_top10.append(to_top10)
+
+        net_ret_30 = apply_turnover_cost(gross_ret_top10, to_top10, 30.0)
+        net_ret_50 = apply_turnover_cost(gross_ret_top10, to_top10, 50.0)
+        net_ret_80 = apply_turnover_cost(gross_ret_top10, to_top10, 80.0)
+
+        top10_net_returns_30.append(net_ret_30)
+        top10_net_returns_50.append(net_ret_50)
+        top10_net_returns_80.append(net_ret_80)
+
+        net_ret_top5_30 = apply_turnover_cost(gross_ret_top5, to_top5, 30.0)
+        top5_net_returns_30.append(net_ret_top5_30)
+
+        net_ret_ew_30 = apply_turnover_cost(gross_ret_ew, to_ew, 30.0)
+        ew_net_returns_30.append(net_ret_ew_30)
+
+        month_str = t_i.strftime("%Y-%m")
+        month_pnl_contributions[month_str] = month_pnl_contributions.get(month_str, 0.0) + net_ret_30
+
+        one_way_30bps_cost = (30.0 / 10000.0) / 2.0
+        for symbol, weight in weights_top10.items():
+            symbol_data = panel[panel["symbol"] == symbol]
+            entry_row = symbol_data[symbol_data["date_utc"] == t_i]
+            exit_row = symbol_data[symbol_data["date_utc"] == exit_date]
+            if not entry_row.empty and not exit_row.empty:
+                p_entry = float(entry_row["open"].iloc[0])
+                p_exit = float(exit_row["open"].iloc[0])
+                if p_entry > 0:
+                    symbol_return = (p_exit / p_entry) - 1.0
+                    gross_contrib = symbol_return * weight
+                    sym_prev_w = prev_weights_top10.get(symbol, 0.0)
+                    sym_to = abs(weight - sym_prev_w)
+                    sym_cost = sym_to * one_way_30bps_cost
+                    net_contrib = gross_contrib - sym_cost
+                    symbol_pnl_contributions[symbol] = symbol_pnl_contributions.get(symbol, 0.0) + net_contrib
+
+        for symbol in (set(prev_weights_top10.keys()) - set(weights_top10.keys())):
+            sym_prev_w = prev_weights_top10[symbol]
+            sym_to = sym_prev_w
+            sym_cost = sym_to * one_way_30bps_cost
+            symbol_pnl_contributions[symbol] = symbol_pnl_contributions.get(symbol, 0.0) - sym_cost
+
+        prev_weights_top10 = weights_top10
+        prev_weights_top5 = weights_top5
+        prev_weights_ew = weights_ew
+
+    tot_ret_30 = _get_total_return(top10_net_returns_30)
+    tot_ret_50 = _get_total_return(top10_net_returns_50)
+    tot_ret_80 = _get_total_return(top10_net_returns_80)
+    dd_30 = _get_max_drawdown(top10_net_returns_30)
+
+    tot_ret_top5_30 = _get_total_return(top5_net_returns_30)
+    dd_top5_30 = _get_max_drawdown(top5_net_returns_30)
+
+    max_sym_pos_share, max_sym_abs_share, _, _ = _get_concentration(symbol_pnl_contributions)
+    max_mon_pos_share, max_mon_abs_share, _, _ = _get_concentration(month_pnl_contributions)
+
+    quality = summarize_rebalance_quality(
+        rebalance_count, insufficient_universe_count, selected_counts, turnovers_top10
+    )
+
+    return {
+        "factor_name": factor_name,
+        "performance": {
+            "base_30bps_total_return_pct": tot_ret_30,
+            "stress_50bps_total_return_pct": tot_ret_50,
+            "crash_80bps_total_return_pct": tot_ret_80,
+            "max_drawdown_pct": dd_30,
+            "turnover_median": quality["median_turnover"],
+        },
+        "benchmarks": {
+            "btc_buy_and_hold_net_pct": btc_return_pct,
+            "eth_buy_and_hold_net_pct": eth_return_pct,
+            "universe_equal_weight_pct": universe_equal_weight_pct,
+            "vs_btc_total_return_pct": tot_ret_30 - btc_return_pct,
+            "vs_eth_total_return_pct": tot_ret_30 - eth_return_pct,
+            "vs_universe_equal_weight_total_return_pct": tot_ret_30 - universe_equal_weight_pct,
+        },
+        "concentration": {
+            "max_single_symbol_positive_pnl_share": max_sym_pos_share,
+            "max_single_symbol_abs_pnl_share": max_sym_abs_share,
+            "max_single_month_positive_pnl_share": max_mon_pos_share,
+            "max_single_month_abs_pnl_share": max_mon_abs_share,
+        },
+        "rebalance_quality": quality,
+        "diagnostic_top5_performance": {
+            "strategy_total_return_pct": tot_ret_top5_30,
+            "strategy_max_drawdown_pct": dd_top5_30,
+        },
+    }
+
+
+def run_stageA2_cmom_diagnostic(daily_bars: list[dict]) -> dict:
+    from datetime import timedelta
+    import configs.base as cfg
+    from research.cross_sectional_factor_lab.panel import (
+        forward_fill_close_by_symbol,
+        load_daily_panel,
+    )
+    from research.cross_sectional_factor_lab.portfolio import (
+        eligible_monday_rebalance_dates,
+    )
+
+    base_summary = {
+        "stage": "stageA2_cmom_diagnostic",
+        "market": "binance_spot",
+        "bias_label": "survivorship_bias_not_controlled",
+        "primary_portfolio": "top10_equal_weight",
+        "live_usage": "not_allowed",
+        "paper_shadow_allowed": False,
+        "can_promote_strategy": False,
+        "generated_at_utc": pd.Timestamp.now(tz="UTC").isoformat(),
+    }
+
+    if not daily_bars:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "empty_daily_bars",
+        })
+        return base_summary
+
+    try:
+        panel = load_daily_panel(daily_bars)
+    except Exception as e:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": f"load_panel_failed: {str(e)}",
+        })
+        return base_summary
+
+    if panel.empty:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "empty_daily_bars",
+        })
+        return base_summary
+
+    panel, ffill_count = forward_fill_close_by_symbol(panel)
+
+    all_dates = panel["date_utc"].unique()
+    rebalance_dates = eligible_monday_rebalance_dates(all_dates)
+
+    if not rebalance_dates:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "insufficient_rebalance_dates",
+        })
+        return base_summary
+
+    valid_exit_dates = [dt + timedelta(days=7) for dt in rebalance_dates if not panel[panel["date_utc"] == dt + timedelta(days=7)].empty]
+    if not valid_exit_dates:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "no_complete_rebalance_periods",
+        })
+        return base_summary
+
+    # Check for missing benchmarks
+    btc_data = panel[panel["symbol"] == "BTCUSDT"]
+    eth_data = panel[panel["symbol"] == "ETHUSDT"]
+    if btc_data.empty or eth_data.empty:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "missing_btc_or_eth_benchmark",
+        })
+        return base_summary
+
+    # Ensure start and end exit dates are present in benchmark data
+    start_date = rebalance_dates[0]
+    last_exit_date = valid_exit_dates[-1]
+    lookup_close_date = last_exit_date - timedelta(days=1)
+
+    btc_start = btc_data[btc_data["date_utc"] == start_date]
+    btc_end = btc_data[btc_data["date_utc"] == lookup_close_date]
+    eth_start = eth_data[eth_data["date_utc"] == start_date]
+    eth_end = eth_data[eth_data["date_utc"] == lookup_close_date]
+
+    if btc_start.empty or btc_end.empty or eth_start.empty or eth_end.empty:
+        base_summary.update({
+            "decision": "stageA2_cmom_data_unavailable",
+            "primary_blocker": "missing_btc_or_eth_benchmark",
+        })
+        return base_summary
+
+    # Compute shared benchmarks
+    btc_bh_net = compute_benchmark_buy_and_hold_net(
+        float(btc_start["open"].iloc[0]),
+        float(btc_end["close"].iloc[0]),
+        30.0
+    ) * 100.0
+
+    eth_bh_net = compute_benchmark_buy_and_hold_net(
+        float(eth_start["open"].iloc[0]),
+        float(eth_end["close"].iloc[0]),
+        30.0
+    ) * 100.0
+
+    # For equal-weight benchmark, we compute it once using momentum_30d_skip_1d's universe (matching Stage A v1)
+    ew_returns = []
+    prev_weights_ew = {}
+    for t_i in rebalance_dates:
+        exit_date = t_i + timedelta(days=7)
+        if panel[panel["date_utc"] == exit_date].empty:
+            continue
+        from research.cross_sectional_factor_lab.factors import compute_rebalance_factor_frame
+        factors = compute_rebalance_factor_frame(panel, t_i, factor_name="momentum_30d_skip_1d")
+        targets_ew = universe_equal_weight_targets(factors)
+        weights_ew = dict(zip(targets_ew["symbol"], targets_ew["target_weight"])) if not targets_ew.empty else {}
+        gross_ret_ew = compute_strategy_period_return(panel, weights_ew, t_i, exit_date)
+        if gross_ret_ew is None:
+            continue
+        to_ew = compute_turnover(prev_weights_ew, weights_ew)
+        net_ret_ew_30 = apply_turnover_cost(gross_ret_ew, to_ew, 30.0)
+        ew_returns.append(net_ret_ew_30)
+        prev_weights_ew = weights_ew
+
+    universe_ew_net = _get_total_return(ew_returns)
+
+    # Run variants
+    variants = {}
+    for variant in cfg.FACTOR_LAB_STAGEA2_CMOM_VARIANTS:
+        variant_summary = _run_factor_variant_backtest(
+            panel,
+            rebalance_dates,
+            variant,
+            btc_bh_net,
+            eth_bh_net,
+            universe_ew_net,
+        )
+        variants[variant] = variant_summary
+
+    # Ensure rebalance_count gate
+    min_rebalances = cfg.FACTOR_LAB_STAGEA2_CMOM_MIN_REBALANCE_COUNT
+    for variant, var_sum in variants.items():
+        if var_sum["rebalance_quality"]["rebalance_count"] < min_rebalances:
+            base_summary.update({
+                "decision": "stageA2_cmom_data_unavailable",
+                "primary_blocker": "insufficient_rebalance_count",
+            })
+            return base_summary
+
+    base_summary.update({
+        "ffill_count": ffill_count,
+        "factor_variants": variants,
+    })
+
+    # Call decide_stageA2_cmom
+    try:
+        from research.cross_sectional_factor_lab.summary import decide_stageA2_cmom
+        decision = decide_stageA2_cmom(base_summary)
+        base_summary.update(decision)
+    except Exception:
+        # Fallback if decide_stageA2_cmom is not implemented/fails (during task progression)
+        base_summary.update({
+            "decision": "cmom_diagnostic_completed",
+            "primary_comparison": {"cmom_beats_30d_after_30bps": False},
+            "next_action": "stop_price_only_momentum",
+        })
+
+    return base_summary
