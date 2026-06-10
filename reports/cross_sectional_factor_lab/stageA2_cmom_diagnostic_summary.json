@@ -1,0 +1,92 @@
+{
+  "stage": "stageA2_cmom_diagnostic",
+  "market": "binance_spot",
+  "bias_label": "survivorship_bias_not_controlled",
+  "primary_portfolio": "top10_equal_weight",
+  "live_usage": "not_allowed",
+  "paper_shadow_allowed": false,
+  "can_promote_strategy": false,
+  "generated_at_utc": "2026-06-10T07:05:17.720709+00:00",
+  "ffill_count": 0,
+  "factor_variants": {
+    "momentum_30d_skip_1d": {
+      "factor_name": "momentum_30d_skip_1d",
+      "performance": {
+        "base_30bps_total_return_pct": -84.05365262614777,
+        "stress_50bps_total_return_pct": -84.85589739474571,
+        "crash_80bps_total_return_pct": -85.98534431004461,
+        "max_drawdown_pct": 84.44056014709041,
+        "turnover_median": 0.6
+      },
+      "benchmarks": {
+        "btc_buy_and_hold_net_pct": -39.67431453652115,
+        "eth_buy_and_hold_net_pct": -57.600541286002596,
+        "universe_equal_weight_pct": -84.60593404980668,
+        "vs_btc_total_return_pct": -44.379338089626614,
+        "vs_eth_total_return_pct": -26.45311134014517,
+        "vs_universe_equal_weight_total_return_pct": 0.5522814236589113
+      },
+      "concentration": {
+        "max_single_symbol_positive_pnl_share": 0.1828219884228773,
+        "max_single_symbol_abs_pnl_share": 0.04199997798222219,
+        "max_single_month_positive_pnl_share": 0.405195291783922,
+        "max_single_month_abs_pnl_share": 0.1441332202176792
+      },
+      "rebalance_quality": {
+        "rebalance_count": 77,
+        "insufficient_universe_count": 0,
+        "insufficient_universe_ratio": 0.0,
+        "median_selected_symbol_count": 10.0,
+        "median_turnover": 0.6
+      },
+      "diagnostic_top5_performance": {
+        "strategy_total_return_pct": -89.6552842199093,
+        "strategy_max_drawdown_pct": 89.96936983610102
+      }
+    },
+    "cmom_14d_skip_1d": {
+      "factor_name": "cmom_14d_skip_1d",
+      "performance": {
+        "base_30bps_total_return_pct": -75.32173574148717,
+        "stress_50bps_total_return_pct": -76.98958161750318,
+        "crash_80bps_total_return_pct": -79.2852691642441,
+        "max_drawdown_pct": 75.32173574148717,
+        "turnover_median": 0.9999999999999999
+      },
+      "benchmarks": {
+        "btc_buy_and_hold_net_pct": -39.67431453652115,
+        "eth_buy_and_hold_net_pct": -57.600541286002596,
+        "universe_equal_weight_pct": -84.60593404980668,
+        "vs_btc_total_return_pct": -35.64742120496602,
+        "vs_eth_total_return_pct": -17.72119445548458,
+        "vs_universe_equal_weight_total_return_pct": 9.284198308319503
+      },
+      "concentration": {
+        "max_single_symbol_positive_pnl_share": 0.1592054797311483,
+        "max_single_symbol_abs_pnl_share": 0.04269429641579233,
+        "max_single_month_positive_pnl_share": 0.3800514572875149,
+        "max_single_month_abs_pnl_share": 0.13837521902301192
+      },
+      "rebalance_quality": {
+        "rebalance_count": 77,
+        "insufficient_universe_count": 0,
+        "insufficient_universe_ratio": 0.0,
+        "median_selected_symbol_count": 10.0,
+        "median_turnover": 0.9999999999999999
+      },
+      "diagnostic_top5_performance": {
+        "strategy_total_return_pct": -78.05668471143575,
+        "strategy_max_drawdown_pct": 80.7929766223817
+      }
+    }
+  },
+  "decision": "cmom_diagnostic_completed",
+  "primary_comparison": {
+    "cmom_vs_30d_return_diff_pct": 8.731916884660592,
+    "cmom_vs_30d_drawdown_diff_pct": -9.118824405603235,
+    "cmom_vs_30d_vs_universe_ew_diff_pct": 8.731916884660592,
+    "cmom_beats_30d_after_30bps": false,
+    "cmom_top5_not_worse_than_top10": true
+  },
+  "next_action": "stop_price_only_momentum"
+}
