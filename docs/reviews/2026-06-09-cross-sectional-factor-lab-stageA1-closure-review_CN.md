@@ -221,15 +221,21 @@ turnover 没有因 regime filter 异常升高。
 
 ---
 
-## 9. 后续路线图，仅在 Round 1 通过后解锁
+## 9. 后续路线图
 
-### A2.2 3d rebalance diagnostic
+### A2.2 14d CMOM vs 30d momentum diagnostic
 
-目标：判断 weekly rebalance 是否太慢。只能作为 diagnostic，不能作为独立 pass/fail 主策略。
+目标：验证 Stage A v1 是否因为使用 `30d momentum` 而偏离论文中更常见的 crypto `past two-week return / CMOM` 口径。只允许 `14d vs 30d`，不能做大量 lookback search。
 
-### A2.3 14d momentum vs 30d momentum
+本阶段仍是 failure diagnostic：即使 14d CMOM 改善，也不能直接进入实盘或 paper shadow。
 
-目标：验证 crypto 是否更适合较短周期动量。只允许 `14d vs 30d`，不能做大量 lookback search。
+### A2.3 regime-gated CMOM
+
+目标：如果 14d CMOM 显示出比 30d momentum 更强的基础生命力，再验证它是否必须叠加 alt/BTC regime 才能避免 long-only alt beta 崩盘。
+
+### A2.x 3d rebalance diagnostic
+
+目标：判断 weekly rebalance 是否太慢。它后置于 CMOM 口径诊断之后，因为如果动量窗口本身错了，加快调仓只会更快交易错误信号。只能作为 diagnostic，不能作为独立 pass/fail 主策略。
 
 ### A2.4 volume confirmation
 
@@ -255,14 +261,14 @@ turnover 没有因 regime filter 异常升高。
 
 ## 10. 当前推荐下一步
 
-下一步不是继续修改 Stage A v1，而是写 Stage A2 diagnostic design。
+Stage A2 Round 1 已完成，结论是：regime/cash fallback 能减亏，但不能形成 alpha。
 
-Stage A2 design 必须固定：
+下一步写 Stage A2.2 CMOM diagnostic design，固定：
 
 ```text
-round = A2 Round 1
-scope = regime_cash_fallback_only
-variants = [regime_none, btc_ma20_cash, alt_universe_20d_return_cash]
+round = A2.2
+scope = cmom_14d_vs_momentum_30d_only
+primary_question = 14d CMOM 是否明显优于当前 30d momentum
 paper_shadow_allowed = false
 live_safe = false
 ```
@@ -274,10 +280,11 @@ live_safe = false
 ```text
 decision = stageA_v1_failed_frozen
 can_tune_stageA_v1 = false
-can_enter_stageA2_diagnostics = true
-stageA2_round1_scope = regime_cash_fallback_only
-stageA2_round1_variants = regime_none | btc_ma20_cash | alt_universe_20d_return_cash
-not_allowed_now = 3d_as_pass_fail | 14d_search | volume_filter | vol_adjusted | funding_oi | onchain | lightgbm | core_satellite
+stageA2_round1_completed = true
+stageA2_round1_result = reduces_damage_but_no_alpha
+can_enter_stageA2_cmom_diagnostic = true
+stageA2_next_scope = cmom_14d_vs_momentum_30d_only
+not_allowed_now = 3d_as_pass_fail | broad_lookback_search | volume_filter | vol_adjusted | funding_oi | onchain | lightgbm | core_satellite
 live_safe = false
 paper_shadow_allowed = false
 ```

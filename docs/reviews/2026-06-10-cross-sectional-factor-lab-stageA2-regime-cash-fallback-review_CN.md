@@ -41,4 +41,26 @@
 
 ## 5. 下一步
 
-暂停 Stage A exchange-only momentum line 的扩展；先做 closure decision：1. 是否执行 A2.2 3d diagnostic；2. 是否转向 B-lite 非价格因子可行性；3. 是否关闭当前 Factor Lab 路线。
+A2.1 的事实结论已经冻结：regime/cash fallback 能减亏，但没有形成进攻型 alpha。下一步不应直接扩大到多分支调参，也不应默认转向 B-lite。
+
+当前推荐进入：
+
+```text
+Stage A2.2 = 14d CMOM vs 30d momentum diagnostic
+```
+
+理由：论文中的 crypto momentum 更接近 `past two-week return / CMOM`，而 Stage A v1 使用的是 `30d momentum`。因此在关闭 price-only momentum 路线前，需要先判断失败是否来自动量窗口口径偏离。
+
+A2.2 只允许回答一个问题：
+
+```text
+14d CMOM 是否明显优于当前 30d momentum？
+```
+
+后续路线：
+
+1. 如果 14d CMOM 明显优于 30d，进入 `regime-gated CMOM` 设计；
+2. 如果 14d CMOM 有改善但仍路径很差，再做 `3d rebalance failure diagnostic`；
+3. 如果 14d CMOM 仍接近 universe equal-weight 或显著跑输 BTC，停止 price-only momentum，转入 B-lite 非价格因子可行性讨论。
+
+`3d rebalance` 不再作为 A2.2 第一优先，因为它回答的是调仓频率问题；当前更基础的问题是：Stage A v1 是否用了错误的动量窗口。
