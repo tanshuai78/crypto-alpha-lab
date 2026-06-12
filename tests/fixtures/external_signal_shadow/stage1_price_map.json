@@ -1,0 +1,16 @@
+{
+  "cex:btcusdt": {
+    "price_series_id": "binance_spot_btc_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "exact",
+    "active": true
+  },
+  "bsc:0xabc": {
+    "price_series_id": "binance_spot_bnb_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "cex_symbol_proxy",
+    "active": true
+  }
+}

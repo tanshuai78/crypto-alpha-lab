@@ -721,3 +721,23 @@ EXTERNAL_SIGNAL_SHADOW_ENTRY_DELAY_BARS = 1
 
 EXTERNAL_SIGNAL_SHADOW_COST_ROUND_TRIP_BPS = 50.0
 # Default round-trip cost used for shadow net return.
+
+# ─── Research: External Signal Shadow Lab Stage 1 Connector ──────────────────
+
+EXTERNAL_SIGNAL_CONNECTOR_EVENT_TIME_BUCKET_MS = 5 * 60 * 1000
+# Semantic dedup bucket width. Prevents repeated website/API refreshes from inflating event density.
+
+EXTERNAL_SIGNAL_CONNECTOR_MAX_CEX_LATENCY_MS = 15 * 60 * 1000
+# Maximum allowed latency for CEX / market rank payloads.
+
+EXTERNAL_SIGNAL_CONNECTOR_MAX_ONCHAIN_LATENCY_MS = 60 * 60 * 1000
+# Maximum allowed latency for on-chain / audit / holder payloads.
+
+EXTERNAL_SIGNAL_CONNECTOR_MAX_MANUAL_FIXTURE_LATENCY_MS = 24 * 60 * 60 * 1000
+# Maximum allowed latency for manual fixture payloads. Not alpha-valid.
+
+EXTERNAL_SIGNAL_CONNECTOR_VERSION = "stage1_v0"
+# Connector version written into normalized event metadata and summaries.
+
+EXTERNAL_SIGNAL_CONNECTOR_SCHEMA_VERSION = "external_signal_event_v1"
+# ExternalSignalEvent-compatible output schema version.

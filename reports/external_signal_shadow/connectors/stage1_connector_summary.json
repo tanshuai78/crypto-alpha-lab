@@ -1,0 +1,52 @@
+{
+  "alpha_interpretation_allowed": false,
+  "connector_version": "stage1_v0",
+  "decision": "external_signal_connector_stage1_passed",
+  "deduped_payload_count": 1,
+  "direction_hint_counts": {
+    "long": 1,
+    "unknown": 1
+  },
+  "emitted_event_count": 2,
+  "event_type_counts": {
+    "smart_money_inflow": 1,
+    "token_audit_pass": 1
+  },
+  "exchange_paper_trading_allowed": false,
+  "execution_engine_allowed": false,
+  "failure_type": "connector_completed",
+  "input_files": [
+    "tests/fixtures/external_signal_shadow/stage1_skill_payloads.jsonl"
+  ],
+  "latency_p50_ms": 60000,
+  "latency_p95_ms": 60000,
+  "live_safe": false,
+  "live_trading_enabled": false,
+  "output_file": "data/external_signal_shadow/normalized/stage1_events.jsonl",
+  "output_file_sha256": "4e8dba3fde3c5d4900df4037123f1aaee5288a451f5728f80eb8a70d3af398d7",
+  "price_mapping_counts": {
+    "cex_symbol_proxy": 1,
+    "exact": 1
+  },
+  "primary_blocker": null,
+  "quarantine_reason_counts": {
+    "missing_asset": 1,
+    "missing_chain": 1,
+    "price_mapping_unavailable": 2,
+    "stale_latency": 1
+  },
+  "quarantined_payload_count": 5,
+  "raw_payload_count": 11,
+  "reject_reason_counts": {
+    "available_before_event": 1,
+    "forbidden_executable_payload": 1,
+    "unsupported_event_type": 1
+  },
+  "rejected_payload_count": 3,
+  "research_shadow_replay_allowed": true,
+  "run_id": "fixture_stage1_v0",
+  "schema_version": "external_signal_event_v1",
+  "source": "fixture",
+  "summary_accounting_ok": true,
+  "wallet_required": false
+}

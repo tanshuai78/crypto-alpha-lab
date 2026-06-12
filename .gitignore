@@ -25,3 +25,7 @@ docs/production_artifacts/
 
 # Local git worktrees
 .worktrees/
+
+# External Signal Shadow Lab runtime data
+data/external_signal_shadow/raw/
+data/external_signal_shadow/normalized/
