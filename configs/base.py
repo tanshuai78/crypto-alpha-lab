@@ -671,3 +671,53 @@ FACTOR_LAB_STAGEA2_CMOM_VARIANTS = (
     "cmom_14d_skip_1d",
 )
 
+
+# ─── Research: External Signal Shadow Lab Stage 0 ─────────────────────────────
+
+EXTERNAL_SIGNAL_SHADOW_MIN_LIQUIDITY_USD = 500_000.0
+# Minimum token liquidity for accepting an external event into shadow replay.
+
+EXTERNAL_SIGNAL_SHADOW_MAX_SELL_TAX_PCT = 5.0
+# Maximum allowed sell tax for token events; higher values are rejected.
+
+EXTERNAL_SIGNAL_SHADOW_MAX_TOP10_HOLDER_SHARE = 0.35
+# Maximum top-10 holder concentration. 0.35 = 35%.
+
+EXTERNAL_SIGNAL_SHADOW_MAX_SMART_MONEY_EXIT_RATE = 0.70
+# Maximum allowed smart-money exit rate. 0.70 = 70%.
+
+EXTERNAL_SIGNAL_SHADOW_CEX_MAX_SPREAD_BPS = 10.0
+# CEX event rejection threshold for current spread.
+
+EXTERNAL_SIGNAL_SHADOW_CEX_MIN_DEPTH_10BPS_USD = 100_000.0
+# Minimum CEX depth within 10 bps needed for shadow eligibility.
+
+EXTERNAL_SIGNAL_SHADOW_MIN_ORDERBOOK_COVERAGE = 0.95
+# Minimum recent orderbook coverage required for CEX events.
+
+EXTERNAL_SIGNAL_SHADOW_MIN_PRICE_COVERAGE = 0.99
+# Minimum price bar coverage required for any shadow replay.
+
+EXTERNAL_SIGNAL_SHADOW_CUSUM_FIXED_THRESHOLD_BPS = 30.0
+# Fixed lower bound for CUSUM confirmation threshold.
+
+EXTERNAL_SIGNAL_SHADOW_CUSUM_VOL_MULTIPLIER = 1.5
+# Rolling-volatility multiplier used by CUSUM threshold.
+
+EXTERNAL_SIGNAL_SHADOW_CUSUM_CONFIRMATION_WINDOW_MIN = 30
+# Maximum minutes after event time to wait for CUSUM confirmation.
+
+EXTERNAL_SIGNAL_SHADOW_TAKE_PROFIT_BPS = 150.0
+# Default triple-barrier take-profit distance.
+
+EXTERNAL_SIGNAL_SHADOW_STOP_LOSS_BPS = 100.0
+# Default triple-barrier stop-loss distance.
+
+EXTERNAL_SIGNAL_SHADOW_MAX_HOLDING_MINUTES = 240
+# Default vertical barrier horizon.
+
+EXTERNAL_SIGNAL_SHADOW_ENTRY_DELAY_BARS = 1
+# Number of complete bars after trigger before shadow entry.
+
+EXTERNAL_SIGNAL_SHADOW_COST_ROUND_TRIP_BPS = 50.0
+# Default round-trip cost used for shadow net return.
