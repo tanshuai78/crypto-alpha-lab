@@ -70,6 +70,13 @@ def test_stage1_summary_fails_when_no_events_emitted():
         decide_stage1_connector_summary,
     )
 
-    result = decide_stage1_connector_summary(_summary(emitted_event_count=0, raw_payload_count=1, deduped_payload_count=0, quarantined_payload_count=1))
+    result = decide_stage1_connector_summary(
+        _summary(
+            emitted_event_count=0,
+            raw_payload_count=1,
+            deduped_payload_count=0,
+            quarantined_payload_count=1,
+        )
+    )
 
     assert result["failure_type"] == "schema_failure"

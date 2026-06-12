@@ -1,5 +1,3 @@
-
-
 def test_canonical_asset_id_formats_correctly():
     from src.research.external_signal_shadow.price_mapping import canonical_asset_id
 
@@ -38,5 +36,9 @@ def test_resolve_price_mapping_returns_none_if_inactive_or_missing(tmp_path):
     )
     price_map = load_price_map(str(map_path))
 
-    assert resolve_price_mapping(price_map, chain="cex", symbol="btc-usdt", token_address=None) is None
-    assert resolve_price_mapping(price_map, chain="cex", symbol="eth-usdt", token_address=None) is None
+    assert (
+        resolve_price_mapping(price_map, chain="cex", symbol="btc-usdt", token_address=None) is None
+    )
+    assert (
+        resolve_price_mapping(price_map, chain="cex", symbol="eth-usdt", token_address=None) is None
+    )

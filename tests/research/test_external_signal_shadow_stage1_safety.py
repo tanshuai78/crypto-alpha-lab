@@ -17,7 +17,9 @@ def test_canonical_json_hash_does_not_include_fetched_at_when_hashing_raw_payloa
     wrapper_1 = {"fetched_at_ms": 1000, "raw_payload": raw_payload}
     wrapper_2 = {"fetched_at_ms": 2000, "raw_payload": raw_payload}
 
-    assert canonical_json_hash(wrapper_1["raw_payload"]) == canonical_json_hash(wrapper_2["raw_payload"])
+    assert canonical_json_hash(wrapper_1["raw_payload"]) == canonical_json_hash(
+        wrapper_2["raw_payload"]
+    )
 
 
 def test_forbidden_policy_rejects_exact_secret_keys():

@@ -12,5 +12,33 @@
     "timeframe": "5m",
     "mapping_type": "cex_symbol_proxy",
     "active": true
+  },
+  "cex:ethusdt": {
+    "price_series_id": "binance_spot_eth_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "direct_cex_symbol",
+    "active": true
+  },
+  "cex:solusdt": {
+    "price_series_id": "binance_spot_sol_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "direct_cex_symbol",
+    "active": true
+  },
+  "cex:xrpusdt": {
+    "price_series_id": "binance_spot_xrp_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "direct_cex_symbol",
+    "active": true
+  },
+  "cex:dogeusdt": {
+    "price_series_id": "binance_spot_doge_usdt",
+    "venue": "binance",
+    "timeframe": "5m",
+    "mapping_type": "direct_cex_symbol",
+    "active": true
   }
 }

@@ -740,4 +740,66 @@ EXTERNAL_SIGNAL_CONNECTOR_VERSION = "stage1_v0"
 # Connector version written into normalized event metadata and summaries.
 
 EXTERNAL_SIGNAL_CONNECTOR_SCHEMA_VERSION = "external_signal_event_v1"
+
+
+EXTERNAL_SIGNAL_STAGE1_1_SOURCE = "gate_marketanalysis_manual_export"
+# Internal source id for Stage 1.1 manual-export dry run. Not a vendor API name.
+
+EXTERNAL_SIGNAL_STAGE1_1_SOURCE_VENDOR = "gate"
+# External vendor label used for source attribution in summaries and reviews.
+
+EXTERNAL_SIGNAL_STAGE1_1_SOURCE_SURFACE = "gate_big_data_dashboard"
+# Human-readable surface where manual observations are collected.
+
+EXTERNAL_SIGNAL_STAGE1_1_SOURCE_CAPTURE_METHOD = "manual_export"
+# Capture method for Stage 1.1. HTTP/API collection remains explicitly out of scope.
+
+EXTERNAL_SIGNAL_STAGE1_1_SOURCE_SKILL = "gate_exchange_marketanalysis"
+# Internal source_skill label used when normalizing manually captured market-analysis payloads.
+
+EXTERNAL_SIGNAL_STAGE1_1_ALLOWED_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT")
+# CEX majors whitelist for Stage 1.1. Prevents a manual Gate dashboard dry run from drifting into small-cap discovery.
+
+EXTERNAL_SIGNAL_STAGE1_1_MIN_RAW_PAYLOADS = 10
+# Minimum raw manual-export payload count for connector-valid status. Below this, data density is insufficient even for dry run.
+
+EXTERNAL_SIGNAL_STAGE1_1_MIN_EMITTED_EVENTS = 1
+# Minimum normalized event count for connector-valid status. This is not enough for Stage 0 handoff.
+
+EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_RAW_PAYLOADS = 20
+# Minimum raw manual-export payload count before Stage 0 handoff can be considered. Safe range: 20-100 for manual dry run.
+
+EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_EMITTED_EVENTS = 5
+# Minimum emitted event count before Stage 0 handoff can be considered.
+
+EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_UNIQUE_SYMBOLS = 3
+# Minimum distinct emitted symbols for handoff. Prevents single-symbol dashboard refreshes from looking like broad signal coverage.
+
+EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_UNIQUE_TIME_BUCKETS = 3
+# Minimum distinct event-time buckets for handoff. Prevents one-time clustered samples from passing as source coverage.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_EVENT_TIME_FALLBACK_RATIO = 0.50
+# Maximum fraction of emitted events whose event_time_ms was derived from available_at_ms. Above this, event timing is not replay-trustworthy.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_PRICE_MAPPING_UNAVAILABLE_RATIO = 0.30
+# Maximum fraction of raw payloads quarantined because no local price series exists. Above this, source does not fit current lab coverage.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_REJECTED_PAYLOAD_RATIO = 0.30
+# Maximum rejected/raw ratio for handoff readiness. High rejection means schema/source quality is unstable.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_SINGLE_SYMBOL_DOMINANCE_RATIO = 0.70
+# Maximum emitted-event concentration in one symbol before source quality is considered too concentrated.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_SINGLE_TIME_BUCKET_DOMINANCE_RATIO = 0.70
+# Maximum emitted-event concentration in one time bucket before source quality is considered too clustered.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_DUPLICATE_RATIO = 0.50
+# Maximum deduped/raw ratio before source quality is considered dominated by repeated dashboard refreshes.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_UNKNOWN_EVENT_TYPE_RATIO = 0.30
+# Maximum unsupported-event/raw ratio before source event taxonomy is considered too unstable.
+
+EXTERNAL_SIGNAL_STAGE1_1_MAX_MISSING_REQUIRED_FIELD_RATIO = 0.30
+# Maximum missing-required-field/raw ratio before manual payload quality is considered insufficient.
+
 # ExternalSignalEvent-compatible output schema version.

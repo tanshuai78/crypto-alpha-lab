@@ -10,17 +10,50 @@ def test_external_signal_stage1_connector_config_constants_exist():
     assert base.EXTERNAL_SIGNAL_CONNECTOR_MAX_CEX_LATENCY_MS == 15 * 60 * 1000
     assert base.EXTERNAL_SIGNAL_CONNECTOR_MAX_ONCHAIN_LATENCY_MS == 60 * 60 * 1000
     assert base.EXTERNAL_SIGNAL_CONNECTOR_MAX_MANUAL_FIXTURE_LATENCY_MS == 24 * 60 * 60 * 1000
+
+
+def test_external_signal_stage1_1_manual_dry_run_config_constants_exist():
+    from configs import base
+
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_SOURCE == "gate_marketanalysis_manual_export"
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_SOURCE_VENDOR == "gate"
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_SOURCE_SURFACE == "gate_big_data_dashboard"
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_SOURCE_CAPTURE_METHOD == "manual_export"
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_SOURCE_SKILL == "gate_exchange_marketanalysis"
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_ALLOWED_SYMBOLS == (
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+    )
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MIN_RAW_PAYLOADS == 10
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_RAW_PAYLOADS == 20
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_EMITTED_EVENTS == 5
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_UNIQUE_SYMBOLS == 3
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_HANDOFF_MIN_UNIQUE_TIME_BUCKETS == 3
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MAX_EVENT_TIME_FALLBACK_RATIO == 0.50
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MAX_PRICE_MAPPING_UNAVAILABLE_RATIO == 0.30
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MAX_REJECTED_PAYLOAD_RATIO == 0.30
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MAX_SINGLE_SYMBOL_DOMINANCE_RATIO == 0.70
+    assert base.EXTERNAL_SIGNAL_STAGE1_1_MAX_SINGLE_TIME_BUCKET_DOMINANCE_RATIO == 0.70
     assert base.EXTERNAL_SIGNAL_CONNECTOR_VERSION == "stage1_v0"
     assert base.EXTERNAL_SIGNAL_CONNECTOR_SCHEMA_VERSION == "external_signal_event_v1"
-
-
 
 
 def test_raw_skill_payload_requires_raw_payload_dict():
     from src.research.external_signal_shadow.schemas import RawSkillPayload
 
     with pytest.raises(ValueError, match="raw_payload"):
-        RawSkillPayload.from_dict({"source": "fixture", "data_quality": "fixture", "source_skill": "fixture", "fetched_at_ms": 1000, "raw_payload": []})
+        RawSkillPayload.from_dict(
+            {
+                "source": "fixture",
+                "data_quality": "fixture",
+                "source_skill": "fixture",
+                "fetched_at_ms": 1000,
+                "raw_payload": [],
+            }
+        )
 
 
 def test_raw_skill_payload_defaults_available_at_to_fetched_at():
@@ -51,8 +84,6 @@ def test_raw_skill_payload_has_explicit_data_quality_default():
     )
 
     assert payload.data_quality == "unknown"
-
-
 
 
 def test_file_backed_connector_fixture_accounting(tmp_path):
@@ -95,7 +126,9 @@ def test_connector_summary_includes_required_audit_fields(tmp_path):
     assert summary["source"] == "fixture"
     assert summary["connector_version"] == "stage1_v0"
     assert summary["schema_version"] == "external_signal_event_v1"
-    assert summary["input_files"] == ["tests/fixtures/external_signal_shadow/stage1_skill_payloads.jsonl"]
+    assert summary["input_files"] == [
+        "tests/fixtures/external_signal_shadow/stage1_skill_payloads.jsonl"
+    ]
     assert summary["run_id"] == "fixture_stage1_v0"
     assert summary["latency_p50_ms"] == 60_000
     assert summary["latency_p95_ms"] == 60_000

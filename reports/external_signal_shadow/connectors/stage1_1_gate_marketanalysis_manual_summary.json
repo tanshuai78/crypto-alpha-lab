@@ -1,0 +1,70 @@
+{
+  "alpha_interpretation_allowed": false,
+  "avoid_event_count": 0,
+  "connector_version": "stage1_v0",
+  "decision": "external_signal_connector_stage1_passed",
+  "deduped_payload_count": 2,
+  "direction_hint_counts": {
+    "unknown": 16
+  },
+  "directionless_event_count": 16,
+  "duplicate_ratio": 0.09523809523809523,
+  "emitted_event_count": 16,
+  "event_time_fallback_count": 1,
+  "event_time_fallback_ratio": 0.0625,
+  "event_type_counts": {
+    "cex_market_tape_anomaly": 16
+  },
+  "exchange_paper_trading_allowed": false,
+  "execution_engine_allowed": false,
+  "failure_type": "connector_completed",
+  "input_files": [
+    "data/external_signal_shadow/raw/gate_marketanalysis_manual_export/2026-06-12.jsonl"
+  ],
+  "latency_p50_ms": 1000,
+  "latency_p95_ms": 1000,
+  "latency_sample_count": 15,
+  "live_safe": false,
+  "live_trading_enabled": false,
+  "minimal_connector_pass": true,
+  "missing_required_field_ratio": 0.047619047619047616,
+  "output_file": "data/external_signal_shadow/normalized/stage1_1_gate_marketanalysis_manual_events.jsonl",
+  "output_file_sha256": "57f60b935c5f0785fb06ce1cb64d21e2218cd89a59cb51fb2a84ed62a59d8d84",
+  "price_mapping_counts": {
+    "direct_cex_symbol": 16
+  },
+  "price_mapping_unavailable_ratio": 0.0,
+  "primary_blocker": null,
+  "quarantine_reason_counts": {
+    "missing_asset": 1,
+    "unsupported_stage1_1_symbol": 1
+  },
+  "quarantined_payload_count": 2,
+  "raw_payload_count": 21,
+  "reject_reason_counts": {
+    "unsupported_event_type": 1
+  },
+  "rejected_payload_count": 1,
+  "rejected_payload_ratio": 0.047619047619047616,
+  "research_shadow_replay_allowed": true,
+  "run_id": "gate_marketanalysis_manual_export_stage1_v0",
+  "schema_version": "external_signal_event_v1",
+  "single_symbol_dominance_ratio": 0.25,
+  "single_time_bucket_dominance_ratio": 0.0625,
+  "source": "gate_marketanalysis_manual_export",
+  "source_capture_method": "manual_export",
+  "source_surface": "gate_big_data_dashboard",
+  "source_vendor": "gate",
+  "stage0_directional_replay_ready": false,
+  "stage0_handoff_blockers": [],
+  "stage0_handoff_mode": "observation_only",
+  "stage0_handoff_ready": true,
+  "stage0_observation_handoff_ready": true,
+  "stage0_observation_only_event_count": 16,
+  "stage0_replay_eligible_event_count": 0,
+  "summary_accounting_ok": true,
+  "unique_event_time_bucket_count": 16,
+  "unique_symbol_count": 5,
+  "unknown_event_type_ratio": 0.047619047619047616,
+  "wallet_required": false
+}
