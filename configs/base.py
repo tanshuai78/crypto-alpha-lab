@@ -802,4 +802,34 @@ EXTERNAL_SIGNAL_STAGE1_1_MAX_UNKNOWN_EVENT_TYPE_RATIO = 0.30
 EXTERNAL_SIGNAL_STAGE1_1_MAX_MISSING_REQUIRED_FIELD_RATIO = 0.30
 # Maximum missing-required-field/raw ratio before manual payload quality is considered insufficient.
 
+# Stage 1.2 Gate public REST base URL. Public-readonly only; no authenticated endpoints.
+EXTERNAL_SIGNAL_STAGE1_2_GATE_REST_BASE_URL = "https://api.gateio.ws/api/v4"
+
+# Stage 1.2 Gate spot ticker path. Safe path must remain public market data.
+EXTERNAL_SIGNAL_STAGE1_2_GATE_TICKERS_PATH = "/spot/tickers"
+
+# Stage 1.2 allowed Gate pairs. Keep small CEX majors only for first collector dry run.
+EXTERNAL_SIGNAL_STAGE1_2_ALLOWED_GATE_PAIRS = (
+    "BTC_USDT",
+    "ETH_USDT",
+    "SOL_USDT",
+    "XRP_USDT",
+    "DOGE_USDT",
+)
+
+# Stage 1.2 HTTP timeout for public readonly calls. Safe range: 5-30 seconds.
+EXTERNAL_SIGNAL_STAGE1_2_TIMEOUT_SEC = 10.0
+
+# Stage 1.2 retry count for public readonly calls. Safe range: 0-2; avoid API hammering.
+EXTERNAL_SIGNAL_STAGE1_2_MAX_RETRIES = 1
+
+# Stage 1.2 backoff between retry attempts. Safe range: 1-10 seconds.
+EXTERNAL_SIGNAL_STAGE1_2_RETRY_BACKOFF_SEC = 2.0
+
+# Stage 1.2 delay between per-symbol public calls. Safe range: 0.1-2.0 seconds; reduces 429 risk.
+EXTERNAL_SIGNAL_STAGE1_2_INTER_REQUEST_DELAY_SEC = 0.3
+
+# Stage 1.2 User-Agent. Identifies research-only readonly collector; not a trading client.
+EXTERNAL_SIGNAL_STAGE1_2_USER_AGENT = "crypto-alpha-lab-research-readonly/0.1"
+
 # ExternalSignalEvent-compatible output schema version.

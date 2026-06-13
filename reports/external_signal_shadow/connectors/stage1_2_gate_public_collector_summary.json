@@ -1,0 +1,23 @@
+{
+  "decision": "external_signal_collector_stage1_2_passed",
+  "collector_version": "stage1_2_v0",
+  "source": "gate_public_market_snapshot_collector",
+  "network_mode": "live_public_readonly",
+  "collector_minimal_pass": true,
+  "failure_type": null,
+  "primary_blocker": null,
+  "http_success_count": 5,
+  "http_failure_count": 0,
+  "raw_payload_count": 5,
+  "numeric_parse_failure_count": 0,
+  "numeric_parse_failure_ratio": 0.0,
+  "rate_limited_count": 0,
+  "parse_error_count": 0,
+  "field_parse_failure_count": 0,
+  "collector_network_failure_count": 0,
+  "api_key_used": false,
+  "private_endpoint_used": false,
+  "event_density_alpha_valid": false,
+  "schedule_generated": true,
+  "live_safe": false
+}

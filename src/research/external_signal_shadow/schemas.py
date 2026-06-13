@@ -127,7 +127,10 @@ class RawSkillPayload:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "RawSkillPayload":
-        return cls(**payload)
+        import dataclasses
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in payload.items() if k in valid_fields}
+        return cls(**filtered)
 
 
 @dataclass(frozen=True)

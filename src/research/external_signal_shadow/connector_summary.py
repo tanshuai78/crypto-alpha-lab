@@ -121,6 +121,38 @@ def decide_stage1_connector_summary(summary: dict) -> dict:
             stage0_directional_replay_ready = False
             stage0_observation_handoff_ready = False
 
+    elif summary.get("source") == "gate_public_market_snapshot_collector":
+        raw_count = summary.get("raw_payload_count", 0)
+        emitted_count = summary.get("emitted_event_count", 0)
+        price_mapping_unavailable_ratio = summary.get("price_mapping_unavailable_ratio", 0.0)
+
+        minimal_connector_pass = (
+            failure_type == "connector_completed"
+            and raw_count >= 5
+            and emitted_count >= 5
+        )
+
+        stage0_handoff_blockers = []
+        if failure_type != "connector_completed":
+            stage0_handoff_blockers.append(failure_type)
+        if raw_count < 5:
+            stage0_handoff_blockers.append("insufficient_raw_payloads")
+        if emitted_count < 5:
+            stage0_handoff_blockers.append("insufficient_emitted_events")
+        if price_mapping_unavailable_ratio > 0.0:
+            stage0_handoff_blockers.append("price_mapping_unavailable")
+
+        stage0_handoff_ready = len(stage0_handoff_blockers) == 0
+
+        if not stage0_handoff_ready:
+            stage0_handoff_mode = "blocked"
+            stage0_directional_replay_ready = False
+            stage0_observation_handoff_ready = False
+        else:
+            stage0_handoff_mode = "observation_only"
+            stage0_directional_replay_ready = False
+            stage0_observation_handoff_ready = True
+
     if failure_type not in ("connector_completed",):
         decision = "external_signal_connector_stage1_failed"
 
@@ -143,6 +175,15 @@ def decide_stage1_connector_summary(summary: dict) -> dict:
         res["stage0_handoff_mode"] = stage0_handoff_mode
         res["stage0_directional_replay_ready"] = stage0_directional_replay_ready
         res["stage0_observation_handoff_ready"] = stage0_observation_handoff_ready
+    elif summary.get("source") == "gate_public_market_snapshot_collector":
+        res["minimal_connector_pass"] = minimal_connector_pass
+        res["stage0_handoff_ready"] = stage0_handoff_ready
+        res["stage0_handoff_blockers"] = stage0_handoff_blockers
+        res["stage0_handoff_mode"] = stage0_handoff_mode
+        res["stage0_directional_replay_ready"] = stage0_directional_replay_ready
+        res["stage0_observation_handoff_ready"] = stage0_observation_handoff_ready
+        res["event_density_alpha_valid"] = False
+        res["triple_barrier_directional_order_allowed"] = False
 
     return res
 

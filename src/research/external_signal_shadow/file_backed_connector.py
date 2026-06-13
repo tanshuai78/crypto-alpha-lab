@@ -28,6 +28,7 @@ EVENT_TYPE_DIRECTION = {
     "liquidity_contraction": "avoid",
     "meme_lifecycle_event": "unknown",
     "cex_market_tape_anomaly": "unknown",
+    "cex_market_snapshot": "unknown",
 }
 
 
@@ -48,6 +49,16 @@ def run_file_backed_connector(
             if not line.strip():
                 continue
             payload_dict = json.loads(line)
+            try:
+                validate_no_executable_payload(payload_dict)
+            except ValueError:
+                records.append(
+                    ConnectorRecord(
+                        status="rejected",
+                        reject_reasons=("forbidden_executable_payload",),
+                    )
+                )
+                continue
             try:
                 wrapper = RawSkillPayload.from_dict(payload_dict)
                 records.append(_process_payload(wrapper, source, price_map, seen_semantic_keys))

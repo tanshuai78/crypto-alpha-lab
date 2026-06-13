@@ -1,0 +1,7 @@
+{
+  "BTC_USDT": [{"currency_pair": "BTC_USDT", "last": "65000", "base_volume": "100", "quote_volume": "6500000", "change_percentage": "1.0"}],
+  "ETH_USDT": [{"currency_pair": "ETH_USDT", "last": "3500", "base_volume": "1000", "quote_volume": "3500000", "change_percentage": "0.5"}],
+  "SOL_USDT": [{"currency_pair": "SOL_USDT", "last": "150", "base_volume": "20000", "quote_volume": "3000000", "change_percentage": "2.1"}],
+  "XRP_USDT": [{"currency_pair": "XRP_USDT", "last": "0.6", "base_volume": "5000000", "quote_volume": "3000000", "change_percentage": "-0.3"}],
+  "DOGE_USDT": [{"currency_pair": "DOGE_USDT", "last": "0.12", "base_volume": "30000000", "quote_volume": "3600000", "change_percentage": "0.9"}]
+}

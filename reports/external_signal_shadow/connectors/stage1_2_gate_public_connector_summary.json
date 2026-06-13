@@ -1,0 +1,60 @@
+{
+  "alpha_interpretation_allowed": false,
+  "connector_version": "stage1_v0",
+  "decision": "external_signal_connector_stage1_passed",
+  "deduped_payload_count": 0,
+  "direction_hint_counts": {
+    "unknown": 5
+  },
+  "duplicate_ratio": 0.0,
+  "emitted_event_count": 5,
+  "event_density_alpha_valid": false,
+  "event_time_fallback_count": 5,
+  "event_time_fallback_ratio": 1.0,
+  "event_type_counts": {
+    "cex_market_snapshot": 5
+  },
+  "exchange_paper_trading_allowed": false,
+  "execution_engine_allowed": false,
+  "failure_type": "connector_completed",
+  "input_files": [
+    "data/external_signal_shadow/raw/gate_public_market_snapshot_collector/2026-06-12.jsonl"
+  ],
+  "latency_p50_ms": null,
+  "latency_p95_ms": null,
+  "latency_sample_count": 0,
+  "live_safe": false,
+  "live_trading_enabled": false,
+  "minimal_connector_pass": true,
+  "missing_required_field_ratio": 0.0,
+  "output_file": "data/external_signal_shadow/normalized/stage1_2_gate_public_events.jsonl",
+  "output_file_sha256": "0dd9ff677c126f056a9699adb7dfe202b1880d11855a887ac487c1baa6e4597d",
+  "price_mapping_counts": {
+    "direct_cex_symbol": 5
+  },
+  "price_mapping_unavailable_ratio": 0.0,
+  "primary_blocker": null,
+  "quarantine_reason_counts": {},
+  "quarantined_payload_count": 0,
+  "raw_payload_count": 5,
+  "reject_reason_counts": {},
+  "rejected_payload_count": 0,
+  "rejected_payload_ratio": 0.0,
+  "research_shadow_replay_allowed": true,
+  "run_id": "gate_public_market_snapshot_collector_stage1_v0",
+  "schema_version": "external_signal_event_v1",
+  "single_symbol_dominance_ratio": 0.2,
+  "single_time_bucket_dominance_ratio": 1.0,
+  "source": "gate_public_market_snapshot_collector",
+  "stage0_directional_replay_ready": false,
+  "stage0_handoff_blockers": [],
+  "stage0_handoff_mode": "observation_only",
+  "stage0_handoff_ready": true,
+  "stage0_observation_handoff_ready": true,
+  "summary_accounting_ok": true,
+  "triple_barrier_directional_order_allowed": false,
+  "unique_event_time_bucket_count": 1,
+  "unique_symbol_count": 5,
+  "unknown_event_type_ratio": 0.0,
+  "wallet_required": false
+}
