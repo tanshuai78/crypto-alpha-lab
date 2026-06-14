@@ -24,6 +24,20 @@
 
 ---
 
+## E002: 新脚本继续堆在 `scripts/` 根目录
+
+日期：2026-06-14
+
+问题：`scripts/` 根目录脚本过多，继续平铺会降低查找、review 和误运行防护效率。
+
+避免规则：
+
+- 新增脚本优先放入领域子目录，例如 `scripts/external_signal_shadow/`、`scripts/factor_lab/`、`scripts/liquidation/`。
+- 根目录只保留通用入口、兼容 wrapper 或极少数跨领域工具。
+- 不为整理而大规模移动旧脚本；只有改到相关脚本时再小步迁移，并同步测试和文档命令。
+
+---
+
 ## 通用提醒
 
 - 当前项目默认路径：`/Users/tanshuai/Desktop/AI-test/crypto-alpha-lab`。

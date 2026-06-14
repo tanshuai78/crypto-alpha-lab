@@ -833,3 +833,95 @@ EXTERNAL_SIGNAL_STAGE1_2_INTER_REQUEST_DELAY_SEC = 0.3
 EXTERNAL_SIGNAL_STAGE1_2_USER_AGENT = "crypto-alpha-lab-research-readonly/0.1"
 
 # ExternalSignalEvent-compatible output schema version.
+
+# ─── External Signal Shadow Lab Stage 1.3 Candidate Discovery ────────────────
+
+EXTERNAL_SIGNAL_STAGE1_3_VOLUME_SPIKE_THRESHOLD = 3.0
+# Candidate A volume spike threshold. 3.0 means current 1h quote volume must be
+# at least 3x the rolling same-hour median. Research-only; do not tune after results.
+
+EXTERNAL_SIGNAL_STAGE1_3_REL_STRENGTH_Z_THRESHOLD = 1.5
+# Candidate B relative-strength threshold in rolling std units. Safe range for
+# pre-registered diagnostics: 1.0-2.5. Do not grid-search in Stage 1.3.
+
+EXTERNAL_SIGNAL_STAGE1_3_ROLLING_DAYS = 7
+# Rolling historical window length for volume and return baselines.
+
+EXTERNAL_SIGNAL_STAGE1_3_SAME_HOUR_MIN_SAMPLES = 5
+# Minimum same-hour historical samples required before volume_spike_1h can emit.
+
+EXTERNAL_SIGNAL_STAGE1_3_ROLLING_STD_MIN_SAMPLES = 48
+# Minimum 1h relative-strength samples required before z-threshold evaluation.
+
+EXTERNAL_SIGNAL_STAGE1_3_SNAPSHOT_INTERVAL_MINUTES = 15
+# Historical snapshot interval. Matches Stage 1.3 replay granularity, not live cadence.
+
+EXTERNAL_SIGNAL_STAGE1_3_ONE_HOUR_BAR_COUNT = 4
+# Number of 15m bars used to construct a complete 1h observation window.
+
+EXTERNAL_SIGNAL_STAGE1_3_FORWARD_4H_BAR_COUNT = 16
+# Number of 15m bars used for the fixed 4h primary forward-return window.
+# Keep centralized so replay, metrics, and eligibility checks cannot drift.
+
+EXTERNAL_SIGNAL_STAGE1_3_HISTORY_DAYS_PREFERRED = 180
+# Preferred historical replay span. Longer improves event diversity.
+
+EXTERNAL_SIGNAL_STAGE1_3_HISTORY_DAYS_MIN = 90
+# Minimum historical replay span before Stage 1.3 can run without data warning.
+
+EXTERNAL_SIGNAL_STAGE1_3_CONFIGURED_DATA_LAG_MS = 60_000
+# Synthetic availability lag added to historical bar close time to prevent same-bar fills.
+
+EXTERNAL_SIGNAL_STAGE1_3_ENTRY_DELAY_BARS = 1
+# Minimum complete 15m bars to wait after candidate event before evaluating entry.
+
+EXTERNAL_SIGNAL_STAGE1_3_MIN_EVENT_COUNT = 100
+# Minimum candidate event count for data sufficiency.
+
+EXTERNAL_SIGNAL_STAGE1_3_MIN_EVENT_DAYS = 20
+# Minimum distinct event days for data sufficiency.
+
+EXTERNAL_SIGNAL_STAGE1_3_MIN_SYMBOLS_WITH_EVENTS = 3
+# Minimum distinct symbols with candidate events.
+
+EXTERNAL_SIGNAL_STAGE1_3_MAX_SINGLE_SYMBOL_EVENT_SHARE = 0.50
+# Max share of events from one symbol. Prevents single-symbol overfit.
+
+EXTERNAL_SIGNAL_STAGE1_3_MAX_SINGLE_DAY_EVENT_SHARE = 0.20
+# Max share of events from one UTC day. Prevents one-day regime overfit.
+
+EXTERNAL_SIGNAL_STAGE1_3_MAX_TOP5_POSITIVE_PNL_SHARE = 0.30
+# Max gross profit contribution from top 5 positive events.
+
+EXTERNAL_SIGNAL_STAGE1_3_RANDOM_BASELINE_TRIALS = 500
+# Number of random baseline trials. Fixed for comparability.
+
+EXTERNAL_SIGNAL_STAGE1_3_RANDOM_SEED = 20260613
+# Fixed seed for reproducible random baseline generation.
+
+EXTERNAL_SIGNAL_STAGE1_3_COST_SCENARIOS_ROUND_TRIP_BPS = (30.0, 50.0, 80.0)
+# Round-trip cost scenarios: base, stress, crash. Research-only, not fee advice.
+
+EXTERNAL_SIGNAL_STAGE1_3_MIN_BAR_COVERAGE_RATIO = 0.98
+# Minimum 15m bar coverage per symbol before replay can be trusted.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_BASE_URL = "https://data-api.binance.vision"
+# Public market-data-only Binance base URL used for Stage 1.3 historical proxy replay.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_KLINES_PATH = "/api/v3/klines"
+# Public spot kline endpoint path. Must remain readonly and unauthenticated.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT")
+# Required major-symbol universe for Stage 1.3 Binance proxy replay.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_INTERVAL = "15m"
+# Historical kline interval required by Stage 1.3 replay.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_KLINES_LIMIT = 1000
+# Max spot kline rows per request. Binance spot endpoint maximum is 1000.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_TIMEOUT_SEC = 10.0
+# Public HTTP timeout for Binance proxy kline requests. Safe range: 5-30 seconds.
+
+EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_REQUEST_SLEEP_SEC = 0.2
+# Delay between public kline requests. Keeps the one-off replay builder polite.
