@@ -5,13 +5,13 @@
   "orderbook_dir_exists": true,
   "primary_blocker": null,
   "liquidation_1m_zero_fill_coverage_24h": 1.0,
-  "orderbook_snapshot_coverage_24h": 1.0,
+  "orderbook_snapshot_coverage_24h": 0.006666666666666666,
   "orderbook_snapshot_coverage_by_symbol_24h": {
-    "BTCUSDT": 1.0,
-    "ETHUSDT": 1.0,
-    "SOLUSDT": 1.0,
-    "XRPUSDT": 1.0,
-    "DOGEUSDT": 1.0
+    "BTCUSDT": 0.00625,
+    "ETHUSDT": 0.006944444444444444,
+    "SOLUSDT": 0.006944444444444444,
+    "XRPUSDT": 0.006944444444444444,
+    "DOGEUSDT": 0.00625
   },
   "orderbook_symbols_with_data": [
     "BTCUSDT",
@@ -22,13 +22,13 @@
   ],
   "price_1m_coverage_24h": 1.0,
   "overlap_hours_by_symbol": {
-    "XRPUSDT": 170.25,
-    "ETHUSDT": 170.68333333333334,
-    "SOLUSDT": 170.15,
-    "BTCUSDT": 170.7,
-    "DOGEUSDT": 170.23333333333332
+    "ETHUSDT": 342.55,
+    "XRPUSDT": 342.1166666666667,
+    "SOLUSDT": 342.01666666666665,
+    "BTCUSDT": 324.98333333333335,
+    "DOGEUSDT": 342.1
   },
   "ready_for_price_only": true,
-  "ready_for_orderbook_aware": true,
-  "decision": "route_c1_overlap_ready_for_orderbook_aware"
+  "ready_for_orderbook_aware": false,
+  "decision": "route_c1_overlap_ready_for_price_only"
 }

@@ -1,0 +1,34 @@
+{
+  "source": "binance_vision_um_daily_metrics",
+  "requested_symbol_count": 5,
+  "requested_days": 180,
+  "download_success_count": 890,
+  "download_failure_count": 10,
+  "row_count": 256320,
+  "symbol_row_counts": {
+    "BTCUSDT": 51264,
+    "ETHUSDT": 51264,
+    "SOLUSDT": 51264,
+    "XRPUSDT": 51264,
+    "DOGEUSDT": 51264
+  },
+  "history_days_by_symbol": {
+    "BTCUSDT": 178.0,
+    "ETHUSDT": 178.0,
+    "SOLUSDT": 178.0,
+    "XRPUSDT": 178.0,
+    "DOGEUSDT": 178.0
+  },
+  "inferred_interval_ms_by_symbol": {
+    "BTCUSDT": 300000,
+    "ETHUSDT": 300000,
+    "SOLUSDT": 300000,
+    "XRPUSDT": 300000,
+    "DOGEUSDT": 300000
+  },
+  "duplicate_row_count": 0,
+  "malformed_row_count": 0,
+  "output_file": "data/external_signal_shadow/derivatives_stress/oi/binance_vision_metrics_oi_180d.jsonl",
+  "live_trading_allowed": false,
+  "api_key_used": false
+}

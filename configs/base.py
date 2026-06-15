@@ -925,3 +925,119 @@ EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_TIMEOUT_SEC = 10.0
 
 EXTERNAL_SIGNAL_STAGE1_3_BINANCE_PROXY_REQUEST_SLEEP_SEC = 0.2
 # Delay between public kline requests. Keeps the one-off replay builder polite.
+
+
+# ─── External Signal Shadow Lab Stage 1.4A Derivatives Stress Data Feasibility ─
+
+EXTERNAL_SIGNAL_STAGE1_4_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT")
+# Mapped symbol universe for USD-M futures.
+
+EXTERNAL_SIGNAL_STAGE1_4_HISTORY_DAYS_PREFERRED = 180
+# Preferred historical days for full composite replay.
+
+EXTERNAL_SIGNAL_STAGE1_4_HISTORY_DAYS_MIN = 90
+# Minimum historical days for a source to be considered usable.
+
+EXTERNAL_SIGNAL_STAGE1_4_MIN_USABLE_SYMBOLS = 3
+# Minimum number of symbols that must pass all feasibility thresholds.
+
+EXTERNAL_SIGNAL_STAGE1_4_BAR_COVERAGE_MIN_RATIO = 0.95
+# Minimum bar coverage ratio for price history data.
+
+EXTERNAL_SIGNAL_STAGE1_4_LIQUIDATION_FIELD_COVERAGE_MIN_RATIO = 0.90
+# Minimum coverage of non-null fields in liquidation records.
+
+EXTERNAL_SIGNAL_STAGE1_4_LIQUIDATION_TIME_COVERAGE_MIN_RATIO = 0.90
+# Minimum time continuity coverage for liquidation data.
+
+EXTERNAL_SIGNAL_STAGE1_4_FUNDING_FIELD_COVERAGE_MIN_RATIO = 0.95
+# Minimum coverage of non-null fields in funding rate records.
+
+EXTERNAL_SIGNAL_STAGE1_4_FUNDING_SETTLEMENT_COVERAGE_MIN_RATIO = 0.95
+# Minimum ratio of expected 8h funding settlements actually found.
+
+EXTERNAL_SIGNAL_STAGE1_4_OI_FIELD_COVERAGE_MIN_RATIO = 0.90
+# Minimum coverage of non-null fields in open interest records.
+
+EXTERNAL_SIGNAL_STAGE1_4_OI_TIME_COVERAGE_MIN_RATIO = 0.90
+# Minimum time continuity coverage for open interest records.
+
+EXTERNAL_SIGNAL_STAGE1_4_EXPECTED_FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000
+# Expected 8h cadence for funding settlements (in milliseconds).
+
+EXTERNAL_SIGNAL_STAGE1_4_EXPECTED_OI_INTERVAL_MS = 60 * 60 * 1000
+# Expected 1h cadence for open interest data (in milliseconds).
+
+EXTERNAL_SIGNAL_STAGE1_4_EXPECTED_PRICE_INTERVAL_MS = 15 * 60 * 1000
+# Expected 15m price bar interval (in milliseconds).
+
+EXTERNAL_SIGNAL_STAGE1_4_FUNDING_PUBLISH_LAG_MS = 15 * 60 * 1000
+# Delay after settlement time before funding rate becomes available/published.
+
+EXTERNAL_SIGNAL_STAGE1_4_PREVIEW_MIN_COMPOSITE_OVERLAP_WINDOWS = 50
+# Minimum composite overlap windows (candidate event entries) for preview density.
+
+EXTERNAL_SIGNAL_STAGE1_4_PREVIEW_MIN_COMPOSITE_OVERLAP_DAYS = 15
+# Minimum distinct days covered by composite overlap windows.
+
+EXTERNAL_SIGNAL_STAGE1_4_BINANCE_FAPI_BASE_URL = "https://fapi.binance.com"
+# Base URL for Binance USD-M Futures public REST API.
+
+EXTERNAL_SIGNAL_STAGE1_4_FUNDING_RATE_PATH = "/fapi/v1/fundingRate"
+# Public endpoint path for funding rate history.
+
+EXTERNAL_SIGNAL_STAGE1_4_OPEN_INTEREST_HIST_PATH = "/futures/data/openInterestHist"
+# Public endpoint path for open interest history.
+
+EXTERNAL_SIGNAL_STAGE1_4_CURRENT_OPEN_INTEREST_PATH = "/fapi/v1/openInterest"
+# Public endpoint path for current open interest.
+
+EXTERNAL_SIGNAL_STAGE1_4_FUTURES_KLINES_PATH = "/fapi/v1/klines"
+# Public endpoint path for futures kline historical bars.
+
+EXTERNAL_SIGNAL_STAGE1_4_BINANCE_VISION_BASE_URL = "https://data.binance.vision"
+# Base URL for Binance Vision public data archives.
+
+EXTERNAL_SIGNAL_STAGE1_4_TIMEOUT_SEC = 10.0
+# Request timeout in seconds for public readonly queries.
+
+EXTERNAL_SIGNAL_STAGE1_4_REQUEST_SLEEP_SEC = 0.2
+# Polite delay between public requests to avoid hitting rate limits.
+
+EXTERNAL_SIGNAL_STAGE1_4_LOCAL_OI_ARCHIVE_GLOB = "data/external_signal_shadow/derivatives_stress/oi/*.jsonl"
+# Glob path for scanning local Open Interest archive files.
+
+EXTERNAL_SIGNAL_STAGE1_4_LOCAL_FORCE_ORDER_ARCHIVE_GLOB = "data/trend_regime_force_orders_raw.jsonl"
+# File path/glob for scanning local force order (liquidation) archives.
+
+EXTERNAL_SIGNAL_STAGE1_4_CM_TO_UM_SYMBOL_MAP = {
+    "BTCUSD_PERP": "BTCUSDT",
+    "ETHUSD_PERP": "ETHUSDT",
+    "SOLUSD_PERP": "SOLUSDT",
+    "XRPUSD_PERP": "XRPUSDT",
+    "DOGEUSD_PERP": "DOGEUSDT",
+}
+# Mapping from Coin-M symbols to USD-M symbols for liquidation snapshots proxying.
+
+
+# Binance Vision daily metrics ZIP path template for USD-M futures OI archive.
+# This is the public historical source for sum_open_interest and sum_open_interest_value.
+EXTERNAL_SIGNAL_STAGE1_4_BINANCE_VISION_METRICS_DAILY_PATH_TEMPLATE = (
+    "/data/futures/um/daily/metrics/{symbol}/{symbol}-metrics-{date}.zip"
+)
+
+# Local JSONL output path for converted Binance Vision metrics OI rows.
+# Runtime data should remain ignored by git unless explicitly reviewed.
+EXTERNAL_SIGNAL_STAGE1_4_BINANCE_VISION_OI_OUTPUT_JSONL = (
+    "data/external_signal_shadow/derivatives_stress/oi/binance_vision_metrics_oi_180d.jsonl"
+)
+
+# Public REST page limit used by Stage 1.4A funding/price historical probes.
+# Safe range: 500-1500; do not exceed Binance endpoint limits.
+EXTERNAL_SIGNAL_STAGE1_4_PUBLIC_REST_PAGE_LIMIT = 1000
+
+# Preferred Stage 1.4A real audit history window.
+# Must be >= EXTERNAL_SIGNAL_STAGE1_4_HISTORY_DAYS_MIN.
+EXTERNAL_SIGNAL_STAGE1_4_REAL_AUDIT_HISTORY_DAYS = 180
+
+

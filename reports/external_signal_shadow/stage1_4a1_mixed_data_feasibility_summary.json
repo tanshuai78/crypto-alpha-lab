@@ -1,0 +1,310 @@
+{
+  "outcome": "stage1_4_data_degraded",
+  "primary_blocker": "liquidation_history_insufficient",
+  "research_result_valid": true,
+  "fixture_run": false,
+  "stage1_4b_candidate_replay_allowed": false,
+  "composite_replay_allowed": false,
+  "live_trading_allowed": false,
+  "feasible_symbol_count": 0,
+  "preview_metrics": {
+    "composite_overlap_window_count": 71643,
+    "composite_overlap_event_days": 14
+  },
+  "symbol_audits": {
+    "SOLUSDT": {
+      "funding": {
+        "funding_source": "binance_fapi_fundingRate",
+        "funding_record_count": 540,
+        "funding_history_days": 179.66666681712962,
+        "funding_field_coverage_ratio": 1.0,
+        "funding_settlement_coverage_ratio": 1.0,
+        "missing_settlement_count": 0,
+        "max_settlement_gap_ms": 28800016,
+        "source_quality": "public_settled_funding_history",
+        "usable": true
+      },
+      "oi": {
+        "oi_source": "binance_openInterestHist_or_local_archive",
+        "oi_record_count": 51264,
+        "oi_history_days": 177.99652777777777,
+        "oi_field_coverage_ratio": 1.0,
+        "oi_time_coverage_ratio": 1.0,
+        "expected_bucket_count": 51264,
+        "actual_unique_bucket_count": 51264,
+        "gap_count": 3,
+        "max_gap_ms": 302000,
+        "oi_history_limit_detected_days": 177.99652777777777,
+        "oi_blocks_full_composite": false,
+        "source_quality": "local_archive",
+        "usable": true
+      },
+      "liquidation": {
+        "liquidation_source": "local_force_order_archive",
+        "liquidation_source_quality": "force_order_archive",
+        "liquidation_history_days": 12.318186469907408,
+        "liquidation_field_coverage_ratio": 1.0,
+        "liquidation_time_coverage_ratio": 920.7692307692307,
+        "liquidation_nonzero_window_count": 11970,
+        "liquidation_symbol_mapping_quality": "exact",
+        "cm_to_um_proxy_used": false,
+        "liquidation_proxy_accepted_for_full_replay": true,
+        "notional_conversion_required": false,
+        "notional_conversion_quality": "verified_by_sample"
+      },
+      "price": {
+        "price_source_preference": "futures_klines_preferred",
+        "price_source": "futures_klines",
+        "price_venue_proxy_used": false,
+        "price_history_days": 179.98958333333334,
+        "price_bar_count": 17280,
+        "price_bar_coverage_ratio": 1.0,
+        "time_coverage_ratio": 1.0,
+        "gap_count": 0,
+        "max_gap_ms": 0
+      }
+    },
+    "DOGEUSDT": {
+      "funding": {
+        "funding_source": "binance_fapi_fundingRate",
+        "funding_record_count": 540,
+        "funding_history_days": 179.66666681712962,
+        "funding_field_coverage_ratio": 1.0,
+        "funding_settlement_coverage_ratio": 1.0,
+        "missing_settlement_count": 0,
+        "max_settlement_gap_ms": 28800016,
+        "source_quality": "public_settled_funding_history",
+        "usable": true
+      },
+      "oi": {
+        "oi_source": "binance_openInterestHist_or_local_archive",
+        "oi_record_count": 51264,
+        "oi_history_days": 177.99652777777777,
+        "oi_field_coverage_ratio": 1.0,
+        "oi_time_coverage_ratio": 1.0,
+        "expected_bucket_count": 51264,
+        "actual_unique_bucket_count": 51264,
+        "gap_count": 2,
+        "max_gap_ms": 302000,
+        "oi_history_limit_detected_days": 177.99652777777777,
+        "oi_blocks_full_composite": false,
+        "source_quality": "local_archive",
+        "usable": true
+      },
+      "liquidation": {
+        "liquidation_source": "local_force_order_archive",
+        "liquidation_source_quality": "force_order_archive",
+        "liquidation_history_days": 14.25267431712963,
+        "liquidation_field_coverage_ratio": 1.0,
+        "liquidation_time_coverage_ratio": 348.46666666666664,
+        "liquidation_nonzero_window_count": 5227,
+        "liquidation_symbol_mapping_quality": "exact",
+        "cm_to_um_proxy_used": false,
+        "liquidation_proxy_accepted_for_full_replay": true,
+        "notional_conversion_required": false,
+        "notional_conversion_quality": "verified_by_sample"
+      },
+      "price": {
+        "price_source_preference": "futures_klines_preferred",
+        "price_source": "futures_klines",
+        "price_venue_proxy_used": false,
+        "price_history_days": 179.98958333333334,
+        "price_bar_count": 17280,
+        "price_bar_coverage_ratio": 1.0,
+        "time_coverage_ratio": 1.0,
+        "gap_count": 0,
+        "max_gap_ms": 0
+      }
+    },
+    "ETHUSDT": {
+      "funding": {
+        "funding_source": "binance_fapi_fundingRate",
+        "funding_record_count": 540,
+        "funding_history_days": 179.66666681712962,
+        "funding_field_coverage_ratio": 1.0,
+        "funding_settlement_coverage_ratio": 1.0,
+        "missing_settlement_count": 0,
+        "max_settlement_gap_ms": 28800016,
+        "source_quality": "public_settled_funding_history",
+        "usable": true
+      },
+      "oi": {
+        "oi_source": "binance_openInterestHist_or_local_archive",
+        "oi_record_count": 51264,
+        "oi_history_days": 177.99652777777777,
+        "oi_field_coverage_ratio": 1.0,
+        "oi_time_coverage_ratio": 1.0,
+        "expected_bucket_count": 51264,
+        "actual_unique_bucket_count": 51264,
+        "gap_count": 2,
+        "max_gap_ms": 302000,
+        "oi_history_limit_detected_days": 177.99652777777777,
+        "oi_blocks_full_composite": false,
+        "source_quality": "local_archive",
+        "usable": true
+      },
+      "liquidation": {
+        "liquidation_source": "local_force_order_archive",
+        "liquidation_source_quality": "force_order_archive",
+        "liquidation_history_days": 14.271029791666667,
+        "liquidation_field_coverage_ratio": 1.0,
+        "liquidation_time_coverage_ratio": 1478.2,
+        "liquidation_nonzero_window_count": 22173,
+        "liquidation_symbol_mapping_quality": "exact",
+        "cm_to_um_proxy_used": false,
+        "liquidation_proxy_accepted_for_full_replay": true,
+        "notional_conversion_required": false,
+        "notional_conversion_quality": "verified_by_sample"
+      },
+      "price": {
+        "price_source_preference": "futures_klines_preferred",
+        "price_source": "futures_klines",
+        "price_venue_proxy_used": false,
+        "price_history_days": 179.98958333333334,
+        "price_bar_count": 17280,
+        "price_bar_coverage_ratio": 1.0,
+        "time_coverage_ratio": 1.0,
+        "gap_count": 0,
+        "max_gap_ms": 0
+      }
+    },
+    "XRPUSDT": {
+      "funding": {
+        "funding_source": "binance_fapi_fundingRate",
+        "funding_record_count": 540,
+        "funding_history_days": 179.66666681712962,
+        "funding_field_coverage_ratio": 1.0,
+        "funding_settlement_coverage_ratio": 1.0,
+        "missing_settlement_count": 0,
+        "max_settlement_gap_ms": 28800016,
+        "source_quality": "public_settled_funding_history",
+        "usable": true
+      },
+      "oi": {
+        "oi_source": "binance_openInterestHist_or_local_archive",
+        "oi_record_count": 51264,
+        "oi_history_days": 177.99652777777777,
+        "oi_field_coverage_ratio": 1.0,
+        "oi_time_coverage_ratio": 1.0,
+        "expected_bucket_count": 51264,
+        "actual_unique_bucket_count": 51264,
+        "gap_count": 5,
+        "max_gap_ms": 302000,
+        "oi_history_limit_detected_days": 177.99652777777777,
+        "oi_blocks_full_composite": false,
+        "source_quality": "local_archive",
+        "usable": true
+      },
+      "liquidation": {
+        "liquidation_source": "local_force_order_archive",
+        "liquidation_source_quality": "force_order_archive",
+        "liquidation_history_days": 12.313705081018519,
+        "liquidation_field_coverage_ratio": 1.0,
+        "liquidation_time_coverage_ratio": 633.6153846153846,
+        "liquidation_nonzero_window_count": 8237,
+        "liquidation_symbol_mapping_quality": "exact",
+        "cm_to_um_proxy_used": false,
+        "liquidation_proxy_accepted_for_full_replay": true,
+        "notional_conversion_required": false,
+        "notional_conversion_quality": "verified_by_sample"
+      },
+      "price": {
+        "price_source_preference": "futures_klines_preferred",
+        "price_source": "futures_klines",
+        "price_venue_proxy_used": false,
+        "price_history_days": 179.98958333333334,
+        "price_bar_count": 17280,
+        "price_bar_coverage_ratio": 1.0,
+        "time_coverage_ratio": 1.0,
+        "gap_count": 0,
+        "max_gap_ms": 0
+      }
+    },
+    "BTCUSDT": {
+      "funding": {
+        "funding_source": "binance_fapi_fundingRate",
+        "funding_record_count": 540,
+        "funding_history_days": 179.66666681712962,
+        "funding_field_coverage_ratio": 1.0,
+        "funding_settlement_coverage_ratio": 1.0,
+        "missing_settlement_count": 0,
+        "max_settlement_gap_ms": 28800016,
+        "source_quality": "public_settled_funding_history",
+        "usable": true
+      },
+      "oi": {
+        "oi_source": "binance_openInterestHist_or_local_archive",
+        "oi_record_count": 51264,
+        "oi_history_days": 177.99652777777777,
+        "oi_field_coverage_ratio": 1.0,
+        "oi_time_coverage_ratio": 1.0,
+        "expected_bucket_count": 51264,
+        "actual_unique_bucket_count": 51264,
+        "gap_count": 8,
+        "max_gap_ms": 302000,
+        "oi_history_limit_detected_days": 177.99652777777777,
+        "oi_blocks_full_composite": false,
+        "source_quality": "local_archive",
+        "usable": true
+      },
+      "liquidation": {
+        "liquidation_source": "local_force_order_archive",
+        "liquidation_source_quality": "force_order_archive",
+        "liquidation_history_days": 14.271164629629629,
+        "liquidation_field_coverage_ratio": 1.0,
+        "liquidation_time_coverage_ratio": 1602.4,
+        "liquidation_nonzero_window_count": 24036,
+        "liquidation_symbol_mapping_quality": "exact",
+        "cm_to_um_proxy_used": false,
+        "liquidation_proxy_accepted_for_full_replay": true,
+        "notional_conversion_required": false,
+        "notional_conversion_quality": "verified_by_sample"
+      },
+      "price": {
+        "price_source_preference": "futures_klines_preferred",
+        "price_source": "futures_klines",
+        "price_venue_proxy_used": false,
+        "price_history_days": 179.98958333333334,
+        "price_bar_count": 17280,
+        "price_bar_coverage_ratio": 1.0,
+        "time_coverage_ratio": 1.0,
+        "gap_count": 0,
+        "max_gap_ms": 0
+      }
+    }
+  },
+  "safety_violation": false,
+  "local_oi_archive_found": true,
+  "local_force_order_archive_found": true,
+  "network_mode": "live_public_readonly",
+  "liquidation_unknown_schema_count": 0,
+  "liquidation_source_type": "force_order_archive",
+  "funding_pagination_page_count": 5,
+  "funding_duplicate_record_count": 0,
+  "funding_pagination_stalled": false,
+  "price_malformed_kline_count": 0,
+  "price_duplicate_open_time_count": 0,
+  "price_interval_mismatch_count": 0,
+  "liquidation_manifest_requested_days": 180,
+  "liquidation_manifest_available_days_by_symbol": {
+    "BTCUSDT": 0,
+    "ETHUSDT": 0,
+    "SOLUSDT": 0,
+    "XRPUSDT": 0,
+    "DOGEUSDT": 0
+  },
+  "liquidation_manifest_history_days_by_symbol": {
+    "BTCUSDT": 0,
+    "ETHUSDT": 0,
+    "SOLUSDT": 0,
+    "XRPUSDT": 0,
+    "DOGEUSDT": 0
+  },
+  "liquidation_manifest_coverage_ratio_by_symbol": {
+    "BTCUSDT": 0.0,
+    "ETHUSDT": 0.0,
+    "SOLUSDT": 0.0,
+    "XRPUSDT": 0.0,
+    "DOGEUSDT": 0.0
+  }
+}

@@ -267,6 +267,71 @@ Stage 1.2 不证明 external signal 已经存在。
 Gate ticker snapshot 只是低成本初筛材料，不是高信息密度 alpha 来源。
 ```
 
+### 4.5 Stage 1.3：Candidate Signal Discovery
+
+Stage 1.3 已完成真实历史 replay。
+
+它回答的问题：
+
+```text
+能否从 Gate ticker snapshot / Binance proxy OHLCV 这种低维公开市场数据中，派生出值得进入 live smoke 的候选事件？
+```
+
+执行口径：
+
+```text
+historical_venue = binance_proxy
+venue_proxy_used = true
+symbols = BTCUSDT / ETHUSDT / SOLUSDT / XRPUSDT / DOGEUSDT
+history = 180 days
+bar_interval = 15m
+bar_count = 86,400
+random_baseline_trials = 500
+primary_metric = 4h terminal return after 50bps round-trip cost
+```
+
+测试候选：
+
+```text
+volume_spike_1h
+relative_strength_vs_btc
+volume_confirmed_relative_strength
+price_move_15m baseline
+cross_symbol_rotation diagnostic
+```
+
+真实 replay 结论：
+
+```text
+decision = stage1_3_candidate_signal_discovery_completed
+next_action = stop_gate_ticker_direction
+research_result_valid = true
+```
+
+主要结果：
+
+```text
+volume_spike_1h: excess +4.23 bps，但 50bps 后中位收益 -48.96 bps
+relative_strength_vs_btc: excess +1.01 bps，但 50bps 后中位收益 -52.29 bps
+volume_confirmed_relative_strength: excess -8.59 bps，失败
+price_move_15m: excess -0.40 bps，失败
+cross_symbol_rotation: event_count = 0，未形成有效诊断
+```
+
+解释：
+
+```text
+低维 ticker / OHLCV 派生事件最多表现为“比匹配随机时刻少亏一点”，没有形成成本后中位正收益。
+因此它们不能进入 Stage 1.4 live smoke，也不应继续调阈值续命。
+```
+
+Stage 1.3 的意义不是“找到了 alpha”，而是完成了一次低成本证伪：
+
+```text
+Gate ticker snapshot / Binance proxy OHLCV 的短周期 price-volume 派生方向，应停止扩展。
+External Signal Shadow Lab 若继续，必须转向更高信息密度 source。
+```
+
 ---
 
 ## 5. 当前到底收集了什么外部信号
@@ -475,22 +540,49 @@ alt beta 很弱时，相对强势仍可能绝对亏损。
 只作为辅助诊断：当 volume_spike 或 relative_strength 触发时，观察是否存在轮动确认。
 ```
 
-### 6.7 后续可能接入的外部信号家族
+### 6.7 后续应转向的高信息密度 source
 
-如果 Gate ticker snapshot 派生信号无效，后续可考虑更高信息密度来源：
+Stage 1.3 已经证伪低维 ticker / OHLCV 派生方向。后续不应继续围绕 `price / volume / change percentage` 调阈值，而应只考虑信息密度更高、且个人投资者仍可低频执行的外部 source。
+
+优先级建议：
 
 ```text
-跨交易所价差 / 成交量差异
-perp funding / OI crowding
-orderbook depth / imbalance
-liquidation cluster
-链上 smart money / whale flow
-token audit / holder concentration
-news / social / KOL propagation
-new token lifecycle
+P1: liquidation cluster / liquidation imbalance
+P2: funding + OI crowding
+P3: orderbook depth / imbalance snapshot
+P4: listing / delisting / unlock / event calendar
+P5: cross-exchange divergence
+P6: on-chain smart money / whale flow
 ```
 
-但这些都不应直接交易，必须先进 External Signal Shadow Lab。
+简要注释：
+
+- `liquidation cluster`：清算集中爆发。比如某个时间窗口内多空爆仓额突然放大，可能代表杠杆仓位被强制出清。它比普通成交量更有信息量，因为清算不是自愿交易，常伴随短期流动性缺口。
+- `liquidation imbalance`：多头清算和空头清算的不平衡。若多头清算远大于空头清算，可能表示下跌过程中杠杆多头被挤出；后续可能出现继续下跌或短线反弹，需要用 replay 判定。
+- `funding + OI crowding`：资金费率和未平仓量共同显示仓位拥挤。`funding` 是永续合约多空之间支付的费率，`OI` 是 open interest，即未平仓合约规模。高 funding + 高 OI 往往表示多头拥挤，低/负 funding + 高 OI 可能表示空头拥挤。
+- `orderbook depth / imbalance`：订单簿深度和买卖盘不平衡。`depth` 表示盘口附近有多少挂单能承接交易，`imbalance` 表示买盘/卖盘哪一边更厚。盘口变薄或单边失衡可能预示短期冲击更容易放大。
+- `listing / delisting / unlock / event calendar`：交易所上线、下线、代币解锁、重大项目事件日历。它们是离散事件，不是连续价格噪声，通常比普通 ticker 更接近“外部信息”。
+- `cross-exchange divergence`：不同交易所之间价格、成交量、盘口或 funding 出现差异。若某交易所先动，另一个交易所滞后，可能形成低频观察机会。但需要警惕手续费、提现/转账不可用、盘口深度和同步延迟。
+- `on-chain smart money / whale flow`：链上大额钱包、标记聪明钱、交易所流入流出等行为。它信息量可能高，但也更依赖地址标签质量、链上延迟和 token 安全过滤。
+
+仍然需要排除的方向：
+
+```text
+MEV / 抢跑
+meme 新币首分钟狙击
+需要钱包签名或 swap payload 的链上自动交易
+秒级 orderbook 做市
+跨所搬砖依赖快速充提
+KOL/news 秒级抢跑
+```
+
+原因：这些方向即使有 alpha，也大概率需要低延迟、私钥、复杂执行或个人不可控的基础设施，不符合本项目的 L0 安全边界。
+
+所有高信息密度 source 都不应直接交易，仍必须先进 External Signal Shadow Lab：
+
+```text
+raw payload -> connector -> available_at_ms -> safety checks -> historical replay -> review -> 决定是否 live smoke
+```
 
 ---
 
@@ -597,7 +689,7 @@ available_at_ms 是否写入
 
 ---
 
-## 10. 为什么下一步重点不是继续采集，而是候选信号发现
+## 10. 为什么下一步重点不是继续 ticker 采集，而是 source 升维
 
 当前最大的风险不是“没有 collector”，而是：
 
@@ -607,13 +699,20 @@ available_at_ms 是否写入
 
 Stage 0 / Stage 1 / Stage 1.2 都是基础设施。它们让我们能安全研究外部数据，但它们不决定研究方向是否有价值。
 
-下一阶段真正应该回答的问题是：
+Stage 1.3 已经回答了第一批低维候选问题：
 
 ```text
-我们能从外部市场快照中系统性派生哪些候选信号？
-这些候选信号代表什么市场假设？
-它们是否比随机 baseline 更有后续结构？
-如果失败，应该停止还是换更高信息密度数据源？
+Gate ticker snapshot / Binance proxy OHLCV 派生的 volume_spike、relative_strength、volume_confirmed_relative_strength，没有形成可进入 live smoke 的成本后正收益结构。
+```
+
+因此下一阶段真正应该回答的问题变成：
+
+```text
+哪一类更高信息密度 source 最值得接入？
+它代表什么市场假设？
+是否可用公开只读或低权限数据获取？
+是否能在个人投资者可执行的 15m / 1h / 4h 时间尺度上验证？
+如果失败，是否能快速停止而不是继续搭管线？
 ```
 
 因此下一步建议不是：
@@ -625,80 +724,66 @@ Stage 0 / Stage 1 / Stage 1.2 都是基础设施。它们让我们能安全研�
 而是：
 
 ```text
-Stage 1.3 Candidate Signal Discovery
+Stage 1.4 不应直接 live smoke。
+下一步应先写 High-Information Source Selection / Stage 1.4 Design。
 ```
 
-Historical Snapshot Replay 应作为 Stage 1.3 的验证工具，而不是阶段目标本身。
+它的目标不是新增一堆 collector，而是选择一个最值得研究的高信息密度 source，并定义最小可证伪 replay。
 
 ---
 
-## 11. Stage 1.3 建议设计
+## 11. 下一阶段建议：高信息密度 source selection
 
 建议正式名称：
 
 ```text
-External Signal Shadow Lab Stage 1.3 Candidate Signal Discovery Design
+External Signal Shadow Lab Stage 1.4 High-Information Source Selection Design
 ```
 
 核心目标：
 
 ```text
-从现有外部市场快照和历史 OHLCV 中，系统性生成、筛选、淘汰候选信号。
+在停止 Gate ticker snapshot 派生方向后，选择一个更高信息密度 source，定义最小接入、最小 replay、最小停止条件。
 ```
 
-第一版只做少数候选，不做大规模参数搜索。主候选限定为：
+推荐第一优先 source：
 
 ```text
-volume_spike_1h
-relative_strength_vs_btc
-volume_confirmed_relative_strength
+liquidation cluster / liquidation imbalance
 ```
 
-降级项：
+理由：
 
 ```text
-price_move_15m = baseline only
-cross_symbol_rotation = diagnostic only
+清算是强制交易，不是普通成交量。
+它通常发生在杠杆拥挤和流动性断层附近。
+项目已有 liquidation 相关历史研究和脚本资产，复用成本低。
+可以用 15m / 1h / 4h 低频 replay 验证，不必进入秒级执行竞赛。
 ```
 
-这意味着：
+备选 source：
 
 ```text
-Stage 1.3 不是为了证明短周期价格动量有效。
-Stage 1.3 是为了判断低维 ticker / volume 数据是否仍能派生出高于随机 baseline 的候选事件。
+funding + OI crowding
+orderbook depth / imbalance snapshot
+listing / unlock / event calendar
 ```
 
-验证方法：
+下一阶段不应做：
 
 ```text
-Historical Snapshot Replay
-```
-
-也就是用历史数据模拟：
-
-```text
-每 15 分钟生成一次 snapshot
-从 snapshot 序列中派生候选 event
-使用 available_at-like 历史时间锚点
-进入 Stage 0 replay / baseline comparison
-输出候选信号 review
-```
-
-执行口径必须保守：
-
-```text
-entry_delay_bars >= 1
-不允许使用触发 bar 的理想价格成交
-不允许用同一根 bar 的 high/low 证明 TP/SL
-cex_market_snapshot 本身仍然 observation-only
-只有候选事件派生规则通过 review 后，才允许进入 Stage 0 replay
+继续调整 volume_spike 阈值
+继续扩大 ticker symbol universe
+直接进入 24h live smoke
+一次性接入多个 source
+接入需要私钥、钱包、swap payload 或交易权限的工具
 ```
 
 ---
 
-## 12. Stage 1.3 必须回答的问题
+## 12. 后续高信息密度 source 必须回答的问题
 
-每个候选信号必须回答：
+每个新 source 和候选信号必须回答：
 
 ```text
 它代表什么市场假设？
@@ -727,7 +812,7 @@ MFE / MAE / left tail 是否可接受？
 
 ---
 
-## 13. 候选信号通过门槛建议
+## 13. 后续候选信号通过门槛建议
 
 第一版建议硬门槛：
 
@@ -755,7 +840,7 @@ alpha_interpretation_allowed = false until review approved
 结果可由固定预注册规则复现
 ```
 
-Stage 1.3 review 至少要输出：
+后续 source-specific replay review 至少要输出：
 
 ```text
 forward_return_15m
@@ -817,9 +902,10 @@ ticker / volume / change percentage 信息不足
 候选高信息密度来源：
 
 ```text
-orderbook depth
-funding / OI
 liquidation aggregate
+funding / OI crowding
+orderbook depth / imbalance
+listing / unlock / event calendar
 cross-exchange divergence
 on-chain smart money
 holder concentration
@@ -865,20 +951,21 @@ Stage 1.2: Gate Public Read-Only Collector
 作用：脚本自动采集公开只读快照
 
 Stage 1.3: Candidate Signal Discovery
+状态：完成
+作用：验证 Gate ticker snapshot / Binance proxy OHLCV 是否能派生短周期候选 alpha
+结论：低维 price-volume 派生方向未通过；停止 Gate ticker snapshot 派生扩展
+
+Stage 1.4: High-Information Source Selection
 状态：下一步建议
-作用：定义少数预注册候选信号家族，并用历史 replay 快速验证
-边界：不扩 collector，不做大规模参数搜索，不解释为 alpha
+作用：在 liquidation / funding+OI / orderbook / event calendar 等 source 中选择一个最小可证伪方向
+边界：一次只选一个 source，不扩多个 collector，不接执行能力
 
-Stage 1.4: Short Live Smoke
+Stage 1.5: Source-specific Connector / Historical Replay
 状态：后置
-作用：对有希望的候选做 24h 真实采集链路验证
-
-Stage 1.5: Optional Skill Adapter
-状态：后置
-作用：接入 Gate/Binance/OKX skills 的只读结构化输出
+作用：对 Stage 1.4 选中的 source 建立只读 connector 和历史 replay
 
 Stage 2: 7d / 30d Shadow Validation
-状态：只对通过历史 replay 和 live smoke 的候选开放
+状态：只对通过 source-specific historical replay 和 24h live smoke 的候选开放
 作用：验证未来真实环境下是否仍有结构
 
 Stage 3: Strategy Candidate Design
@@ -895,40 +982,39 @@ Stage 3: Strategy Candidate Design
 1. 这条研究线的逻辑是否自洽？
 2. Stage 0 / Stage 1 / Stage 1.2 是否只是基础设施，而没有被误读为 alpha？
 3. `cex_market_snapshot` 是否应保持 observation-only？
-4. 下一步是否应该优先做 Candidate Signal Discovery，而不是继续实时采集？
-5. 第一批主候选 `volume_spike_1h / relative_strength_vs_btc / volume_confirmed_relative_strength` 是否合理？
-6. `price_move_15m` 降为 baseline、`cross_symbol_rotation` 降为 diagnostic 是否合理？
-7. 是否应该加入或替换其他候选信号家族？
-8. 通过门槛是否过松或过严？
-9. 30d shadow replay 是否应后置到历史 replay 和 24h smoke 之后？
-10. 如果 Gate ticker 派生信号失败，是否应转向更高信息密度数据源？
-11. 哪些外部 source 最适合个人投资者继续研究，哪些应直接排除？
+4. Stage 1.3 是否足以停止 Gate ticker snapshot 派生方向？
+5. 下一步是否应该优先选择 `liquidation cluster / liquidation imbalance`？
+6. `funding + OI crowding`、`orderbook imbalance`、`event calendar` 哪个更适合作为备选？
+7. 高信息密度 source 的历史 replay 应如何定义 baseline？
+8. 通过门槛是否仍沿用 event_count / event_days / symbol coverage / random baseline / cost stress？
+9. 30d shadow replay 是否仍应后置到 historical replay 和 24h smoke 之后？
+10. 哪些外部 source 最适合个人投资者继续研究，哪些应直接排除？
 
 ---
 
 ## 17. 当前判断
 
-External Signal Shadow Lab 值得继续，但前提是不要把它变成无限搭管线。
+External Signal Shadow Lab 值得继续，但 Gate ticker snapshot / Binance proxy OHLCV 的低维短周期 price-volume 派生方向应停止。
 
 它的下一步重点必须从：
 
 ```text
-怎么采更多数据
+继续调 ticker / volume 阈值
 ```
 
 转向：
 
 ```text
-怎么发现、定义、筛选、淘汰候选信号
+选择一个高信息密度 source，并用最小 replay 快速证伪
 ```
 
-如果 Stage 1.3 的候选信号发现失败，应明确停止 Gate ticker snapshot 派生方向，而不是继续增加阈值、频率、币种或数据源来救结果。
+Stage 1.3 已经给出停止 Gate ticker snapshot 派生方向的证据：候选事件样本足够、覆盖多币和多日，但成本后中位收益仍为负，组合候选也未跑赢匹配随机基准。
 
 当前推荐决策：
 
 ```text
-decision = proceed_to_stage1_3_candidate_signal_discovery_design
-scope = Gate ticker snapshot derived candidate signals only
+decision = proceed_to_stage1_4_high_information_source_selection_design
+preferred_first_source = liquidation_cluster_or_liquidation_imbalance
 collector_expansion_allowed = false
 live_shadow_required_now = false
 historical_replay_first = true

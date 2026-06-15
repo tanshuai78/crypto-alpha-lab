@@ -29,3 +29,5 @@ docs/production_artifacts/
 # External Signal Shadow Lab runtime data
 data/external_signal_shadow/raw/
 data/external_signal_shadow/normalized/
+data/external_signal_shadow/derivatives_stress/
+

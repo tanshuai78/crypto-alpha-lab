@@ -1,0 +1,9 @@
+{
+  "fixture_run": true,
+  "research_result_valid": false,
+  "expected_default_outcome": "stage1_4_data_degraded",
+  "preview_not_alpha": true,
+  "candidate_replay_implemented": false,
+  "forward_return_computed": false,
+  "random_baseline_computed": false
+}
