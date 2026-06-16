@@ -39,6 +39,20 @@ live_trading_allowed = false
 alpha_interpretation_allowed = false
 ```
 
+审核后必须补入的执行约束：
+
+```text
+1. no_sample_no_feasible: 没有 sample rows / trial export，不允许判定 feasible。
+2. docs_only_max_degraded: 只有官网/文档证据时，最多 degraded。
+3. evidence_level_required: 每个 vendor 必须记录 evidence_level 和 evidence_urls。
+4. license_split_required: license 必须拆分为 local research / backtesting / local storage / derived metrics。
+5. sample_access_type_required: sample 访问方式必须区分 public sample / free trial / sales sample / paid required。
+6. exact_exchange_scope_required: 必须区分 Binance USD-M exact 与 multi-exchange aggregate。
+7. side_mapping_confidence_required: long/short liquidation 映射必须 verified 或文档支持 inferred。
+8. replay_anchor_policy_required: tick / bucket / daily 数据必须有不同 replay anchor policy。
+9. personal_cost_gate_required: 超出个人投资者成本上限必须 user_cost_decision_required。
+```
+
 Stage 1.4A.2 只允许输出三类结论：
 
 ```text
@@ -122,14 +136,14 @@ Stage 1.4A.2 不是数据采购计划。
 
 ## 4. 候选 vendor source
 
-第一版只审计 5 个候选 source，不继续扩散：
+第一版只审计 5 个候选 source，不继续扩散。优先级按“最可能最快拿到可导出的 >=90d long/short liquidation sample”排序：
 
 ```text
 P1: Tardis.dev
-P2: Coinalyze
-P3: CoinGlass
-P4: Coin Metrics Pro
-P5: Laevitas
+P2: CoinGlass
+P3: Laevitas
+P4: Coinalyze
+P5: Coin Metrics Pro
 ```
 
 ### 4.1 `Tardis.dev`
@@ -161,35 +175,7 @@ expected_fit = high
 purchase_now = false
 ```
 
-### 4.2 `Coinalyze`
-
-Coinalyze 页面显示其覆盖 aggregated futures market data，包括 open interest、funding rate、liquidations、basis 等。API 文档显示需要 API key。
-
-对本项目的价值：
-
-```text
-可能提供 aggregated liquidation history
-与 funding / OI / basis 数据族一致
-适合低频 15m / 1h composite，不一定需要 tick-level
-```
-
-主要风险：
-
-```text
-可能是 aggregated 而非逐笔 liquidation
-license / API limit 需要确认
-字段是否含 long/short side 和 notional USD 需要 sample 验证
-```
-
-初始评级：
-
-```text
-priority = P2
-expected_fit = medium_high
-purchase_now = false
-```
-
-### 4.3 `CoinGlass`
+### 4.2 `CoinGlass`
 
 CoinGlass API 文档显示有 pair liquidation history 与 aggregated liquidation history endpoint；其 liquidation order endpoint 只提供近 7 天订单数据，而 liquidation history endpoint 面向历史 long/short liquidation 数据。CoinGlass 页面也显示有 90d / all 的 liquidation history 图表能力。
 
@@ -212,12 +198,67 @@ aggregated history 不一定有逐笔 timestamp
 初始评级：
 
 ```text
+priority = P2
+expected_fit = medium_high
+purchase_now = false
+```
+
+### 4.3 `Laevitas`
+
+Laevitas 公开资料显示其是 derivatives analytics / data 平台，覆盖 futures、options、order book、funding、liquidations 等。其 API / docs 目录中可见 derivatives historical data 与 liquidation 相关能力，但具体历史 liquidation endpoint、字段、导出限制仍必须以 sample 核实。
+
+对本项目的价值：
+
+```text
+衍生品数据平台定位匹配
+可能适合 derivatives stress research
+可能比机构级数据商更容易做 sample/trial 审计
+```
+
+主要风险：
+
+```text
+liquidation history endpoint 和字段需要进一步确认
+可能更偏 analytics dashboard，不一定方便 raw sample export
+```
+
+初始评级：
+
+```text
 priority = P3
 expected_fit = medium
 purchase_now = false
 ```
 
-### 4.4 `Coin Metrics Pro`
+### 4.4 `Coinalyze`
+
+Coinalyze 页面显示其覆盖 aggregated futures market data，包括 open interest、funding rate、liquidations、basis 等。API 文档显示需要 API key。
+
+对本项目的价值：
+
+```text
+可能提供 aggregated liquidation history
+与 funding / OI / basis 数据族一致
+适合低频 15m / 1h composite，不一定需要 tick-level
+```
+
+主要风险：
+
+```text
+可能是 aggregated 而非逐笔 liquidation
+license / API limit 需要确认
+字段是否含 long/short side 和 notional USD 需要 sample 验证
+```
+
+初始评级：
+
+```text
+priority = P4
+expected_fit = medium
+purchase_now = false
+```
+
+### 4.5 `Coin Metrics Pro`
 
 Coin Metrics 文档显示 community API 只提供最近 24h liquidation data，而 professional API 提供完整 liquidations data 与更高 rate limit。
 
@@ -240,34 +281,8 @@ community API 明确不够 >=90d
 初始评级：
 
 ```text
-priority = P4
-expected_fit = high_but_cost_sensitive
-purchase_now = false
-```
-
-### 4.5 `Laevitas`
-
-Laevitas 公开资料显示其是 derivatives analytics / data 平台，覆盖 futures、options、order book、funding、liquidations 等。其历史 API 文档更容易确认 OI / volume 等 derivatives history；liquidation 历史字段需要进一步以 API docs 或 sample 核实。
-
-对本项目的价值：
-
-```text
-衍生品数据平台定位匹配
-可能适合 derivatives stress research
-```
-
-主要风险：
-
-```text
-liquidation history endpoint 和字段需要进一步确认
-可能更偏 analytics dashboard，不一定方便 raw sample export
-```
-
-初始评级：
-
-```text
 priority = P5
-expected_fit = unknown_medium
+expected_fit = high_but_cost_sensitive
 purchase_now = false
 ```
 
@@ -282,19 +297,38 @@ purchase_now = false
 ```json
 {
   "vendor": "tardis_dev",
-  "source_surface": "official_docs|trial_sample|manual_sales_reply|public_sample",
+  "source_surface": "marketing_page|official_api_docs|sample_schema|sample_rows|trial_export|manual_sales_reply",
+  "evidence_level": "marketing_page|official_api_docs|sample_schema|sample_rows|trial_export",
+  "evidence_urls": [],
+  "evidence_retrieved_at": "2026-06-15",
   "audit_time_ms": 1781452800000,
-  "purchase_required_for_sample": false,
+  "sample_access_type": "public_sample|free_trial|sales_provided_sample|paid_plan_required|unknown",
+  "payment_required_before_sample": false,
+  "sales_contact_required": false,
+  "api_key_required_for_sample": false,
   "sample_file_available": true,
+  "license_status": "clear|unknown|restricted|disallowed",
   "license_allows_local_research": true,
+  "license_allows_backtesting": true,
+  "license_allows_local_storage": true,
+  "license_allows_derived_metrics": true,
+  "redistribution_forbidden": true,
   "history_days_claimed": 180,
   "history_days_verified_from_sample": 0,
   "symbols_claimed": ["BTCUSDT", "ETHUSDT"],
   "symbols_verified": ["BTCUSDT"],
   "exchange_scope": "binance_usdm|multi_exchange|aggregated_unknown",
+  "binance_usdm_exact": true,
+  "includes_coin_margined": false,
+  "includes_usd_margined": true,
+  "multi_exchange_aggregate": false,
+  "exchange_filter_available": true,
   "timestamp_resolution_ms": 1000,
   "side_available": true,
   "side_semantics": "long_short|buy_sell|unknown",
+  "long_liquidation_mapping": "long_liquidation_usd|side_sell|vendor_documented_field|unknown",
+  "short_liquidation_mapping": "short_liquidation_usd|side_buy|vendor_documented_field|unknown",
+  "side_mapping_confidence": "verified|inferred_from_official_docs|unknown",
   "notional_usd_available": true,
   "price_available": true,
   "quantity_available": true,
@@ -302,12 +336,25 @@ purchase_now = false
   "symbol_field_available": true,
   "timestamp_field_available": true,
   "download_or_export_format": "csv|jsonl|parquet|api_json|unknown",
+  "source_granularity": "tick|1m|5m|15m|1h|daily|unknown",
+  "replay_anchor_policy": "event_time_plus_lag|bucket_end_plus_lag|not_intraday_usable|unknown",
   "available_at_policy_defined": true,
   "field_mapping_status": "compatible|needs_transform|incompatible|unknown",
   "stage1_4a1_alignment_status": "compatible|degraded|incompatible|unknown",
+  "cost_tier": "free|low|medium|high|enterprise_unknown",
+  "personal_investor_feasible_cost": true,
   "estimated_cost_usd_per_month": null,
   "manual_notes": []
 }
+```
+
+`evidence_level` 是硬门槛，不允许把营销页或文档页面当成可用数据证明：
+
+```text
+marketing_page -> 不能 feasible
+official_api_docs -> 最多 vendor_liquidation_source_degraded
+sample_schema -> 最多 degraded，除非后续拿到 sample rows / trial export
+sample_rows / trial_export -> 才允许进入 feasible 判定
 ```
 
 其中 `available_at_policy_defined` 的意思是：
@@ -319,18 +366,26 @@ purchase_now = false
 默认 policy：
 
 ```text
-event_time_ms = liquidation event timestamp from vendor
-available_at_ms = event_time_ms + configured_vendor_data_lag_ms
-configured_vendor_data_lag_ms >= 60_000
+tick/event data:
+  event_time_ms = liquidation event timestamp from vendor
+  available_at_ms = event_time_ms + configured_vendor_data_lag_ms
+
+1m/5m/15m/1h bucket data:
+  event_time_ms = bucket_end_ms
+  available_at_ms = bucket_end_ms + configured_vendor_data_lag_ms
+
+daily/export-only data:
+  replay_anchor_policy = not_intraday_usable
+  不允许用于 15m / 1h intraday replay，只能做低频 diagnostic
 ```
 
-如果 vendor 数据是 aggregated 1m bar：
+`configured_vendor_data_lag_ms` 第一版不得低于：
 
 ```text
-available_at_ms = bucket_end_ms + configured_vendor_data_lag_ms
+60_000
 ```
 
-不能用 bucket start 当 replay anchor。
+不能用 bucket start 当 replay anchor，也不能用 vendor 事件声称时间替代真实可得时间。
 
 ---
 
@@ -339,25 +394,47 @@ available_at_ms = bucket_end_ms + configured_vendor_data_lag_ms
 Vendor 只有满足以下条件，才允许进入下一步 sample parser implementation plan：
 
 ```text
-history_days_claimed >= 90
+evidence_level in {sample_rows, trial_export}
 sample_file_available = true
+history_days_claimed >= 90
+history_days_verified_from_sample >= 90
+license_status = clear
 license_allows_local_research = true
+license_allows_backtesting = true
+license_allows_local_storage = true
+license_allows_derived_metrics = true
 symbols_with_usable_data >= 3
 side_available = true
+side_mapping_confidence in {verified, inferred_from_official_docs}
 notional_usd_available = true
 symbol_field_available = true
 timestamp_field_available = true
 exchange_scope != aggregated_unknown
 timestamp_resolution_ms <= 60_000
+source_granularity in {tick, 1m, 5m, 15m, 1h}
+replay_anchor_policy in {event_time_plus_lag, bucket_end_plus_lag}
 field_mapping_status in {compatible, needs_transform}
 stage1_4a1_alignment_status in {compatible, degraded}
-purchase_required_for_sample = false OR explicit_user_approval_for_trial = true
+payment_required_before_sample = false OR explicit_user_cost_approval = true
+personal_investor_feasible_cost = true OR explicit_user_cost_approval = true
+```
+
+没有 sample 的硬规则：
+
+```text
+if docs_look_good and sample_file_available == false:
+    decision = vendor_liquidation_source_degraded
+    primary_blocker = sample_not_available
+    next_action = request_sample_or_trial
 ```
 
 Hard reject：
 
 ```text
 license disallows local research
+license disallows backtesting
+license disallows local storage
+license disallows derived metrics
 only dashboard screenshots, no export
 no side / long-short field
 no timestamp field
@@ -366,6 +443,8 @@ no notional / price / quantity sufficient to compute notional
 only real-time < 7d data
 requires private trading account permission
 requires API key in repo or .env automation
+daily-only export for intraday replay
+enterprise quote only and no sample before payment
 ```
 
 如果只有 aggregated liquidation data，但包含：
@@ -382,7 +461,8 @@ timestamp/bucket_end
 
 ```text
 field_mapping_status = compatible
-source_granularity = aggregated_window
+source_granularity in {1m, 5m, 15m, 1h}
+replay_anchor_policy = bucket_end_plus_lag
 ```
 
 不要求 tick-level。Stage 1.4 的候选事件本来就是 `15m / 1h` 聚合级别，不做秒级交易。
@@ -420,6 +500,44 @@ binance_usdm_exact = false
 
 这种数据可以做 partial diagnostic，但不能直接声称 Binance USD-M composite 已满足。
 
+更细的交易所范围字段必须写清楚：
+
+```text
+binance_usdm_exact = true/false
+includes_coin_margined = true/false
+includes_usd_margined = true/false
+multi_exchange_aggregate = true/false
+exchange_filter_available = true/false
+```
+
+如果 `binance_usdm_exact = false` 但 `multi_exchange_aggregate = true`，则：
+
+```text
+stage1_4a1_alignment_status = degraded
+full_binance_usdm_composite_claim_allowed = false
+partial_diagnostic_allowed = true
+```
+
+Side semantics 必须映射到项目语义：
+
+```text
+long liquidation = forced SELL pressure
+short liquidation = forced BUY pressure
+```
+
+如果 vendor 只给 `buy / sell`，必须由官方文档或 sample 字段说明确认：
+
+```text
+side_mapping_confidence = verified
+```
+
+若只是根据字段名猜测：
+
+```text
+side_mapping_confidence = unknown
+decision cannot be feasible
+```
+
 ---
 
 ## 8. 成本与授权边界
@@ -437,17 +555,41 @@ local sample audit
 如果 vendor 要求付费，输出：
 
 ```text
-purchase_required = true
+sample_access_type = paid_plan_required
+payment_required_before_sample = true
 estimated_cost_usd_per_month = known_or_unknown
 next_action = user_cost_decision_required
 ```
 
 此时停止，不允许 agent 自动继续。
 
+个人投资者成本 gate：
+
+```text
+cost_tier = free:
+  personal_investor_feasible_cost = true
+
+cost_tier = low:
+  estimated_cost_usd_per_month <= 50
+  personal_investor_feasible_cost = true
+
+cost_tier = medium:
+  50 < estimated_cost_usd_per_month <= 200
+  next_action = user_cost_decision_required
+  decision cannot be feasible without explicit approval
+
+cost_tier in {high, enterprise_unknown}:
+  estimated_cost_usd_per_month > 200 OR enterprise quote only
+  decision = vendor_liquidation_source_degraded
+  primary_blocker = cost_or_enterprise_sales_blocker
+```
+
+这个成本 gate 不是说贵的数据没价值，而是避免“为了救研究线而无上限付费”。Stage 1.4A.2 只能判断是否值得申请 sample / trial；采购必须另行决策。
+
 如果 vendor 要求 API key：
 
 ```text
-api_key_required = true
+api_key_required_for_sample = true
 ```
 
 第一版 implementation 不读取 `.env`，不接 secret manager，不把 key 写进 repo。用户可以手动导出 sample 到：
@@ -477,6 +619,10 @@ Summary 顶层字段：
   "primary_blocker": "...",
   "candidate_vendor_count": 5,
   "feasible_vendor_count": 0,
+  "recommended_vendor_order": ["tardis_dev", "coinglass", "laevitas", "coinalyze", "coin_metrics_pro"],
+  "best_vendor": null,
+  "lowest_cost_usable_vendor": null,
+  "highest_data_quality_vendor": null,
   "purchase_allowed": false,
   "paper_trading_allowed": false,
   "live_trading_allowed": false,
@@ -489,7 +635,24 @@ Summary 顶层字段：
 Review 必须包含表格：
 
 ```text
-vendor | sample_available | history_days | symbols | side | notional_usd | timestamp_resolution | exchange_scope | license_ok | cost_known | decision | blocker
+vendor | priority | evidence_level | sample_access_type | sample_available | history_days_verified | symbols | side_mapping_confidence | notional_usd | timestamp_resolution | exchange_scope | license_status | cost_tier | decision | blocker
+```
+
+Review 还必须输出：
+
+```text
+recommended_vendor_order
+best_vendor
+lowest_cost_usable_vendor
+highest_data_quality_vendor
+next_action_by_vendor
+```
+
+如果所有 vendor 都 degraded，review 必须明确下一步是：
+
+```text
+request_sample_or_trial from top ranked vendor
+or stop vendor path and continue live forceOrder collection / Stage 1.4B-Lite
 ```
 
 ---
@@ -497,6 +660,22 @@ vendor | sample_available | history_days | symbols | side | notional_usd | times
 ## 10. 决策树
 
 ```text
+if any vendor has evidence_level not in {sample_rows, trial_export}:
+    vendor can only be degraded
+
+if docs_look_good but sample_file_available == false:
+    vendor_decision = vendor_liquidation_source_degraded
+    vendor_primary_blocker = sample_not_available
+    vendor_next_action = request_sample_or_trial
+
+if license_status != clear:
+    vendor_decision = vendor_liquidation_source_degraded
+    vendor_primary_blocker = license_unclear_or_restricted
+
+if cost_tier in {medium, high, enterprise_unknown} and no explicit_user_cost_approval:
+    vendor_decision = vendor_liquidation_source_degraded
+    vendor_primary_blocker = user_cost_decision_required
+
 if feasible_vendor_count >= 1:
     next_action = write_stage1_4a3_vendor_sample_parser_plan
 elif at_least_one_vendor_requires_paid_trial_but_fields_look_promising:
@@ -570,12 +749,26 @@ USD-M full composite replay
 进入 Stage 1.4A.2：
 
 ```text
-decision = proceed_to_stage1_4a2_vendor_liquidation_data_feasibility_design
+decision = approved_with_required_fixes
 implementation_scope = docs_and_sample_audit_only
 first_action = write_stage1_4a2_vendor_liquidation_data_feasibility_implementation_plan
 purchase_allowed = false
 stage1_4b_candidate_replay_allowed = false
 live_safe = false
+```
+
+Implementation plan 前必须保留的修正项：
+
+```text
+1. No sample rows / trial export means no feasible decision.
+2. Add evidence_level / evidence_urls / evidence_retrieved_at.
+3. Split license into local research / backtesting / local storage / derived metrics.
+4. Split sample access into public_sample / free_trial / sales_provided_sample / paid_plan_required.
+5. Distinguish Binance USD-M exact from multi-exchange aggregate.
+6. Require long/short liquidation side mapping confidence.
+7. Define replay anchor by source_granularity.
+8. Add personal investor cost gate.
+9. Output recommended_vendor_order and best next action.
 ```
 
 一句话：

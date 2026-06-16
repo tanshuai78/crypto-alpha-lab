@@ -30,4 +30,4 @@ docs/production_artifacts/
 data/external_signal_shadow/raw/
 data/external_signal_shadow/normalized/
 data/external_signal_shadow/derivatives_stress/
-
+data/external_signal_shadow/vendor_liquidation_samples/

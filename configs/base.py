@@ -1041,3 +1041,38 @@ EXTERNAL_SIGNAL_STAGE1_4_PUBLIC_REST_PAGE_LIMIT = 1000
 EXTERNAL_SIGNAL_STAGE1_4_REAL_AUDIT_HISTORY_DAYS = 180
 
 
+# ─── External Signal Shadow Lab Stage 1.4A.2: Vendor Liquidation Audit ───
+
+EXTERNAL_SIGNAL_STAGE1_4A2_VENDOR_ORDER = (
+    "tardis_dev",
+    "coinglass",
+    "laevitas",
+    "coinalyze",
+    "coin_metrics_pro",
+)
+# Fixed first-pass vendor audit order. Do not expand the vendor list before this
+# five-vendor audit is completed; otherwise the feasibility audit becomes open-ended.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_MIN_HISTORY_DAYS = 90.0
+# Minimum verified liquidation sample history before a vendor can be considered feasible.
+# Safe range: 90-180 days. Below 90d is insufficient for Stage 1.4B replay eligibility.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_MIN_SYMBOLS_WITH_USABLE_DATA = 3
+# Minimum number of target symbols with usable sample rows.
+# Safe range: 3-5. Fewer than 3 symbols makes source feasibility too concentrated.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_MAX_TIMESTAMP_RESOLUTION_MS = 60_000
+# Coarsest timestamp resolution allowed for intraday Stage 1.4B replay candidates.
+# 60s is acceptable for 15m/1h liquidation clusters; daily-only data is not.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_MIN_VENDOR_DATA_LAG_MS = 60_000
+# Conservative minimum data availability lag when vendor samples do not provide true arrival time.
+# Prevents replay anchoring on unavailable bucket-start timestamps.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_LOW_COST_MAX_USD_PER_MONTH = 50.0
+# Maximum monthly cost considered low for personal research sample access.
+# Above this, user cost approval is required before feasible can be claimed.
+
+EXTERNAL_SIGNAL_STAGE1_4A2_MEDIUM_COST_MAX_USD_PER_MONTH = 200.0
+# Maximum monthly cost considered medium. Costs above this or enterprise quote-only plans
+# are degraded by default unless the user explicitly approves.
