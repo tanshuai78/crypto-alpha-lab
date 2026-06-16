@@ -205,6 +205,8 @@ docker run -d --name trend-forceorder \
   uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
     --output data/trend_regime_liquidation_cache.json \
     --raw-output data/trend_regime_force_orders_raw.jsonl \
+    --raw-rotate-max-bytes 268435456 \
+    --raw-rotate-backup-dir data/backup \
     --flush-interval-sec 5 \
     --max-seconds 0
 ```
@@ -297,6 +299,8 @@ docker run -d --name trend-forceorder \
   uv run --with websockets python scripts/collect_trend_regime_force_orders.py \
     --output data/trend_regime_liquidation_cache.json \
     --raw-output data/trend_regime_force_orders_raw.jsonl \
+    --raw-rotate-max-bytes 268435456 \
+    --raw-rotate-backup-dir data/backup \
     --flush-interval-sec 5 \
     --max-seconds 0
 ```
@@ -611,7 +615,17 @@ dmesg -T | grep -i -E 'killed process|out of memory|oom'
 
 ### 归档备份与 Checksum 轮转策略 (Archive Backup & Checksum Rotation)
 
-为防止原始归档文件（`trend_regime_force_orders_raw.jsonl`）体积无限增长，建议每周进行一次轮转。轮转必须保证数据完整性，包含以下 sequence：
+为防止原始归档文件（`trend_regime_force_orders_raw.jsonl`）体积无限增长，采集脚本现已支持自动轮转：
+
+```bash
+python scripts/collect_trend_regime_force_orders.py \
+  --raw-output data/trend_regime_force_orders_raw.jsonl \
+  --raw-rotate-max-bytes 536870912 \
+  --raw-rotate-backup-dir data/backup
+```
+
+默认阈值为 `512 MiB`。如果你需要在维护窗口里手动做一次确定性的归档，下面的周度轮转 sequence 仍然有效：
+
 1. **停止采集服务**。
 2. **计算原始文件校验和**：
    ```bash

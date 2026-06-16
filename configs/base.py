@@ -338,6 +338,12 @@ TREND_REGIME_EVENT_LOG_JSONL = "trend_regime_watch_events.jsonl"
 TREND_REGIME_FORCE_ORDER_RAW_JSONL = "trend_regime_force_orders_raw.jsonl"
 # Raw Binance forceOrder events collected locally for replayable liquidation proxy history.
 
+TREND_REGIME_FORCE_ORDER_RAW_ROTATE_MAX_BYTES = 512 * 1024 * 1024
+# Auto-rotate the active raw archive once it reaches this size to prevent unbounded growth.
+
+TREND_REGIME_FORCE_ORDER_RAW_ROTATE_BACKUP_DIR = "data/backup"
+# Backup directory used when rotating the active raw archive.
+
 TREND_REGIME_LIQUIDATION_HOURLY_JSONL = "trend_regime_liquidation_hourly.jsonl"
 # Hourly symbol-level liquidation proxy derived from local forceOrder raw events.
 

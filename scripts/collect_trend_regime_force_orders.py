@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -14,6 +15,8 @@ from loguru import logger
 
 from configs.base import (
     TREND_REGIME_FORCE_ORDER_RAW_JSONL,
+    TREND_REGIME_FORCE_ORDER_RAW_ROTATE_BACKUP_DIR,
+    TREND_REGIME_FORCE_ORDER_RAW_ROTATE_MAX_BYTES,
     TREND_REGIME_WATCH_SYMBOLS,
 )
 
@@ -193,6 +196,66 @@ def append_force_order_raw_jsonl(record: dict[str, Any], path: str, fsync: bool 
             os.fsync(fh.fileno())
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def rotate_force_order_raw_archive_if_needed(
+    raw_path: str | Path,
+    *,
+    backup_dir: str | Path,
+    max_bytes: int,
+) -> dict[str, Any]:
+    raw_file = Path(raw_path)
+    backup_dir_path = Path(backup_dir)
+
+    result: dict[str, Any] = {
+        "rotated": False,
+        "reason": "disabled" if max_bytes <= 0 else "below_threshold",
+        "raw_path": str(raw_file),
+        "backup_dir": str(backup_dir_path),
+        "raw_size_bytes": 0,
+    }
+
+    if max_bytes <= 0:
+        return result
+    if not raw_file.exists():
+        result["reason"] = "missing"
+        return result
+
+    raw_size_bytes = raw_file.stat().st_size
+    result["raw_size_bytes"] = raw_size_bytes
+    if raw_size_bytes < max_bytes:
+        return result
+
+    backup_dir_path.mkdir(parents=True, exist_ok=True)
+    digest = _sha256_file(raw_file)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_name = f"{raw_file.stem}_{timestamp}_{digest[:12]}{raw_file.suffix}"
+    backup_path = backup_dir_path / backup_name
+    checksum_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
+
+    raw_file.replace(backup_path)
+    checksum_path.write_text(f"{digest}  {backup_path.name}\n", encoding="utf-8")
+    raw_file.touch()
+
+    return {
+        "rotated": True,
+        "reason": "rotated",
+        "raw_path": str(raw_file),
+        "backup_dir": str(backup_dir_path),
+        "backup_path": str(backup_path),
+        "checksum_path": str(checksum_path),
+        "raw_size_bytes": raw_size_bytes,
+        "sha256": digest,
+        "max_bytes": max_bytes,
+    }
+
+
 class RollingLiquidationAccumulator:
     def __init__(self, *, window_ms: int) -> None:
         self.window_ms = window_ms
@@ -258,6 +321,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the primary append-only archive of raw forceOrder JSONL events.",
     )
     parser.add_argument(
+        "--raw-rotate-max-bytes",
+        type=int,
+        default=int(TREND_REGIME_FORCE_ORDER_RAW_ROTATE_MAX_BYTES),
+        help="Auto-rotate the raw archive once it reaches this size in bytes. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--raw-rotate-backup-dir",
+        default=TREND_REGIME_FORCE_ORDER_RAW_ROTATE_BACKUP_DIR,
+        help="Directory where rotated raw archive backups and checksums are stored.",
+    )
+    parser.add_argument(
+        "--raw-rotate-check-interval-sec",
+        type=float,
+        default=60.0,
+        help="How often to check raw archive size while the collector is running.",
+    )
+    parser.add_argument(
         "--fsync-raw",
         action="store_true",
         help="Call os.fsync() on raw JSONL file descriptor after writing each event.",
@@ -294,6 +374,7 @@ async def run_collector(args: argparse.Namespace) -> int:
     last_flush_ts = 0.0
     message_count = 0
     accepted_count = 0
+    last_raw_rotate_check_ts = 0.0
 
     logger.info(
         "force_order_collector_start url={} output={} symbols={}", url, output_path, symbols
@@ -307,6 +388,27 @@ async def run_collector(args: argparse.Namespace) -> int:
                 while True:
                     now = time.time()
                     now_ms = int(now * 1000)
+
+                    if (
+                        raw_output_path is not None
+                        and int(args.raw_rotate_max_bytes) > 0
+                        and now - last_raw_rotate_check_ts
+                        >= float(args.raw_rotate_check_interval_sec)
+                    ):
+                        rotation_result = rotate_force_order_raw_archive_if_needed(
+                            raw_output_path,
+                            backup_dir=args.raw_rotate_backup_dir,
+                            max_bytes=int(args.raw_rotate_max_bytes),
+                        )
+                        last_raw_rotate_check_ts = now
+                        if rotation_result.get("rotated"):
+                            logger.info(
+                                "force_order_raw_archive_rotated raw_path={} backup_path={} size_bytes={} sha256={}",
+                                rotation_result.get("raw_path"),
+                                rotation_result.get("backup_path"),
+                                rotation_result.get("raw_size_bytes"),
+                                rotation_result.get("sha256"),
+                            )
 
                     recv_timeout = max(0.2, float(args.flush_interval_sec))
                     raw: str | None = None

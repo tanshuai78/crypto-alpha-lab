@@ -7,6 +7,7 @@ from scripts.collect_trend_regime_force_orders import (
     build_force_order_raw_record,
     build_force_order_stream_url,
     parse_force_order_notional_event,
+    rotate_force_order_raw_archive_if_needed,
     should_stop,
     write_liquidation_cache_json,
 )
@@ -251,3 +252,47 @@ def test_parse_args_help_marks_raw_as_primary_archive(capsys):
     captured = capsys.readouterr()
     assert "primary append-only archive" in captured.out
     assert "legacy compatibility cache" in captured.out
+
+
+def test_rotate_force_order_raw_archive_if_needed_moves_full_raw_and_leaves_fresh_file(tmp_path):
+    raw_path = tmp_path / "trend_regime_force_orders_raw.jsonl"
+    backup_dir = tmp_path / "backup"
+    payload = {"event_id": "evt-1", "symbol": "BTC/USDT"}
+    raw_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    result = rotate_force_order_raw_archive_if_needed(
+        raw_path,
+        backup_dir=backup_dir,
+        max_bytes=1,
+    )
+
+    assert result["rotated"] is True
+    assert result["raw_path"] == str(raw_path)
+    assert result["backup_dir"] == str(backup_dir)
+    assert raw_path.exists()
+    assert raw_path.read_text(encoding="utf-8") == ""
+    backup_files = list(backup_dir.glob("trend_regime_force_orders_raw_*.jsonl"))
+    assert len(backup_files) == 1
+    assert backup_files[0].read_text(encoding="utf-8") == json.dumps(payload) + "\n"
+    checksum_files = list(backup_dir.glob("trend_regime_force_orders_raw_*.jsonl.sha256"))
+    assert len(checksum_files) == 1
+    assert checksum_files[0].read_text(encoding="utf-8").strip().endswith(
+        f"  {backup_files[0].name}"
+    )
+
+
+def test_rotate_force_order_raw_archive_if_needed_is_noop_below_threshold(tmp_path):
+    raw_path = tmp_path / "trend_regime_force_orders_raw.jsonl"
+    backup_dir = tmp_path / "backup"
+    raw_path.write_text(json.dumps({"event_id": "evt-1"}) + "\n", encoding="utf-8")
+
+    result = rotate_force_order_raw_archive_if_needed(
+        raw_path,
+        backup_dir=backup_dir,
+        max_bytes=10_000,
+    )
+
+    assert result["rotated"] is False
+    assert result["reason"] == "below_threshold"
+    assert raw_path.exists()
+    assert backup_dir.exists() is False
