@@ -1,6 +1,6 @@
 # Trend/Liquidation Phase 1A 服务器部署与运行指南
 
-> 最后更新：2026-06-05
+> 最后更新：2026-06-15
 
 > 入口文档：`docs/ops/2026-06-05-ops-index_CN.md`
 
@@ -353,19 +353,261 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 
 在服务器上配置 crontab 定期执行派生脚本。
 > [!WARNING]
-> 对于 `1m` 和 `5m` 颗粒度，由于使用了 `--fill-empty-buckets` 填充所有无交易时段的空桶，高频写入会占用一定的存储空间与 IOPS。请确保服务器磁盘性能充足。
+> 对于 `1m` 和 `5m` 颗粒度，由于使用了 `--fill-empty-buckets` 填充所有无交易时段的空桶，高频写入会占用一定的存储空间与 IOPS。更关键的是，`scripts/aggregate_trend_regime_liquidations.py` 当前会全量读取 `trend_regime_force_orders_raw.jsonl` 后再聚合；随着 raw archive 增长，调度频率过高会导致 CPU / 内存压力显著上升。
 
 推荐的 crontab 调度配置：
 ```cron
-# 每分钟执行一次 1m 聚合（填充最近24小时空桶）
-*/1 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 1m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_1m.jsonl
+# 每 5 分钟串行执行 1m + 5m 聚合。
+# 使用 flock 防止跨分钟重叠；使用 nice 降低对 sshd 和采集进程的资源争抢。
+*/5 * * * * flock -n /tmp/trend_liq_derive.lock bash -lc '
+  cd /root/crypto-alpha-lab || exit 1
+  now_ms=$(($(date +\%s)*1000))
+  start_ms=$((now_ms - 86400000))
+  PYTHONPATH=. nice -n 10 python3 scripts/aggregate_trend_regime_liquidations.py \
+    --bucket 1m \
+    --fill-empty-buckets \
+    --start-ms "$start_ms" \
+    --end-ms "$now_ms" \
+    --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+    --output data/trend_regime_liquidation_1m.jsonl &&
+  PYTHONPATH=. nice -n 10 python3 scripts/aggregate_trend_regime_liquidations.py \
+    --bucket 5m \
+    --fill-empty-buckets \
+    --start-ms "$start_ms" \
+    --end-ms "$now_ms" \
+    --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+    --output data/trend_regime_liquidation_5m.jsonl
+' >> /root/crypto-alpha-lab/logs/trend_liq_derive.log 2>&1
 
-# 每5分钟执行一次 5m 聚合（填充最近24小时空桶）
-*/5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 5m --fill-empty-buckets --start-ms $(($(date +\%s)*1000 - 86400000)) --end-ms $(($(date +\%s)*1000)) --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT --output data/trend_regime_liquidation_5m.jsonl
+# 每小时第 5 分钟执行一次 1h 聚合。
+# 复用同一把锁，避免整点附近与 1m/5m 聚合并发读取同一个 raw archive。
+5 * * * * flock -n /tmp/trend_liq_derive.lock bash -lc '
+  cd /root/crypto-alpha-lab || exit 1
+  PYTHONPATH=. nice -n 10 python3 scripts/aggregate_trend_regime_liquidations.py \
+    --bucket 1h \
+    --output data/trend_regime_liquidation_hourly.jsonl
+' >> /root/crypto-alpha-lab/logs/trend_liq_hourly.log 2>&1
 
-# 每小时的第5分钟执行一次 1h 聚合（不进行填充空桶）
-5 * * * * cd /root/crypto-alpha-lab && PYTHONPATH=. python3 scripts/aggregate_trend_regime_liquidations.py --bucket 1h --output data/trend_regime_liquidation_hourly.jsonl
+# 健康检查降频到每 30 分钟一次。
+# 当前脚本会全量扫描 raw + aggregate 文件，不适合与高频聚合绑定在同一周期。
+*/30 * * * * flock -n /tmp/trend_liq_derive.lock bash -lc '
+  cd /root/crypto-alpha-lab || exit 1
+  PYTHONPATH=. nice -n 10 python3 scripts/check_liquidation_collector_health.py \
+    --data-dir data
+' > /root/crypto-alpha-lab/data/trend_regime_liquidation_health.json 2>> /root/crypto-alpha-lab/logs/trend_liq_health.log
 ```
+
+说明：
+
+1. `&&` 只能保证同一条 cron 内部按顺序执行，不能阻止下一轮 cron 到点后再次启动；真正防重叠的是 `flock -n /tmp/trend_liq_derive.lock`。
+2. `1m` 聚合已从“每分钟一次”降为“每 5 分钟一次”。这是因为 `1m` 文件主要用于本地研究回放，不需要在服务器上每分钟全量重算。
+3. `health check` 不再与 `1m/5m` 聚合绑定为同周期串行任务，而是单独降频。原因是 `scripts/check_liquidation_collector_health.py` 同样会全量扫描 raw archive 和聚合文件，高频运行会额外放大 CPU 压力。
+4. 如果某一轮聚合尚未结束，下一轮会因为 `flock -n` 直接跳过。这比堆积多个 Python 进程更安全。
+
+### 推荐安装方式：脚本包装 + `crontab <file>` (Recommended Install Method)
+
+不要优先使用 `crontab -e` 手工编辑超长命令。
+
+原因：
+
+1. SSH 不稳定时，交互式编辑器容易中途断开，导致保存失败或误写。
+2. `crontab` 的每条任务本质上必须是单行；把多行 `bash -lc '...'` 直接粘进去，容易触发 `bad minute`。
+3. 将复杂逻辑放进独立脚本后，cron 本身只保留短命令，便于审计、替换与回滚。
+
+推荐 sequence：
+
+1. 先写 shell 脚本：
+   - `scripts/run_trend_liq_derive.sh`
+   - `scripts/run_trend_liq_hourly.sh`
+   - `scripts/run_trend_liq_health.sh`
+2. 再写 cron 文件，例如：`/root/crypto-alpha-lab/trend_liq_safe.cron`
+3. 使用非交互方式安装：
+   ```bash
+   crontab -l > /root/crontab.backup.$(date +%Y%m%d-%H%M%S)
+   crontab /root/crypto-alpha-lab/trend_liq_safe.cron
+   crontab -l
+   ```
+
+### 实际部署文件（2026-06-15 当前落地版本） (Actual Deployed Files)
+
+当前服务器上实际生效的安全版调度，不再直接把复杂命令写进 `crontab`，而是通过以下 3 个脚本承载：
+
+1. `/root/crypto-alpha-lab/scripts/run_trend_liq_derive.sh`
+   - 串行执行 `1m` 与 `5m` 聚合。
+   - 自动计算最近 24h 的 `start_ms` / `end_ms`。
+2. `/root/crypto-alpha-lab/scripts/run_trend_liq_hourly.sh`
+   - 执行 `1h` 聚合。
+3. `/root/crypto-alpha-lab/scripts/run_trend_liq_health.sh`
+   - 运行 `scripts/check_liquidation_collector_health.py` 并输出健康摘要。
+
+对应的 `crontab` 入口是：
+
+```cron
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/5 * * * * flock -n /tmp/trend_liq_derive.lock /root/crypto-alpha-lab/scripts/run_trend_liq_derive.sh >> /root/crypto-alpha-lab/logs/trend_liq_derive.log 2>&1
+5 * * * * flock -n /tmp/trend_liq_derive.lock /root/crypto-alpha-lab/scripts/run_trend_liq_hourly.sh >> /root/crypto-alpha-lab/logs/trend_liq_hourly.log 2>&1
+*/30 * * * * flock -n /tmp/trend_liq_derive.lock /root/crypto-alpha-lab/scripts/run_trend_liq_health.sh > /root/crypto-alpha-lab/data/trend_regime_liquidation_health.json 2>> /root/crypto-alpha-lab/logs/trend_liq_health.log
+```
+
+验收命令：
+
+```bash
+crontab -l
+crontab -l | grep -E 'flock|run_trend_liq'
+```
+
+只有当输出中能看到 `flock` 和三个 `run_trend_liq_*` 脚本时，才说明旧版 `*/1` / `*/15` 任务已被成功替换。
+
+### 2026-06-15 事故记录：CPU 99% / SSH 断开 (Incident Note)
+
+现象：
+
+1. 服务器 CPU 长时间接近 `99%`。
+2. SSH 连接经常在认证前后直接被关闭：`Connection closed by 47.82.4.85 port 22`。
+3. 根分区并未打满：`df -h` 显示 `/` 仍有约 `13G` 可用空间，使用率约 `56%`。
+
+直接原因：
+
+1. `scripts/aggregate_trend_regime_liquidations.py` 当前实现会先全量读取 `trend_regime_force_orders_raw.jsonl`，再做聚合；raw archive 越大，单次执行越慢。
+2. 原始 crontab 中 `1m` 聚合为 `*/1`，当单次运行超过 60 秒后，下一分钟 cron 会启动新的 Python 进程，导致多个聚合任务重叠。
+3. `5m` 聚合与健康检查同时读取同一个大文件，进一步放大 CPU、内存与 I/O 争抢。
+4. 当系统资源被抢空时，`sshd` 可能无法及时分配资源或受到 OOM / 调度抖动影响，从而表现为 SSH 连接被直接关闭。
+
+已排除项：
+
+1. 这次问题的主因不是根分区磁盘已满；磁盘空间不是当前首要瓶颈。
+2. 清理 `/root/my-bitcoin-project/...` 的旧 orderbook 数据，不会直接解决 `/root/crypto-alpha-lab` 当前这套 liquidation 派生链路的 CPU 问题。
+
+本次缓解方案：
+
+1. 将 `1m` 聚合从“每分钟一次”降为“每 5 分钟一次”。
+2. 为派生任务增加 `flock` 锁，禁止跨分钟重叠执行。
+3. 为聚合和健康检查增加 `nice -n 10`，降低它们与 sshd / 采集器争抢 CPU 的优先级。
+4. 将健康检查降频到每 30 分钟一次，避免它与高频派生同时全量扫描 raw archive。
+
+后续长期修复方向：
+
+1. 将 `trend_regime_force_orders_raw.jsonl` 改为更积极的日切或周切归档，避免 active raw 文件无限增长。
+2. 将 `aggregate_trend_regime_liquidations.py` 改为增量聚合，只处理“上次聚合后新增的 raw 事件”，不要每次全量读取整个 archive。
+
+### 切换后 10 分钟巡检 (10-Minute Post-Switch Checklist)
+
+切换完成后的前 10 分钟，不要只看 `crontab -l`。必须同时检查“旧进程是否退干净、CPU 是否回落、派生文件是否继续更新”。
+
+第 0 分钟：确认新 cron 仍在
+
+```bash
+crontab -l
+crontab -l | grep -E 'flock|run_trend_liq'
+```
+
+预期：
+
+1. 只看到 3 条新任务。
+2. 不再出现旧的 `*/1` 和 `*/15` 条目。
+
+第 0 到 1 分钟：确认没有旧残留进程堆积
+
+```bash
+pgrep -af 'aggregate_trend_regime_liquidations.py|check_liquidation_collector_health.py|run_trend_liq'
+```
+
+预期：
+
+1. 最多只看到当前这一轮对应的少量进程。
+2. 不应该出现多组历史遗留的聚合进程同时常驻。
+
+第 1 到 3 分钟：看 CPU / load 是否开始回落
+
+```bash
+uptime
+ps -eo pid,etime,%cpu,%mem,cmd --sort=-%cpu | head -20
+```
+
+预期：
+
+1. 不再有多个 `aggregate_trend_regime_liquidations.py` 同时高 CPU 占用。
+2. `sshd` 不应继续被批处理任务压制。
+
+第 3 到 5 分钟：检查派生日志
+
+```bash
+tail -n 50 /root/crypto-alpha-lab/logs/trend_liq_derive.log
+tail -n 50 /root/crypto-alpha-lab/logs/trend_liq_hourly.log
+tail -n 50 /root/crypto-alpha-lab/logs/trend_liq_health.log
+```
+
+预期：
+
+1. 没有持续 traceback。
+2. 没有权限错误、路径错误或 `file not found`。
+
+第 5 到 7 分钟：确认 `1m/5m` 派生文件继续更新
+
+```bash
+ls -lh /root/crypto-alpha-lab/data/trend_regime_liquidation_1m.jsonl
+ls -lh /root/crypto-alpha-lab/data/trend_regime_liquidation_5m.jsonl
+stat /root/crypto-alpha-lab/data/trend_regime_liquidation_1m.jsonl
+stat /root/crypto-alpha-lab/data/trend_regime_liquidation_5m.jsonl
+```
+
+预期：
+
+1. 文件存在。
+2. 修改时间刷新到最近几分钟。
+
+第 7 到 10 分钟：确认 health 摘要继续产出
+
+```bash
+ls -lh /root/crypto-alpha-lab/data/trend_regime_liquidation_health.json
+tail -n 50 /root/crypto-alpha-lab/logs/trend_liq_health.log
+```
+
+预期：
+
+1. health JSON 存在。
+2. 没有连续报错。
+
+额外检查：排查 OOM
+
+```bash
+dmesg -T | grep -i -E 'killed process|out of memory|oom'
+```
+
+预期：
+
+切换后不应继续新增由聚合脚本引发的 OOM 记录。
+
+### 失败回滚方法 (Rollback Procedure)
+
+如果新 cron 安装失败、脚本路径写错，或者切换后 10 分钟内系统状态更差，按以下顺序回滚：
+
+1. 查看最近一次备份：
+   ```bash
+   ls -lt /root/crontab.backup.*
+   ```
+2. 恢复旧版 cron：
+   ```bash
+   crontab /root/crontab.backup.<timestamp>
+   crontab -l
+   ```
+3. 如有必要，临时停用新脚本日志写入：
+   ```bash
+   mv /root/crypto-alpha-lab/scripts/run_trend_liq_derive.sh /root/crypto-alpha-lab/scripts/run_trend_liq_derive.sh.disabled
+   mv /root/crypto-alpha-lab/scripts/run_trend_liq_hourly.sh /root/crypto-alpha-lab/scripts/run_trend_liq_hourly.sh.disabled
+   mv /root/crypto-alpha-lab/scripts/run_trend_liq_health.sh /root/crypto-alpha-lab/scripts/run_trend_liq_health.sh.disabled
+   ```
+4. 回滚后立即再次执行：
+   ```bash
+   crontab -l
+   pgrep -af 'aggregate_trend_regime_liquidations.py|check_liquidation_collector_health.py|run_trend_liq'
+   ```
+
+注意：
+
+回滚只解决“调度层配置错误”。如果根因是 raw archive 已经过大，旧 cron 恢复后仍可能重新触发 CPU 过高问题，因此回滚后应优先继续推进 raw 轮转或增量聚合修复。
 
 ### 归档备份与 Checksum 轮转策略 (Archive Backup & Checksum Rotation)
 
