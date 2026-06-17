@@ -1,0 +1,63 @@
+{
+  "decision": "liquidation_diagnostic_weak",
+  "next_action": "continue_accumulating_but_do_not_wait_for_90d",
+  "liquidation_source_truth_level": "local_force_order_snapshot_rows_not_complete_tape",
+  "complete_liquidation_tape_claim_allowed": false,
+  "full_composite_claim_allowed": false,
+  "alpha_interpretation_allowed": false,
+  "paper_trading_allowed": false,
+  "live_trading_allowed": false,
+  "density_report": {
+    "raw_history_days": 15.0,
+    "liquidation_history_days": 15.0,
+    "symbols_with_events": 3,
+    "event_days": 16,
+    "max_single_symbol_event_share": 0.3333333333333333,
+    "max_single_day_event_share": 0.16666666666666666,
+    "top_1_day_notional_share": 0.16245569390166317,
+    "top_3_days_notional_share": 0.42147596110151775,
+    "top_1_symbol_notional_share": 0.6437789693719894
+  },
+  "overlap_report": {
+    "alignment_overlap_available": false,
+    "data_alignment_overlap_window_count_15m": 0,
+    "stress_condition_overlap_window_count_15m": 0,
+    "data_alignment_overlap_event_days": 0,
+    "stress_condition_overlap_event_days": 0,
+    "symbols_with_alignment_overlap": 0,
+    "alignment_policy": {
+      "funding": "asof_latest_before_bucket_end_minus_lag",
+      "oi": "asof_latest_before_bucket_end_with_staleness_limit",
+      "price": "bucket_exact_or_covering"
+    }
+  },
+  "imbalance_distribution": {
+    "long_short_imbalance_distribution_15m": {
+      "long_ratio": 0.8277,
+      "short_ratio": 0.1723
+    },
+    "long_short_imbalance_distribution_1h": {
+      "long_ratio": 0.8277,
+      "short_ratio": 0.1723
+    },
+    "long_liquidation_notional_total": 72859.0,
+    "short_liquidation_notional_total": 15165.0
+  },
+  "source_quality_report": {
+    "raw_row_count": 18,
+    "raw_history_days": 15.0,
+    "raw_recent_event_count_24h": 2,
+    "duplicate_event_count": 0,
+    "invalid_json_line_count": 0,
+    "invalid_json_line_ratio": 0.0,
+    "missing_timestamp_count": 0,
+    "expected_symbol_coverage": 5,
+    "actual_symbol_coverage": 3,
+    "unknown_schema_count": 0,
+    "missing_required_field_count": 0,
+    "parse_error_count": 0,
+    "rotation_fragment_count": 0,
+    "collector_gap_verifiable": false,
+    "archive_gap_observations": "event_sparse_stream_cannot_prove_uptime"
+  }
+}

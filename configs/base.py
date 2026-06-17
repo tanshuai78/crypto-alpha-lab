@@ -1082,3 +1082,61 @@ EXTERNAL_SIGNAL_STAGE1_4A2_LOW_COST_MAX_USD_PER_MONTH = 50.0
 EXTERNAL_SIGNAL_STAGE1_4A2_MEDIUM_COST_MAX_USD_PER_MONTH = 200.0
 # Maximum monthly cost considered medium. Costs above this or enterprise quote-only plans
 # are degraded by default unless the user explicitly approves.
+
+
+# ─── External Signal Shadow Lab Stage 1.4A-LQ30: Local ForceOrder Snapshot Diagnostic ───
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_HISTORY_DAYS = 15
+# Minimum local forceOrder history span for LQ30 diagnostic to be meaningful.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_SYMBOLS_WITH_EVENTS = 3
+# Minimum number of symbols with liquidation events.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_EVENT_DAYS = 10
+# Minimum number of distinct days containing liquidation events.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ALIGNMENT_OVERLAP_EVENT_DAYS = 10
+# Minimum days where liquidation windows align with funding/OI/price datasets.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_SINGLE_SYMBOL_EVENT_SHARE = 0.60
+# Max allowed share of event count contributed by one symbol.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_SINGLE_DAY_EVENT_SHARE = 0.35
+# Max allowed share of event count contributed by one day.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_TOP1_DAY_NOTIONAL_SHARE = 0.50
+# Max allowed notional concentration in the single largest day.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_TOP3_DAYS_NOTIONAL_SHARE = 0.70
+# Max allowed cumulative notional concentration in the top 3 days.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_TOP1_SYMBOL_NOTIONAL_SHARE = 0.70
+# Max allowed notional concentration in the single largest symbol.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_INVALID_JSON_LINE_RATIO = 0.001
+# Max acceptable invalid JSON line ratio if invalid rows are quarantined.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_BUCKET_15M_MS = 15 * 60 * 1000
+# Fixed UTC 15m aggregation bucket.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_BUCKET_1H_MS = 60 * 60 * 1000
+# Fixed UTC 1h aggregation bucket.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_CONFIGURED_LAG_MS = 60_000
+# Conservative data lag applied after bucket_end when producing available_at_ms.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_FUNDING_PUBLISH_LAG_MS = 5 * 60 * 1000
+# Expected delay for funding rate publication.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MAX_OI_STALENESS_MS = 60 * 60 * 1000
+# Maximum age allowed for OI data compared to bucket end to be considered aligned.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ABS_FUNDING_RATE_PREVIEW = 0.0
+# Minimum absolute funding rate to check preview condition.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ABS_OI_CHANGE_RATIO_PREVIEW = 0.0
+# Minimum absolute OI change ratio to check preview condition.
+
+EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ABS_PRICE_RETURN_1H_PREVIEW = 0.0
+# Minimum absolute price return 1h to check preview condition.
+
