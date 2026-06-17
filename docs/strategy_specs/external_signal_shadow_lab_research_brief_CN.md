@@ -779,6 +779,84 @@ listing / unlock / event calendar
 接入需要私钥、钱包、swap payload 或交易权限的工具
 ```
 
+### 11.1 截至 2026-06-16 的收敛结论
+
+Stage 1.4 的讨论已经从“泛化的高信息密度 source 选择”进一步收敛到更现实的两条子问题：
+
+```text
+1. 当前 local forceOrder liquidation 历史还不够长时，是否值得继续等到 90d？
+2. funding / OI / futures price 这组三元 crowding label，单独是否还有增量结构？
+```
+
+现有证据是：
+
+```text
+Stage 1.3 已证伪低维 ticker / OHLCV price-volume 派生方向；
+Stage 1.4A.1 已确认 funding / OI / futures price 历史基本可得；
+Stage 1.4A.1 的主要 blocker 不是 funding/OI/price，而是 liquidation history 只有约 12-14d；
+vendor liquidation sample 仍未取得；
+CM liquidation proxy 只能做 partial diagnostic，不应当作 full composite 主证据。
+```
+
+因此，当前不应把下一步理解为：
+
+```text
+重新把 funding / OI / price 当主线 alpha 方向无限调参
+```
+
+也不应理解为：
+
+```text
+什么都不做，单纯等待 90d liquidation 自动积累完毕
+```
+
+更合适的推进方式应为双轨：
+
+```text
+Track A:
+Stage 1.4A-LQ30 Local ForceOrder Snapshot Diagnostic
+
+Track B:
+Stage 1.4B-Lite Funding/OI/Price Crowding Replay
+```
+
+两条线的职责必须区分：
+
+- `Stage 1.4A-LQ30`：只回答“当前 15-30d local forceOrder snapshot 数据是否已经显示出足够事件密度、重叠度、集中度和状态切换信息，值得继续等 90d 或继续争取 vendor sample”。它不输出 alpha pass，不开放 paper/live，不可替代 full composite replay。
+- `Stage 1.4B-Lite`：只回答“funding / OI / futures price 这组三元 crowding label，在不依赖 liquidation 的情况下，是否仍存在可重复的增量结构”。它不是 full derivatives stress composite，也不能替代 liquidation 主线。
+
+因此当前的推荐顺序不是单押某一条，而是：
+
+```text
+优先先写并执行 Stage 1.4A-LQ30 design；
+同时把 Stage 1.4B-Lite 保留为低成本并行预筛；
+最终是否继续投入 90d liquidation / vendor sample，取决于 A 与 B 的组合结果，而不是任意单条线的成败。
+```
+
+组合判断建议：
+
+```text
+B-Lite fail + LQ30 weak
+-> 停止免费 derivatives stress alpha 路线，只保留 live liquidation collector 作为长期数据资产
+
+B-Lite fail + LQ30 promising
+-> liquidation 可能真的是关键缺失腿；不做 alpha 通过结论，但值得继续积累 exact history 或争取 vendor sample
+
+B-Lite pass + LQ30 weak
+-> crowding label 可能有一些结构，但 liquidation 暂未显示明显增量；可继续低成本 crowding replay，不急于扩大 liquidation 成本投入
+
+B-Lite pass + LQ30 promising
+-> 这是最值得进入更长历史 local forceOrder replay 或 vendor-grade full composite 的情况
+```
+
+这也意味着一个重要边界：
+
+```text
+funding / OI / price 单独不应重新成为主线；
+它们只应作为 Stage 1.4B-Lite 的 crowding precheck。
+liquidation 仍是 full derivatives stress composite 中不可替代的状态切换变量。
+```
+
 ---
 
 ## 12. 后续高信息密度 source 必须回答的问题
@@ -955,14 +1033,33 @@ Stage 1.3: Candidate Signal Discovery
 作用：验证 Gate ticker snapshot / Binance proxy OHLCV 是否能派生短周期候选 alpha
 结论：低维 price-volume 派生方向未通过；停止 Gate ticker snapshot 派生扩展
 
-Stage 1.4: High-Information Source Selection
-状态：下一步建议
-作用：在 liquidation / funding+OI / orderbook / event calendar 等 source 中选择一个最小可证伪方向
-边界：一次只选一个 source，不扩多个 collector，不接执行能力
+Stage 1.4: Derivatives Stress Composite Research
+状态：已进入可行性审计与分轨准备阶段
+作用：围绕 liquidation + funding + OI + futures price 定义最小可证伪 derivatives stress 研究路径
 
-Stage 1.5: Source-specific Connector / Historical Replay
-状态：后置
-作用：对 Stage 1.4 选中的 source 建立只读 connector 和历史 replay
+Stage 1.4A.1: Real Data Feasibility Audit
+状态：完成
+作用：确认 funding / OI / futures price 历史可得性，并识别当前 local forceOrder liquidation history 的长度缺口
+结论：funding / OI / futures price 基本可用；local forceOrder liquidation history 当前仅约 12-14d，不足以支持 research-grade full composite replay
+
+Stage 1.4A.2: Vendor Liquidation Data Feasibility
+状态：框架完成，但尚未取得真实 sample/trial export
+作用：判断 vendor liquidation source 是否值得继续投入
+结论：docs-only / no-sample 只能 degraded，尚不能证明 vendor liquidation source 可用
+
+Stage 1.4A-LQ30: Local ForceOrder Snapshot Diagnostic
+状态：下一步优先建议
+作用：用当前 15-30d 本地 forceOrder snapshot archive 检查 liquidation 事件密度、重叠度、集中度和 source quality
+边界：不输出 alpha pass，不开放 paper/live，不可替代 full composite replay
+
+Stage 1.4B-Lite: Funding/OI/Price Crowding Replay
+状态：并行备选
+作用：验证 funding / OI / futures price 三元 crowding label 是否存在低成本可重复结构
+边界：不是 full derivatives stress composite，不允许把其通过解释为 liquidation 路线已经通过
+
+Stage 1.5: Longer-History Local ForceOrder / Vendor-grade Composite Replay
+状态：后置，只有在 Stage 1.4A-LQ30 与 Stage 1.4B-Lite 的组合结果支持时才开放
+作用：进入更长历史 local forceOrder replay 或 vendor-grade full composite replay
 
 Stage 2: 7d / 30d Shadow Validation
 状态：只对通过 source-specific historical replay 和 24h live smoke 的候选开放
@@ -1013,12 +1110,66 @@ Stage 1.3 已经给出停止 Gate ticker snapshot 派生方向的证据：候选
 当前推荐决策：
 
 ```text
-decision = proceed_to_stage1_4_high_information_source_selection_design
+decision = proceed_to_stage1_4a_lq30_local_forceorder_snapshot_diagnostic_design
+parallel_secondary_track = stage1_4b_lite_funding_oi_price_crowding_replay
 preferred_first_source = liquidation_cluster_or_liquidation_imbalance
 collector_expansion_allowed = false
 live_shadow_required_now = false
 historical_replay_first = true
 alpha_interpretation_allowed = false
+```
+
+截至 2026-06-17，`Stage 1.4A-LQ30` 已经产出第一份真实输入驱动的 diagnostic 结果：
+
+```text
+decision = liquidation_diagnostic_promising
+next_action = continue_accumulating_exact_history
+```
+
+这里的正确解释是：
+
+```text
+local forceOrder snapshot 这条腿值得继续积累历史；
+它已显示出足够的数据密度、集中度稳定性和最小时间对齐能力，
+因此不再属于“盲等 90d”。
+```
+
+这里的错误解释是：
+
+```text
+liquidation alpha 已成立
+full composite 已通过
+paper/live 可进入
+vendor liquidation 已不需要
+```
+
+因此下一条正式设计线应推进为：
+
+```text
+Stage 1.4B-Lite Funding/OI/Price Crowding Replay
+```
+
+它的角色是：
+
+```text
+cheap crowding precheck
+```
+
+而不是：
+
+```text
+liquidation substitute
+full derivatives stress pass
+```
+
+补充边界：
+
+```text
+funding / OI / price 不应重新成为主线；
+它们只应作为 B-Lite crowding precheck 存在。
+
+如果 B-Lite 失败，只能证明 crowding label 单独不够强；
+不能单独否定 liquidation + funding + OI + price 的完整 composite。
 ```
 
 更高层判断：
