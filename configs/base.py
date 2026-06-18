@@ -1140,3 +1140,77 @@ EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ABS_OI_CHANGE_RATIO_PREVIEW = 0.0
 EXTERNAL_SIGNAL_STAGE1_4_LQ30_MIN_ABS_PRICE_RETURN_1H_PREVIEW = 0.0
 # Minimum absolute price return 1h to check preview condition.
 
+
+# ─── Research: External Signal Shadow Lab Stage 1.4B-Lite ──────────────────
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_EVENT_DETECTION_WINDOW_HOURS = 4
+# Lookback window in hours for event detection.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_ENTRY_DELAY_BARS = 1
+# Number of complete 15m bars to delay entry.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_PRIMARY_FORWARD_WINDOW_HOURS = 4
+# Primary forward hold window in hours.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_SECONDARY_FORWARD_WINDOWS_HOURS = (1, 12)
+# Secondary forward hold windows in hours (report-only).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_FUNDING_EXTREME_PERCENTILE = 90
+# Funding extreme percentile (top/bottom) for crowding definition.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_FUNDING_PERCENTILE_LOOKBACK_DAYS = 90
+# Rolling window in days for symbol-specific funding percentiles.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MIN_FUNDING_HISTORY_POINTS = 30
+# Minimum history points required to calculate funding percentiles.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_OI_EXPANSION_4H_PCT = 0.02
+# 4h OI expansion threshold (2%).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_OI_CONTRACTION_4H_PCT = -0.02
+# 4h OI contraction threshold (-2%).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_PRICE_RETURN_4H_PCT = 0.015
+# 4h price return threshold (1.5%).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_PRICE_FLUSH_4H_PCT = 0.02
+# 4h price return flush threshold (2%).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_PRICE_BASELINE_1H_RETURN_PCT = 0.015
+# Price baseline return threshold for benchmark.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_FUNDING_PUBLISH_LAG_MS = EXTERNAL_SIGNAL_STAGE1_4_FUNDING_PUBLISH_LAG_MS
+# Delayed publication threshold for funding rate.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MAX_OI_STALENESS_MS = 60 * 60 * 1000
+# Maximum allowed staleness of Open Interest.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MIN_OI_HISTORY_POINTS = 2
+# Minimum OI history points required.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_EVENT_COOLDOWN_HOURS = 4
+# Cooldown period in hours to avoid repeating signals.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_RANDOM_BASELINE_TRIALS = 500
+# Number of trials for symbol-hour matched random baseline.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_COST_SCENARIOS_BPS = (30, 50, 80)
+# Round-trip cost scenarios (base, stress, crash).
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MIN_EVENT_COUNT = 100
+# Minimum events required to pass overall density gate.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MIN_EVENT_DAYS = 20
+# Minimum distinct event days to pass overall density gate.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MIN_SYMBOLS_WITH_EVENTS = 3
+# Minimum symbols with events to pass overall density gate.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MAX_SINGLE_SYMBOL_EVENT_SHARE = 0.50
+# Maximum single symbol share of total events.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MAX_SINGLE_DAY_EVENT_SHARE = 0.20
+# Maximum single day share of total events.
+
+EXTERNAL_SIGNAL_STAGE1_4B_LITE_MAX_TOP5_POSITIVE_GROSS_PROFIT_SHARE = 0.30
+# Maximum top-5 positive events gross profit share.

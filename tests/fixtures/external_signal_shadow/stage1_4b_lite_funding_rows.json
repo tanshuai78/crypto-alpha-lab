@@ -1,0 +1,2502 @@
+[
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778285400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778314200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778343000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778371800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778400600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778429400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778458200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778487000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778515800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778544600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778573400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778602200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778631000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778659800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778688600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778717400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778746200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778775000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778803800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778832600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778861400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778890200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778919000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778947800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1778976600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779005400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779034200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779063000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779091800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779120600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779149400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779178200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779207000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779235800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779264600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779293400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779322200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779351000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779379800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779408600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779437400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779466200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779495000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779523800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779552600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779581400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779610200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779639000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779667800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779696600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779725400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779754200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779783000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779811800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779840600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779869400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779898200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779927000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779955800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1779984600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780013400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780042200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780071000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780099800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780128600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780157400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780186200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780215000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780243800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780272600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780301400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780330200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780359000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780387800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780416600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780445400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780474200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780503000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780531800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780560600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780589400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780618200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780647000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780675800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780704600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780733400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780762200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780791000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780819800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780848600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780877400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780906200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780935000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780963800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1780992600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1781021400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1781050200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1781079000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1781107800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "BTCUSDT",
+    "fundingTime": 1781136600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778285400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778314200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778343000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778371800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778400600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778429400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778458200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778487000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778515800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778544600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778573400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778602200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778631000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778659800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778688600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778717400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778746200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778775000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778803800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778832600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778861400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778890200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778919000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778947800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1778976600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779005400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779034200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779063000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779091800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779120600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779149400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779178200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779207000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779235800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779264600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779293400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779322200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779351000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779379800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779408600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779437400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779466200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779495000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779523800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779552600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779581400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779610200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779639000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779667800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779696600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779725400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779754200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779783000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779811800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779840600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779869400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779898200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779927000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779955800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1779984600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780013400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780042200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780071000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780099800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780128600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780157400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780186200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780215000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780243800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780272600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780301400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780330200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780359000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780387800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780416600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780445400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780474200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780503000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780531800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780560600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780589400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780618200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780647000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780675800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780704600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780733400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780762200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780791000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780819800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780848600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780877400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780906200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780935000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780963800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1780992600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1781021400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1781050200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1781079000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1781107800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "ETHUSDT",
+    "fundingTime": 1781136600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778285400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778314200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778343000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778371800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778400600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778429400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778458200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778487000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778515800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778544600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778573400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778602200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778631000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778659800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778688600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778717400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778746200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778775000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778803800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778832600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778861400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778890200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778919000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778947800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1778976600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779005400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779034200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779063000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779091800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779120600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779149400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779178200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779207000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779235800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779264600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779293400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779322200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779351000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779379800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779408600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779437400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779466200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779495000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779523800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779552600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779581400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779610200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779639000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779667800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779696600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779725400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779754200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779783000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779811800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779840600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779869400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779898200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779927000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779955800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1779984600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780013400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780042200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780071000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780099800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780128600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780157400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780186200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780215000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780243800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780272600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780301400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780330200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780359000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780387800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780416600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780445400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780474200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780503000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780531800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780560600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780589400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780618200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780647000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780675800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780704600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780733400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780762200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780791000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780819800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780848600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780877400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780906200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780935000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780963800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1780992600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1781021400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1781050200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1781079000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1781107800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "SOLUSDT",
+    "fundingTime": 1781136600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778285400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778314200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778343000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778371800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778400600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778429400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778458200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778487000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778515800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778544600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778573400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778602200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778631000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778659800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778688600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778717400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778746200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778775000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778803800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778832600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778861400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778890200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778919000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778947800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1778976600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779005400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779034200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779063000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779091800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779120600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779149400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779178200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779207000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779235800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779264600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779293400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779322200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779351000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779379800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779408600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779437400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779466200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779495000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779523800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779552600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779581400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779610200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779639000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779667800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779696600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779725400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779754200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779783000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779811800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779840600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779869400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779898200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779927000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779955800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1779984600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780013400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780042200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780071000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780099800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780128600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780157400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780186200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780215000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780243800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780272600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780301400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780330200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780359000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780387800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780416600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780445400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780474200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780503000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780531800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780560600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780589400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780618200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780647000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780675800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780704600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780733400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780762200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780791000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780819800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780848600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780877400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780906200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780935000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780963800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1780992600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1781021400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1781050200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1781079000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1781107800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "XRPUSDT",
+    "fundingTime": 1781136600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778285400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778314200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778343000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778371800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778400600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778429400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778458200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778487000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778515800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778544600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778573400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778602200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778631000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778659800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778688600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778717400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778746200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778775000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778803800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778832600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778861400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778890200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778919000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778947800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1778976600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779005400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779034200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779063000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779091800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779120600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779149400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779178200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779207000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779235800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779264600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779293400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779322200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779351000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779379800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779408600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779437400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779466200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779495000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779523800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779552600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779581400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779610200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779639000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779667800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779696600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779725400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779754200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779783000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779811800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779840600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779869400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779898200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779927000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779955800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1779984600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780013400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780042200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780071000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780099800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780128600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780157400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780186200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780215000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780243800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780272600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780301400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780330200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780359000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780387800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780416600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780445400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780474200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780503000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780531800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780560600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780589400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780618200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780647000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780675800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780704600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780733400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780762200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780791000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780819800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780848600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780877400000,
+    "fundingRate": 0.0003
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780906200000,
+    "fundingRate": -0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780935000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780963800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1780992600000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1781021400000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1781050200000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1781079000000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1781107800000,
+    "fundingRate": 0.0001
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "fundingTime": 1781136600000,
+    "fundingRate": 0.0001
+  }
+]

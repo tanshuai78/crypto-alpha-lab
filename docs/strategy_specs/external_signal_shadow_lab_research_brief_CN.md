@@ -1119,7 +1119,7 @@ historical_replay_first = true
 alpha_interpretation_allowed = false
 ```
 
-截至 2026-06-17，`Stage 1.4A-LQ30` 已经产出第一份真实输入驱动的 diagnostic 结果：
+截至 2026-06-18，`Stage 1.4A-LQ30` 已经产出第一份真实输入驱动的 diagnostic 结果：
 
 ```text
 decision = liquidation_diagnostic_promising
@@ -1170,6 +1170,49 @@ funding / OI / price 不应重新成为主线；
 
 如果 B-Lite 失败，只能证明 crowding label 单独不够强；
 不能单独否定 liquidation + funding + OI + price 的完整 composite。
+```
+
+截至 2026-06-18，`Stage 1.4B-Lite` 已完成真实输入回放，并已在 `10 / 50 / 500 trials` 三档 random baseline 下得到一致结论：
+
+```text
+decision = crowding_lite_failed
+primary_blocker = day_concentration_limit_exceeded
+next_action = stop_crowding_only_branch
+```
+
+当前最重要的事实是：
+
+```text
+这不是 fixture smoke；
+这不是只在 debug trials 下成立的偶然结果；
+这是一份真实输入、正式 500 trials baseline 下仍保持稳定的失败结论。
+```
+
+这里的正确解释是：
+
+```text
+funding / OI / futures price 这组三元 crowding-only label，
+在当前冻结参数下没有形成事件数足够、跨日足够、集中度可接受的独立研究分支；
+因此不应继续作为主线投入调参。
+```
+
+这里的错误解释是：
+
+```text
+derivatives stress 全线失败
+liquidation 这条腿没有价值
+Stage 1.4 full composite 已被证伪
+```
+
+因此截至当前阶段，Stage 1.4 的推荐路线更新为：
+
+```text
+primary_track = stage1_4a_lq30_local_forceorder_snapshot_diagnostic
+secondary_crowding_only_track = stopped_after_b_lite_falsification
+continue_accumulating_local_liquidation_history = true
+vendor_liquidation_sample_still_optional = true
+full_composite_claim_allowed = false
+alpha_interpretation_allowed = false
 ```
 
 更高层判断：
