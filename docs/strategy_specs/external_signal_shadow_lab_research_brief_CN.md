@@ -332,6 +332,73 @@ Gate ticker snapshot / Binance proxy OHLCV 的短周期 price-volume 派生方�
 External Signal Shadow Lab 若继续，必须转向更高信息密度 source。
 ```
 
+### 4.6 前置阶段留下来的代码与数据，现在还有什么用
+
+需要明确：`Stage 0 - Stage 1.3` 没有被废弃。
+它们里面有些资产已经退出主线，有些资产仍然是当前与后续研究的基础设施。
+
+#### 仍然保留高价值的部分
+
+```text
+Stage 0:
+- 事件后 replay / review 的工程方法仍然有用
+- “先产生 summary，再写 review，再决定继续/停止”的流程仍然是当前主线方法论
+
+Stage 1.0:
+- connector 标准化、forbidden payload 检查、raw_payload_hash、available_at_ms 语义仍然有用
+- 这些边界会继续复用于 vendor sample、liquidation archive、未来 fuller composite 输入
+
+Stage 1.2:
+- public-readonly collector 的安全边界仍然有参考价值
+- “无登录、无 API key、只读、显式 live 开关”的运维模式仍然是后续公开数据接入的默认模板
+
+Stage 1.3:
+- 180d Binance proxy 价格数据、500 次随机 baseline、50bps 成本后 4h terminal return 的研究口径仍然有用
+- 它为后续分支提供了一个已经被证伪的低维 baseline，对比价值很高
+```
+
+#### 已退出主线、但可作为历史参考的部分
+
+```text
+Stage 1.1:
+- manual payload dry run 不再作为长期方法
+- 但它仍可作为 fixture / smoke / 手工构造极端 case 的参考样板
+
+Stage 1.2 的 Gate ticker snapshot:
+- 不再被视为当前主线的高信息密度来源
+- 但仍可作为 observation-only 数据源与 collector 模板保留
+```
+
+#### 对当前 Stage 1.4 还有什么直接帮助
+
+当前主线已经转到：
+
+```text
+LQ30 liquidation diagnostic
+-> Stage 1.4C joint decision
+-> 未来 fuller composite readiness
+```
+
+在这条线上，前面阶段留下来的直接作用是：
+
+```text
+1. Stage 0 / 1.0 提供了“外部数据如何进入研究系统”的工程骨架
+2. Stage 1.3 提供了“crowding-only / low-dim price-volume 不能单独成立”的正式负结论
+3. 这些负结论帮助我们避免重新回到 price-volume/funding-only 的调参循环
+```
+
+因此对当前阶段的正确理解是：
+
+```text
+Stage 0 - 1.3 不是白做；
+它们已经完成了：
+- 安全接入框架
+- replay/review 方法论
+- 一条低维公开市场数据主线的正式证伪
+```
+
+这三件事，正是当前 Stage 1.4 能够更快收敛到 liquidation-assisted 路线的原因。
+
 ---
 
 ## 5. 当前到底收集了什么外部信号
