@@ -1,3 +1,4 @@
+
 # External Signal Shadow Lab 分支说明：External Catalyst Events + Filter
 
 日期：2026-06-21
@@ -52,24 +53,6 @@ external catalyst triggers market state transition
 
 ```text
 外生事件 -> 标准化 -> 安全审计 -> filter matrix -> 历史 replay -> review -> 决定继续或停止
-```
-
-这里的“转向”不是放弃本地 liquidation 数据资产，而是把当前主动研究重心从继续调 CEX 内生变量，转移到 external catalyst。
-
-正式路线应写成双轨：
-
-```text
-active_research_track = external_catalyst_events_filter_matrix
-long_term_data_asset_track = continue_local_forceorder_liquidation_collection
-full_composite_track = deferred_until_liquidation_history_or_vendor_quality_improves
-```
-
-也就是说：
-
-```text
-Stage 1.5 负责寻找新的高信息密度外生 source；
-local forceOrder collector 继续作为长期 liquidation 数据资产积累；
-二者不是互相替代关系。
 ```
 
 ---
@@ -159,15 +142,6 @@ secret
 private_key
 wallet_seed
 mnemonic
-authorization
-bearer
-access_token
-refresh_token
-cookie
-session
-csrf
-password
-passphrase
 signed_tx
 raw_tx
 order_request
@@ -209,32 +183,16 @@ replay = 证伪器
 
 ## 7. 为什么不能直接收集所有 events
 
-因为没有 schema 和 filter 之前，收集 events 会带来五类污染：
+因为没有 schema 和 filter 之前，收集 events 会带来四类污染：
 
 ```text
 1. event_type 语义污染：listing / delisting / unlock / futures launch 被混成一个 signal。
 2. available_at_ms 污染：历史发布时间被误当成真实可得时间。
 3. hindsight bias：今天看到的过去 event calendar 未必是当时市场知道的信息。
 4. filter 误用：已经失败的 OI/price proxy 被偷偷塞回硬过滤器。
-5. connector / payload 污染：外部源格式变化、超大 payload、深层嵌套或错误 symbol mapping 污染研究表。
 ```
 
 因此必须先写 Stage 1.5 filter matrix design，再做 source audit。
-
-Stage 1.5A 之前不允许写“全量采集器”。第一版只允许做 bounded source audit：
-
-```text
-source_domain_allowlist_required = true
-max_payload_bytes_required = true
-max_json_depth_required = true
-request_timeout_required = true
-retry_with_backoff_required = true
-schema_quarantine_required = true
-raw_payload_hash_required = true
-collector_circuit_breaker_required = true
-```
-
-这些规则的目的不是防资金被盗，因为本分支不接 API key / 钱包 / execution layer；它们的目的是防止脏数据、格式炸弹、重试风暴或 source drift 污染研究结论。
 
 ---
 
@@ -268,16 +226,6 @@ source 可信
 分页 / 反爬 / 多语言页面可能造成字段不稳定
 available_at_ms 需要保守估计
 ```
-
-第一版需要进一步拆分 listing 语义，避免滑回“新币追涨”：
-
-```text
-new_coin_spot_listing = forbidden_or_observation_only
-new_perp_for_existing_spot_asset = allowed_if_pre_event_liquidity_pass
-new_pair_for_existing_liquid_asset = allowed
-```
-
-其中 `existing_liquid_asset` 必须在事件前已经有足够价格历史、成交量和可映射 symbol；不能用事件后流动性反推事件前资格。
 
 ### 8.2 第二优先：Token unlock calendars
 
@@ -337,34 +285,12 @@ Experimental Replay Group：用于固定分组对比。
 ```text
 source_integrity_veto
 forbidden_payload_veto
-source_resource_safety_veto
 available_at_veto
-first_hour_entry_delay_policy
+first_hour_no_trade_veto
 asset_quality_veto
 liquidity_depth_veto
 hindsight_risk_veto
 ```
-
-注意：
-
-```text
-first_hour_entry_delay_policy 不删除事件，只禁止 available_at 后首小时入场，避免公告瞬时追涨/追空。
-```
-
-`source_resource_safety_veto` 必须在 connector normalize 前生效。至少覆盖：
-
-```text
-domain_allowlist_violation
-payload_too_large
-json_depth_exceeded
-request_timeout
-retry_budget_exhausted
-schema_parse_error
-symbol_mapping_ambiguous
-source_format_drift
-```
-
-触发后不得 silent fallback，不得自动猜 symbol，不得进入 replay；只能进入 quarantine / observation-only 统计。
 
 ### 9.2 Context Label Filter
 
@@ -384,15 +310,6 @@ deleveraging_proxy_context
 
 ```text
 deleveraging_proxy_context 在 Stage 1.4E 失败后只能 diagnostic-only，不能作为 hard filter。
-```
-
-其他 CEX 内生变量也只能作为 context label，不允许重新变成 primary alpha source：
-
-```text
-funding_crowding_context != entry rule
-oi_crowding_context != entry rule
-price_reaction_context != entry rule
-local_liquidation_context != complete tape truth
 ```
 
 ---
@@ -424,29 +341,6 @@ source_audit_summary.json
 source_audit_review_CN.md
 ```
 
-Source audit summary 必须包含 connector 安全与 source drift 字段：
-
-```text
-source_domain_allowlist_pass_rate
-payload_too_large_count
-json_depth_exceeded_count
-request_timeout_count
-retry_budget_exhausted_count
-schema_parse_error_count
-schema_quarantine_count
-symbol_mapping_ambiguous_count
-source_format_drift_count
-raw_payload_hash_missing_count
-```
-
-如果官方公告页面存在 CDN / 多语言 / HTML 更新时间不一致，必须在 review 中单独输出：
-
-```text
-timestamp_source_disagreement_count
-timestamp_quality_distribution
-available_at_delay_sensitivity_required = true
-```
-
 ### Stage 1.5B：Minimal Historical Event Table
 
 目标：
@@ -466,8 +360,6 @@ symbol mapping
 event_type
 event magnitude
 hindsight_risk flag
-timestamp_quality
-event_type_replay_group
 ```
 
 ### Stage 1.5C：External Catalyst Historical Replay
@@ -487,14 +379,6 @@ price baseline
 event-type baseline
 BTC regime baseline
 concentration checks
-```
-
-Replay 不允许混合 event type 后直接宣称通过。必须按 event type 输出独立结果：
-
-```text
-event_type_mixing_allowed_for_source_audit = true
-event_type_mixing_allowed_for_replay_pass = false
-post_hoc_group_selection_allowed = false
 ```
 
 ### Stage 1.5D：Live Smoke Collector
@@ -521,13 +405,6 @@ source_integrity_pass_rate >= 95%
 symbol_mapping_pass_rate >= 95%
 available_at_policy_defined = true
 forbidden_payload_count = 0
-source_resource_safety_policy_defined = true
-schema_quarantine_count is reported
-payload_too_large_count is reported
-request_timeout_count is reported
-symbol_mapping_ambiguous_count = 0 for replay rows
-primary_event_type_events >= 20
-timestamp_quality_high_or_medium_ratio >= 95%
 ```
 
 ### 11.2 Replay research pass
@@ -550,15 +427,11 @@ max_single_symbol_event_share <= 0.60
 ```text
 source 无法审计
 available_at_ms 无法保守构建
-connector resource safety 无法定义
-schema parse / symbol mapping 错误被 silent ignore
 事件数不足且不可扩展
 表现不优于 random baseline
 成本后中位收益为负
 收益由单日 / 单币 / Top 5 极端事件贡献
 filter matrix 没有增量价值
-任一 event type 的 replay 样本不足但被强行混合成通过
-事后挑选表现最好的 group 作为主结论
 ```
 
 ---
@@ -594,16 +467,11 @@ position sizing
 decision = proceed_to_stage1_5a_historical_event_source_audit
 primary_source_priority = official_exchange_announcements
 secondary_source_priority = unlock_calendars_source_audit_only
-active_research_track = external_catalyst_events_filter_matrix
-liquidation_collection_continues_as_data_asset = true
-full_composite_track_deferred = true
 external_catalyst_events_collection_allowed_after_filter_matrix_design = true
 historical_replay_allowed_after_minimal_event_table = true
 live_smoke_allowed_only_after_historical_replay_promising = true
 paper_trading_allowed = false
 live_trading_allowed = false
-short_execution_intent_allowed = false
-post_hoc_group_selection_allowed = false
 ```
 
 一句话：
