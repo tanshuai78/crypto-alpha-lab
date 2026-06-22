@@ -1310,3 +1310,81 @@ EXTERNAL_SIGNAL_STAGE1_4E_DELEVERAGING_PROXY_MIN_SPARSE_EVENT_COUNT = 30
 
 EXTERNAL_SIGNAL_STAGE1_4E_DELEVERAGING_PROXY_MIN_SPARSE_EVENT_DAYS = 10
 # Min event days to qualify as promising sparse.
+
+
+# ─── External Signal Shadow Lab Stage 1.5A: Historical Event Source Audit ────
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_ALLOWED_DOMAINS = (
+    "binance.com",
+    "www.binance.com",
+    "okx.com",
+    "www.okx.com",
+    "defillama.com",
+    "tokenomist.ai",
+)
+# Allowed domains to prevent redirect spoofing / SSRF and restrict research-only fetching.
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_MAX_PAYLOAD_BYTES = 2_000_000
+# Hard cap on raw fetched payload size (2MB) to prevent OOM / DoS.
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_MAX_JSON_DEPTH = 8
+# Maximum allowed JSON nesting depth to prevent stack overflow on recursive parsing.
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_REQUEST_TIMEOUT_SEC = 10.0
+# Timeout for readonly public HTTP fetch.
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_RETRY_BUDGET = 2
+# Max retry attempts for public requests.
+
+EXTERNAL_SIGNAL_STAGE1_5A_SOURCE_AUDIT_MAX_EVENTS_PER_PAGE = 200
+# Max items/events processed per API page.
+
+EXTERNAL_SIGNAL_STAGE1_5A_ANNOUNCEMENT_DELAY_SCENARIOS_MS = (
+    5 * 60 * 1000,
+    15 * 60 * 1000,
+    60 * 60 * 1000,
+)
+# Delay sensitivity scenarios for simulated available_at (5m, 15m, 60m).
+
+EXTERNAL_SIGNAL_STAGE1_5A_PRIMARY_ANNOUNCEMENT_DELAY_MS = 15 * 60 * 1000
+# Primary conservative delay added to source_published_at_ms to build available_at_ms.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_HISTORICAL_EVENTS_FOUND = 30
+# Minimum historical events found globally to pass audit density gate.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_PRIMARY_EVENT_TYPE_EVENTS = 20
+# Minimum events of the primary target event type to pass audit.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_UNIQUE_EVENT_DAYS = 20
+# Minimum distinct UTC days with events to pass audit.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_SYMBOLS_WITH_EVENTS = 3
+# Minimum distinct symbols with events to pass audit.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_SOURCE_INTEGRITY_PASS_RATE = 0.95
+# Minimum required ratio of events passing Layer A source integrity checks.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_TRADE_PAIR_MAPPING_PASS_RATE = 0.95
+# Minimum required ratio of events passing trade pair symbol mapping.
+
+EXTERNAL_SIGNAL_STAGE1_5A_MIN_TIMESTAMP_HIGH_OR_MEDIUM_RATIO = 0.95
+# Minimum required ratio of events with High or Medium timestamp quality.
+
+EXTERNAL_SIGNAL_STAGE1_5A_ELIGIBLE_EVENT_TYPES_FOR_STAGE1_5B = (
+    "exchange_delisting_notice",
+    "futures_contract_launch",
+    "margin_enablement",
+    "trading_pair_removal",
+    "trading_pair_addition_for_existing_liquid_asset",
+    "major_exchange_status_event",
+)
+# Event types eligible for Stage 1.5B replay.
+
+EXTERNAL_SIGNAL_STAGE1_5A_OBSERVATION_ONLY_EVENT_TYPES = (
+    "major_unlock_event",
+    "large_scheduled_token_emission",
+    "new_coin_listing",
+    "whale_deposit",
+)
+# Event types restricted to observation-only.
+
