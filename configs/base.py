@@ -1388,3 +1388,31 @@ EXTERNAL_SIGNAL_STAGE1_5A_OBSERVATION_ONLY_EVENT_TYPES = (
 )
 # Event types restricted to observation-only.
 
+
+# ─── External Signal Shadow Lab Stage 1.5B: Minimal Historical Event Table ────
+
+EXTERNAL_SIGNAL_STAGE1_5B_MIN_ARTICLE_EVENTS = 30
+# Minimum manually reviewed article-level events required for event table readiness.
+
+EXTERNAL_SIGNAL_STAGE1_5B_TARGET_MAX_ARTICLE_EVENTS_FIRST_PASS = 100
+# Target maximum for first-pass manual review scope only. This is not a hard failure gate.
+
+EXTERNAL_SIGNAL_STAGE1_5B_MIN_UNIQUE_EVENT_DAYS = 20
+# Minimum UTC event days required for source diversity.
+
+EXTERNAL_SIGNAL_STAGE1_5B_MIN_SYMBOLS_WITH_EVENTS = 3
+# Minimum unique normalized symbols required.
+
+EXTERNAL_SIGNAL_STAGE1_5B_PRIMARY_ANNOUNCEMENT_DELAY_MS = 15 * 60 * 1000
+# Conservative available_at lag inherited from Stage 1.5A.
+
+EXTERNAL_SIGNAL_STAGE1_5B_ALLOWED_EVENT_TYPES = (
+    "exchange_delisting_notice",
+    "futures_contract_launch",
+)
+# Only Stage 1.5A-passed event types may enter Stage 1.5B.
+
+EXTERNAL_SIGNAL_STAGE1_5B_SOURCE_PROFILE = "binance_official_announcements_like_rows"
+# Source profile for the current Binance official announcements table.
+
+
