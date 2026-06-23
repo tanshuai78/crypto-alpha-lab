@@ -37,6 +37,15 @@ def parse_args():
         help="Local source file path or glob pattern (e.g. data/fixtures/*.jsonl)",
     )
     parser.add_argument(
+        "--source-file-mode",
+        choices=("fixture", "real"),
+        default="fixture",
+        help=(
+            "How to treat --source-file. Use fixture for tests/smoke runs; "
+            "use real only after manual source review."
+        ),
+    )
+    parser.add_argument(
         "--source-url",
         help="Remote source URL to fetch",
     )
@@ -125,9 +134,14 @@ def main():
                 )
             )
 
-    # Build summary
-    # Override fixture_run if explicitly passed as argument
-    final_fixture_run = fixture_run or args.fixture_run
+    # Build summary. Local files are fixtures by default; explicitly reviewed
+    # local source files can opt into real mode. --fixture-run remains a hard override.
+    if args.fixture_run:
+        final_fixture_run = True
+    elif args.source_file and args.source_file_mode == "real":
+        final_fixture_run = False
+    else:
+        final_fixture_run = fixture_run
     summary = build_source_audit_summary(
         events=all_events,
         metrics=merged_metrics,

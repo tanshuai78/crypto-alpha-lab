@@ -106,6 +106,9 @@ def test_summary_decision_passed_when_gates_pass():
     assert summary["overall_decision"] == ExternalSignalSourceAuditDecision.PASSED.value
     assert summary["source_decisions"]["binance_announcements"]["decision"] == ExternalSignalSourceAuditDecision.PASSED.value
     assert summary["event_type_decisions"][ExternalSignalEventType.DELISTING.value] == ExternalSignalSourceAuditDecision.PASSED.value
+    assert summary["source_decisions"]["binance_announcements"]["recommended_event_types_for_stage1_5b"] == [
+        ExternalSignalEventType.DELISTING.value
+    ]
 
 
 def test_source_specific_veto_does_not_fail_unrelated_good_source():

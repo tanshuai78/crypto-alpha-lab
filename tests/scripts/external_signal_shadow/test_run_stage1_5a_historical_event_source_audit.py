@@ -53,6 +53,43 @@ def test_runner_writes_summary_from_fixture_jsonl():
         os.unlink(out_name)
 
 
+def test_runner_real_source_file_mode_marks_research_result_valid():
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+        f.write(
+            b'{"title": "Binance Will Delist MOB", "time": 1710921600000, "symbol": "MOB"}\n'
+        )
+        f_name = f.name
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as out_f:
+        out_name = out_f.name
+
+    try:
+        args = [
+            "run_stage1_5a_historical_event_source_audit.py",
+            "--source-profile",
+            "binance_official_announcements_like_rows",
+            "--source-file",
+            f_name,
+            "--source-file-mode",
+            "real",
+            "--output-summary",
+            out_name,
+        ]
+
+        with patch("sys.argv", args):
+            main()
+
+        with open(out_name, "r") as r:
+            summary = json.load(r)
+
+        assert summary["research_result_valid"] is True
+        assert summary["metrics"]["historical_events_found"] == 1
+        assert summary["metrics"]["raw_cache_written"] is False
+    finally:
+        os.unlink(f_name)
+        os.unlink(out_name)
+
+
 def test_runner_propagates_network_raw_cache_metadata():
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as out_f:
         out_name = out_f.name

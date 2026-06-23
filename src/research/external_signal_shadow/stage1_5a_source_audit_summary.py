@@ -185,16 +185,7 @@ def build_source_audit_summary(
 
         source_decisions[src] = {
             "decision": src_decision,
-            "recommended_event_types_for_stage1_5b": [
-                et.value
-                for et in ExternalSignalEventType
-                if et.value
-                in base.EXTERNAL_SIGNAL_STAGE1_5A_ELIGIBLE_EVENT_TYPES_FOR_STAGE1_5B
-                and src_decision
-                == ExternalSignalSourceAuditDecision.PASSED.value
-            ]
-            if src_decision == ExternalSignalSourceAuditDecision.PASSED.value
-            else [],
+            "recommended_event_types_for_stage1_5b": [],
         }
 
     # 3. Per-event-type decisions
@@ -275,6 +266,16 @@ def build_source_audit_summary(
                     )
 
             event_type_decisions[et_val] = et_decision
+
+    passed_eligible_event_types = [
+        et.value
+        for et in ExternalSignalEventType
+        if et.value in base.EXTERNAL_SIGNAL_STAGE1_5A_ELIGIBLE_EVENT_TYPES_FOR_STAGE1_5B
+        and event_type_decisions[et.value] == ExternalSignalSourceAuditDecision.PASSED.value
+    ]
+    for source_decision in source_decisions.values():
+        if source_decision["decision"] == ExternalSignalSourceAuditDecision.PASSED.value:
+            source_decision["recommended_event_types_for_stage1_5b"] = passed_eligible_event_types
 
     # 4. Overall decision
     unattributed_veto = any(
