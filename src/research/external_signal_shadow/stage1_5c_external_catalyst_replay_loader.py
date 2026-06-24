@@ -73,6 +73,10 @@ def load_price_bars(path: str | Path) -> list[dict]:
                 quote_volume = float(bar[key])
                 break
 
+        source_val = bar.get("source", "binance_um_futures_15m")
+        if source_val == "binance_spot_15m_proxy":
+            continue
+
         res.append({
             "symbol": bar["symbol"],
             "bar_start_ms": bar_start_ms,
@@ -82,6 +86,6 @@ def load_price_bars(path: str | Path) -> list[dict]:
             "low": low_val,
             "close": close_val,
             "quote_volume": quote_volume,
-            "source": bar.get("source", "binance_um_futures_15m"),
+            "source": source_val,
         })
     return res

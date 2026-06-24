@@ -74,3 +74,56 @@ def test_load_price_bars_normalizes_jsonl(tmp_path):
     assert rows[0]["bar_start_ms"] == 1710000000000
     assert rows[0]["bar_end_ms"] == 1710000900000
     assert rows[0]["close"] == 100.5
+
+
+def test_stage1_5c_uses_coverage_pass_event_table_for_rerun(tmp_path):
+    # Verify we can load standard event objects that contain the stage1_5c1 normalized headers
+    path = tmp_path / "pass_events.jsonl"
+    path.write_text(json.dumps({
+        "symbol_event_id": "s1",
+        "event_type": "futures_contract_launch",
+        "symbol": "ABCUSDT",
+        "available_at_ms": 1710000900000,
+        "stage1_5c_rerun_candidate": True,
+        "replay_price_source_allowed": "futures_only",
+        "stage1_5c_review_pending": True,
+        "stage1_5c_replay_candidate_allowed": False,
+        "replay_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+    }) + "\n")
+    rows = load_stage1_5b_symbol_events(path)
+    assert len(rows) == 1
+    assert rows[0]["symbol_event_id"] == "s1"
+
+
+def test_spot_proxy_archive_is_not_accepted_as_replay_price_source(tmp_path):
+    path = tmp_path / "price.jsonl"
+    path.write_text("\n".join([
+        json.dumps({
+            "symbol": "ABCUSDT",
+            "bar_start_ms": 1710000000000,
+            "open": "100",
+            "high": "101",
+            "low": "99",
+            "close": "100.5",
+            "quote_volume": "100000",
+            "source": "binance_spot_15m_proxy",
+        }),
+        json.dumps({
+            "symbol": "XYZUSDT",
+            "bar_start_ms": 1710000000000,
+            "open": "100",
+            "high": "101",
+            "low": "99",
+            "close": "100.5",
+            "quote_volume": "100000",
+            "source": "binance_um_futures_15m",
+        })
+    ]) + "\n")
+    rows = load_price_bars(path)
+    # The spot proxy bar (ABCUSDT) must be discarded, only futures bar (XYZUSDT) should remain
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "XYZUSDT"
+    assert rows[0]["source"] == "binance_um_futures_15m"
+

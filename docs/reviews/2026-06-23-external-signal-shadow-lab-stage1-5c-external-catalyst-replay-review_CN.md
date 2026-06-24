@@ -1,25 +1,25 @@
 # External Signal Shadow Lab Stage 1.5C External Catalyst Replay Review
 
 ## 1. 结论与顶层状态 (Conclusion & Top-Level Decision)
-- **Top-Level Decision:** `stage1_5c_replay_invalid`
-- **Research Result Valid (研究结论有效性):** `False`
+- **Top-Level Decision:** `stage1_5c_replay_completed`
+- **Research Result Valid (研究结论有效性):** `True`
 - **Baseline Trials Override Used (是否使用了调试次数覆盖):** `False`
-- **Promising Cells (有希望的实验组):** []
-- **Top-Level Blockers (全局阻塞原因):** `no_price_history_coverage, no_replay_primary_rows, no_market_pair_overlap_with_price_archive, no_cell_level_promising_result`
+- **Promising Cells (有希望的实验组):** ['futures_contract_launch|futures_launch_long_attention_diagnostic|12h|G1_source_event_after_first_hour_delay', 'futures_contract_launch|futures_launch_long_attention_diagnostic|12h|G2_price_coverage_only']
+- **Top-Level Blockers (全局阻塞原因):** `None`
 
 ---
 
 ## 2. 价格与流动性过滤漏斗 (Price and Liquidity Funnel)
 
 ### Coverage Attrition Funnel (价格与流动性过滤漏斗)
-- **输入 Stage 1.5B 原始事件数 (Symbol-Events):** 194
-- **允许的事件类型数 (Allowed Event Type Events):** 194
-- **CEX 存在性校验通过数 (Market Pair Existence Verified):** 0
-- **价格覆盖校验通过数 (Price History Coverage Pass):** 0
+- **输入 Stage 1.5B 原始事件数 (Symbol-Events):** 63
+- **允许的事件类型数 (Allowed Event Type Events):** 63
+- **CEX 存在性校验通过数 (Market Pair Existence Verified):** 63
+- **价格覆盖校验通过数 (Price History Coverage Pass):** 63
 - **流动性代理校验通过数 (Liquidity Proxy Pass):** 0
-- **去重与冷却后候选事件数 (Candidate Count After Cooldown):** 0
-- **参与 Replay 评估的 Primary 样本行数:** 0
-- **拒绝原因统计 (Reject Reason Counts):** {"missing_price_history": 194}
+- **去重与冷却后候选事件数 (Candidate Count After Cooldown):** 124
+- **参与 Replay 评估的 Primary 样本行数:** 124
+- **拒绝原因统计 (Reject Reason Counts):** {}
 
 
 ---
@@ -27,15 +27,26 @@
 ## 3. Cell-Level Replay Results (各实验组 Replay 明细)
 | Cell Key | Decision | Event Count | Median Net Return (4h, 50bps) | Baseline Excess Bps | Blockers |
 |---|---|---|---|---|---|
-
+| futures_contract_launch|futures_launch_long_attention_diagnostic|1h|G1_source_event_after_first_hour_delay | stage1_5c_cell_failed | 62 | -269.9262265 | -216.64716210153225 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, left_tail_drawdown_exceeds_random_baseline, top5_profit_share_exceeds_limit |
+| futures_contract_launch|futures_launch_long_attention_diagnostic|1h|G2_price_coverage_only | stage1_5c_cell_failed | 62 | -269.9262265 | -216.64716210153225 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, left_tail_drawdown_exceeds_random_baseline, top5_profit_share_exceeds_limit |
+| futures_contract_launch|futures_launch_short_access_diagnostic|1h|G1_source_event_after_first_hour_delay | stage1_5c_cell_failed | 62 | 169.92622649999998 | 223.20529089846772 | left_tail_drawdown_exceeds_random_baseline |
+| futures_contract_launch|futures_launch_short_access_diagnostic|1h|G2_price_coverage_only | stage1_5c_cell_failed | 62 | 169.92622649999998 | 223.20529089846772 | left_tail_drawdown_exceeds_random_baseline |
+| futures_contract_launch|futures_launch_long_attention_diagnostic|4h|G1_source_event_after_first_hour_delay | stage1_5c_cell_failed | 62 | -158.3364525 | -105.05738810153227 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, left_tail_drawdown_exceeds_random_baseline, top5_profit_share_exceeds_limit |
+| futures_contract_launch|futures_launch_long_attention_diagnostic|4h|G2_price_coverage_only | stage1_5c_cell_failed | 62 | -158.3364525 | -105.05738810153227 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, left_tail_drawdown_exceeds_random_baseline, top5_profit_share_exceeds_limit |
+| futures_contract_launch|futures_launch_short_access_diagnostic|4h|G1_source_event_after_first_hour_delay | stage1_5c_cell_failed | 62 | 58.3364525 | 111.61551689846773 | left_tail_drawdown_exceeds_random_baseline |
+| futures_contract_launch|futures_launch_short_access_diagnostic|4h|G2_price_coverage_only | stage1_5c_cell_failed | 62 | 58.3364525 | 111.61551689846773 | left_tail_drawdown_exceeds_random_baseline |
+| futures_contract_launch|futures_launch_long_attention_diagnostic|12h|G1_source_event_after_first_hour_delay | stage1_5c_cell_promising | 62 | 117.34571199999999 | 170.62477639846773 | None |
+| futures_contract_launch|futures_launch_long_attention_diagnostic|12h|G2_price_coverage_only | stage1_5c_cell_promising | 62 | 117.34571199999999 | 170.62477639846773 | None |
+| futures_contract_launch|futures_launch_short_access_diagnostic|12h|G1_source_event_after_first_hour_delay | stage1_5c_cell_failed | 62 | -217.345712 | -164.06664760153225 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, top5_profit_share_exceeds_limit |
+| futures_contract_launch|futures_launch_short_access_diagnostic|12h|G2_price_coverage_only | stage1_5c_cell_failed | 62 | -217.345712 | -164.06664760153225 | median_net_return_after_50bps_not_positive, baseline_excess_net_bps_not_positive, price_baseline_excess_net_bps_not_positive, top5_profit_share_exceeds_limit |
 
 ---
 
 ## 4. 历史基准对比 (Baseline Comparison)
 - **Random Baseline Trials (随机基准模拟次数):** 500
-- **Random Baseline Median Net Return (4h, 50bps):** 0.0 bps
-- **Price Move Baseline Median Net Return (4h, 50bps):** 0.0 bps
-- **Random Baseline Left Tail (5th percentile):** 0.0 bps
+- **Random Baseline Median Net Return (4h, 50bps):** -53.27906439846773 bps
+- **Price Move Baseline Median Net Return (4h, 50bps):** -87.220844 bps
+- **Random Baseline Left Tail (5th percentile):** -1393.63523 bps
 
 ---
 

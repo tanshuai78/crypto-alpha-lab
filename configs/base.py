@@ -1456,4 +1456,54 @@ EXTERNAL_SIGNAL_STAGE1_5C_FILTER_GROUPS = (
 )
 
 
+# ─── External Signal Shadow Lab Stage 1.5C.1: Price Coverage Expansion ─────
+
+EXTERNAL_SIGNAL_STAGE1_5C1_BINANCE_FAPI_BASE_URL = "https://fapi.binance.com"
+# Base URL for Binance USD-M futures REST API
+EXTERNAL_SIGNAL_STAGE1_5C1_BINANCE_SPOT_BASE_URL = "https://api.binance.com"
+# Base URL for Binance spot REST API
+EXTERNAL_SIGNAL_STAGE1_5C1_FUTURES_EXCHANGE_INFO_PATH = "/fapi/v1/exchangeInfo"
+# Path to USD-M futures exchangeInfo endpoint
+EXTERNAL_SIGNAL_STAGE1_5C1_FUTURES_KLINES_PATH = "/fapi/v1/klines"
+# Path to USD-M futures klines endpoint
+EXTERNAL_SIGNAL_STAGE1_5C1_SPOT_EXCHANGE_INFO_PATH = "/api/v3/exchangeInfo"
+# Path to spot exchangeInfo endpoint
+EXTERNAL_SIGNAL_STAGE1_5C1_SPOT_KLINES_PATH = "/api/v3/klines"
+# Path to spot klines endpoint
+
+EXTERNAL_SIGNAL_STAGE1_5C1_KLINE_INTERVAL = "15m"
+# Interval for klines to download
+EXTERNAL_SIGNAL_STAGE1_5C1_KLINE_INTERVAL_MS = 15 * 60 * 1000
+# Kline interval in milliseconds
+EXTERNAL_SIGNAL_STAGE1_5C1_KLINE_LIMIT = 1500
+# Maximum limit of klines per single request allowed by Binance
+EXTERNAL_SIGNAL_STAGE1_5C1_ALLOWED_FUTURES_QUOTE_ASSETS = ("USDT", "USDC")
+# Allowed quote assets for perpetual contracts under USD-M futures
+EXTERNAL_SIGNAL_STAGE1_5C1_TIMEOUT_SEC = 10.0
+# Request connection/read timeout in seconds
+EXTERNAL_SIGNAL_STAGE1_5C1_REQUEST_SLEEP_SEC = 0.2
+# Request sleep delay in seconds between calls to avoid rate limits
+EXTERNAL_SIGNAL_STAGE1_5C1_RETRY_BUDGET = 2
+# Retries budget for network failure cases
+EXTERNAL_SIGNAL_STAGE1_5C1_MAX_KLINE_REQUESTS_PER_RUN = 500
+# Safety threshold for maximum total kline REST requests in a single run
+EXTERNAL_SIGNAL_STAGE1_5C1_MAX_SYMBOLS_PER_RUN = 250
+# Safety threshold for maximum unique symbols to download in a single run
+
+EXTERNAL_SIGNAL_STAGE1_5C1_PRE_EVENT_HISTORY_DAYS = 30
+# Pre-event historical coverage required for delisting events (in days)
+EXTERNAL_SIGNAL_STAGE1_5C1_POST_EVENT_BUFFER_DAYS = 2
+# Buffer days after the event window to capture late reactions
+EXTERNAL_SIGNAL_STAGE1_5C1_MERGE_GAP_MS = 6 * 60 * 60 * 1000
+# Minimum gap in milliseconds to merge separate windows for the same symbol
+
+EXTERNAL_SIGNAL_STAGE1_5C1_MIN_RERUN_EVENT_COUNT = 30
+# Minimum events with valid coverage to allow Stage 1.5C rerun
+EXTERNAL_SIGNAL_STAGE1_5C1_MIN_RERUN_EVENT_DAYS = 10
+# Minimum event calendar days with valid coverage to allow Stage 1.5C rerun
+EXTERNAL_SIGNAL_STAGE1_5C1_MIN_RERUN_SYMBOLS = 3
+# Minimum unique event symbols with valid coverage to allow Stage 1.5C rerun
+
+
+
 

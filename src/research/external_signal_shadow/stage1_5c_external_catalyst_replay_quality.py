@@ -96,7 +96,16 @@ def evaluate_event_price_coverage(
         return base_report
 
     # 2. Entry bar
-    entry_candidate_time_ms = available_at_ms + entry_delay_hours * 3600_000
+    entry_anchor_ms = available_at_ms
+    if event.get("event_type") == "futures_contract_launch":
+        launch_anchor_ms = int(
+            event.get("suggested_replay_anchor_ms")
+            or event.get("first_futures_bar_start_ms")
+            or available_at_ms
+        )
+        entry_anchor_ms = max(available_at_ms, launch_anchor_ms)
+
+    entry_candidate_time_ms = entry_anchor_ms + entry_delay_hours * 3600_000
     entry_bar = find_first_bar_at_or_after(symbol_bars, entry_candidate_time_ms)
     if not entry_bar:
         base_report["coverage_reject_reason"] = "missing_entry_bar"
@@ -115,10 +124,14 @@ def evaluate_event_price_coverage(
             return base_report
 
     # 4. Min price history before event (30 days)
-    min_pre_ms = available_at_ms - base.EXTERNAL_SIGNAL_STAGE1_5C_MIN_PRE_EVENT_PRICE_HISTORY_DAYS * 24 * 3600 * 1000
-    if symbol_bars[0]["bar_start_ms"] > min_pre_ms:
-        base_report["coverage_reject_reason"] = "insufficient_pre_event_history"
-        return base_report
+    # Only enforce for delisting events or other types that require pre-event history.
+    # Do not enforce for futures contract launch because the contract did not exist before launch.
+    event_type = event.get("event_type")
+    if event_type != "futures_contract_launch":
+        min_pre_ms = available_at_ms - base.EXTERNAL_SIGNAL_STAGE1_5C_MIN_PRE_EVENT_PRICE_HISTORY_DAYS * 24 * 3600 * 1000
+        if symbol_bars[0]["bar_start_ms"] > min_pre_ms:
+            base_report["coverage_reject_reason"] = "insufficient_pre_event_history"
+            return base_report
 
     base_report["price_history_coverage_verified"] = True
 

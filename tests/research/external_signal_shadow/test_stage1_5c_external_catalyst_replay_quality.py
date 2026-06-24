@@ -68,3 +68,53 @@ def test_price_coverage_and_liquidity_proxy_are_reported_separately():
     assert report["candidate_allowed_for_close_price_replay"] is True
     assert report["liquidity_proxy_pass"] is False
     assert report["candidate_allowed_for_execution_relevance"] is False
+
+
+def test_stage1_5c_accepts_futures_launch_post_launch_coverage_without_30d_pre_history():
+    # Only post-launch bars exist, start_ms is event_time (0). Pre-event history is missing.
+    bars = [_bar("ABCUSDT", i * 900_000, close=100 + i) for i in range(0, 30)]
+    event_time = 0
+    price_index = build_price_index(bars)
+    report = evaluate_event_price_coverage(
+        event={"symbol": "ABCUSDT", "available_at_ms": event_time, "event_type": "futures_contract_launch"},
+        price_index=price_index,
+        entry_delay_hours=1,
+        forward_windows_hours=(1, 4),
+    )
+    assert report["price_coverage_gate_passed"] is True
+    assert report["candidate_allowed_for_close_price_replay"] is True
+
+
+def test_stage1_5c_uses_futures_launch_first_bar_anchor_for_entry():
+    bars = [_bar("ABCUSDT", i * 900_000, close=100 + i) for i in range(0, 30)]
+    price_index = build_price_index(bars)
+    report = evaluate_event_price_coverage(
+        event={
+            "symbol": "ABCUSDT",
+            "available_at_ms": 0,
+            "event_type": "futures_contract_launch",
+            "first_futures_bar_start_ms": 7_200_000,
+            "suggested_replay_anchor_ms": 7_200_000,
+        },
+        price_index=price_index,
+        entry_delay_hours=1,
+        forward_windows_hours=(1, 4),
+    )
+    assert report["price_coverage_gate_passed"] is True
+    assert report["entry_candidate_time_ms"] == 10_800_000
+    assert report["entry_bar_start_ms"] == 10_800_000
+
+
+def test_stage1_5c_still_requires_delisting_pre_event_history():
+    # Only post-launch bars exist, start_ms is event_time (35 days). Pre-event 30d history is missing.
+    event_time = 35 * 24 * 3600_000
+    bars = [_bar("ABCUSDT", event_time + i * 900_000, close=100 + i) for i in range(0, 30)]
+    price_index = build_price_index(bars)
+    report = evaluate_event_price_coverage(
+        event={"symbol": "ABCUSDT", "available_at_ms": event_time, "event_type": "exchange_delisting_notice"},
+        price_index=price_index,
+        entry_delay_hours=1,
+        forward_windows_hours=(1, 4),
+    )
+    assert report["price_coverage_gate_passed"] is False
+    assert report["coverage_reject_reason"] == "insufficient_pre_event_history"
