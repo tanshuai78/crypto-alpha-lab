@@ -1,0 +1,103 @@
+from src.research.external_signal_shadow.stage1_5d_live_event_source_summary import (
+    build_smoke_summary,
+)
+
+
+def test_short_live_smoke_is_observation_in_progress_not_operational_pass():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True, "heartbeat_gap": False}],
+        events=[],
+        request_manifest=[],
+        fixture_run=False,
+        debug_short_run=True,
+        observation_hours=0.05,
+    )
+    assert summary["decision"] == "stage1_5d_smoke_observation_in_progress"
+    assert summary["event_detection_validated"] is False
+    assert summary["research_result_valid"] is False
+
+
+def test_fixture_zero_event_smoke_marks_research_result_valid_false():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True, "heartbeat_gap": False}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+    )
+    assert summary["decision"] == "stage1_5d_smoke_observation_in_progress"
+    assert summary["fixture_run"] is True
+    assert summary["research_result_valid"] is False
+
+
+def test_zero_event_24h_stable_polling_is_operational_unvalidated():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True, "heartbeat_gap": False} for _ in range(24)],
+        events=[],
+        request_manifest=[],
+        fixture_run=False,
+        debug_short_run=False,
+        observation_hours=24.0,
+    )
+    assert summary["decision"] == "stage1_5d_operational_pass_event_detection_unvalidated"
+    assert summary["event_detection_validated"] is False
+    assert summary["research_result_valid"] is True
+
+
+def test_event_detection_passed_requires_event_and_first_bar_status():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True, "heartbeat_gap": False}],
+        events=[{"event_type": "futures_contract_launch", "symbol_parse_status": "parsed", "first_futures_bar_status": "found"}],
+        request_manifest=[],
+        fixture_run=False,
+        debug_short_run=False,
+        observation_hours=1.0,
+    )
+    assert summary["decision"] == "stage1_5d_event_detection_passed"
+    assert summary["event_detection_validated"] is True
+    assert summary["research_result_valid"] is True
+
+
+def test_summary_splits_raw_symbol_failed_and_deduped_counts():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True, "heartbeat_gap": False}],
+        events=[
+            {"event_id": "e1", "event_type": "futures_contract_launch", "symbols": ["ABCUSDT"], "first_futures_bar_status": "not_yet_available"},
+            {"event_id": "e2", "event_type": "futures_contract_launch", "symbols": [], "first_futures_bar_status": "not_yet_available"},
+        ],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={
+            "raw_futures_launch_article_count": 4,
+            "symbol_parsed_event_count": 2,
+            "symbol_parse_failed_count": 2,
+            "deduped_new_event_count": 2,
+        },
+    )
+    assert summary["raw_futures_launch_article_count"] == 4
+    assert summary["symbol_parsed_event_count"] == 2
+    assert summary["symbol_parse_failed_count"] == 2
+    assert summary["deduped_new_event_count"] == 2
+    assert summary["new_futures_launch_event_count"] == 2
+
+
+def test_upstream_invalid_makes_smoke_invalid():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": False, "blockers": ["missing"]},
+        heartbeats=[],
+        events=[],
+        request_manifest=[],
+        fixture_run=False,
+        debug_short_run=False,
+        observation_hours=0.0,
+    )
+    assert summary["decision"] == "stage1_5d_smoke_invalid"
+    assert "upstream_evidence_missing_or_invalid" in summary["blockers"]
