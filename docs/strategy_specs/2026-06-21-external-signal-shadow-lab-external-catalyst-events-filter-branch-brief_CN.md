@@ -314,9 +314,11 @@ deleveraging_proxy_context 在 Stage 1.4E 失败后只能 diagnostic-only，不�
 
 ---
 
-## 10. 后续步骤
+## 10. 当前进展与后续路线
 
-### Stage 1.5A：Historical Event Source Audit
+本节用于同步 Stage 1.5 分支的最新状态。后续 agent / 人工 reviewer 只看本 brief 时，应优先读取本节，再打开对应 review 文档核对证据。
+
+### 10.1 Stage 1.5A：Historical Event Source Audit（已完成）
 
 目标：
 
@@ -324,74 +326,265 @@ deleveraging_proxy_context 在 Stage 1.4E 失败后只能 diagnostic-only，不�
 审计 external catalyst source 是否有足够历史、字段、时间戳和 source integrity。
 ```
 
-推荐审计对象：
+已完成事项：
 
 ```text
-Binance official announcements
-OKX official announcements
-DefiLlama unlocks
-Tokenomist unlocks
-CoinMarketCal / CoinMarketCap events calendar
+1. 完成 fixture source audit，用于验证 forbidden payload、source integrity、timestamp quality、per-source / per-event-type decision 等框架能力。
+2. 完成 Binance API candidate events smoke，证明可以从 Binance official announcements 半自动采集候选事件。
+3. 完成人工复核与 high-confidence source audit，产出 Binance reviewed high-confidence event source。
 ```
 
-输出：
+关键结论：
 
 ```text
-source_audit_summary.json
-source_audit_review_CN.md
+Binance official announcements 可以作为 Stage 1.5B 的第一批高可信事件源。
+Fixture review 中出现 source_audit_failed 是安全测试预期，不代表真实 Binance source 失败。
+Unknown / unsupported event type 必须 quarantine 或 observation-only，replay_allowed = false。
 ```
 
-### Stage 1.5B：Minimal Historical Event Table
+主要证据：
+
+```text
+docs/reviews/2026-06-22-external-signal-shadow-lab-stage1-5a-historical-event-source-audit-fixture-review_CN.md
+docs/reviews/2026-06-23-external-signal-shadow-lab-stage1-5a-binance-api-candidate-events-smoke-review_CN.md
+docs/reviews/2026-06-23-external-signal-shadow-lab-stage1-5a-binance-candidate-events-manual-review_CN.md
+docs/reviews/2026-06-23-external-signal-shadow-lab-stage1-5a-binance-reviewed-high-confidence-source-audit-review_CN.md
+```
+
+### 10.2 Stage 1.5B：Minimal Historical Event Table（已完成）
 
 目标：
 
 ```text
-收集 30-100 条高可信 external catalyst events。
+把 Stage 1.5A 通过审计的 Binance high-confidence events 转换成最小历史事件表。
 ```
 
-要求：
+已完成事项：
 
 ```text
-source_url
-source_published_at_ms
-available_at_ms policy
-raw_payload_hash
-symbol mapping
-event_type
-event magnitude
-hindsight_risk flag
+构建 article-level 与 symbol-level event table。
+保留 source_url、source_published_at_ms、available_at_ms、raw_payload_hash、event_payload_hash。
+保留 stage1_5a provenance，便于回溯 review / summary。
+明确 symbol = BASEUSDT 只是 research normalization，不代表 market pair 已验证。
+明确 directional_hypothesis = undefined，1.5B 不给 long / short 方向。
 ```
 
-### Stage 1.5C：External Catalyst Historical Replay
+关键结论：
+
+```text
+Stage 1.5B 只是“事件表制造机”，不是 replay 或 signal generator。
+stage1_5c_review_pending = true 只表示可以交给 1.5C 审核，不代表已经允许 replay。
+price_join_allowed = false
+forward_return_allowed = false
+context_label_join_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+```
+
+主要证据：
+
+```text
+docs/plans/2026-06-23-external-signal-shadow-lab-stage1-5b-minimal-historical-event-table-implementation-plan_CN.md
+docs/reviews/2026-06-23-external-signal-shadow-lab-stage1-5b-minimal-historical-event-table-review_CN.md
+```
+
+### 10.3 Stage 1.5C：External Catalyst Historical Replay（已完成）
 
 目标：
 
 ```text
-按照 filter matrix 固定分组，评估事件后 1h / 4h / 12h / 24h forward return。
+按照 filter matrix 固定分组，评估 external catalyst event 后的 1h / 4h / 12h forward return。
 ```
 
-必须包含：
+已完成事项：
 
 ```text
-30 / 50 / 80 bps cost
-symbol-hour matched random baseline
-price baseline
-event-type baseline
-BTC regime baseline
-concentration checks
+实现 event_type + signed_mode + entry_delay + filter_group 的 cell-level replay。
+禁止混合 futures_contract_launch 与 exchange_delisting_notice 形成 top-level pass claim。
+使用 30 / 50 / 80 bps cost、500 trials random baseline、price baseline、集中度与左尾风险检查。
+close-price replay only，不证明执行可行性。
 ```
 
-### Stage 1.5D：Live Smoke Collector
+关键结论：
 
-只有 Stage 1.5C 有希望，才允许。
+```text
+top_level_decision = stage1_5c_replay_completed
+research_result_valid = true
+promising_cells:
+  futures_contract_launch | futures_launch_long_attention_diagnostic | 12h | G1_source_event_after_first_hour_delay
+  futures_contract_launch | futures_launch_long_attention_diagnostic | 12h | G2_price_coverage_only
+```
+
+解释：
+
+```text
+Binance futures_contract_launch 事件，在 12h long_attention diagnostic close-price replay 上出现 promising cell。
+1h / 4h long 方向失败，可能反映刚上线后价格仍处于剧烈重定价、插针、做市商调盘口阶段。
+short_access diagnostic 方向不允许解释成可执行做空策略。
+```
+
+安全边界：
+
+```text
+Stage 1.5C promising 不允许 paper/live。
+Stage 1.5C promising 不证明 alpha。
+Stage 1.5C promising 不证明 execution feasibility。
+Promising cell 只允许进入 live event-source smoke collector design，以及并行编写 execution feasibility data audit plan。
+```
+
+主要证据：
+
+```text
+docs/plans/2026-06-23-external-signal-shadow-lab-stage1-5c-external-catalyst-replay-implementation-plan_CN.md
+docs/reviews/2026-06-23-external-signal-shadow-lab-stage1-5c-external-catalyst-replay-review_CN.md
+```
+
+### 10.4 Stage 1.5C.1：Price Coverage Expansion（已完成）
 
 目标：
 
 ```text
-验证真实 source latency、字段稳定性、429、available_at_ms 与 safe fail。
+解决 Stage 1.5C 初始运行中的 no_price_history_coverage / futures price coverage 问题。
 ```
 
-不允许 paper/live。
+已完成事项：
+
+```text
+为 Stage 1.5B 的 Binance symbol events 扩展 futures kline coverage。
+区分 current exchangeInfo 与 historical existence。
+输出 futures coverage pass event table，供 Stage 1.5C clean rerun 使用。
+明确 spot proxy report-only，不能影响 ready decision。
+```
+
+关键结论：
+
+```text
+decision = stage1_5c1_price_coverage_ready_for_1_5c_rerun
+Stage 1.5B input events = 194
+Futures coverage pass events = 63
+Calendar days = 46
+Symbols = 61
+Not matured events = 1
+```
+
+解释：
+
+```text
+1.5C.1 修复的是数据覆盖问题，不是策略问题。
+futures_contract_launch 可以用 post-launch futures coverage。
+exchange_delisting_notice 仍需要 market_scope / historical futures existence / effective-time 进一步拆解。
+```
+
+主要证据：
+
+```text
+docs/plans/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expansion-implementation-plan_CN.md
+docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expansion-review_CN.md
+```
+
+### 10.5 Stage 1.5D：Live Event-Source Smoke Collector（已实现，正式 24h 运行中）
+
+目标：
+
+```text
+验证真实 Binance announcement source 的 latency、字段稳定性、schema drift、request health、heartbeat、first futures bar observation。
+```
+
+已完成事项：
+
+```text
+实现 public-readonly live source collector。
+实现 upstream evidence gate。
+实现 domain allowlist、redirect final host 校验、dedupe / watermark、request manifest、heartbeat、daily rotated storage。
+实现 first futures bar observer，且不阻塞 announcement poll loop。
+实现 fixture smoke 与 short live smoke。
+完成服务器部署流程文档。
+```
+
+当前状态：
+
+```text
+short live smoke decision = stage1_5d_smoke_observation_in_progress
+research_result_valid = false
+event_detection_validated = false
+poll_count = 3
+deduped_new_event_count = 28
+```
+
+解释：
+
+```text
+短 smoke 只证明本地路径闭环，不是正式 24h operational pass。
+正式 24h source smoke 必须是同一个 output-root 下连续运行 >= 24h。
+多段中断运行不能拼接成正式 24h。
+服务器已部署，当前应等待正式 24h 运行结束后取回 summary / JSONL / review。
+```
+
+正式 24h 后可能出现两种合格结果：
+
+```text
+stage1_5d_operational_pass_event_detection_unvalidated:
+  24h 内 collector 稳定，但没有新 futures launch event。
+
+stage1_5d_event_detection_passed:
+  24h 内捕捉到新 futures launch event，并完成 first futures bar observation。
+```
+
+主要证据：
+
+```text
+docs/designs/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-design_CN.md
+docs/plans/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-implementation-plan_CN.md
+docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-review_CN.md
+```
+
+### 10.6 Stage 1.5E：Execution Feasibility Data Audit（下一步，建议并行编写）
+
+目标：
+
+```text
+验证 Stage 1.5C 的 promising cell 是否具备执行意义。
+```
+
+它不是 replay，不是 trading，不是 signal generator。
+
+需要审计的内容：
+
+```text
+futures launch 后 1h / 4h / 12h 的 spread_bps
+top_0_5pct_depth_usdt
+top_1pct_depth_usdt
+slippage_estimate_bps_for_500usdt
+mark / index divergence
+24h quote volume
+first 1h liquidity stabilization
+orderbook snapshot availability
+```
+
+为什么必须做：
+
+```text
+Stage 1.5C 只使用 close price replay。
+close price replay 无法证明真实盘口可以成交。
+futures launch 初期常见薄盘口、宽点差、插针、做市商重新定价、深度塌陷。
+如果执行可行性失败，Stage 1.5C promising 只能保留为研究现象，不能进入 shadow execution。
+```
+
+建议下一步文档：
+
+```text
+docs/plans/2026-06-25-external-signal-shadow-lab-stage1-5e-execution-feasibility-data-audit-implementation-plan_CN.md
+```
+
+安全边界：
+
+```text
+execution_engine_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+alpha_interpretation_allowed = false
+trade_signal_allowed = false
+```
 
 ---
 
@@ -464,21 +657,32 @@ position sizing
 ## 13. 当前正式建议
 
 ```text
-decision = proceed_to_stage1_5a_historical_event_source_audit
-primary_source_priority = official_exchange_announcements
-secondary_source_priority = unlock_calendars_source_audit_only
-external_catalyst_events_collection_allowed_after_filter_matrix_design = true
-historical_replay_allowed_after_minimal_event_table = true
-live_smoke_allowed_only_after_historical_replay_promising = true
+decision = continue_stage1_5d_24h_live_source_smoke_and_write_stage1_5e_execution_feasibility_audit_plan
+stage1_5a_source_audit_status = completed
+stage1_5b_minimal_event_table_status = completed
+stage1_5c_historical_replay_status = completed_with_promising_cells
+stage1_5c1_price_coverage_status = completed_ready_for_1_5c_rerun
+stage1_5d_live_source_smoke_status = implemented_and_formal_24h_run_pending_or_running
+stage1_5e_execution_feasibility_audit_status = next_plan_to_write
+primary_event_type_under_research = futures_contract_launch
+primary_promising_cell = futures_contract_launch_long_attention_diagnostic_12h_close_price_replay_only
+exchange_delisting_notice_status = insufficient_futures_replay_sample_pending_market_scope_and_effective_time_work
+external_catalyst_events_collection_allowed = true
+historical_replay_completed = true
+live_event_source_smoke_allowed = true
+execution_feasibility_audit_allowed = true
 paper_trading_allowed = false
 live_trading_allowed = false
+execution_engine_allowed = false
+alpha_interpretation_allowed = false
 ```
 
 一句话：
 
 ```text
-External Catalyst Events + Filter 是 External Signal Shadow Lab 的下一条高信息密度 source 分支；
-它的价值在于用外部事件替代低维内生状态变量作为研究起点，
-但所有事件都必须经过 schema、available_at_ms、hard veto、context label、baseline replay 和 review，
-不能被直接解释成交易信号。
+External Catalyst Events + Filter 已经从 source audit 推进到 historical replay 与 live source smoke；
+当前唯一有希望的研究现象是 Binance futures_contract_launch 在 12h long_attention diagnostic close-price replay 上的 promising cell；
+但它仍然不能解释成 alpha 或交易信号。
+下一步必须同时完成 24h live event-source smoke 和 execution feasibility data audit，
+确认 source 能稳定捕捉事件、盘口执行条件没有把 close-price replay 的收益吃掉。
 ```

@@ -311,6 +311,8 @@ Error: upstream evidence invalid
 
 ```bash
 ssh root@47.82.4.85
+用更稳的登录方式是：同时把提示符改回方便一点，可以直接在登录时手动设 PS1
+ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -tt root@47.82.4.85 'env -u TMOUT PS1="\u@\h:\w\$ " bash --noprofile --norc -i'
 cd /root/crypto-alpha-lab
 tmux new -s stage1_5d
 ```
