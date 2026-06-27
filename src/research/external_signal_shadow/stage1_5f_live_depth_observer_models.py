@@ -1,0 +1,170 @@
+from dataclasses import asdict, dataclass
+from enum import Enum
+
+
+class LiveDepthObserverDecision(str, Enum):
+    BOOTSTRAP_WATERMARK_ONLY = "stage1_5f_observer_bootstrap_watermark_only"
+    RUNNING_NO_NEW_EVENT = "stage1_5f_observer_running_no_new_event"
+    EVENT_OBSERVATION_IN_PROGRESS = "stage1_5f_observer_event_observation_in_progress"
+    DEPTH_EVIDENCE_COLLECTED = "stage1_5f_observer_depth_evidence_collected"
+    INVALID = "stage1_5f_observer_invalid"
+    FAILED = "stage1_5f_observer_failed"
+
+
+@dataclass(frozen=True)
+class Watermark:
+    watermark_version: int = 1
+    max_seen_detected_at_ms: int = 0
+    seen_event_ids: list[str] = None
+    seen_source_article_ids: list[str] = None
+    seen_stable_event_keys: list[str] = None
+    updated_at_ms: int = 0
+
+    def __post_init__(self):
+        # Handle frozen list defaults
+        if self.seen_event_ids is None:
+            object.__setattr__(self, "seen_event_ids", [])
+        if self.seen_source_article_ids is None:
+            object.__setattr__(self, "seen_source_article_ids", [])
+        if self.seen_stable_event_keys is None:
+            object.__setattr__(self, "seen_stable_event_keys", [])
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class EventSymbolState:
+    event_symbol_id: str
+    event_id: str = ""
+    symbol: str = ""
+    detected_at_ms: int = 0
+    observation_started_at_ms: int = 0
+    observation_window_end_ms: int = 0
+    status: str = "active"  # active, completed, expired, failed
+    depth_snapshot_count: int = 0
+    last_snapshot_ms: int = 0
+    max_gap_ms: int = 0
+    coverage_ratio_pass: bool = False
+    max_gap_pass: bool = False
+    research_result_valid: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class DepthSnapshot:
+    event_symbol_id: str
+    symbol: str
+    fetched_at_ms: int
+    exchange_time_ms: int | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    spread_bps: float | None = None
+    top_bid_depth_usdt: float = 0.0
+    top_ask_depth_usdt: float = 0.0
+    buy_slippage_bps: float | None = None
+    sell_slippage_bps: float | None = None
+    slippage_status: str = "ok"  # e.g., "ok", "insufficient_depth", "invalid_depth"
+    depth_status: str = "healthy"  # e.g., "healthy", "invalid"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class RequestManifestRow:
+    requested_host: str
+    requested_path: str = ""
+    requested_url_hash: str = ""
+    final_url_hash: str = ""
+    http_status: int = 0
+    payload_size_bytes: int = 0
+    response_payload_hash: str = ""
+    retry_count: int = 0
+    error: str | None = None
+    fetched_at_ms: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class HeartbeatRow:
+    poll_index: int
+    poll_at_ms: int = 0
+    active_count: int = 0
+    completed_count: int = 0
+    last_error: str | None = None
+    budget_status: str = "ok"
+    watermark_updated_at_ms: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class LiveDepthObserverSummary:
+    decision: str
+    bootstrap_watermark_allowed: bool
+    live_depth_observation_allowed: bool
+    stage1_5d_summary_path: str
+    stage1_5e_summary_path: str | None
+    stage1_5e_context_missing: bool
+    stage1_5e_context_suspicious: bool
+    watermark_present: bool
+    watermark_version: int | None
+    max_seen_detected_at_ms: int
+    pre_watermark_events_ignored: int
+    post_watermark_events_accepted: int
+    active_observation_count: int
+    completed_observation_count: int
+    expired_observation_count: int
+    failed_observation_count: int
+    min_snapshot_count_required: int
+    total_snapshots_collected: int
+    request_success_rate: float
+    total_requests_made: int
+    failed_requests_count: int
+    consecutive_network_errors: int
+    max_consecutive_network_errors_seen: int
+    last_heartbeat_at_ms: int
+    heartbeat_count: int
+    # L0/L1 Risk & Compliance controls hard-gates:
+    execution_feasibility_claim_allowed: bool = False
+    trade_signal_allowed: bool = False
+    paper_trading_allowed: bool = False
+    live_trading_allowed: bool = False
+    execution_engine_allowed: bool = False
+    alpha_interpretation_allowed: bool = False
+    research_result_valid: bool = False
+    blocker: str | None = None
+    summary_generated_at_ms: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})

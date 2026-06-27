@@ -1,0 +1,1 @@
+{"event_id": "e_hist_1", "event_type": "futures_contract_launch", "detected_at_ms": 1719300000000, "symbols": ["BTCUSDT"], "source_name": "binance_announcement", "source_article_id": "1001", "source_detail_url": "https://www.binance.com/announcement/1001", "source_published_at_ms": 1719300000000, "title": "Launch BTC Perpetual"}

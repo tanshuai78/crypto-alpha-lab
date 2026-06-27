@@ -7,6 +7,34 @@
 
 ---
 
+## 0.1 Review Decision
+
+```text
+decision = approved_with_required_fixes_absorbed
+scope = live_depth_observation_only
+execution_feasibility_claim_allowed = false
+trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
+alpha_interpretation_allowed = false
+```
+
+本版 design 已吸收 implementation plan 前必须固定的工程语义：
+
+```text
+1. watermark 必须 atomic write，并能识别 corrupted watermark。
+2. observer 重启必须 resume active observation，不能重置 12h window。
+3. min snapshot count 改为按 coverage ratio 自动计算。
+4. depth endpoint limit 固定进入 config，支持 top-20 / 500 USDT slippage proxy。
+5. slippage 使用 VWAP vs mid_price 的固定公式。
+6. request budget 在启动新 observation 前预检查。
+7. exchangeInfo 使用缓存刷新 cadence，不可用时 pending 而非误判 symbol missing。
+8. research_result_valid 需要 snapshot 时间覆盖和 gap 检查，不只看数量。
+```
+
+---
+
 ## 0. 设计结论
 
 Stage 1.5F 的目标不是把 Stage 1.5C 的 close-price replay 推向交易，而是补齐一个关键证据缺口：
@@ -184,13 +212,44 @@ bootstrap_mode = establish_watermark_only
 
 ```json
 {
+  "watermark_version": 1,
   "watermark_created_at_ms": 0,
+  "watermark_updated_at_ms": 0,
   "max_seen_detected_at_ms": 0,
   "seen_event_ids": [],
   "seen_source_article_ids": [],
   "seen_stable_event_keys": []
 }
 ```
+
+### 4.1.1 Watermark Atomic Write
+
+`watermark.json` 是 Stage 1.5F 的核心语义安全文件。写入必须是原子操作：
+
+```text
+1. write watermark.tmp
+2. flush file handle
+3. fsync watermark.tmp
+4. atomic rename watermark.tmp -> watermark.json
+5. fsync parent directory where supported
+```
+
+如果 `watermark.json` 缺失：
+
+```text
+allowed only when bootstrap_mode = establish_watermark_only
+otherwise decision = stage1_5f_observer_invalid
+blocker = missing_watermark_requires_bootstrap_mode
+```
+
+如果 `watermark.json` 解析失败、缺少 `watermark_version`、或字段类型不合法：
+
+```text
+decision = stage1_5f_observer_invalid
+blocker = corrupted_watermark
+```
+
+禁止在 corrupted watermark 情况下自动重建 watermark。必须人工归档旧目录后重新 bootstrap，避免历史事件被误判为新事件。
 
 ### 4.2 Event Age Gate
 
@@ -250,6 +309,40 @@ observation_status = skipped_symbol_not_in_current_um_futures_exchangeinfo
 
 注意：current exchangeInfo 只能证明当前可查，不证明历史存在或不存在。
 
+### 4.4.1 exchangeInfo Refresh Semantics
+
+`exchangeInfo` 必须使用缓存，不允许每个 symbol 每轮都请求。
+
+建议配置：
+
+```text
+EXTERNAL_SIGNAL_STAGE1_5F_EXCHANGEINFO_REFRESH_SEC = 300
+```
+
+状态字段：
+
+```json
+{
+  "exchangeinfo_last_refreshed_at_ms": null,
+  "exchangeinfo_symbol_count": 0,
+  "exchangeinfo_fetch_error_count": 0,
+  "exchangeinfo_status": "ok|stale|unavailable"
+}
+```
+
+如果 `exchangeInfo` 暂时不可用：
+
+```text
+observation_status = pending_exchangeinfo_unavailable
+depth_observation_started = false
+```
+
+不得把一次网络失败解释为：
+
+```text
+skipped_symbol_not_in_current_um_futures_exchangeinfo
+```
+
 ---
 
 ## 5. Observation State Machine
@@ -281,6 +374,13 @@ failed_too_many_network_errors
   "observation_window_end_ms": 0,
   "last_depth_fetch_at_ms": null,
   "depth_snapshot_count": 0,
+  "expected_snapshot_count": 720,
+  "min_snapshot_count_required": 576,
+  "max_snapshot_gap_ms": 180000,
+  "max_observed_snapshot_gap_ms": null,
+  "snapshot_gap_violation_count": 0,
+  "started_from_post_watermark_event": true,
+  "event_age_gate_passed": true,
   "network_error_count": 0,
   "rate_limit_error_count": 0,
   "observation_status": "active_depth_observation"
@@ -293,6 +393,7 @@ Completion rule:
 completed_12h_observation if:
   now_ms >= observation_window_end_ms
   and depth_snapshot_count >= configured minimum snapshot count
+  and snapshot time coverage passes
 ```
 
 建议默认：
@@ -300,16 +401,87 @@ completed_12h_observation if:
 ```text
 EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS = 12 * 60 * 60 * 1000
 EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC = 60
-EXTERNAL_SIGNAL_STAGE1_5F_MIN_SNAPSHOT_COUNT_FOR_VALID_OBSERVATION = 240
+EXTERNAL_SIGNAL_STAGE1_5F_MIN_SNAPSHOT_COVERAGE_RATIO = 0.80
+EXTERNAL_SIGNAL_STAGE1_5F_MAX_SNAPSHOT_GAP_MS = 3 * 60 * 1000
 ```
 
-如果用 300s cadence，则 min snapshot count 应调整为 100 左右。该阈值必须在 `configs/base.py`。
+`min_snapshot_count_required` 必须由配置自动计算：
+
+```text
+expected_snapshot_count =
+  EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS
+  / (EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC * 1000)
+
+min_snapshot_count_required =
+  ceil(expected_snapshot_count * EXTERNAL_SIGNAL_STAGE1_5F_MIN_SNAPSHOT_COVERAGE_RATIO)
+```
+
+示例：
+
+```text
+60s cadence:
+  expected = 720
+  min required at 80% = 576
+
+300s cadence:
+  expected = 144
+  min required at 80% = 116
+```
+
+Snapshot time coverage must also pass:
+
+```text
+first_snapshot_ms <= observer_started_at_ms + 2 * poll_interval_ms
+last_snapshot_ms >= observation_window_end_ms - 2 * poll_interval_ms
+max_observed_snapshot_gap_ms <= EXTERNAL_SIGNAL_STAGE1_5F_MAX_SNAPSHOT_GAP_MS
+```
+
+### 5.1 Restart / Resume Semantics
+
+On startup, the observer must load latest state per `event_symbol_id`:
+
+```text
+1. If observation_status = active_depth_observation and now_ms < observation_window_end_ms:
+     resume active observation.
+     do not reset observer_started_at_ms.
+     do not extend observation_window_end_ms.
+
+2. If observation_status = active_depth_observation and now_ms >= observation_window_end_ms:
+     compute snapshot count and time coverage.
+     mark completed_12h_observation if coverage passes.
+     otherwise mark expired_without_depth.
+
+3. If observation_status is terminal:
+     do not restart unless operator explicitly creates a new run root.
+```
+
+This prevents server restarts from silently extending or shifting the 12h observation window.
 
 ---
 
 ## 6. Depth Metrics
 
 每次 depth fetch 输出一条 snapshot row。
+
+Depth endpoint request must use configured limit:
+
+```text
+EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_LIMIT = 100
+```
+
+The URL must include:
+
+```text
+symbol = ABCUSDT
+limit = EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_LIMIT
+```
+
+`DEPTH_LIMIT` must be large enough to support:
+
+```text
+top_20 bid/ask notional
+500 USDT buy/sell slippage proxy
+```
 
 ### 6.1 Raw Depth Fields
 
@@ -360,6 +532,36 @@ buy_slippage_bps_for_500usdt
 sell_slippage_bps_for_500usdt
 ```
 
+Fixed formula:
+
+```text
+slippage_reference_price = mid_price
+
+buy_vwap_for_500usdt:
+  walk asks from best ask upward until cumulative quote notional >= 500 USDT
+
+buy_slippage_bps_for_500usdt =
+  (buy_vwap_for_500usdt / mid_price - 1) * 10_000
+
+sell_vwap_for_500usdt:
+  walk bids from best bid downward until cumulative quote notional >= 500 USDT
+
+sell_slippage_bps_for_500usdt =
+  (1 - sell_vwap_for_500usdt / mid_price) * 10_000
+```
+
+Required fields:
+
+```json
+{
+  "slippage_reference_price": "mid_price",
+  "buy_vwap_for_500usdt": null,
+  "sell_vwap_for_500usdt": null,
+  "buy_slippage_bps_for_500usdt": null,
+  "sell_slippage_bps_for_500usdt": null
+}
+```
+
 Rules:
 
 ```text
@@ -404,6 +606,7 @@ event_observation_in_progress:
 depth_evidence_collected:
   at least one event-symbol completed 12h observation
   min snapshot count passed
+  snapshot time coverage passed
   request success rate passed
   safety flags false
 
@@ -443,10 +646,22 @@ Top-level summary:
   "api_key_used": false,
   "order_endpoint_used": false,
   "watermark_initialized": true,
+  "watermark_version": 1,
+  "post_watermark_event_count": 0,
+  "pre_watermark_event_ignored_count": 0,
+  "skipped_event_too_old_count": 0,
   "new_event_symbol_count": 0,
   "active_observation_count": 0,
   "completed_observation_count": 0,
   "depth_snapshot_count": 0,
+  "expected_snapshot_count_per_completed_observation": 720,
+  "min_snapshot_coverage_ratio": 0.8,
+  "max_snapshot_gap_ms": 180000,
+  "max_observed_snapshot_gap_ms": null,
+  "request_budget_full_count": 0,
+  "skipped_request_budget_full_count": 0,
+  "exchangeinfo_last_refreshed_at_ms": null,
+  "exchangeinfo_fetch_error_count": 0,
   "request_success_rate": null,
   "median_spread_bps": null,
   "p95_spread_bps": null,
@@ -464,6 +679,13 @@ Top-level summary:
 ```text
 completed_observation_count >= 1
 and each completed observation has enough snapshots
+and snapshot time coverage passes
+and event was post-watermark
+and event_age_gate_passed = true
+and watermark_initialized = true
+and no corrupted watermark
+and no schema drift blocker
+and no request budget violation
 and request success rate passes
 and safety flags are false
 ```
@@ -528,10 +750,36 @@ EXTERNAL_SIGNAL_STAGE1_5F_MAX_CONSECUTIVE_NETWORK_ERRORS = 5
 EXTERNAL_SIGNAL_STAGE1_5F_HTTP_TIMEOUT_SEC = 10.0
 ```
 
+Before starting any new event-symbol observation, compute:
+
+```text
+estimated_requests_per_min =
+  active_event_symbol_count
+  * depth_requests_per_symbol_per_poll
+  * (60 / EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC)
+  + exchangeinfo_refresh_requests_per_min
+```
+
+If estimated budget would exceed `EXTERNAL_SIGNAL_STAGE1_5F_MAX_DEPTH_REQUESTS_PER_MINUTE`:
+
+```text
+do not start new observation
+observation_status = skipped_request_budget_full
+skipped_request_budget_full_count += 1
+```
+
+If `active_event_symbol_count >= EXTERNAL_SIGNAL_STAGE1_5F_MAX_ACTIVE_EVENT_SYMBOLS`:
+
+```text
+do not start new observation
+observation_status = skipped_request_budget_full
+```
+
 If budget exceeded:
 
 ```text
-observation_status = failed_rate_limit_budget_exceeded
+active observation status = failed_rate_limit_budget_exceeded
+new event status = skipped_request_budget_full
 ```
 
 The observer must fail closed:
@@ -620,15 +868,29 @@ Task 13: fixture smoke and short live smoke
 Required tests:
 
 ```text
+test_watermark_write_is_atomic
+test_corrupted_watermark_makes_observer_invalid
+test_missing_watermark_requires_bootstrap_mode
 test_bootstrap_watermark_does_not_start_observation_for_existing_events
 test_new_event_after_watermark_starts_observation
 test_event_age_gate_skips_old_event
 test_only_futures_contract_launch_is_eligible
 test_symbol_not_in_current_exchangeinfo_is_skipped_not_failed
+test_exchangeinfo_unavailable_keeps_event_pending_not_symbol_not_found
+test_restart_resumes_active_observation_without_resetting_window
+test_restart_expires_old_active_observation_without_enough_snapshots
+test_min_snapshot_count_computed_from_window_poll_interval_and_coverage_ratio
+test_depth_url_uses_configured_limit
 test_depth_snapshot_computes_spread_and_top_depth
+test_buy_slippage_uses_ask_vwap_vs_mid_price
+test_sell_slippage_uses_bid_vwap_vs_mid_price
 test_slippage_for_500usdt_marks_insufficient_depth
 test_depth_request_manifest_is_written
 test_observation_completes_after_12h_and_min_snapshot_count
+test_research_result_valid_requires_snapshot_time_coverage_not_only_count
+test_new_event_skipped_when_request_budget_full
+test_active_symbols_cannot_exceed_max_active_event_symbols
+test_pre_watermark_event_is_counted_as_ignored_not_rejected_failure
 test_summary_never_allows_paper_live_execution_or_alpha
 test_proxy_failed_state_does_not_block_observation_only_mode
 test_private_endpoint_or_api_key_usage_is_forbidden
@@ -672,4 +934,3 @@ Stage 1.5G may compare:
 ```
 
 Only Stage 1.5G can decide whether the observed live depth evidence is strong enough to continue research.
-
