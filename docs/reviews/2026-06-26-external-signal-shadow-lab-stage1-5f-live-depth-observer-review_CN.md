@@ -1174,9 +1174,15 @@ blocking_current_1_5f = false
 后续修复建议：
 
 ```text
-stage = Stage 1.5D parser enhancement
-next_action = write_small_fix_plan_or_patch_after_current_7d_observer_stable
+status = fixed_locally_pending_server_rollout
+fixed_by = Stage 1.5D Multiple TradFi Symbol Extraction
+server_current_run_affected = false unless deployed/restarted
+rollout_recommendation = start a new 1.5D output root after deployment
 ```
+
+> [!WARNING]
+> Do not deploy into an existing 7d output root. After server rollout, start a new Stage 1.5D run with a fresh output-root and bootstrap a matching Stage 1.5F observer.
+
 
 建议测试：
 
@@ -1194,7 +1200,42 @@ test_stage1_5f_rejects_symbol_empty_event_without_crashing
 3. 若仍无法抽取，明确输出 symbol_parse_failed_count 和 rejection_reason = symbol_missing。
 ```
 
-该问题可以等待当前 7d observer 稳定运行后再处理，不需要中断当前 1.5D / 1.5F。
+该问题已在本地完全修复并验证（详见 Stage 1.5D Multiple TradFi Symbol Extraction 计划与实现），等待后续上线部署。
+
+
+### Issue: `BTCU and ETHU` base-asset-only futures launch symbols=[]
+
+当前 7d server run 已观察到一个新的 post-watermark futures launch 标题：
+
+```text
+releaseDate = 2026-06-30T14:45:02.782Z
+source_article_id = 25da4614ffff435fa28544b27fd33a39
+title = Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)
+Stage 1.5D output = symbols=[]
+Stage 1.5F accepted event-symbol count = 0
+```
+
+根因：当前本地 `Multiple TradFi` 修复只覆盖 detail/title 中出现完整 `XXXUSDT` / `XXXUSDC` 的情况；`BTCU`、`ETHU` 是 base asset，不是完整合约 symbol。1.5F 只消费非空 `symbols`，因此不会启动 12h depth observation。
+
+风险判断：
+
+```text
+severity = high_for_observation_coverage
+safety_risk = low
+impact_type = false_negative
+current_7d_artifact_effect = 该 BTCU/ETHU 事件的 12h live depth window 已无法通过当前 artifact 完整补回
+```
+
+修复计划：
+
+```text
+plan = docs/plans/2026-07-01-external-signal-shadow-lab-stage1-5d-base-asset-launch-symbol-extraction-hotfix-plan_CN.md
+status = locally_implemented_and_verified_waiting_server_deployment
+server_deployment = wait_until_review_passes
+rollout = deploy code, start fresh Stage 1.5D output root, bootstrap matching fresh Stage 1.5F output root
+```
+
+不要在现有 7d output root 中直接覆盖历史 event rows；这会污染 artifact lineage。
 
 ## 10. 当前推荐下一步
 
@@ -1204,14 +1245,15 @@ priority_2 = 每 2-4 小时检查 heartbeat / events / summary。
 priority_3 = 等待 watermark 后的新 futures_contract_launch event-symbol。
 priority_4 = 如果 post_watermark_events_accepted > 0，进入 15-30 分钟巡检频率。
 priority_5 = 有 completed 12h depth evidence 后，进入 Stage 1.5G Live Depth Evidence Review。
-priority_6 = 非阻断并行任务：修复 Multiple TradFi symbol extraction gap。
+priority_6 = 非阻断并行任务：部署上线 Multiple TradFi symbol extraction 修复。
 ```
 
 等待新 event 期间可以并行推进：
 
 ```text
 1. Stage 1.5D parser enhancement:
-   修复 Multiple USDⓈ-Margined TradFi Perpetual Contracts 的 symbols=[] 问题。
+   [已完成] 修复 Multiple USDⓈ-Margined TradFi Perpetual Contracts 的 symbols=[] 问题。
+
 
 2. Stage 1.5G Live Depth Evidence Review plan:
    先写 review plan，不执行交易，只定义如何审查 1.5F depth snapshots。

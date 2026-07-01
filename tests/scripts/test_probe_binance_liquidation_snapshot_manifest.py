@@ -6,11 +6,8 @@ is expected to be injected via a `url_head_fn` parameter or patched with
 monkeypatching.
 """
 
-import sys
 import os
-import json
-
-import pytest
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 

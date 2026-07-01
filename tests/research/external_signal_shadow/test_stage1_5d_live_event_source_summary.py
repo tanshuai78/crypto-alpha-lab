@@ -101,3 +101,31 @@ def test_upstream_invalid_makes_smoke_invalid():
     )
     assert summary["decision"] == "stage1_5d_smoke_invalid"
     assert "upstream_evidence_missing_or_invalid" in summary["blockers"]
+
+
+def test_summary_includes_detail_fallback_counters():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={
+            "detail_fetch_attempted_count": 2,
+            "detail_fetch_success_count": 1,
+            "detail_fetch_failed_count": 1,
+            "detail_fetch_budget_deferred_count": 1,
+            "detail_fetch_url_rejected_count": 0,
+            "detail_symbol_extracted_count": 1,
+            "detail_symbol_parse_failed_count": 1,
+            "title_symbol_extracted_count": 3,
+            "symbol_empty_event_count": 1,
+        },
+    )
+
+    assert summary["detail_fetch_attempted_count"] == 2
+    assert summary["detail_symbol_extracted_count"] == 1
+    assert summary["title_symbol_extracted_count"] == 3
+

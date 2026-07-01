@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+
 def generate_fixtures():
     # Base timestamp: 1781165400000 ms (approximately 2026-06-12)
     base_time = 1781165400000

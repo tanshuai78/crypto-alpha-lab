@@ -5,10 +5,13 @@ import re
 
 def classify_event_type(title: str) -> str:
     title_lower = title.lower()
+    has_usd_m_margin_context = bool(
+        re.search(r"(?:USDⓈ|USDS|USD)-Margined|(?:USDⓈ|USDS|USD)-M\b", title, re.IGNORECASE)
+    )
     if (
         "futures" in title_lower
         and "launch" in title_lower
-        and "margined" in title_lower
+        and ("margined" in title_lower or has_usd_m_margin_context)
         and "perpetual" in title_lower
     ):
         return "futures_contract_launch"
@@ -20,6 +23,82 @@ def extract_futures_launch_symbols(title: str) -> list[str]:
     matches = re.findall(r"\b([A-Z0-9]+USDT|[A-Z0-9]+USDC)\b", title)
     # Deduplicate while preserving order
     return list(dict.fromkeys(matches))
+
+
+BASE_ASSET_STOPWORDS = {
+    "BINANCE", "FUTURES", "WILL", "LAUNCH", "USD", "USDT", "USDC", "USDS",
+    "MARGINED", "PERPETUAL", "CONTRACT", "CONTRACTS", "AND", "MULTIPLE",
+    "TRADFI", "TIME", "SETTLEMENT", "ASSET", "UNDERLYING", "MARGIN", "TIER",
+    "WARNING"
+}
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def _has_usds_margined_launch_context(text: str) -> bool:
+    margin = re.search(r'(?:USDⓈ|USDS|USD)-Margined|(?:USDⓈ|USDS|USD)-M', text, re.IGNORECASE)
+    perp = re.search(r'perpetual\s+contracts?', text, re.IGNORECASE)
+    launch = re.search(r'launch|will\s+launch', text, re.IGNORECASE)
+    return bool(margin and perp and launch)
+
+
+def _find_launch_candidate_window(text: str) -> str | None:
+    margin_matches = list(re.finditer(r'(?:USDⓈ|USDS|USD)-Margined|(?:USDⓈ|USDS|USD)-M', text, re.IGNORECASE))
+    perp_matches = list(re.finditer(r'perpetual\s+contracts?', text, re.IGNORECASE))
+    launch_matches = list(re.finditer(r'launch|will\s+launch', text, re.IGNORECASE))
+    if not margin_matches or not perp_matches or not launch_matches:
+        return None
+
+    for m in margin_matches:
+        for p in perp_matches:
+            start = min(m.start(), p.start())
+            end = max(m.end(), p.end())
+            if (end - start) <= 500:
+                for lm in launch_matches:
+                    window_start = min(m.start(), p.start(), lm.start())
+                    window_end = max(m.end(), p.end(), lm.end())
+                    if (window_end - window_start) <= 500:
+                        return text[window_start:window_end]
+    return None
+
+
+def _extract_between_margin_and_perpetual(text: str) -> str:
+    m = re.search(r'(?:USDⓈ|USDS|USD)-Margined|(?:USDⓈ|USDS|USD)-M', text, re.IGNORECASE)
+    p = re.search(r'perpetual\s+contracts?', text, re.IGNORECASE)
+    if m and p:
+        if m.end() < p.start():
+            return text[m.end():p.start()]
+        elif p.end() < m.start():
+            return text[p.end():m.start()]
+    return ""
+
+
+def extract_futures_launch_base_assets(text: str, force_classify: bool = True) -> list[str]:
+    if force_classify and classify_event_type(text) != "futures_contract_launch":
+        return []
+    if extract_futures_launch_symbols(text):
+        return []
+    window = _find_launch_candidate_window(text)
+    if not window:
+        return []
+
+    segment = _extract_between_margin_and_perpetual(window)
+    tokens = re.findall(r"\b[A-Z][A-Z0-9]{1,19}\b", segment)
+    return _dedupe([t for t in tokens if t not in BASE_ASSET_STOPWORDS])
+
+
+def derive_symbol_candidates_from_base_assets_in_launch_context(text: str, max_symbols: int) -> dict:
+    bases = extract_futures_launch_base_assets(text)
+    symbols = [f"{base}USDT" for base in bases[:max_symbols]]
+    return {
+        "symbols": symbols,
+        "symbol_extraction_source": "title_base_asset_derived" if symbols else None,
+        "symbol_derivation_method": "base_asset_plus_quote" if symbols else None,
+        "quote_derivation_source": "explicit_usdt_context" if symbols else None,
+        "symbol_validation_status": "unverified" if symbols else None,
+    }
 
 
 def extract_base_asset(symbol: str) -> str:
@@ -61,28 +140,60 @@ def dedupe_events(rows: list[dict]) -> list[dict]:
     return unique_rows
 
 
+SYMBOL_EXTRACTION_VERSION = 2
+PARSER_VERSION = "stage1_5d_symbol_extraction_v2"
+
+
 def normalize_live_event(
     raw: dict,
     source_parent_url: str,
     detected_at_ms: int,
     source_published_at_ms: int,
     source_published_at_ms_confidence: str,
+    symbols_override: list[str] | tuple[str, ...] | None = None,
+    extraction_metadata: dict | None = None,
 ) -> dict:
     code = raw.get("code") or ""
     title = raw.get("title") or ""
 
     event_type = classify_event_type(title)
-    symbols = tuple(extract_futures_launch_symbols(title))
+
+    if symbols_override is not None:
+        symbols = tuple(symbols_override)
+    else:
+        symbols = tuple(extract_futures_launch_symbols(title))
+
     base_assets = tuple(extract_base_asset(s) for s in symbols)
 
     source_detail_url_normalized = f"{source_parent_url.rstrip('/')}/{code}"
 
-    symbol_part = symbols[0] if symbols else "UNKNOWN"
-    stable_key = build_stable_event_key(code, symbol_part)
+    if len(symbols) == 0:
+        stable_key = f"binance_{code}_UNKNOWN"
+        event_id = hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
+    elif len(symbols) == 1:
+        stable_key = f"binance_{code}_{symbols[0]}"
+        event_id = hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
+    else:
+        stable_key = f"binance_{code}_MULTI"
+        event_id = hashlib.sha256(f"{stable_key}|{','.join(sorted(symbols))}".encode("utf-8")).hexdigest()
 
-    event_id = hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
+    # Default metadata
+    meta = {
+        "symbol_extraction_source": "title" if symbols else "none",
+        "detail_fetch_attempted": False,
+        "detail_fetch_status": "not_needed",
+        "symbol_parse_failed_reason": None if symbols else "symbol_missing_no_detail_attempted",
+        "symbol_parse_status": "parsed" if symbols else "terminal_failed",
+        "parser_version": PARSER_VERSION,
+        "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
+    }
+    if extraction_metadata:
+        # Merge, but preserve version fields
+        meta.update(extraction_metadata)
+        meta["parser_version"] = PARSER_VERSION
+        meta["symbol_extraction_version"] = SYMBOL_EXTRACTION_VERSION
 
-    return {
+    result = {
         "event_id": event_id,
         "event_type": event_type,
         "source_name": "binance_official_announcements",
@@ -106,6 +217,8 @@ def normalize_live_event(
         "execution_engine_allowed": False,
         "alpha_interpretation_allowed": False,
     }
+    result.update(meta)
+    return result
 
 
 def parse_binance_announcement_payload(payload: dict) -> dict:
@@ -181,3 +294,86 @@ def parse_binance_announcement_payload(payload: dict) -> dict:
         "source_format_drift_count": 0,
         "schema_parse_error": False,
     }
+
+
+def extract_symbol_candidates_from_detail_payload(payload: object, max_symbols: int, title: str | None = None) -> dict:
+    snippets = []
+
+    def _walk(obj: object) -> None:
+        if isinstance(obj, str):
+            snippets.append(obj)
+        elif isinstance(obj, dict):
+            for val in obj.values():
+                _walk(val)
+        elif isinstance(obj, (list, tuple, set)):
+            for val in obj:
+                _walk(val)
+
+    _walk(payload)
+
+    if title:
+        snippets.insert(0, title)
+
+    # 1. Exact matches of USDT/USDC symbols (preferred)
+    exact_symbols = []
+    seen = set()
+    for s in snippets:
+        if len(exact_symbols) >= max_symbols:
+            break
+        bounded_s = s[:100000]
+        matches = re.findall(r"\b([A-Z0-9]{2,30}USDT|[A-Z0-9]{2,30}USDC)\b", bounded_s)
+        for m in matches:
+            if len(exact_symbols) >= max_symbols:
+                break
+            if m not in seen:
+                seen.add(m)
+                exact_symbols.append(m)
+
+    if exact_symbols:
+        return {
+            "symbols": exact_symbols,
+            "symbol_extraction_source": "detail",
+            "symbol_derivation_method": "none",
+            "quote_derivation_source": None,
+            "symbol_validation_status": "validated_by_exact_text",
+        }
+
+    # 2. Base asset derivation fallback
+    derived_symbols = []
+    seen_derived = set()
+    for s in snippets:
+        if len(derived_symbols) >= max_symbols:
+            break
+        window = _find_launch_candidate_window(s[:100000])
+        if window:
+            bases = extract_futures_launch_base_assets(window, force_classify=False)
+            for b in bases:
+                sym = f"{b}USDT"
+                if len(derived_symbols) >= max_symbols:
+                    break
+                if sym not in seen_derived:
+                    seen_derived.add(sym)
+                    derived_symbols.append(sym)
+
+    if derived_symbols:
+        return {
+            "symbols": derived_symbols,
+            "symbol_extraction_source": "detail_base_asset_derived",
+            "symbol_derivation_method": "base_asset_plus_quote",
+            "quote_derivation_source": "explicit_usdt_context",
+            "symbol_validation_status": "unverified",
+        }
+
+    return {
+        "symbols": [],
+        "symbol_extraction_source": "none",
+        "symbol_derivation_method": None,
+        "quote_derivation_source": None,
+        "symbol_validation_status": None,
+    }
+
+
+def extract_symbols_from_detail_payload(payload: object, max_symbols: int) -> list[str]:
+    """Extract futures contract symbols from nested Binance detail payload or raw text."""
+    res = extract_symbol_candidates_from_detail_payload(payload, max_symbols)
+    return res["symbols"]

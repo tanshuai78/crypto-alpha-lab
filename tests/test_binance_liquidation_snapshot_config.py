@@ -3,13 +3,12 @@ Tests that all required Binance liquidation snapshot constants exist in configs/
 with sane types and valid values.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import configs.base as cfg
-
 
 # ---------------------------------------------------------------------------
 # Existence and type tests

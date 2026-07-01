@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import time
 import urllib.error
@@ -21,6 +22,49 @@ def validate_url_allowlist(url: str, allowed_domains: tuple[str, ...]) -> None:
     host = parsed.hostname
     if not host or not host_allowed(host, allowed_domains):
         raise ValueError("domain_not_allowed")
+
+
+def validate_announcement_detail_url(url: str, allowed_domains: tuple[str, ...] | None = None) -> None:
+    if not url:
+        raise ValueError("detail_url_missing")
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("detail_url_scheme_not_allowed")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("domain_not_allowed")
+
+    host = host.lower()
+
+    # Check localhost
+    if host in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError("domain_not_allowed")
+
+    # Check IP literal for private IP
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+
+    if ip is not None and (ip.is_private or ip.is_loopback):
+        raise ValueError("domain_not_allowed")
+
+    if allowed_domains is None:
+        allowed_domains = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_DOMAINS", ("binance.com", "www.binance.com"))
+
+    if not host_allowed(host, allowed_domains):
+        raise ValueError("domain_not_allowed")
+
+    if "/support/announcement/" not in parsed.path:
+        raise ValueError("path_not_allowed")
+
+    query_params = urllib.parse.parse_qs(parsed.query)
+    for key in query_params:
+        if key.lower() in ("redirect", "url", "next"):
+            raise ValueError("detail_url_query_not_allowed")
+
 
 
 def build_announcement_list_url(base_url: str, path: str, query_params: dict[str, str]) -> str:
@@ -91,6 +135,74 @@ def fetch_public_json(url: str, live_public_readonly: bool, timeout_sec: float =
                     "http_status": status_code,
                     "payload_size_bytes": len(raw_bytes),
                     "row_count": row_count,
+                    "error": None,
+                }
+        except ValueError as e:
+            raise e
+        except Exception as e:
+            last_error = e
+
+    err_status = getattr(last_error, "code", None)
+    return {
+        "ok": False,
+        "payload": None,
+        "requested_url": url,
+        "final_url": url,
+        "requested_host": requested_host,
+        "final_host": requested_host,
+        "redirect_count": 0,
+        "http_status": err_status,
+        "payload_size_bytes": 0,
+        "row_count": None,
+        "error": str(last_error),
+    }
+
+
+def fetch_public_payload(url: str, live_public_readonly: bool, timeout_sec: float = 10.0, retry_budget: int = 0) -> dict:
+    """Fetch public readonly payload as raw text, without forcing JSON parse."""
+    if not live_public_readonly:
+        raise PermissionError("explicit --live-public-readonly flag required for network calls")
+
+    allowed_domains = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_DOMAINS", ("binance.com", "www.binance.com"))
+    validate_announcement_detail_url(url, allowed_domains)
+
+    headers = {
+        "User-Agent": "Antigravity-Crypto-Alpha-Lab-Stage1.5D-Client/1.0"
+    }
+    req = urllib.request.Request(url, headers=headers)
+
+    parsed_req = urllib.parse.urlparse(url)
+    requested_host = parsed_req.hostname or ""
+
+    last_error = None
+    redirect_count = 0
+
+    for attempt in range(retry_budget + 1):
+        if attempt > 0:
+            time.sleep(0.2)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+                final_url = response.geturl()
+                validate_announcement_detail_url(final_url, allowed_domains)
+
+                status_code = getattr(response, "status", 200)
+                raw_bytes = response.read()
+                content = raw_bytes.decode("utf-8")
+
+                if final_url != url:
+                    redirect_count = 1
+
+                return {
+                    "ok": True,
+                    "payload": content,
+                    "requested_url": url,
+                    "final_url": final_url,
+                    "requested_host": requested_host,
+                    "final_host": urllib.parse.urlparse(final_url).hostname or "",
+                    "redirect_count": redirect_count,
+                    "http_status": status_code,
+                    "payload_size_bytes": len(raw_bytes),
+                    "row_count": None,
                     "error": None,
                 }
         except ValueError as e:

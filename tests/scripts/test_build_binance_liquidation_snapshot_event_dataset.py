@@ -4,12 +4,10 @@ Tests for build_binance_liquidation_snapshot_event_dataset.py
 Uses synthetic in-memory data. No real file I/O.
 """
 
-import sys
-import os
 import importlib.util
+import os
+import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 

@@ -84,8 +84,36 @@ def build_smoke_summary(
         ),
         "deduped_new_event_count": counters.get("deduped_new_event_count", len(events)),
         "new_futures_launch_event_count": counters.get("deduped_new_event_count", len(events)),
+        "detail_fetch_attempted_count": counters.get(
+            "detail_fetch_attempted_count",
+            sum(1 for e in events if e.get("detail_fetch_attempted", False))
+        ),
+        "detail_fetch_success_count": counters.get(
+            "detail_fetch_success_count",
+            sum(1 for e in events if e.get("detail_fetch_status") == "success")
+        ),
+        "detail_fetch_failed_count": counters.get("detail_fetch_failed_count", 0),
+        "detail_fetch_budget_deferred_count": counters.get("detail_fetch_budget_deferred_count", 0),
+        "detail_fetch_url_rejected_count": counters.get("detail_fetch_url_rejected_count", 0),
+        "detail_symbol_extracted_count": counters.get(
+            "detail_symbol_extracted_count",
+            sum(1 for e in events if e.get("symbol_extraction_source") == "detail" and e.get("symbols"))
+        ),
+        "detail_symbol_parse_failed_count": counters.get(
+            "detail_symbol_parse_failed_count",
+            sum(1 for e in events if e.get("symbol_extraction_source") == "detail" and not e.get("symbols"))
+        ),
+        "title_symbol_extracted_count": counters.get(
+            "title_symbol_extracted_count",
+            sum(1 for e in events if e.get("symbol_extraction_source") == "title")
+        ),
+        "symbol_empty_event_count": counters.get(
+            "symbol_empty_event_count",
+            sum(1 for e in events if not e.get("symbols"))
+        ),
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
         "execution_engine_allowed": False,
         "alpha_interpretation_allowed": False,
     }
+

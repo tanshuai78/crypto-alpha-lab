@@ -5,7 +5,9 @@ import pytest
 from src.research.external_signal_shadow.stage1_5d_live_event_source_client import (
     build_announcement_list_url,
     fetch_public_json,
+    fetch_public_payload,
     host_allowed,
+    validate_announcement_detail_url,
     validate_url_allowlist,
 )
 
@@ -63,3 +65,61 @@ def test_fetch_public_json_rejects_redirect_final_host_not_allowed():
     with patch("urllib.request.urlopen", return_value=FakeResponse()):
         with pytest.raises(ValueError, match="redirect_final_domain_not_allowed"):
             fetch_public_json("https://www.binance.com/test", live_public_readonly=True, timeout_sec=1.0)
+
+
+def test_detail_url_non_https_rejected():
+    with pytest.raises(ValueError, match="detail_url_scheme_not_allowed"):
+        validate_announcement_detail_url("http://www.binance.com/en/support/announcement/abc")
+
+
+def test_detail_url_non_allowlisted_host_rejected():
+    with pytest.raises(ValueError, match="domain_not_allowed"):
+        validate_announcement_detail_url("https://evil.com/en/support/announcement/abc")
+
+
+def test_detail_url_localhost_rejected():
+    with pytest.raises(ValueError):
+        validate_announcement_detail_url("https://localhost/en/support/announcement/abc")
+
+
+def test_detail_url_missing_marks_url_missing_without_crash():
+    with pytest.raises(ValueError, match="detail_url_missing"):
+        validate_announcement_detail_url("")
+
+
+def test_detail_url_rejects_redirect_query_injection():
+    with pytest.raises(ValueError, match="detail_url_query_not_allowed"):
+        validate_announcement_detail_url("https://www.binance.com/en/support/announcement/abc?redirect=https://evil.com")
+
+
+def test_fetch_public_payload_returns_raw_text_without_json_parse():
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self): return "https://www.binance.com/en/support/announcement/abc"
+        def read(self): return b"<html>BTCU and ETHU Perpetual Contracts</html>"
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        result = fetch_public_payload("https://www.binance.com/en/support/announcement/abc", live_public_readonly=True)
+
+    assert result["ok"] is True
+    assert result["payload"] == "<html>BTCU and ETHU Perpetual Contracts</html>"
+    assert result["payload_size_bytes"] > 0
+
+
+def test_detail_url_private_ip_rejected_even_if_allowlisted_for_test():
+    with pytest.raises(ValueError, match="domain_not_allowed"):
+        validate_announcement_detail_url(
+            "https://10.0.0.1/en/support/announcement/abc",
+            allowed_domains=("10.0.0.1",),
+        )
+
+    with pytest.raises(ValueError, match="domain_not_allowed"):
+        validate_announcement_detail_url(
+            "https://192.168.1.5/en/support/announcement/abc",
+            allowed_domains=("192.168.1.5",),
+        )
+
+
+

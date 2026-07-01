@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Sequence, Optional
+from typing import Optional, Sequence
 
 
 def main(args: Optional[Sequence[str]] = None) -> None:

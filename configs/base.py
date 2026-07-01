@@ -1535,6 +1535,22 @@ EXTERNAL_SIGNAL_STAGE1_5D_HEARTBEAT_RETENTION_DAYS = 30
 EXTERNAL_SIGNAL_STAGE1_5D_MAX_RAW_PAYLOAD_BYTES_PER_DAY = 200_000_000
 EXTERNAL_SIGNAL_STAGE1_5D_MAX_HEARTBEAT_ROWS_PER_DAY = 2_000
 
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SYMBOL_EXTRACTION_MAX_SYMBOLS = 30
+# Maximum symbols extracted from one announcement detail payload. Prevents malformed pages from creating huge symbol lists.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL = 3
+# Maximum announcement detail fallback requests per poll. Keeps list polling stable and bounded.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_REQUEST_TIMEOUT_SEC = 10.0
+# Network timeout for announcement detail fallback requests.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES = 3
+# Maximum retry attempts across polls for transient detail fallback failures.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC = 3600
+# Maximum age for retrying a pending detail fallback before marking terminal failed.
+
+
 
 # ─── External Signal Shadow Lab Stage 1.5E: Execution Feasibility Data Audit ───
 

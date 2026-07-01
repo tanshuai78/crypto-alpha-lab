@@ -5,6 +5,7 @@ import pytest
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
     classify_event_symbol_eligibility,
     flatten_event_symbols,
+    iter_stage1_5d_event_rows,
     make_event_symbol_id,
     validate_stage1_5d_summary,
 )
@@ -189,3 +190,21 @@ def test_pre_watermark_rejection_reason_is_ignored_not_failure():
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
     assert status == "rejected"
     assert reason == "pre_watermark"
+
+
+def test_stage1_5f_loader_accepts_legacy_1_5d_event_rows_without_symbol_extraction_diagnostics(tmp_path):
+    events = tmp_path / "events.jsonl"
+    events.write_text(json.dumps({
+        "event_id": "legacy-event",
+        "event_type": "futures_contract_launch",
+        "symbols": ["ABCUSDT"],
+        "detected_at_ms": 1_000,
+        "source_article_id": "abc",
+    }) + "\n")
+
+    rows = list(iter_stage1_5d_event_rows(str(events)))
+    flattened = list(flatten_event_symbols(rows[0]))
+
+    assert flattened[0]["symbol"] == "ABCUSDT"
+    assert make_event_symbol_id(rows[0], "ABCUSDT")
+

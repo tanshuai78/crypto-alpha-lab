@@ -4,13 +4,10 @@ Tests for audit_binance_liquidation_snapshot_continuity.py
 Uses synthetic in-memory data. No real file I/O in unit tests.
 """
 
-import sys
-import os
 import importlib.util
+import os
+import sys
 from pathlib import Path
-from datetime import date, timedelta
-
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
