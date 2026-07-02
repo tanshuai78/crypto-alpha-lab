@@ -7,6 +7,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_parser impo
     extract_symbols_from_detail_payload,
     normalize_live_event,
     parse_binance_announcement_payload,
+    extract_symbol_candidates_from_detail_payload,
 )
 
 
@@ -226,7 +227,7 @@ def test_detail_base_asset_fallback_derives_symbols_when_detail_has_base_assets_
         }
     }
 
-    assert extract_symbols_from_detail_payload(detail, max_symbols=30) == ["BTCUUSDT", "ETHUUSDT"]
+    assert extract_symbols_from_detail_payload(detail, max_symbols=30) == ["BTCU", "ETHU"]
 
 
 def test_detail_prefers_full_symbols_over_base_asset_fallback():
@@ -241,7 +242,8 @@ def test_base_asset_fallback_ignores_tokens_outside_launch_sentence_window():
     Risk Warning: PORTFOLIO MARGIN TIER SETTLEMENT ASSET LEVERAGE COLLATERAL RATIO.
     """
 
-    assert extract_symbols_from_detail_payload(detail, max_symbols=30) == ["BTCUUSDT", "ETHUUSDT"]
+    assert extract_symbols_from_detail_payload(detail, max_symbols=30) == ["BTCU", "ETHU"]
+
 
 
 def test_base_asset_fallback_ignores_table_labels_launch_time_settlement_asset():
@@ -253,6 +255,57 @@ def test_base_asset_fallback_ignores_table_labels_launch_time_settlement_asset()
     """
 
     assert extract_symbols_from_detail_payload(detail, max_symbols=30) == []
+
+
+def test_detail_extracts_u_settled_contract_symbols_from_table_text():
+    detail = """
+    Binance Futures will launch the following perpetual contract(s) as below:
+    2026-07-01 09:00 (UTC): BTCU Perpetual Contract with up to 100x leverage
+    2026-07-01 10:00 (UTC): ETHU Perpetual Contract with up to 100x leverage
+    USDⓈ-M Perpetual Contract
+    BTCU
+    ETHU
+    Settlement Asset
+    U (United Stables)
+    U (United Stables)
+    """
+
+    result = extract_symbol_candidates_from_detail_payload(detail, max_symbols=30, title="Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)")
+
+    assert result["symbols"] == ["BTCU", "ETHU"]
+    assert result["symbol_extraction_source"] == "detail_contract_symbol"
+    assert result["symbol_derivation_method"] == "none"
+    assert result["symbol_validation_status"] == "requires_exchange_info_validation"
+    assert result["symbol_launch_times_ms"]["BTCU"] == 1782896400000
+    assert result["symbol_launch_times_ms"]["ETHU"] == 1782900000000
+
+
+def test_detail_contract_symbol_path_prefers_btcu_over_btcuusdt_derivation():
+    detail = "USDⓈ-M Perpetual Contract BTCU ETHU Settlement Asset U U"
+    title = "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)"
+
+    result = extract_symbol_candidates_from_detail_payload(detail, max_symbols=30, title=title)
+
+    assert result["symbols"] == ["BTCU", "ETHU"]
+    assert "BTCUUSDT" not in result["symbols"]
+    assert "ETHUUSDT" not in result["symbols"]
+
+
+def test_detail_contract_symbol_candidate_does_not_collect_table_labels():
+    detail = """
+    USDⓈ-M Perpetual Contract
+    BTCU
+    ETHU
+    Launch Time
+    Underlying Asset
+    Settlement Asset
+    Minimum Notional Value
+    Capped Funding Rate
+    """
+
+    result = extract_symbol_candidates_from_detail_payload(detail, max_symbols=30, title="Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts")
+
+    assert result["symbols"] == ["BTCU", "ETHU"]
 
 
 

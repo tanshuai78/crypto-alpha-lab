@@ -111,9 +111,15 @@ def build_smoke_summary(
             "symbol_empty_event_count",
             sum(1 for e in events if not e.get("symbols"))
         ),
+        "candidate_validation_pending_count": counters.get("candidate_validation_pending_count", 0),
+        "candidate_validation_success_count": counters.get("candidate_validation_success_count", 0),
+        "candidate_validation_expired_count": counters.get("candidate_validation_expired_count", 0),
+        "u_settlement_symbol_extracted_count": counters.get("u_settlement_symbol_extracted_count", 0),
+        "pre_launch_validation_deferred_count": counters.get("pre_launch_validation_deferred_count", 0),
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
         "execution_engine_allowed": False,
         "alpha_interpretation_allowed": False,
     }
+
 

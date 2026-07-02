@@ -1,6 +1,8 @@
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
+
 
 
 def classify_event_type(title: str) -> str:
@@ -31,6 +33,15 @@ BASE_ASSET_STOPWORDS = {
     "TRADFI", "TIME", "SETTLEMENT", "ASSET", "UNDERLYING", "MARGIN", "TIER",
     "WARNING"
 }
+
+
+CONTRACT_SYMBOL_CANDIDATE_STOPWORDS = BASE_ASSET_STOPWORDS | {
+    "LAUNCH", "TIME", "UNDERLYING", "PROJECT", "INFO", "TICK", "SIZE", "MINIMUM",
+    "NOTIONAL", "VALUE", "CAPPED", "FUNDING", "RATE", "FEE", "FREQUENCY",
+    "EVERY", "EIGHT", "HOURS", "MAXIMUM", "LEVERAGE", "TRADING", "MODE",
+    "SUPPORTED", "UNITED", "STABLES", "UTC"
+}
+
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -88,6 +99,77 @@ def extract_futures_launch_base_assets(text: str, force_classify: bool = True) -
     tokens = re.findall(r"\b[A-Z][A-Z0-9]{1,19}\b", segment)
     return _dedupe([t for t in tokens if t not in BASE_ASSET_STOPWORDS])
 
+
+def _find_contract_symbol_candidate_windows(text: str) -> list[str]:
+    keywords = [
+        r"(?:USDⓈ|USDS|USD)-Margined",
+        r"(?:USDⓈ|USDS|USD)-M",
+        r"Perpetual\s+Contracts?",
+        r"Settlement\s+Asset",
+    ]
+    pattern = "|".join(keywords)
+    windows = []
+    for m in re.finditer(pattern, text, re.IGNORECASE):
+        start = max(0, m.start() - 200)
+        end = min(len(text), m.end() + 200)
+        windows.append(text[start:end])
+    return windows
+
+
+
+def extract_contract_symbol_candidates_from_detail_text(text: str, max_symbols: int) -> list[str]:
+    # 1. Locate the launch context window first
+    window = _find_launch_candidate_window(text)
+    if not window:
+        return []
+    
+    # 2. Filter out lines containing "warning" or "risk" from the window
+    clean_lines = []
+    for line in window.splitlines():
+        if "warning" in line.lower() or "risk" in line.lower():
+            continue
+        clean_lines.append(line)
+    clean_window = "\n".join(clean_lines)
+
+    windows = _find_contract_symbol_candidate_windows(clean_window)
+    out = []
+    seen = set()
+    for w in windows:
+        for token in re.findall(r"\b[A-Z][A-Z0-9]{1,29}\b", w):
+            if token in CONTRACT_SYMBOL_CANDIDATE_STOPWORDS:
+                continue
+            if token.isdigit():
+                continue
+            if token not in seen:
+                seen.add(token)
+                out.append(token)
+            if len(out) >= max_symbols:
+                return out
+    return out
+
+
+
+def extract_symbol_launch_times_ms(text: str, symbols: list[str]) -> dict[str, int]:
+    out = {}
+    matches = list(re.finditer(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", text))
+    for symbol in symbols:
+        symbol_matches = list(re.finditer(rf"\b{re.escape(symbol)}\b", text))
+        best_dt_ms = None
+        min_dist = 999999
+        for sm in symbol_matches:
+            for dm in matches:
+                dist = abs(dm.start() - sm.start())
+                if dist < min_dist and dist < 150:
+                    dt_str = f"{dm.group(1)}T{dm.group(2)}:00"
+                    try:
+                        dt = datetime.fromisoformat(dt_str).replace(tzinfo=timezone.utc)
+                        best_dt_ms = int(dt.timestamp() * 1000)
+                        min_dist = dist
+                    except ValueError:
+                        continue
+        if best_dt_ms is not None:
+            out[symbol] = best_dt_ms
+    return out
 
 def derive_symbol_candidates_from_base_assets_in_launch_context(text: str, max_symbols: int) -> dict:
     bases = extract_futures_launch_base_assets(text)
@@ -337,6 +419,21 @@ def extract_symbol_candidates_from_detail_payload(payload: object, max_symbols: 
             "quote_derivation_source": None,
             "symbol_validation_status": "validated_by_exact_text",
         }
+
+    # 1.5 Contract-symbol candidates (e.g. BTCU, ETHU)
+    combined_text = "\n".join(snippets)[:100000]
+    contract_candidates = extract_contract_symbol_candidates_from_detail_text(combined_text, max_symbols)
+    if contract_candidates:
+        symbol_launch_times = extract_symbol_launch_times_ms(combined_text, contract_candidates)
+        return {
+            "symbols": contract_candidates,
+            "symbol_extraction_source": "detail_contract_symbol",
+            "symbol_derivation_method": "none",
+            "quote_derivation_source": None,
+            "symbol_validation_status": "requires_exchange_info_validation",
+            "symbol_launch_times_ms": symbol_launch_times,
+        }
+
 
     # 2. Base asset derivation fallback
     derived_symbols = []

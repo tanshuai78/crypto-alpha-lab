@@ -17,6 +17,12 @@ def test_depth_url_uses_configured_limit():
     assert "symbol=ABCUSDT" in url
 
 
+def test_depth_url_uses_raw_u_settled_symbol_without_usdt_suffix():
+    url = build_depth_url("BTCU", limit=base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_LIMIT)
+    assert "symbol=BTCU" in url
+    assert "BTCUUSDT" not in url
+
+
 def test_exchangeinfo_refresh_respects_cadence():
     now = int(time.time() * 1000)
     prev = {
@@ -165,3 +171,29 @@ def test_fixture_mode_does_not_call_real_network():
     # If live_public_readonly is False, it raises RuntimeError instantly. This guarantees no network calls in fixture mode.
     with pytest.raises(RuntimeError):
         fetch_public_json("https://fapi.binance.com/fapi/v1/depth", live_public_readonly=False)
+
+
+def test_stage1_5f_client_handles_http_400_for_invalid_u_settled_depth_request(monkeypatch):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_client import (
+        fetch_depth_snapshot,
+    )
+    from urllib.error import HTTPError
+    import io
+
+    def mock_urlopen(*args, **kwargs):
+        fp = io.BytesIO(b'{"code": -1121, "msg": "Invalid symbol."}')
+        raise HTTPError(
+            url="https://fapi.binance.com/fapi/v1/depth?symbol=BTCU",
+            code=400,
+            msg="Bad Request",
+            hdrs={},
+            fp=fp
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    res = fetch_depth_snapshot("BTCU", live_public_readonly=True)
+
+    assert res["ok"] is False
+    assert res["error"] == "http_error_400"
+    assert "Invalid symbol" in res["message"] or "Bad Request" in res["message"]

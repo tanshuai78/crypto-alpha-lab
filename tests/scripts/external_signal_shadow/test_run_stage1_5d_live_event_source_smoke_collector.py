@@ -131,7 +131,7 @@ def test_runner_live_first_bar_writes_exchangeinfo_manifest(tmp_path):
             }]
         }
     }
-    exchange_info = {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL"}]}
+    exchange_info = {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}]}
     klines = [[9999999999999, "1", "1", "1", "1", "1"]]
 
     def fake_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -666,8 +666,8 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
-        {"symbol": "ETHUUSDT", "status": "TRADING", "contractType": "PERPETUAL"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
     ]}
 
     def fake_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -706,9 +706,9 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
     assert len(event_files) == 1
     events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
     assert len(events) == 1
-    assert events[0]["symbols"] == ["BTCUUSDT", "ETHUUSDT"]
-    assert events[0]["symbol_extraction_source"] == "detail_base_asset_derived"
-    assert events[0]["symbol_derivation_method"] == "base_asset_plus_quote"
+    assert events[0]["symbols"] == ["BTCU", "ETHU"]
+    assert events[0]["symbol_extraction_source"] == "detail_contract_symbol"
+    assert events[0]["symbol_derivation_method"] == "none"
     assert events[0]["quote_derivation_source"] == "exchange_info"
     assert events[0]["symbol_validation_status"] == "validated"
     assert events[0]["symbol_parse_status"] == "parsed"
@@ -783,8 +783,8 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
     }
     detail_html = "<html><body>Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts.</body></html>"
     exchange_info = {"symbols": [
-        {"symbol": "BTCUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
-        {"symbol": "ETHUUSDT", "status": "TRADING", "contractType": "PERPETUAL"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -826,7 +826,7 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
     assert len(event_files) == 1
     events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
     assert len(events) == 1
-    assert events[0]["symbols"] == ["BTCUUSDT", "ETHUUSDT"]
+    assert events[0]["symbols"] == ["BTCU", "ETHU"]
 
     manifest_files = list((output_root / "request_manifest").glob("*.jsonl"))
     assert len(manifest_files) == 1
@@ -850,8 +850,8 @@ def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tm
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
-        {"symbol": "ETHUUSDT", "status": "TRADING", "contractType": "PERPETUAL"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
     ]}
 
     calls = {"fetch_json": 0, "fetch_payload": 0}
@@ -1063,8 +1063,8 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
-        {"symbol": "ETHUUSDT", "status": "TRADING", "contractType": "PERPETUAL"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -1109,10 +1109,10 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
     assert len(events) == 1
     ev = events[0]
 
-    assert "BTCUUSDT" in ev["symbols"]
-    assert "ETHUUSDT" in ev["symbols"]
-    assert ev["symbol_extraction_source"] == "detail_base_asset_derived"
-    assert ev["symbol_derivation_method"] == "base_asset_plus_quote"
+    assert "BTCU" in ev["symbols"]
+    assert "ETHU" in ev["symbols"]
+    assert ev["symbol_extraction_source"] == "detail_contract_symbol"
+    assert ev["symbol_derivation_method"] == "none"
     assert ev["quote_derivation_source"] == "exchange_info"
     assert ev["symbol_validation_status"] == "validated"
     assert ev["symbol_parse_status"] == "parsed"
@@ -1196,8 +1196,8 @@ def test_persisted_base_asset_events_never_emit_unverified_validation_status(tmp
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
-        {"symbol": "ETHUUSDT", "status": "TRADING", "contractType": "PERPETUAL"},
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -1243,6 +1243,317 @@ def test_persisted_base_asset_events_never_emit_unverified_validation_status(tmp
     ]
     assert persisted_events
     assert all(ev.get("symbol_validation_status") != "unverified" for ev in persisted_events)
+
+
+def test_exchangeinfo_validation_accepts_trading_u_settled_perpetual_symbols():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    exchangeinfo_by_symbol = {
+        "BTCU": {
+            "symbol": "BTCU",
+            "contractType": "PERPETUAL",
+            "status": "TRADING",
+            "quoteAsset": "U",
+            "marginAsset": "U",
+            "onboardDate": 1782896400000,
+        },
+        "ETHU": {
+            "symbol": "ETHU",
+            "contractType": "PERPETUAL",
+            "status": "TRADING",
+            "quoteAsset": "U",
+            "marginAsset": "U",
+            "onboardDate": 1782900000000,
+        },
+    }
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU", "ETHU"],
+        exchangeinfo_by_symbol=exchangeinfo_by_symbol,
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782896400000,
+    )
+
+    assert result["validated_symbols"] == ["BTCU", "ETHU"]
+    assert result["pending_symbols"] == []
+    assert result["rejected_symbols"] == []
+    assert result["symbol_onboard_times_ms"] == {"BTCU": 1782896400000, "ETHU": 1782900000000}
+    assert result["symbol_exchangeinfo"]["BTCU"]["quoteAsset"] == "U"
+
+
+def test_exchangeinfo_validation_does_not_rewrite_raw_contract_candidate_to_usdt_suffix():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU"],
+        exchangeinfo_by_symbol={
+            "BTCUUSDT": {
+                "symbol": "BTCUUSDT",
+                "contractType": "PERPETUAL",
+                "status": "TRADING",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": 1782896400000,
+            }
+        },
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782896400000,
+    )
+
+    assert result["validated_symbols"] == []
+    assert result["pending_symbols"] == ["BTCU"]
+    assert result["pending_reasons"]["BTCU"] == "exchange_info_symbol_missing"
+
+
+def test_exchangeinfo_validation_rejects_non_perpetual_contract():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU"],
+        exchangeinfo_by_symbol={"BTCU": {"symbol": "BTCU", "contractType": "CURRENT_QUARTER", "status": "TRADING", "quoteAsset": "U", "marginAsset": "U"}},
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782896400000,
+    )
+
+    assert result["validated_symbols"] == []
+    assert result["rejected_symbols"] == ["BTCU"]
+    assert result["rejection_reasons"]["BTCU"] == "exchange_info_disallowed_contract_type"
+
+
+def test_exchangeinfo_validation_rejects_disallowed_margin_asset():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU"],
+        exchangeinfo_by_symbol={"BTCU": {"symbol": "BTCU", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "U", "marginAsset": "BUSD"}},
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782896400000,
+    )
+
+    assert result["validated_symbols"] == []
+    assert result["rejected_symbols"] == ["BTCU"]
+    assert result["rejection_reasons"]["BTCU"] == "exchange_info_disallowed_margin_asset"
+
+
+def test_exchangeinfo_validation_does_not_accept_symbol_string_only_without_metadata():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU"],
+        exchangeinfo_by_symbol={"BTCU": {}},
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782896400000,
+    )
+
+    assert result["validated_symbols"] == []
+    assert result["rejected_symbols"] == ["BTCU"]
+    assert result["rejection_reasons"]["BTCU"] == "exchange_info_incomplete_metadata"
+
+
+def test_candidate_symbol_present_but_status_pending_does_not_emit_before_onboard_plus_grace():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_candidate_symbols_against_exchangeinfo,
+    )
+
+    result = validate_candidate_symbols_against_exchangeinfo(
+        candidates=["BTCU"],
+        exchangeinfo_by_symbol={"BTCU": {"symbol": "BTCU", "contractType": "PERPETUAL", "status": "PRE_TRADING", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000}},
+        allowed_margin_assets=("USDT", "USDC", "U"),
+        allowed_quote_assets=("USDT", "USDC", "U"),
+        allowed_contract_types=("PERPETUAL",),
+        validatable_statuses=("TRADING", "PENDING_TRADING", "PRE_TRADING"),
+        emittable_statuses=("TRADING",),
+        now_ms=1782892800000,
+    )
+
+    assert result["validated_symbols"] == []
+    assert result["pending_symbols"] == ["BTCU"]
+    assert result["pending_reasons"]["BTCU"] == "exchange_info_symbol_status_not_trading_prelaunch"
+
+
+def test_rejected_candidate_validation_emits_terminal_diagnostic_event(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "25da4614ffff435fa28544b27fd33a39",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined BTCU Perpetual Contract (2026-07-01)",
+                    "releaseDate": 1782821102782,
+                }]
+            }]
+        }
+    }
+    detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU Perpetual Contract."
+    exchange_info = {
+        "symbols": [{
+            "symbol": "BTCU",
+            "status": "TRADING",
+            "contractType": "CURRENT_QUARTER",
+            "quoteAsset": "U",
+            "marginAsset": "U",
+        }]
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
+        if "/support/announcement/25da4614" in url:
+            return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "rejected_candidate_smoke"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    event_files = list((output_root / "events").glob("*.jsonl"))
+    assert len(event_files) == 1
+    events = [json.loads(line) for line in event_files[0].read_text().splitlines() if line.strip()]
+    assert len(events) == 1
+    assert events[0]["symbols"] == []
+    assert events[0]["symbol_validation_status"] == "rejected"
+    assert events[0]["symbol_parse_status"] == "terminal_failed"
+    assert events[0]["symbol_parse_failed_reason"] == "exchange_info_disallowed_contract_type"
+
+
+def test_effective_launch_time_prefers_exchangeinfo_onboard_date_over_detail_time():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_effective_launch_times_ms,
+    )
+
+    result = build_effective_launch_times_ms(
+        candidate_symbols=["BTCU"],
+        symbol_onboard_times_ms={"BTCU": 1782896400000},
+        symbol_launch_times_ms={"BTCU": 1782892800000},
+        source_published_at_ms=1782830702782,
+        first_detected_at_ms=1782889542209,
+    )
+
+    assert result["symbol_effective_launch_times_ms"] == {"BTCU": 1782896400000}
+    assert result["launch_time_source"] == "exchange_info"
+
+
+def test_effective_launch_time_falls_back_to_detail_when_onboard_missing():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_effective_launch_times_ms,
+    )
+
+    result = build_effective_launch_times_ms(
+        candidate_symbols=["BTCU"],
+        symbol_onboard_times_ms={},
+        symbol_launch_times_ms={"BTCU": 1782896400000},
+        source_published_at_ms=1782830702782,
+        first_detected_at_ms=1782889542209,
+    )
+
+    assert result["symbol_effective_launch_times_ms"] == {"BTCU": 1782896400000}
+    assert result["launch_time_source"] == "detail"
+
+
+def test_fixture_mode_exchangeinfo_payload_enables_candidate_validation_without_network(tmp_path, monkeypatch):
+    fixture_json_path = tmp_path / "fixture_with_exchangeinfo.json"
+    fixture = {
+        "exchangeInfoPayload": {
+            "symbols": [
+                {"symbol": "BTCU", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+                {"symbol": "ETHU", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000},
+            ]
+        },
+        "data": {"catalogs": [{"articles": [{
+            "code": "25da4614ffff435fa28544b27fd33a39",
+            "title": "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)",
+            "releaseDate": 1782830702782,
+            "detailPayload": "USDⓈ-M Perpetual Contract BTCU ETHU Settlement Asset U U",
+        }]}]},
+    }
+    fixture_json_path.write_text(json.dumps(fixture))
+
+    def fail_network(*args, **kwargs):
+        raise AssertionError("fixture mode must not call live network")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_network)
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "fixture_smoke_u"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--fixture-json", str(fixture_json_path),
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("sys.argv", args):
+        rc = main()
+
+    assert rc == 0
+    event_files = list((output_root / "events").glob("*.jsonl"))
+    persisted_events = [
+        json.loads(line)
+        for path in event_files
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert persisted_events
+    symbols_extracted = sorted(persisted_events[0]["symbols"])
+    assert symbols_extracted == ["BTCU", "ETHU"]
+    assert persisted_events[0]["symbol_validation_status"] == "validated"
+    assert persisted_events[0]["symbol_parse_status"] == "parsed"
+
+
 
 
 

@@ -482,12 +482,12 @@ docs/plans/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expan
 docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expansion-review_CN.md
 ```
 
-### 10.5 Stage 1.5D：Live Event-Source Smoke Collector（已实现，正式 24h 运行中）
+### 10.5 Stage 1.5D：Live Event-Source Collector（已实现，7d U-settled hotfix observation 运行中）
 
 目标：
 
 ```text
-验证真实 Binance announcement source 的 latency、字段稳定性、schema drift、request health、heartbeat、first futures bar observation。
+验证真实 Binance announcement source 的 latency、字段稳定性、schema drift、request health、heartbeat、symbol extraction、first futures bar observation。
 ```
 
 已完成事项：
@@ -499,35 +499,45 @@ docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-exp
 实现 first futures bar observer，且不阻塞 announcement poll loop。
 实现 fixture smoke 与 short live smoke。
 完成服务器部署流程文档。
+完成 Multiple TradFi detail fallback，避免 "Multiple USD-Margined TradFi Perpetual Contracts" 标题 symbols=[]。
+完成 BTCU/ETHU U-settled raw contract symbol hotfix：BTCU / ETHU 不得被改写成 BTCUUSDT / ETHUUSDT。
 ```
 
 当前状态：
 
 ```text
-short live smoke decision = stage1_5d_smoke_observation_in_progress
-research_result_valid = false
-event_detection_validated = false
-poll_count = 3
-deduped_new_event_count = 28
+current_server_mode = 7d_u_settled_hotfix_observation
+current_stage1_5d_output_root_pattern = data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_u_hotfix
+primary_event_type_under_live_observation = futures_contract_launch
+known_recent_edge_case = BTCU/ETHU U-settled raw contract symbols
 ```
 
 解释：
 
 ```text
-短 smoke 只证明本地路径闭环，不是正式 24h operational pass。
-正式 24h source smoke 必须是同一个 output-root 下连续运行 >= 24h。
-多段中断运行不能拼接成正式 24h。
-服务器已部署，当前应等待正式 24h 运行结束后取回 summary / JSONL / review。
+Stage 1.5D 已不再只是 24h smoke；当前任务是 7d continuous observation。
+1.5D 负责把 Binance 公告转换成事件行，但不证明交易价值。
+如果 raw payload 出现新 launch 标题，但 events 行 symbols=[]，应先检查 parser / detail fallback / exchangeInfo validation。
+如果 symbols 非空且通过 exchangeInfo validation，才允许交给 Stage 1.5F live depth observer。
 ```
 
-正式 24h 后可能出现两种合格结果：
+当前合格输出形态：
 
 ```text
-stage1_5d_operational_pass_event_detection_unvalidated:
-  24h 内 collector 稳定，但没有新 futures launch event。
+普通 BASEUSDT/BASEUSDC launch:
+  symbol_extraction_source = title 或 detail
+  symbol_validation_status = validated
 
-stage1_5d_event_detection_passed:
-  24h 内捕捉到新 futures launch event，并完成 first futures bar observation。
+Multiple TradFi launch:
+  symbol_extraction_source = detail 或 detail_base_asset_derived
+  detail_fetch_attempted = true
+
+U-settled launch，例如 BTCU/ETHU:
+  symbol_extraction_source = detail_contract_symbol
+  symbols = ["BTCU", "ETHU"]
+  symbol_validation_status = validated
+  quoteAsset = U
+  marginAsset = U
 ```
 
 主要证据：
@@ -536,9 +546,13 @@ stage1_5d_event_detection_passed:
 docs/designs/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-design_CN.md
 docs/plans/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-implementation-plan_CN.md
 docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-review_CN.md
+docs/designs/2026-06-30-external-signal-shadow-lab-stage1-5d-multiple-tradfi-symbol-extraction-design_CN.md
+docs/plans/2026-06-30-external-signal-shadow-lab-stage1-5d-multiple-tradfi-symbol-extraction-implementation-plan_CN.md
+docs/plans/2026-07-01-external-signal-shadow-lab-stage1-5d-base-asset-launch-symbol-extraction-hotfix-plan_CN.md
+docs/plans/2026-07-01-external-signal-shadow-lab-stage1-5d-u-settlement-contract-symbol-hotfix-plan_CN.md
 ```
 
-### 10.6 Stage 1.5E：Execution Feasibility Data Audit（下一步，建议并行编写）
+### 10.6 Stage 1.5E：Execution Feasibility Data Audit（已完成，结论为 proxy failed）
 
 目标：
 
@@ -561,19 +575,20 @@ first 1h liquidity stabilization
 orderbook snapshot availability
 ```
 
-为什么必须做：
+关键结论：
 
 ```text
-Stage 1.5C 只使用 close price replay。
-close price replay 无法证明真实盘口可以成交。
-futures launch 初期常见薄盘口、宽点差、插针、做市商重新定价、深度塌陷。
-如果执行可行性失败，Stage 1.5C promising 只能保留为研究现象，不能进入 shadow execution。
+decision = stage1_5e_execution_feasibility_proxy_failed
+原因：现有历史 close/kline proxy 不能证明真实成交、点差、盘口深度和 slippage。
+影响：Stage 1.5C promising cell 只能保留为研究现象，不能进入 paper/live，也不能解释为 alpha。
 ```
 
-建议下一步文档：
+为什么这不是坏事：
 
 ```text
-docs/plans/2026-06-25-external-signal-shadow-lab-stage1-5e-execution-feasibility-data-audit-implementation-plan_CN.md
+1.5E 正确阻断了“用 close price 假装可成交”的错误路径。
+它把后续研究从历史 proxy 拉回到 live public depth evidence。
+因此 1.5F 必须只记录 watermark 后的新事件，不能补历史盘口。
 ```
 
 安全边界：
@@ -584,6 +599,122 @@ paper_trading_allowed = false
 live_trading_allowed = false
 alpha_interpretation_allowed = false
 trade_signal_allowed = false
+```
+
+主要证据：
+
+```text
+docs/plans/2026-06-25-external-signal-shadow-lab-stage1-5e-execution-feasibility-data-audit-implementation-plan_CN.md
+data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
+```
+
+### 10.7 Stage 1.5F：Live Depth Observer（已实现，等待 post-watermark event）
+
+目标：
+
+```text
+对 Stage 1.5D 产生的 watermark 后 futures launch event-symbol，连续采集 12h Binance USD-M public depth snapshots。
+```
+
+已完成事项：
+
+```text
+实现 bootstrap watermark。
+实现 post-watermark event gate。
+实现 exchangeInfo gate、request budget gate、heartbeat、request manifest、depth snapshots、events_accepted / events_rejected。
+实现 12h observation window、min snapshot coverage、max gap、request success rate 等 evidence validity 规则。
+实现 U-settled raw symbol depth request：BTCU / ETHU 不得拼成 BTCUUSDT / ETHUUSDC。
+```
+
+当前状态：
+
+```text
+current_stage1_5f_output_root = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_u_hotfix
+expected_idle_decision_before_new_event = stage1_5f_observer_running_no_new_event
+post_watermark_events_accepted = 0 表示尚未有可观察的新事件，不表示程序失败。
+```
+
+1.5F 成功的最低条件：
+
+```text
+post_watermark_events_accepted >= 1
+active_observation_count > 0 或 completed_observation_count >= 1
+total_snapshots_collected 持续增长
+request_success_rate >= configured threshold
+research_result_valid 只能在至少一个 event-symbol 完成 12h depth evidence 后为 true。
+```
+
+主要证据：
+
+```text
+docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md
+docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md
+docs/reviews/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-review_CN.md
+```
+
+### 10.8 Stage 1.5G：Live Depth Evidence Review（下一步，可先写 plan，不能先下结论）
+
+目标：
+
+```text
+审核 Stage 1.5F 产出的 live depth evidence 是否足以支持“该事件类型可继续研究执行条件”。
+```
+
+它要回答的问题：
+
+```text
+1. 12h observation 是否覆盖完整，snapshot_count / first_ms / last_ms / max_gap 是否达标。
+2. spread、top depth、500 USDT slippage proxy 是否在可研究范围内。
+3. depth endpoint、exchangeInfo、request_manifest 是否一致且可审计。
+4. 是否存在 event source delay、symbol extraction delay 或 watermark 错位。
+5. 是否只能保留 no-trade / observation-only 结论。
+```
+
+它不能回答的问题：
+
+```text
+不能证明 alpha。
+不能证明 execution_feasibility_proven。
+不能生成 signal。
+不能进入 paper/live。
+```
+
+执行条件：
+
+```text
+可以现在编写 Stage 1.5G design / implementation plan。
+正式 evidence review 结论必须等至少一个 post-watermark event-symbol 完成 12h live depth observation。
+```
+
+### 10.9 后续事件源候选路线
+
+当前 futures_contract_launch 事件频率低，适合继续观察，但不适合孤注一掷。后续应并行准备其他 external catalyst source 的 design，而不是在 1.5F 空等。
+
+建议优先级：
+
+```text
+P1: exchange_delisting_notice
+  原因：事件语义强，可能产生流动性迁移和风险重估。
+  当前 blocker：需要 market_scope、effective_time、futures historical existence、是否可做空等字段。
+
+P2: margin_enablement / borrow_enablement / leverage_enablement
+  原因：杠杆可得性变化可能改变参与者结构。
+  当前 blocker：公告字段分散，需要确认 source coverage 与 available_at_ms。
+
+P3: trading_pair_addition / spot listing / futures listing family
+  原因：可作为流动性迁移与 attention shock 家族。
+  当前 blocker：不同 listing 类型不能混成一个 event_type。
+
+P4: scheduled token unlock / emission
+  原因：供给压力语义强。
+  当前 blocker：第三方 calendar 存在 hindsight risk，需要严格 source audit。
+```
+
+当前建议：
+
+```text
+不要暂停 1.5D / 1.5F。
+等待 futures launch live depth evidence 的同时，先写 exchange_delisting_notice 的 source/schema/effective-time design。
 ```
 
 ---
@@ -636,8 +767,8 @@ filter matrix 没有增量价值
 即使历史 replay 通过，也只允许进入：
 
 ```text
-24h live smoke collector
-7d shadow observation
+7d live source observation
+7d live depth observation
 30d shadow observation
 ```
 
@@ -657,20 +788,26 @@ position sizing
 ## 13. 当前正式建议
 
 ```text
-decision = continue_stage1_5d_24h_live_source_smoke_and_write_stage1_5e_execution_feasibility_audit_plan
+decision = continue_stage1_5d_1_5f_7d_u_settled_hotfix_observation_and_prepare_stage1_5g_plan
 stage1_5a_source_audit_status = completed
 stage1_5b_minimal_event_table_status = completed
 stage1_5c_historical_replay_status = completed_with_promising_cells
 stage1_5c1_price_coverage_status = completed_ready_for_1_5c_rerun
-stage1_5d_live_source_smoke_status = implemented_and_formal_24h_run_pending_or_running
-stage1_5e_execution_feasibility_audit_status = next_plan_to_write
+stage1_5d_live_source_collector_status = implemented_7d_u_settled_hotfix_observation_running
+stage1_5d_symbol_extraction_status = multiple_tradfi_and_u_settled_hotfix_applied
+stage1_5e_execution_feasibility_audit_status = completed_proxy_failed
+stage1_5f_live_depth_observer_status = implemented_waiting_for_post_watermark_event_or_collecting_when_event_arrives
+stage1_5g_live_depth_evidence_review_status = next_plan_to_write_not_yet_executable_as_final_review_until_completed_depth_evidence_exists
 primary_event_type_under_research = futures_contract_launch
 primary_promising_cell = futures_contract_launch_long_attention_diagnostic_12h_close_price_replay_only
 exchange_delisting_notice_status = insufficient_futures_replay_sample_pending_market_scope_and_effective_time_work
 external_catalyst_events_collection_allowed = true
 historical_replay_completed = true
-live_event_source_smoke_allowed = true
-execution_feasibility_audit_allowed = true
+live_event_source_collector_allowed = true
+live_depth_observation_allowed = true
+stage1_5g_plan_allowed = true
+execution_feasibility_audit_completed_but_failed_to_prove_execution = true
+execution_feasibility_claim_allowed = false
 paper_trading_allowed = false
 live_trading_allowed = false
 execution_engine_allowed = false
@@ -680,9 +817,9 @@ alpha_interpretation_allowed = false
 一句话：
 
 ```text
-External Catalyst Events + Filter 已经从 source audit 推进到 historical replay 与 live source smoke；
+External Catalyst Events + Filter 已经从 source audit 推进到 historical replay、live source collector 与 live depth observation；
 当前唯一有希望的研究现象是 Binance futures_contract_launch 在 12h long_attention diagnostic close-price replay 上的 promising cell；
 但它仍然不能解释成 alpha 或交易信号。
-下一步必须同时完成 24h live event-source smoke 和 execution feasibility data audit，
-确认 source 能稳定捕捉事件、盘口执行条件没有把 close-price replay 的收益吃掉。
+1.5E 已证明 historical proxy 不能证明执行可行性；下一步不是交易，而是等待 1.5F 对 watermark 后新事件完成 12h live depth evidence，
+同时编写 1.5G review plan，并准备 exchange_delisting_notice 等低频外部事件源的下一条研究支线。
 ```

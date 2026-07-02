@@ -1551,6 +1551,29 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC = 3600
 # Maximum age for retrying a pending detail fallback before marking terminal failed.
 
 
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS = ("USDT", "USDC", "U")
+# Public Binance USD-M futures margin/settlement assets allowed for event-symbol validation.
+
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS = ("USDT", "USDC", "U")
+# Public Binance USD-M futures quote assets allowed for event-symbol validation.
+
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL",)
+# Only perpetual futures launch events are valid for Stage 1.5D/1.5F handoff.
+
+EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES = ("TRADING", "PENDING_TRADING", "PRE_TRADING")
+# Statuses that may keep a candidate in validation/pending state.
+
+EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES = ("TRADING",)
+# Only these statuses may emit parsed event-symbol rows for Stage 1.5F.
+
+EXTERNAL_SIGNAL_STAGE1_5D_PENDING_VALIDATION_GRACE_AFTER_LAUNCH_SEC = 30 * 60
+# Keep pre-launch symbol validation pending until launch time plus this grace buffer.
+
+EXTERNAL_SIGNAL_STAGE1_5D_PENDING_VALIDATION_MAX_TOTAL_SEC = 12 * 60 * 60
+# Absolute upper bound for pending validation to avoid unbounded retry state.
+
+
+
 
 # ─── External Signal Shadow Lab Stage 1.5E: Execution Feasibility Data Audit ───
 

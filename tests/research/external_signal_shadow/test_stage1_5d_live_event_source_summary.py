@@ -122,10 +122,21 @@ def test_summary_includes_detail_fallback_counters():
             "detail_symbol_parse_failed_count": 1,
             "title_symbol_extracted_count": 3,
             "symbol_empty_event_count": 1,
+            "candidate_validation_pending_count": 5,
+            "candidate_validation_success_count": 4,
+            "candidate_validation_expired_count": 3,
+            "u_settlement_symbol_extracted_count": 2,
+            "pre_launch_validation_deferred_count": 1,
         },
     )
 
     assert summary["detail_fetch_attempted_count"] == 2
     assert summary["detail_symbol_extracted_count"] == 1
     assert summary["title_symbol_extracted_count"] == 3
+    assert summary["candidate_validation_pending_count"] == 5
+    assert summary["candidate_validation_success_count"] == 4
+    assert summary["candidate_validation_expired_count"] == 3
+    assert summary["u_settlement_symbol_extracted_count"] == 2
+    assert summary["pre_launch_validation_deferred_count"] == 1
+
 
