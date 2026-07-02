@@ -1788,6 +1788,62 @@ def test_detail_http_404_does_not_emit_success_or_persist_payload(tmp_path):
     assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events)
 
 
+def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "3",
+        "--poll-interval-sec", "0",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, **kwargs):
+        return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 404, "payload_size_bytes": 9, "row_count": None, "error": "detail_payload_http_status_404"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    terminal_rows = [
+        row for row in events
+        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "terminal_failed"
+    ]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["symbols"] == []
+    assert terminal_rows[0]["detail_fetch_status"] == "detail_payload_http_status_404"
+    assert terminal_rows[0]["symbol_parse_failed_reason"] == "detail_payload_http_status_404"
+
+    summary_data = json.loads(summary.read_text())
+    assert summary_data["detail_fetch_failed_count"] == 3
+    assert summary_data["detail_terminal_failed_count"] == 1
+    assert summary_data["symbol_parse_failed_count"] == 1
+    assert summary_data["symbol_empty_event_count"] == 1
+
+
 def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_path):
     list_payload = {
         "data": {
@@ -1954,7 +2010,6 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
         and row.get("symbol_parse_status") == "parsed"
     ]
     assert len(parsed_rows2) == 1
-
 
 
 
