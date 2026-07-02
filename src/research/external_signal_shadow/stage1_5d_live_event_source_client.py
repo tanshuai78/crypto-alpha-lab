@@ -187,6 +187,37 @@ def fetch_public_payload(url: str, live_public_readonly: bool, timeout_sec: floa
 
                 status_code = getattr(response, "status", 200)
                 raw_bytes = response.read()
+
+                if status_code != 200:
+                    return {
+                        "ok": False,
+                        "payload": None,
+                        "requested_url": url,
+                        "final_url": final_url,
+                        "requested_host": requested_host,
+                        "final_host": urllib.parse.urlparse(final_url).hostname or "",
+                        "redirect_count": redirect_count,
+                        "http_status": status_code,
+                        "payload_size_bytes": len(raw_bytes),
+                        "row_count": None,
+                        "error": f"detail_payload_http_status_{status_code}",
+                    }
+
+                if len(raw_bytes) == 0:
+                    return {
+                        "ok": False,
+                        "payload": None,
+                        "requested_url": url,
+                        "final_url": final_url,
+                        "requested_host": requested_host,
+                        "final_host": urllib.parse.urlparse(final_url).hostname or "",
+                        "redirect_count": redirect_count,
+                        "http_status": status_code,
+                        "payload_size_bytes": 0,
+                        "row_count": None,
+                        "error": "empty_detail_payload",
+                    }
+
                 content = raw_bytes.decode("utf-8")
 
                 if final_url != url:

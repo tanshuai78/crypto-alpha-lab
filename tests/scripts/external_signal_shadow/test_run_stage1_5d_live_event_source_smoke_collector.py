@@ -693,9 +693,15 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
         "--poll-interval-sec", "0",
     ]
 
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        if "/support/announcement/25da4614" in url:
+            return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "payload_size_bytes": len(detail_payload), "error": None}
+        raise AssertionError(url)
+
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch):
-        with patch("sys.argv", args):
-            rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
 
     assert rc == 0
     s = json.loads(summary.read_text())
@@ -752,10 +758,16 @@ def test_base_asset_derived_symbol_not_emitted_when_exchange_info_missing(tmp_pa
         "--poll-interval-sec", "2",
     ]
 
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        if "/support/announcement/25da4614" in url:
+            return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "payload_size_bytes": len(detail_payload), "error": None}
+        raise AssertionError(url)
+
     with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 1):
         with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     json.loads(summary.read_text())
@@ -1548,10 +1560,402 @@ def test_fixture_mode_exchangeinfo_payload_enables_candidate_validation_without_
         if line.strip()
     ]
     assert persisted_events
+    assert persisted_events
     symbols_extracted = sorted(persisted_events[0]["symbols"])
     assert symbols_extracted == ["BTCU", "ETHU"]
     assert persisted_events[0]["symbol_validation_status"] == "validated"
     assert persisted_events[0]["symbol_parse_status"] == "parsed"
+
+
+def _read_jsonl_files(directory):
+    if not directory.exists():
+        return []
+    rows = []
+    for path in sorted(directory.glob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def test_empty_detail_payload_keeps_article_pending_retry_without_terminal_event(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, **kwargs):
+        return {
+            "ok": True,
+            "payload": list_payload,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 200,
+            "payload_size_bytes": 100,
+            "row_count": 1,
+            "error": None,
+        }
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {
+            "ok": False,
+            "payload": None,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 202,
+            "payload_size_bytes": 0,
+            "row_count": None,
+            "error": "empty_detail_payload",
+        }
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(
+        row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "terminal_failed"
+        for row in events
+    )
+
+    manifest = _read_jsonl_files(output_root / "request_manifest")
+    empty_rows = [
+        r for r in manifest
+        if r.get("source_type") == "announcement_detail"
+        and r.get("error") == "empty_detail_payload"
+        and "d2acaa91c14e4cc598aaee1017efc1ac" in (r.get("url") or "")
+    ]
+    assert len(empty_rows) >= 1
+    assert empty_rows[-1]["http_status"] == 202
+    assert empty_rows[-1]["payload_size_bytes"] == 0
+    assert empty_rows[-1]["response_payload_size_bytes"] == 0
+    assert empty_rows[-1].get("payload_path") in (None, "")
+    assert empty_rows[-1].get("payload_sha256") in (None, "")
+    assert empty_rows[-1].get("payload_trusted") is False
+
+    summary_data = json.loads(summary.read_text())
+    assert summary_data["detail_fetch_attempted_count"] >= 1
+    assert summary_data["detail_fetch_failed_count"] >= 1
+    assert summary_data["detail_pending_retry_count"] >= 1
+    assert summary_data["detail_empty_payload_count"] >= 1
+    assert summary_data.get("symbol_empty_event_count", 0) == 0
+    assert summary_data.get("symbol_parse_failed_count", 0) == 0
+
+
+def test_detail_http_429_keeps_pending_retry_without_terminal_event(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, **kwargs):
+        return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 429, "payload_size_bytes": 17, "row_count": None, "error": "detail_payload_http_status_429"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events)
+
+
+def test_detail_http_503_keeps_pending_retry_without_terminal_event(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, **kwargs):
+        return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 503, "payload_size_bytes": 19, "row_count": None, "error": "detail_payload_http_status_503"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events)
+
+
+def test_detail_http_404_does_not_emit_success_or_persist_payload(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, **kwargs):
+        return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 404, "payload_size_bytes": 9, "row_count": None, "error": "detail_payload_http_status_404"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    # For option A: max_retries limit is 3, first poll is retry_count=1, so no terminal event yet.
+    assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events)
+
+
+def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    fixture_info = {
+        "symbols": [
+            {"symbol": "STRCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000},
+            {"symbol": "CATUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000},
+        ]
+    }
+    fixture_path = tmp_path / "exchangeInfo.json"
+    fixture_path.write_text(json.dumps(fixture_info))
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "2",
+        "--poll-interval-sec", "0",
+    ]
+
+    poll_num = 0
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": len(fixture_info["symbols"]), "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        nonlocal poll_num
+        poll_num += 1
+        if poll_num == 1:
+            return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": None, "error": "empty_detail_payload"}
+        else:
+            return {
+                "ok": True,
+                "payload": "2026-07-02 09:15 (UTC): STRCUSDT Perpetual Contract\n2026-07-02 09:20 (UTC): CATUSDT Perpetual Contract",
+                "requested_url": url,
+                "final_url": url,
+                "http_status": 200,
+                "payload_size_bytes": 100,
+                "row_count": None,
+                "error": None,
+            }
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    parsed_rows = [
+        row for row in events
+        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "parsed"
+    ]
+    assert len(parsed_rows) == 1
+    assert "STRCUSDT" in parsed_rows[0]["symbols"]
+    assert "CATUSDT" in parsed_rows[0]["symbols"]
+
+
+def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_seen_ids(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+                    "releaseDate": 1782830702782,
+                }]
+            }]
+        }
+    }
+    fixture_info = {
+        "symbols": [
+            {"symbol": "STRCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000},
+            {"symbol": "CATUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000},
+        ]
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    # Run 1: detail returns ok=False, empty_detail_payload
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": len(fixture_info["symbols"]), "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch1(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": None, "error": "empty_detail_payload"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch1):
+            with patch("sys.argv", args1):
+                rc1 = main()
+
+    assert rc1 == 0
+    events1 = _read_jsonl_files(output_root / "events")
+    assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events1)
+
+    # Run 2 (restart): detail returns ok=True
+    args2 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_payload_fetch2(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {
+            "ok": True,
+            "payload": "2026-07-02 09:15 (UTC): STRCUSDT Perpetual Contract\n2026-07-02 09:20 (UTC): CATUSDT Perpetual Contract",
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 200,
+            "payload_size_bytes": 100,
+            "row_count": None,
+            "error": None,
+        }
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch2):
+            with patch("sys.argv", args2):
+                rc2 = main()
+
+    assert rc2 == 0
+    events2 = _read_jsonl_files(output_root / "events")
+    parsed_rows2 = [
+        row for row in events2
+        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "parsed"
+    ]
+    assert len(parsed_rows2) == 1
+
+
 
 
 

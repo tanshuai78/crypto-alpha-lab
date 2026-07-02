@@ -127,6 +127,10 @@ def test_summary_includes_detail_fallback_counters():
             "candidate_validation_expired_count": 3,
             "u_settlement_symbol_extracted_count": 2,
             "pre_launch_validation_deferred_count": 1,
+            "detail_pending_retry_count": 3,
+            "detail_empty_payload_count": 1,
+            "detail_http_not_ready_count": 2,
+            "detail_terminal_failed_count": 1,
         },
     )
 
@@ -138,5 +142,9 @@ def test_summary_includes_detail_fallback_counters():
     assert summary["candidate_validation_expired_count"] == 3
     assert summary["u_settlement_symbol_extracted_count"] == 2
     assert summary["pre_launch_validation_deferred_count"] == 1
+    assert summary["detail_pending_retry_count"] == 3
+    assert summary["detail_empty_payload_count"] == 1
+    assert summary["detail_http_not_ready_count"] == 2
+    assert summary["detail_terminal_failed_count"] == 1
 
 

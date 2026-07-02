@@ -638,3 +638,26 @@ OUT_ROOT 为空导致 summary 写到 /binance_futures_launch_smoke_summary.json
 ### 12.4 旧事件不能补完整 12h live depth
 
 已经错过 12h entry window 的事件，即使现在 parser 修复，也不能补成完整 live depth evidence。只能等待 watermark 之后的新事件。
+
+### 12.5 2026-07-02 empty detail payload incident
+
+2026-07-02 incident: Binance announcement detail returned HTTP 202 + 0-byte body.
+Old behavior: treated as success, persisted empty payload, emitted symbols=[] terminal_failed.
+Fixed behavior: treats as transient detail unavailable, writes manifest failure, keeps pending_retry, no terminal event.
+
+Monitoring command:
+```bash
+python - <<'PY'
+import json, os
+from pathlib import Path
+root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
+for path in sorted((root / "request_manifest").glob("*.jsonl")):
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("source_type") == "announcement_detail" and row.get("payload_size_bytes") == 0:
+            print(json.dumps(row, ensure_ascii=False))
+PY
+```
+

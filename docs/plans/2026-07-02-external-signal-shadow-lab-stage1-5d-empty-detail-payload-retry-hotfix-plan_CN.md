@@ -91,7 +91,9 @@ terminal_or_policy_controlled_detail_unavailable:
 Minimum acceptable rule:
   all non-200 responses return ok=false
   202/empty/429/5xx keep pending_retry
-  400/401/403/404 never become success and never persist trusted payload; whether they retry until max age or terminal-fail immediately must be explicit in runner tests
+  400/401/403/404 never become success and never persist trusted payload
+  400/401/403/404 follow max_retries exhaustion, not silent pop and not infinite retry
+  when max_retries is exhausted, emit explicit terminal_failed with reason detail_payload_http_status_<status>
 ```
 
 Manifest payload semantics:
@@ -110,7 +112,7 @@ Execution order:
 1. Run/add the July 2 parser regression first to confirm parser handles normal detail body text.
 2. Fix client semantics: only HTTP 200 + non-empty body can be success.
 3. Fix runner transient retry semantics and manifest fields.
-4. Verify same-process retry and process-restart retry.
+4. Verify same-process retry and current process-restart behavior.
 5. Add summary counters.
 6. Run 1.5F regression and safety grep.
 7. Update docs.
@@ -380,9 +382,10 @@ def test_detail_http_404_does_not_emit_success_or_persist_payload(tmp_path):
     # Mock fetch_public_payload with ok=False, http_status=404, error=detail_payload_http_status_404.
     # Assert no parsed success event.
     # Assert no trusted payload_path/payload_sha256.
-    # If implementation chooses retry-until-max-age for 404, assert no terminal event on first attempt.
-    # If implementation chooses immediate terminal for 404, assert explicit terminal reason detail_payload_http_status_404.
-    # In either case: never symbols parsed, never detail_fetch_status=success.
+    # Assert no terminal event on first attempt if max_retries has not been exhausted.
+    # Assert retry_count or equivalent failure accounting increments for the non-transient attempt.
+    # After max_retries is exhausted, assert explicit terminal_failed reason detail_payload_http_status_404.
+    # In all cases: never symbols parsed, never detail_fetch_status=success.
 ```
 
 ### Step 2: Run test and confirm fail
@@ -421,6 +424,18 @@ Required behavior:
    do not add source_article_id to terminal seen set
    do not call detail_retry_state.pop(code, None)
    continue
+4. if error is terminal_or_policy_controlled_detail_unavailable:
+   increment state["retry_count"] for this failed detail attempt
+   keep detail_retry_state[code] until retry_count >= max_retries_limit
+   do not append parsed/success event
+   do not persist trusted payload
+   if retry_count < max_retries_limit:
+      continue
+   if retry_count >= max_retries_limit:
+      emit terminal_failed event with symbol_parse_failed_reason = fetch_res["error"]
+      detail_fetch_status = fetch_res["error"]
+      detail_retry_state.pop(code, None)
+      continue
 ```
 
 Transient classification helper may be local to runner:
@@ -441,6 +456,14 @@ def is_transient_detail_fetch_error(fetch_res: dict) -> bool:
 ```
 
 Do not persist a 0-byte detail payload as trusted detail evidence. The manifest is enough audit evidence for the failed attempt.
+
+Implementation note:
+
+```text
+Current runner else branch for fetch_res["ok"] is false does not increment state["retry_count"].
+This hotfix must add retry_count increment for terminal_or_policy_controlled_detail_unavailable so max_retries_limit can actually terminate 400/401/403/404 paths.
+Transient 202/empty/429/5xx may use retry_count or max_age depending on current runner policy, but must never success or terminal-fail on the first transient attempt.
+```
 
 Required manifest fields for failed detail attempts:
 
@@ -496,7 +519,7 @@ This test verifies same-process retry state. It must also indirectly verify that
 Add a second explicit process-restart test:
 
 ```python
-def test_empty_detail_retry_survives_process_restart_by_not_marking_seen(tmp_path):
+def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_seen_ids(tmp_path):
     # Run 1 against output_root:
     #   list payload includes article
     #   detail returns ok=False, http_status=202, error=detail_payload_http_status_202
@@ -511,7 +534,25 @@ def test_empty_detail_retry_survives_process_restart_by_not_marking_seen(tmp_pat
     # Assert exactly one parsed event row exists after run 2.
 ```
 
-The restart test is blocking. In-memory retry is not enough: after process restart, the article must not be permanently missed because no terminal event / seen id was written during the empty-detail attempt.
+Important current-runner behavior:
+
+```text
+seen_event_ids is currently initialized as an empty in-memory set on each runner start.
+The runner does not rebuild seen_event_ids from existing events/*.jsonl at startup.
+Therefore, this process-restart test does not prove durable retry state.
+It verifies the current behavior: after restart, the same article can re-enter the detail fetch path because in-process seen ids do not survive restart.
+```
+
+This is acceptable for this hotfix because the bug being fixed is the in-process terminal failure path. Do not add disk-backed dedupe/retry-state rebuilding in this hotfix.
+
+Out of scope for this plan:
+
+```text
+Run 1: detail success -> emit parsed event
+Run 2 same output_root: same article -> must not emit duplicate parsed event
+```
+
+That stronger restart dedupe invariant requires a separate plan to rebuild seen_event_ids from events/*.jsonl at startup.
 
 If the runner does not currently support multiple polls cleanly in one test, run `main()` twice against the same `output_root` with fixture/mock state, preserving files.
 
@@ -520,11 +561,11 @@ If the runner does not currently support multiple polls cleanly in one test, run
 ```bash
 PYTHONPATH=src:. .venv/bin/python -m pytest \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py::test_empty_detail_payload_retries_and_success_later_emits_symbols_once \
-  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py::test_empty_detail_retry_survives_process_restart_by_not_marking_seen \
+  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py::test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_seen_ids \
   -q
 ```
 
-Expected after Task 2: likely pass or reveal missing retry persistence. If fail, fix only retry-state behavior needed for this case.
+Expected after Task 2: likely pass or reveal a same-process retry-state issue / current restart behavior mismatch. If fail, fix only the retry behavior needed for this hotfix; do not add disk-backed event dedupe in this plan.
 
 ### Step 3: Ensure no duplicate events
 
@@ -596,7 +637,7 @@ Expected: pass. If it fails, fix parser before touching runner.
 ## Task 5: Summary and diagnostics counters stay truthful
 
 **Files:**
-- Modify if needed: `src/research/external_signal_shadow/stage1_5d_live_event_source_summary.py`
+- Modify: `src/research/external_signal_shadow/stage1_5d_live_event_source_summary.py`
 - Test: `tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py`
 - Test: `tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py`
 
@@ -857,7 +898,7 @@ collector keeps retrying until configured retry / age policy decides otherwise.
 8. Empty detail payload does not emit `symbols=[] terminal_failed` event.
 9. Empty detail payload does not add terminal event id to `seen_event_ids`.
 10. Same-process retry can later emit exactly one parsed event with symbols.
-11. Process-restart retry can later emit exactly one parsed event with symbols from the same output root.
+11. Process-restart retry can later emit exactly one parsed event with symbols from the same output root under current in-process-only `seen_event_ids`; restart after a successful emit may duplicate events, and durable startup dedupe requires a separate plan.
 12. July 2 TradFi body text parser extracts all eight expected symbols.
 13. Summary includes `detail_pending_retry_count`, `detail_empty_payload_count`, and `detail_http_not_ready_count`.
 14. 1.5F still ignores `symbols=[]` and uses normal post-watermark non-empty event-symbol flow.

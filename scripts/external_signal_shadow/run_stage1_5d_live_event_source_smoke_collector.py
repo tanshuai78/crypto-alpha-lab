@@ -208,6 +208,20 @@ def build_candidate_terminal_event(
     return norm_event
 
 
+TRANSIENT_DETAIL_HTTP_STATUSES = {202, 408, 425, 429, 500, 502, 503, 504}
+
+def is_transient_detail_fetch_error(fetch_res: dict) -> bool:
+    error = fetch_res.get("error") or ""
+    status = fetch_res.get("http_status")
+    if error == "empty_detail_payload":
+        return True
+    if status in TRANSIENT_DETAIL_HTTP_STATUSES:
+        return True
+    if error.startswith("detail_payload_http_status_5"):
+        return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live-public-readonly", action="store_true")
@@ -309,6 +323,9 @@ def main():
     detail_fetch_url_rejected_count = 0
     detail_symbol_extracted_count = 0
     detail_symbol_parse_failed_count = 0
+    detail_empty_payload_count = 0
+    detail_http_not_ready_count = 0
+    detail_terminal_failed_count = 0
     title_symbol_extracted_count = 0
     symbol_empty_event_count = 0
 
@@ -563,6 +580,7 @@ def main():
                     symbol_empty_event_count += 1
                     symbol_parse_failed_count += 1
                     detail_symbol_parse_failed_count += 1
+                    detail_terminal_failed_count += 1
                     if has_candidate_symbols:
                         candidate_validation_expired_count += len(state["candidate_symbols"])
 
@@ -608,6 +626,7 @@ def main():
                     symbol_empty_event_count += 1
                     symbol_parse_failed_count += 1
                     detail_symbol_parse_failed_count += 1
+                    detail_terminal_failed_count += 1
 
                     norm_event = normalize_live_event(
                         raw=state["raw"],
@@ -1138,11 +1157,62 @@ def main():
                         "payload_sha256": None,
                         "payload_size_bytes": 0,
                         "payload_path": None,
+                        "payload_trusted": False,
+                        "response_payload_size_bytes": fetch_res.get("payload_size_bytes") or 0,
                         "parser_version": PARSER_VERSION,
                         "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
                     }
                     append_jsonl(stream_paths["request_manifest"], detail_manifest)
                     request_manifest.append(detail_manifest)
+
+                    # Update counters
+                    if fetch_res.get("error") == "empty_detail_payload" or fetch_res.get("payload_size_bytes") == 0:
+                        detail_empty_payload_count += 1
+                    
+                    status = fetch_res.get("http_status")
+                    if status in TRANSIENT_DETAIL_HTTP_STATUSES:
+                        detail_http_not_ready_count += 1
+
+                    # Check transient vs non-transient
+                    if is_transient_detail_fetch_error(fetch_res):
+                        continue
+                    else:
+                        max_retries_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
+                        if state["retry_count"] >= max_retries_limit:
+                            symbol_empty_event_count += 1
+                            symbol_parse_failed_count += 1
+                            detail_symbol_parse_failed_count += 1
+                            detail_terminal_failed_count += 1
+
+                            err_reason = fetch_res.get("error") or "fetch_failed"
+                            norm_event = normalize_live_event(
+                                raw=state["raw"],
+                                source_parent_url=source_parent_url,
+                                detected_at_ms=state["first_detected_at_ms"],
+                                source_published_at_ms=state["raw"].get("releaseDate"),
+                                source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
+                                symbols_override=(),
+                                extraction_metadata={
+                                    "symbol_extraction_source": "none",
+                                    "detail_fetch_attempted": True,
+                                    "detail_fetch_status": err_reason,
+                                    "symbol_parse_failed_reason": err_reason,
+                                    "symbol_parse_status": "terminal_failed",
+                                }
+                            )
+                            norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
+                            norm_event["detail_fetched_at_ms"] = now_ms
+                            norm_event["symbol_resolved_at_ms"] = now_ms
+                            norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
+
+                            event_id = norm_event["event_id"]
+                            if event_id not in seen_event_ids:
+                                seen_event_ids.add(event_id)
+                                append_jsonl(stream_paths["events"], norm_event)
+                                events_detected.append(norm_event)
+
+                            detail_retry_state.pop(code, None)
+                        continue
 
             append_jsonl(stream_paths["raw_payloads"], {"timestamp_ms": now_ms, "payload": payload})
 
@@ -1283,6 +1353,10 @@ def main():
             "candidate_validation_expired_count": candidate_validation_expired_count,
             "u_settlement_symbol_extracted_count": u_settlement_symbol_extracted_count,
             "pre_launch_validation_deferred_count": pre_launch_validation_deferred_count,
+            "detail_pending_retry_count": len(detail_retry_state),
+            "detail_empty_payload_count": detail_empty_payload_count,
+            "detail_http_not_ready_count": detail_http_not_ready_count,
+            "detail_terminal_failed_count": detail_terminal_failed_count,
         },
     )
 

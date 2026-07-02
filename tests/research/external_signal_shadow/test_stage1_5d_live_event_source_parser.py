@@ -308,5 +308,38 @@ def test_detail_contract_symbol_candidate_does_not_collect_table_labels():
     assert result["symbols"] == ["BTCU", "ETHU"]
 
 
+def test_detail_extracts_july_2_tradfi_usdt_symbols_from_body_text():
+    detail_text = """
+    Binance Futures will launch the following perpetual contract(s) as below:
+    2026-07-02 09:15 (UTC): STRCUSDT Perpetual Contract
+    2026-07-02 09:20 (UTC): CATUSDT Perpetual Contract
+    2026-07-02 09:25 (UTC): TXNUSDT Perpetual Contract
+    2026-07-02 09:30 (UTC): FLEXUSDT Perpetual Contract
+    2026-07-02 09:35 (UTC): TERUSDT Perpetual Contract
+    2026-07-02 09:40 (UTC): TTWOUSDT Perpetual Contract
+    2026-07-02 09:45 (UTC): KSTRUSDT Perpetual Contract
+    2026-07-02 09:50 (UTC): BSPUSDT Perpetual Contract
+    """
+    result = extract_symbol_candidates_from_detail_payload(
+        detail_text,
+        max_symbols=30,
+        title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
+    )
+
+    assert result["symbol_extraction_source"] == "detail"
+    assert result["symbol_validation_status"] == "validated_by_exact_text"
+    assert result["symbols"] == [
+        "STRCUSDT",
+        "CATUSDT",
+        "TXNUSDT",
+        "FLEXUSDT",
+        "TERUSDT",
+        "TTWOUSDT",
+        "KSTRUSDT",
+        "BSPUSDT",
+    ]
+
+
+
 
 

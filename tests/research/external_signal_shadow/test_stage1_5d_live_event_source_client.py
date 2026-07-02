@@ -122,4 +122,103 @@ def test_detail_url_private_ip_rejected_even_if_allowlisted_for_test():
         )
 
 
+def test_fetch_public_payload_rejects_empty_body():
+    class FakeResponse:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def geturl(self):
+            return "https://www.binance.com/en/support/announcement/abc"
+        def read(self):
+            return b""
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        result = fetch_public_payload(
+            "https://www.binance.com/en/support/announcement/abc",
+            live_public_readonly=True,
+        )
+
+    assert result["ok"] is False
+    assert result["http_status"] == 200
+    assert result["payload_size_bytes"] == 0
+    assert result["payload"] is None
+    assert result["error"] == "empty_detail_payload"
+
+
+def test_fetch_public_payload_treats_http_202_as_not_ready():
+    class FakeResponse:
+        status = 202
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def geturl(self):
+            return "https://www.binance.com/en/support/announcement/abc"
+        def read(self):
+            return b""
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        result = fetch_public_payload(
+            "https://www.binance.com/en/support/announcement/abc",
+            live_public_readonly=True,
+        )
+
+    assert result["ok"] is False
+    assert result["http_status"] == 202
+    assert result["payload_size_bytes"] == 0
+    assert result["payload"] is None
+    assert result["error"] == "detail_payload_http_status_202"
+
+
+def test_fetch_public_payload_treats_http_429_as_not_ready():
+    class FakeResponse:
+        status = 429
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def geturl(self):
+            return "https://www.binance.com/en/support/announcement/abc"
+        def read(self):
+            return b"Too Many Requests"
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        result = fetch_public_payload(
+            "https://www.binance.com/en/support/announcement/abc",
+            live_public_readonly=True,
+        )
+
+    assert result["ok"] is False
+    assert result["http_status"] == 429
+    assert result["payload"] is None
+    assert result["error"] == "detail_payload_http_status_429"
+
+
+def test_fetch_public_payload_treats_http_503_as_not_ready():
+    class FakeResponse:
+        status = 503
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def geturl(self):
+            return "https://www.binance.com/en/support/announcement/abc"
+        def read(self):
+            return b"Service Unavailable"
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        result = fetch_public_payload(
+            "https://www.binance.com/en/support/announcement/abc",
+            live_public_readonly=True,
+        )
+
+    assert result["ok"] is False
+    assert result["http_status"] == 503
+    assert result["payload"] is None
+    assert result["error"] == "detail_payload_http_status_503"
+
+
+
 
