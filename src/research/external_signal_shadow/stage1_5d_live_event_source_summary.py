@@ -120,6 +120,7 @@ def build_smoke_summary(
         "detail_empty_payload_count": counters.get("detail_empty_payload_count", 0),
         "detail_http_not_ready_count": counters.get("detail_http_not_ready_count", 0),
         "detail_terminal_failed_count": counters.get("detail_terminal_failed_count", 0),
+        "detail_transient_timeout_count": counters.get("detail_transient_timeout_count", 0),
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
         "execution_engine_allowed": False,

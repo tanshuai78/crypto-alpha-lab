@@ -474,3 +474,64 @@ def extract_symbols_from_detail_payload(payload: object, max_symbols: int) -> li
     """Extract futures contract symbols from nested Binance detail payload or raw text."""
     res = extract_symbol_candidates_from_detail_payload(payload, max_symbols)
     return res["symbols"]
+
+
+def extract_contract_symbol_candidates_from_title(title: str, max_symbols: int) -> list[str]:
+    if classify_event_type(title) != "futures_contract_launch":
+        return []
+
+    margin = re.search(r"(?:USDⓈ|USDS|USD)-Margined|(?:USDⓈ|USDS|USD)-M", title, re.IGNORECASE)
+    perp = re.search(r"perpetual\s+contracts?", title, re.IGNORECASE)
+    launch = re.search(r"will\s+launch|launch", title, re.IGNORECASE)
+    if not margin or not perp or not launch:
+        return []
+    if margin.end() >= perp.start():
+        return []
+
+    segment = title[margin.end():perp.start()]
+    tokens = re.findall(r"\b[A-Z][A-Z0-9]{1,29}\b", segment)
+    out = []
+    for token in tokens:
+        if token in CONTRACT_SYMBOL_CANDIDATE_STOPWORDS:
+            continue
+        if token.isdigit():
+            continue
+        if re.fullmatch(r"\d{4}|\d{2}|\d{8}", token):
+            continue
+        out.append(token)
+        if len(out) >= max_symbols:
+            break
+    return _dedupe(out)
+
+
+def extract_symbol_candidates_from_title(title: str, max_symbols: int) -> dict:
+    exact_symbols = extract_futures_launch_symbols(title)[:max_symbols]
+    if exact_symbols:
+        return {
+            "symbols": exact_symbols,
+            "symbol_extraction_source": "title",
+            "symbol_derivation_method": "none",
+            "quote_derivation_source": None,
+            "symbol_validation_status": "validated_by_exact_text",
+            "symbol_launch_times_ms": {},
+        }
+
+    raw_candidates = extract_contract_symbol_candidates_from_title(title, max_symbols)
+    if raw_candidates:
+        return {
+            "symbols": raw_candidates,
+            "symbol_extraction_source": "title_contract_symbol",
+            "symbol_derivation_method": "none",
+            "quote_derivation_source": "exchange_info",
+            "symbol_validation_status": "requires_exchange_info_validation",
+            "symbol_launch_times_ms": {},
+        }
+
+    return {
+        "symbols": [],
+        "symbol_extraction_source": None,
+        "symbol_derivation_method": None,
+        "quote_derivation_source": None,
+        "symbol_validation_status": None,
+        "symbol_launch_times_ms": {},
+    }

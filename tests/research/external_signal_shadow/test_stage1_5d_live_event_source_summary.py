@@ -131,6 +131,7 @@ def test_summary_includes_detail_fallback_counters():
             "detail_empty_payload_count": 1,
             "detail_http_not_ready_count": 2,
             "detail_terminal_failed_count": 1,
+            "detail_transient_timeout_count": 4,
         },
     )
 
@@ -146,5 +147,6 @@ def test_summary_includes_detail_fallback_counters():
     assert summary["detail_empty_payload_count"] == 1
     assert summary["detail_http_not_ready_count"] == 2
     assert summary["detail_terminal_failed_count"] == 1
+    assert summary["detail_transient_timeout_count"] == 4
 
 

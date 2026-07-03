@@ -42,3 +42,10 @@ def test_stage1_5d_u_settlement_contract_config_constants():
     assert base.EXTERNAL_SIGNAL_STAGE1_5D_PENDING_VALIDATION_MAX_TOTAL_SEC >= 12 * 60 * 60
 
 
+def test_stage1_5d_allows_usd1_futures_assets_for_exchangeinfo_validated_contracts():
+    assert "USD1" in base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS
+    assert "USD1" in base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS
+
+
+def test_stage1_5d_transient_detail_fetch_max_age_config():
+    assert base.EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC == 86400

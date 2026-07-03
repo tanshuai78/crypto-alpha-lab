@@ -1550,11 +1550,15 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES = 3
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC = 3600
 # Maximum age for retrying a pending detail fallback before marking terminal failed.
 
+EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC = 86400
+# Transient detail responses such as Binance HTTP 202 + empty body are not terminal parser failures.
 
-EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS = ("USDT", "USDC", "U")
+
+
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS = ("USDT", "USDC", "U", "USD1")
 # Public Binance USD-M futures margin/settlement assets allowed for event-symbol validation.
 
-EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS = ("USDT", "USDC", "U")
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS = ("USDT", "USDC", "U", "USD1")
 # Public Binance USD-M futures quote assets allowed for event-symbol validation.
 
 EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL",)

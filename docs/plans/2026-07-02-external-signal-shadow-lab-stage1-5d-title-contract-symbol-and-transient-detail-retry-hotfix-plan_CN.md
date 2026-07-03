@@ -962,8 +962,7 @@ Run Stage 1.5F compatibility tests:
 
 ```bash
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_client.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
   -q
 ```
 
@@ -1024,3 +1023,34 @@ Recommended execution mode:
 ```text
 TDD implementation in this session after user approval.
 ```
+
+---
+
+## Actual Changes and Verification Results
+
+### 1. Files Modified
+- [configs/base.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/configs/base.py): Centralized allowed futures margin/quote asset lists (`USD1` added) and defined `EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC = 86400`.
+- [src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py): Added `extract_contract_symbol_candidates_from_title` and `extract_symbol_candidates_from_title`.
+- [src/research/external_signal_shadow/stage1_5d_live_event_source_summary.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/src/research/external_signal_shadow/stage1_5d_live_event_source_summary.py): Included `detail_transient_timeout_count` in build smoke summary structure.
+- [scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py):
+  - Pre-fetch candidate extraction from title segment.
+  - Skip detail fallback for title candidates and route them directly to exchangeInfo validation.
+  - Track transient fetch error counts and enforce transient max-age limit.
+  - Log details and count statistics appropriately.
+
+### 2. Tests Added and Executed
+- [tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py): Added 6 title parser candidate extraction test cases.
+- [tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py): Added tests for new config keys and `USD1` presence.
+- [tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py): Added test for `detail_transient_timeout_count` inclusion.
+- [tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py](file:///Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py): Added 3 runner tests for title candidates, and 2 runner tests for transient detail retry/timeout.
+
+### 3. Verification Evidence
+Fresh verification after the counter/doc follow-up fix:
+```text
+Stage 1.5D affected suite: 91 passed in 7.23s
+Stage 1.5F compatibility suite: 80 passed in 0.07s
+External signal suite: 666 passed in 15.23s
+Full repository suite: 1406 passed in 68.72s
+git diff --check: clean
+```
+Safety grep only matched existing `configs/base.py` comment examples for optional API key config; no runtime trading/private API call path was introduced.

@@ -340,6 +340,58 @@ def test_detail_extracts_july_2_tradfi_usdt_symbols_from_body_text():
     ]
 
 
+def test_title_extracts_raw_contract_symbol_candidate_ethusd1():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)"
+    result = extract_symbol_candidates_from_title(title, max_symbols=30)
+    assert result["symbols"] == ["ETHUSD1"]
+    assert result["symbol_extraction_source"] == "title_contract_symbol"
+    assert result["symbol_derivation_method"] == "none"
+    assert result["symbol_validation_status"] == "requires_exchange_info_validation"
 
 
+def test_title_prefers_exact_usdt_usdc_symbols_as_parsed_title_symbols():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch USDⓈ-Margined CAPUSDT Perpetual Contract (2026-06-27)"
+    result = extract_symbol_candidates_from_title(title, max_symbols=30)
+    assert result["symbols"] == ["CAPUSDT"]
+    assert result["symbol_extraction_source"] == "title"
+    assert result["symbol_validation_status"] == "validated_by_exact_text"
 
+
+def test_title_contract_candidate_does_not_collect_generic_words():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)"
+    result = extract_symbol_candidates_from_title(title, max_symbols=30)
+    assert result["symbols"] == []
+
+
+def test_title_candidate_extraction_only_scans_margin_to_perpetual_segment():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_contract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract; Risk Warning ABCDEF"
+    result = extract_contract_symbol_candidates_from_title(title, max_symbols=30)
+    assert result == ["ETHUSD1"]
+
+
+def test_title_candidate_rejects_usds_margined_generic_title_without_symbol():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_contract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch Multiple USDS-Margined TradFi Perpetual Contracts (2026-07-02)"
+    assert extract_contract_symbol_candidates_from_title(title, max_symbols=30) == []
+
+
+def test_title_candidate_rejects_date_and_generic_words():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_contract_symbol_candidates_from_title,
+    )
+    title = "Binance Futures Will Launch USDⓈ-Margined Perpetual Contract (2026-07-03)"
+    assert extract_contract_symbol_candidates_from_title(title, max_symbols=30) == []

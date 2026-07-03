@@ -25,6 +25,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_parser impo
     SYMBOL_EXTRACTION_VERSION,
     extract_symbol_candidates_from_detail_payload,
     normalize_live_event,
+    extract_symbol_candidates_from_title,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
     append_jsonl,
@@ -191,7 +192,7 @@ def build_candidate_terminal_event(
             "symbol_derivation_method": state.get("symbol_derivation_method"),
             "quote_derivation_source": state.get("quote_derivation_source"),
             "symbol_validation_status": symbol_validation_status,
-            "detail_fetch_attempted": True,
+            "detail_fetch_attempted": state.get("detail_fetch_attempted", True),
             "detail_fetch_status": detail_fetch_status,
             "symbol_parse_failed_reason": reason,
             "symbol_parse_status": "terminal_failed",
@@ -326,6 +327,7 @@ def main():
     detail_empty_payload_count = 0
     detail_http_not_ready_count = 0
     detail_terminal_failed_count = 0
+    detail_transient_timeout_count = 0
     title_symbol_extracted_count = 0
     symbol_empty_event_count = 0
 
@@ -334,6 +336,7 @@ def main():
     candidate_validation_expired_count = 0
     u_settlement_symbol_extracted_count = 0
     pre_launch_validation_deferred_count = 0
+    max_symbols = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SYMBOL_EXTRACTION_MAX_SYMBOLS", 30)
 
 
 
@@ -548,13 +551,38 @@ def main():
                         events_detected.append(norm_event)
                 else:
                     if code not in seen_event_ids and code not in detail_retry_state:
-                        detail_retry_state[code] = {
-                            "raw": raw_art,
-                            "first_detected_at_ms": now_ms,
-                            "retry_count": 0,
-                            "last_retry_at_ms": 0,
-                            "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"]
-                        }
+                        title_candidate_res = extract_symbol_candidates_from_title(raw_art.get("title") or "", max_symbols)
+                        if title_candidate_res["symbol_validation_status"] == "requires_exchange_info_validation":
+                            detail_retry_state[code] = {
+                                "raw": raw_art,
+                                "first_detected_at_ms": now_ms,
+                                "retry_count": 0,
+                                "detail_fetch_attempt_count": 0,
+                                "transient_detail_error_count": 0,
+                                "non_transient_detail_error_count": 0,
+                                "last_retry_at_ms": 0,
+                                "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"],
+                                "candidate_symbols": title_candidate_res["symbols"],
+                                "symbol_extraction_source": title_candidate_res["symbol_extraction_source"],
+                                "symbol_derivation_method": title_candidate_res["symbol_derivation_method"],
+                                "quote_derivation_source": "exchange_info",
+                                "symbol_validation_status": "pending_exchangeinfo_missing",
+                                "symbol_launch_times_ms": title_candidate_res.get("symbol_launch_times_ms", {}),
+                                "symbol_onboard_times_ms": {},
+                                "detail_fetch_attempted": False,
+                                "detail_fetch_status": "not_needed",
+                            }
+                        else:
+                            detail_retry_state[code] = {
+                                "raw": raw_art,
+                                "first_detected_at_ms": now_ms,
+                                "retry_count": 0,
+                                "detail_fetch_attempt_count": 0,
+                                "transient_detail_error_count": 0,
+                                "non_transient_detail_error_count": 0,
+                                "last_retry_at_ms": 0,
+                                "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"]
+                            }
 
             # Clean up first_bar_queue to remove empty symbol events
             first_bar_queue = [
@@ -571,16 +599,31 @@ def main():
                 max_age_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 3600)
                 age_sec = (now_ms - state["first_detected_at_ms"]) / 1000.0
                 has_candidate_symbols = bool(state.get("candidate_symbols"))
+                has_transient_detail_errors = state.get("transient_detail_error_count", 0) > 0
                 if has_candidate_symbols:
                     expire = should_expire_candidate_validation(state, now_ms)
+                elif has_transient_detail_errors:
+                    transient_max_age = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC", 86400)
+                    expire = age_sec >= transient_max_age
                 else:
-                    expire = age_sec > max_age_limit
+                    expire = age_sec >= max_age_limit
 
                 if expire:
-                    symbol_empty_event_count += 1
-                    symbol_parse_failed_count += 1
-                    detail_symbol_parse_failed_count += 1
-                    detail_terminal_failed_count += 1
+                    if has_transient_detail_errors and not has_candidate_symbols:
+                        detail_terminal_failed_count += 1
+                        detail_transient_timeout_count += 1
+                        fetch_status = "transient_detail_max_age_exceeded"
+                        failed_reason = "transient_detail_max_age_exceeded"
+                        terminal_fail_type = "detail_unavailable_timeout"
+                    else:
+                        symbol_empty_event_count += 1
+                        symbol_parse_failed_count += 1
+                        detail_symbol_parse_failed_count += 1
+                        detail_terminal_failed_count += 1
+                        fetch_status = "max_age_exceeded"
+                        failed_reason = "detail_retry_max_age_exceeded"
+                        terminal_fail_type = None
+
                     if has_candidate_symbols:
                         candidate_validation_expired_count += len(state["candidate_symbols"])
 
@@ -596,12 +639,14 @@ def main():
                             "symbol_extraction_source": state.get("symbol_extraction_source", "none"),
                             "symbol_derivation_method": state.get("symbol_derivation_method", None),
                             "symbol_validation_status": "rejected" if is_derived else None,
-                            "detail_fetch_attempted": state["retry_count"] > 0,
-                            "detail_fetch_status": "max_age_exceeded",
-                            "symbol_parse_failed_reason": "detail_retry_max_age_exceeded",
+                            "detail_fetch_attempted": state["retry_count"] > 0 or state.get("detail_fetch_attempt_count", 0) > 0,
+                            "detail_fetch_status": fetch_status,
+                            "symbol_parse_failed_reason": failed_reason,
                             "symbol_parse_status": "terminal_failed",
                         }
                     )
+                    if terminal_fail_type:
+                        norm_event["terminal_failure_type"] = terminal_fail_type
                     norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
                     norm_event["detail_fetched_at_ms"] = state.get("detail_fetched_at_ms")
                     norm_event["symbol_resolved_at_ms"] = now_ms
@@ -687,7 +732,8 @@ def main():
                     state["launch_time_source"] = effective_launch["launch_time_source"]
 
                     if validation_result["validated_symbols"]:
-                        detail_fetch_success_count += 1
+                        if state.get("detail_fetch_attempted", True):
+                            detail_fetch_success_count += 1
                         detail_symbol_extracted_count += 1
                         candidate_validation_success_count += len(validation_result["validated_symbols"])
 
@@ -708,8 +754,8 @@ def main():
                                 "symbol_derivation_method": state["symbol_derivation_method"],
                                 "quote_derivation_source": "exchange_info",
                                 "symbol_validation_status": "validated",
-                                "detail_fetch_attempted": True,
-                                "detail_fetch_status": "success",
+                                "detail_fetch_attempted": state.get("detail_fetch_attempted", True),
+                                "detail_fetch_status": state.get("detail_fetch_status", "success"),
                                 "symbol_parse_failed_reason": None,
                                 "symbol_parse_status": "parsed",
                             }
@@ -757,14 +803,15 @@ def main():
                             symbol_empty_event_count += 1
                             symbol_parse_failed_count += 1
                             detail_symbol_parse_failed_count += 1
-                            detail_fetch_success_count += 1
+                            if state.get("detail_fetch_attempted", True):
+                                detail_fetch_success_count += 1
 
                             norm_event = build_candidate_terminal_event(
                                 state=state,
                                 source_parent_url=source_parent_url,
                                 now_ms=now_ms,
                                 reason=reason,
-                                detail_fetch_status="success",
+                                detail_fetch_status=state.get("detail_fetch_status", "success"),
                                 symbol_validation_status="rejected",
                             )
                             event_id = norm_event["event_id"]
@@ -782,7 +829,7 @@ def main():
 
                 # 4. Attempt fetch
                 detail_budget_remaining -= 1
-                state["retry_count"] += 1
+                state["detail_fetch_attempt_count"] = state.get("detail_fetch_attempt_count", 0) + 1
                 state["last_retry_at_ms"] = now_ms
                 detail_fetch_attempted_count += 1
 
@@ -1175,8 +1222,12 @@ def main():
 
                     # Check transient vs non-transient
                     if is_transient_detail_fetch_error(fetch_res):
+                        state["transient_detail_error_count"] = state.get("transient_detail_error_count", 0) + 1
                         continue
                     else:
+                        state["non_transient_detail_error_count"] = state.get("non_transient_detail_error_count", 0) + 1
+                        state["retry_count"] = state["non_transient_detail_error_count"]
+
                         max_retries_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
                         if state["retry_count"] >= max_retries_limit:
                             symbol_empty_event_count += 1
@@ -1326,6 +1377,13 @@ def main():
         else:
             final_events.append(ev)
 
+    detail_pending_retry_count = sum(
+        1
+        for state in detail_retry_state.values()
+        if state.get("detail_fetch_attempt_count", 0) > 0
+        or state.get("transient_detail_error_count", 0) > 0
+    )
+
     summary = build_smoke_summary(
         upstream_evidence=evidence_res,
         heartbeats=heartbeats,
@@ -1353,10 +1411,11 @@ def main():
             "candidate_validation_expired_count": candidate_validation_expired_count,
             "u_settlement_symbol_extracted_count": u_settlement_symbol_extracted_count,
             "pre_launch_validation_deferred_count": pre_launch_validation_deferred_count,
-            "detail_pending_retry_count": len(detail_retry_state),
+            "detail_pending_retry_count": detail_pending_retry_count,
             "detail_empty_payload_count": detail_empty_payload_count,
             "detail_http_not_ready_count": detail_http_not_ready_count,
             "detail_terminal_failed_count": detail_terminal_failed_count,
+            "detail_transient_timeout_count": detail_transient_timeout_count,
         },
     )
 

@@ -254,7 +254,7 @@ def test_detail_max_age_expired_marks_terminal_failed(tmp_path):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
         if "/support/announcement/tradfi" in url:
-            return {"ok": False, "payload": None, "final_url": url, "http_status": 500, "error": "persistent_error"}
+            return {"ok": False, "payload": None, "final_url": url, "http_status": 400, "error": "persistent_error"}
         raise AssertionError(url)
 
     summary = tmp_path / "summary.json"
@@ -658,7 +658,7 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
             "catalogs": [{
                 "articles": [{
                     "code": "25da4614ffff435fa28544b27fd33a39",
-                    "title": "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-01)",
                     "releaseDate": 1782821102782,
                 }]
             }]
@@ -787,7 +787,7 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
             "catalogs": [{
                 "articles": [{
                     "code": "25da4614ffff435fa28544b27fd33a39",
-                    "title": "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-01)",
                     "releaseDate": 1782821102782,
                 }]
             }]
@@ -854,7 +854,7 @@ def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tm
             "catalogs": [{
                 "articles": [{
                     "code": "25da4614ffff435fa28544b27fd33a39",
-                    "title": "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-01)",
                     "releaseDate": 1782821102782,
                 }]
             }]
@@ -980,7 +980,7 @@ def test_detail_terminal_failed_paths_preserve_first_detected_at_ms(tmp_path):
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
-        return {"ok": False, "payload": None, "final_url": url, "http_status": 500, "error": "persistent_error"}
+        return {"ok": False, "payload": None, "final_url": url, "http_status": 400, "error": "persistent_error"}
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "timestamp_failed_smoke"
@@ -1067,7 +1067,7 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
             "catalogs": [{
                 "articles": [{
                     "code": "25da4614ffff435fa28544b27fd33a39",
-                    "title": "Binance Futures Will Launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts (2026-07-01)",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-01)",
                     "releaseDate": 1782821102782,
                 }]
             }]
@@ -2012,12 +2012,337 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
     assert len(parsed_rows2) == 1
 
 
+def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "23c9b8e88309409cbcd8509af0b78d10",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
+                    "releaseDate": 1782989104900,
+                }]
+            }]
+        }
+    }
+    exchange_info = {
+        "symbols": [{
+            "symbol": "ETHUSD1",
+            "contractType": "PERPETUAL",
+            "status": "TRADING",
+            "quoteAsset": "USD1",
+            "marginAsset": "USD1",
+            "onboardDate": 1782989000000,
+        }]
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        if "klines" in url:
+            return {"ok": True, "payload": [], "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    detail_calls = {"count": 0}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        raise AssertionError("title contract symbol path must not fetch detail")
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    parsed = [r for r in events if r.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10"]
+    assert len(parsed) == 1
+    assert parsed[0]["symbols"] == ["ETHUSD1"] or parsed[0]["symbols"] == ("ETHUSD1",)
+    assert parsed[0]["symbol_parse_status"] == "parsed"
+    assert parsed[0]["symbol_extraction_source"] == "title_contract_symbol"
+    assert parsed[0]["symbol_validation_status"] == "validated"
+    assert parsed[0]["detail_fetch_attempted"] is False
+    assert parsed[0]["detail_fetch_status"] == "not_needed"
+    assert detail_calls["count"] == 0
 
 
+def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_fetch(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "23c9b8e88309409cbcd8509af0b78d10",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
+                    "releaseDate": 1782989104900,
+                }]
+            }]
+        }
+    }
+    exchange_info = {
+        "symbols": [{
+            "symbol": "ETHUSD1",
+            "contractType": "PERPETUAL",
+            "status": "PENDING_TRADING",
+            "quoteAsset": "USD1",
+            "marginAsset": "USD1",
+            "onboardDate": 1783069200000,
+        }]
+    }
+
+    detail_calls = {"count": 0}
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        raise AssertionError("pending title candidate must not fetch detail")
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(row.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10" for row in events)
+    assert detail_calls["count"] == 0
+    s = json.loads(summary.read_text())
+    assert s["detail_pending_retry_count"] == 0
+    assert s["candidate_validation_pending_count"] == 0
+    assert s["pre_launch_validation_deferred_count"] >= 1
 
 
+def test_title_contract_candidate_pending_survives_process_restart_without_detail_fetch(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "23c9b8e88309409cbcd8509af0b78d10",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
+                    "releaseDate": 1782989104900,
+                }]
+            }]
+        }
+    }
+    pending_exchange_info = {"symbols": []}
+    trading_exchange_info = {
+        "symbols": [{
+            "symbol": "ETHUSD1",
+            "contractType": "PERPETUAL",
+            "status": "TRADING",
+            "quoteAsset": "USD1",
+            "marginAsset": "USD1",
+            "onboardDate": 1782989000000,
+        }]
+    }
+    detail_calls = {"count": 0}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        raise AssertionError("title candidate restart path must not fetch detail")
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    def run_once(exchange_info):
+        def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+            if "article/list/query" in url:
+                return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+            if "exchangeInfo" in url:
+                return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+            if "klines" in url:
+                return {"ok": True, "payload": [], "final_url": url, "http_status": 200, "error": None}
+            raise AssertionError(url)
+
+        args = [
+            "run_stage1_5d_live_event_source_smoke_collector.py",
+            "--live-public-readonly",
+            "--stage1-5c1-summary", str(c1),
+            "--stage1-5c-summary", str(c),
+            "--output-root", str(output_root),
+            "--output-summary", str(summary),
+            "--max-polls", "1",
+            "--poll-interval-sec", "0",
+        ]
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    return main()
+
+    assert run_once(pending_exchange_info) == 0
+    assert _read_jsonl_files(output_root / "events") == []
+
+    assert run_once(trading_exchange_info) == 0
+    events = _read_jsonl_files(output_root / "events")
+    parsed = [r for r in events if r.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10"]
+    assert len(parsed) == 1
+    assert detail_calls["count"] == 0
 
 
+def test_transient_detail_http_202_does_not_terminal_fail_by_max_retries(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-02)",
+                    "releaseDate": 1782980108049,
+                }]
+            }]
+        }
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {
+            "ok": False,
+            "payload": None,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 202,
+            "payload_size_bytes": 0,
+            "row_count": None,
+            "error": "detail_payload_http_status_202",
+        }
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "5",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(
+        row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "terminal_failed"
+        for row in events
+    )
+    s = json.loads(summary.read_text())
+    assert s["detail_pending_retry_count"] >= 1
+    assert s["detail_http_not_ready_count"] >= 1
+    assert s["detail_terminal_failed_count"] == 0
+    assert s["detail_transient_timeout_count"] == 0
 
 
+def test_transient_detail_max_age_terminal_is_detail_unavailable_not_symbol_empty(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-02)",
+                    "releaseDate": 1782980108049,
+                }]
+            }]
+        }
+    }
 
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {
+            "ok": False,
+            "payload": None,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 202,
+            "payload_size_bytes": 0,
+            "row_count": None,
+            "error": "detail_payload_http_status_202",
+        }
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "2",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC", 0):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    terminal_rows = [
+        r for r in events
+        if r.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and r.get("symbol_parse_status") == "terminal_failed"
+    ]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["detail_fetch_status"] == "transient_detail_max_age_exceeded"
+    assert terminal_rows[0]["symbol_parse_failed_reason"] == "transient_detail_max_age_exceeded"
+    assert terminal_rows[0].get("terminal_failure_type") == "detail_unavailable_timeout"
+
+    s = json.loads(summary.read_text())
+    assert s["detail_terminal_failed_count"] == 1
+    assert s["detail_transient_timeout_count"] == 1
+    assert s.get("detail_symbol_parse_failed_count", 0) == 0
+    assert s.get("symbol_empty_event_count", 0) == 0

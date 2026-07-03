@@ -3,7 +3,7 @@
 **日期:** 2026-07-01  
 **对应设计:** `docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md`  
 **对应实现计划:** `docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md`  
-**当前运行重点:** Stage 1.5D empty-detail retry hotfix source collector + Stage 1.5F live depth observer
+**当前运行重点:** Stage 1.5D title-contract symbol + transient detail retry hotfix source collector + Stage 1.5F live depth observer
 
 ## 1. 当前结论
 
@@ -11,15 +11,15 @@
 decision = stage1_5f_running_waiting_for_post_watermark_event
 implementation_status = completed_and_locally_verified
 live_depth_evidence_status = not_collected_yet
-current_server_mode = 7d_empty_detail_retry_hotfix_observation
+current_server_mode = 7d_title_contract_transient_hotfix_observation
 stage1_5g_allowed = plan_only_until_completed_12h_depth_observation
 ```
 
 当前可以做：
 
 ```text
-1. 保持 Stage 1.5D empty-detail retry hotfix 版 7d collector 运行。
-2. 保持 Stage 1.5F empty-detail retry hotfix 版 live depth observer 运行。
+1. 保持 Stage 1.5D title-contract/transient-detail hotfix 版 7d collector 运行。
+2. 保持 Stage 1.5F title-contract/transient-detail hotfix 版 live depth observer 运行。
 3. 定期检查 raw payload、1.5D events、1.5F summary。
 4. 先写 Stage 1.5G Live Depth Evidence Review plan。
 ```
@@ -54,7 +54,7 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 维持 empty-detail retry hotfix 版 1.5D/1.5F 运行，并每 2-4 小时巡检。
+P0: 维持 title-contract/transient-detail hotfix 版 1.5D/1.5F 运行，并每 2-4 小时巡检。
 理由: 当前没有 post-watermark 新事件，主要风险是进程静默退出、路径变量误查、或 raw payload 中出现新事件但 events 未写入。
 
 P1: 等待 Stage 1.5D 写入 watermark 之后的新 futures_contract_launch event-symbol。
@@ -94,20 +94,20 @@ P5: 如果 1.5G 判定 depth evidence 足够且盘口质量通过，只允许进
 
 ## 4. 当前服务器路径
 
-### 4.1 当前应使用的 empty-detail retry hotfix 路径
+### 4.1 当前应使用的 title-contract/transient-detail hotfix 路径
 
 ```bash
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_empty_detail_retry_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 ```
 
-empty-detail retry hotfix 部署后应记录的实际路径：
+title-contract/transient-detail hotfix 部署后应记录的实际路径：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_empty_detail_retry_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_title_contract_transient_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
 ```
 
 ### 4.2 不再作为当前监控目标的旧路径
@@ -117,6 +117,8 @@ STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_emp
 ```text
 data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260629T133308Z_7d
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d
+data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_empty_detail_retry_hotfix
+data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix
 data/external_signal_shadow/stage1_5d/live_event_source_smoke_interrupted_*
 data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 ```
@@ -176,17 +178,17 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+export SERVER="root@47.82.4.85"
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_client.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_client.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
   -q
 
-# 可选全仓验证，本地当前结果为 1393 passed：
+# 可选全仓验证，本地当前结果为 1406 passed：
 # PYTHONPATH=src:. .venv/bin/python -m pytest -q
 
 rsync -avzP \
@@ -197,7 +199,7 @@ rsync -avzP \
   --exclude='.pytest_cache' \
   --exclude='__pycache__' \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/ \
-  root@47.82.4.85:/root/crypto-alpha-lab/
+  "$SERVER:/root/crypto-alpha-lab/"
 ```
 
 ### 7.2 服务器 pytest 依赖修复
@@ -237,11 +239,10 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_client.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_client.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
   -q
 ```
@@ -249,12 +250,12 @@ PYTHONPATH=src:. .venv/bin/python -m pytest \
 预期：
 
 ```text
-105 passed 左右
+171 passed 左右
 ```
 
 ### 7.3 停止旧 hotfix 会话
 
-启动 empty-detail retry hotfix 前，先停掉旧 1.5D/1.5F 会话，避免两个 observer 同时消费不同 output root：
+启动 title-contract/transient-detail hotfix 前，先停掉旧 1.5D/1.5F 会话，避免两个 observer 同时消费不同 output root：
 
 ```bash
 tmux ls
@@ -268,18 +269,20 @@ tmux kill-session -t stage1_5d_continuous_7d_u_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_u_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_empty_detail_retry_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_empty_detail_retry_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/dev/null || true
 ```
 
-### 7.4 启动 empty-detail retry hotfix 版 Stage 1.5D 7d run
+### 7.4 启动 title-contract/transient-detail hotfix 版 Stage 1.5D 7d run
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_empty_detail_retry_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_title_contract_transient_hotfix"
 
-tmux new -d -s stage1_5d_continuous_7d_empty_detail_retry_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_title_contract_transient_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -295,7 +298,7 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_l
 echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
 ```
 
-### 7.5 Bootstrap empty-detail retry hotfix 版 Stage 1.5F watermark
+### 7.5 Bootstrap title-contract/transient-detail hotfix 版 Stage 1.5F watermark
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -308,10 +311,12 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
     data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
 fi
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_empty_detail_retry_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
+
+rm -rf "$STAGE1_5F_OUT"
 
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
   --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
@@ -324,10 +329,10 @@ cat "$STAGE1_5F_OUT/watermark.json"
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json"
 ```
 
-### 7.6 启动 empty-detail retry hotfix 版 Stage 1.5F observer
+### 7.6 启动 title-contract/transient-detail hotfix 版 Stage 1.5F observer
 
 ```bash
-tmux new -d -s stage1_5f_live_depth_7d_empty_detail_retry_hotfix "
+tmux new -d -s stage1_5f_live_depth_7d_title_contract_transient_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -353,8 +358,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_empty_detail_retry_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -373,7 +378,11 @@ find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/n
 find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
 find "$STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
 
-cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null || true
+if [ -f "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" ]; then
+  cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json"
+else
+  echo "1.5D summary not written yet; active 7d run should be monitored via heartbeats/events/request_manifest."
+fi
 wc -l "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
 wc -l "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
 tail -n 3 "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
@@ -390,9 +399,10 @@ du -sh "$STAGE1_5D_EVENTS_OUT"/raw_payloads 2>/dev/null || true
 post_watermark_events_accepted = 0 = 还没有 watermark 之后的新 event-symbol 被接受。
 active_observation_count > 0 = 正在对新事件采 12h depth。
 total_snapshots_collected 增长 = 已开始写入盘口快照。
-detail_pending_retry_count 增长 = detail 页面暂不可用，collector 会继续重试，不应写 symbols=[] terminal_failed。
+detail_pending_retry_count 增长 = detail 页面暂不可用且已发生 detail fetch retry；不包含 title candidate 的 exchangeInfo pre-trading/pending。
 detail_empty_payload_count 增长 = detail response 为空，例如 HTTP 202 + 0 byte；这是本次 hotfix 重点监控项。
 detail_terminal_failed_count 增长 = detail 已进入明确终态失败，需要检查对应 request_manifest 和 events row。
+pre_launch_validation_deferred_count 增长 = title/exchangeInfo 候选已经识别，但 symbol 还不是 TRADING，不应进入 1.5F depth。
 ```
 
 监控频率：
@@ -409,7 +419,7 @@ detail_terminal_failed_count 增长 = detail 已进入明确终态失败，需�
 ### 9.1 查看 1.5F watermark 时间
 
 ```bash
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
 
 python - <<'PY'
 import json
@@ -446,8 +456,8 @@ grep -RniE "Futures Will Launch|Will Launch.*Perpetual|USDⓈ-Margined|USDS-Marg
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_empty_detail_retry_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 ```
@@ -537,6 +547,7 @@ PY
 raw payload 有新 launch，但 events 没写入或 symbols=[] = parser/normalizer 覆盖问题。
 events 中 symbols 非空 + parsed = 1.5D 成功产出 event-symbol。
 events 中 detected_utc 晚于 watermark utc_time = 1.5F 理论上应接受为 post-watermark。
+source=title_contract_symbol + validation=validated = 标题中 ETHUSD1 这类 raw contract symbol 直抽并通过 exchangeInfo 验证。
 source=detail_contract_symbol + validation=validated + symbols=["BTCU","ETHU"] = U-settled raw contract symbol hotfix 路径生效。
 source=detail_base_asset_derived + validation=validated = base-asset-plus-quote fallback 路径生效，但不能用于 BTCU/ETHU 这类 raw U-settled symbol。
 source=detail + validation=validated_by_exact_text = detail 原文完整 XXXUSDT/XXXUSDC symbol 路径生效。
@@ -544,13 +555,13 @@ validation=pending_exchangeinfo_missing = 候选 symbol 还未出现在 exchange
 validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确拒绝，例如非 PERPETUAL 或资产不在 allowlist。
 ```
 
-## 10. empty-detail retry hotfix 首次输出判读模板
+## 10. title-contract/transient-detail hotfix 首次输出判读模板
 
-empty-detail retry hotfix 重新部署后，首次输出应类似：
+title-contract/transient-detail hotfix 重新部署后，首次输出应类似：
 
 ```text
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_empty_detail_retry_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_title_contract_transient_hotfix
 
 decision = stage1_5f_observer_running_no_new_event
 stage1_5e_context_missing = false
@@ -571,8 +582,8 @@ heartbeat_count = 1
 判读：
 
 ```text
-status = normal_initial_empty_detail_retry_hotfix_run
-path_status = correct_empty_detail_retry_hotfix_paths
+status = normal_initial_title_contract_transient_hotfix_run
+path_status = correct_title_contract_transient_hotfix_paths
 1.5D_status = running_and_writing_heartbeats
 1.5F_status = running_and_waiting_for_post_watermark_event
 depth_collection_status = not_started_because_no_new_post_watermark_event_symbol
@@ -681,5 +692,28 @@ for path in sorted((root / "request_manifest").glob("*.jsonl")):
         row = json.loads(line)
         if row.get("source_type") == "announcement_detail" and row.get("payload_size_bytes") == 0:
             print(json.dumps(row, ensure_ascii=False))
+PY
+```
+
+### 12.6 2026-07-02 ETHUSD1 and transient detail retry hotfix (M3)
+
+2026-07-02 live incident:
+- ETHUSD1 title event exposed title raw contract symbol gap.
+- Multiple TradFi and ETHUSD1 exposed Binance detail HTTP 202 + empty persistence.
+- Fix target is future events only; already-watermarked/terminal rows are recovery validation only.
+- It is forbidden to use reparsed 23c9b8e88309409cbcd8509af0b78d10 or d2acaa91c14e4cc598aaee1017efc1ac rows as official 12h live depth evidence.
+
+Post-hotfix verification command:
+```bash
+python - <<'PY'
+import glob, json, os
+rows = []
+for p in glob.glob(os.path.join(os.environ["STAGE1_5D_EVENTS_OUT"], "events", "*.jsonl")):
+    for line in open(p):
+        if line.strip():
+            r = json.loads(line)
+            if r.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10":
+                rows.append(r)
+print(rows[-3:])
 PY
 ```
