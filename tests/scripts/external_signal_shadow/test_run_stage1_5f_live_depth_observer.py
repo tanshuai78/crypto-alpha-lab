@@ -382,3 +382,316 @@ def test_runner_blocks_stage1_5e_summary_with_trading_flag_true(tmp_path):
         summary = json.load(f)
     assert summary["decision"] == "stage1_5f_observer_invalid"
     assert summary["blocker"] == "stage1_5e_summary_invalid_or_unsafe"
+
+
+def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_path, monkeypatch):
+    import time
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
+
+    now_ms = 1783069534532
+    watermark_time = 1783009167053
+    detected_at_ms = 1783023648791
+    launch_time_ms = 1783069200000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "ethusd1-event",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": detected_at_ms,
+            "symbols": ["ETHUSD1"],
+            "symbol_extraction_source": "title_contract_symbol",
+            "symbol_validation_status": "validated",
+            "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
+            "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    monkeypatch.setattr(time, "time", lambda: now_ms / 1000.0)
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    # Assert ETHUSD1 accepted and diagnostic basis logged
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    accepted_rows = []
+    with open(accepted_files[0], "r") as f:
+        for line in f:
+            if line.strip():
+                accepted_rows.append(json.loads(line))
+    assert len(accepted_rows) == 1
+    assert accepted_rows[0]["symbol"] == "ETHUSD1"
+    assert accepted_rows[0]["observation_age_basis"] == "symbol_effective_launch_time"
+
+    # Assert no ETHUSD1 rejected
+    rejected_files = list((output_root / "events_rejected").glob("**/*.jsonl"))
+    assert len(rejected_files) == 0
+
+
+def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_later(tmp_path, monkeypatch):
+    import time
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
+
+    now_ms = 1783069200000
+    watermark_time = 1783000000000
+    detected_at_ms = now_ms - 60_000
+    launch_time_ms = now_ms + 10 * 60 * 1000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "ethusd1-event",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": detected_at_ms,
+            "symbols": ["ETHUSD1"],
+            "symbol_extraction_source": "title_contract_symbol",
+            "symbol_validation_status": "validated",
+            "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
+            "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    def run_poll(fake_now_ms: int):
+        monkeypatch.setattr(time, "time", lambda: fake_now_ms / 1000.0)
+        args = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        orig_argv = sys.argv
+        try:
+            sys.argv = args
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+        finally:
+            sys.argv = orig_argv
+
+    # Poll 1: before launch. Expected: stays pending, watermark not advanced, not accepted or rejected
+    run_poll(now_ms)
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 0
+    rejected_files = list((output_root / "events_rejected").glob("**/*.jsonl"))
+    assert len(rejected_files) == 0
+
+    with open(output_root / "watermark.json", "r") as f:
+        w_after = json.load(f)
+    assert w_after["max_seen_detected_at_ms"] == watermark_time
+
+    # Poll 2: at/after launch. Expected: accepted
+    run_poll(launch_time_ms)
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    accepted_rows = []
+    with open(accepted_files[0], "r") as f:
+        for line in f:
+            if line.strip():
+                accepted_rows.append(json.loads(line))
+    assert len(accepted_rows) == 1
+    assert accepted_rows[0]["symbol"] == "ETHUSD1"
+
+    with open(output_root / "watermark.json", "r") as f:
+        w_final = json.load(f)
+    assert w_final["max_seen_detected_at_ms"] == detected_at_ms
+    assert "ethusd1-event" in w_final["seen_event_ids"]
+
+
+def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics(tmp_path, monkeypatch):
+    import time
+
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
+
+    launch_time_ms = 1783069200000
+    now_ms = launch_time_ms + 15 * 60 * 1000 + 1_000
+    watermark_time = 1783009167053
+    detected_at_ms = 1783023648791
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "ethusd1-event-rejected",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": detected_at_ms,
+            "symbols": ["ETHUSD1"],
+            "symbol_extraction_source": "title_contract_symbol",
+            "symbol_validation_status": "validated",
+            "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
+            "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    monkeypatch.setattr(time, "time", lambda: now_ms / 1000.0)
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    rejected_files = list((output_root / "events_rejected").glob("**/*.jsonl"))
+    assert len(rejected_files) == 1
+    rejected_rows = []
+    with open(rejected_files[0], "r") as f:
+        for line in f:
+            if line.strip():
+                rejected_rows.append(json.loads(line))
+
+    assert len(rejected_rows) == 1
+    row = rejected_rows[0]
+    assert row["symbol"] == "ETHUSD1"
+    assert row["rejection_reason"] == "age_exceeded"
+    assert row["observation_age_base_ms"] == launch_time_ms
+    assert row["observation_age_basis"] == "symbol_effective_launch_time"
+    assert row["event_age_ms"] == 15 * 60 * 1000 + 1_000
+    assert row["max_event_age_ms"] == 15 * 60 * 1000
+    assert row["watermark_max_seen_detected_at_ms"] == watermark_time
+    assert row["watermark_version"] == 1

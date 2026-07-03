@@ -50,3 +50,9 @@ def test_max_snapshot_gap_is_consistent_with_coverage_ratio_and_poll_interval():
 def test_request_success_rate_threshold_exists():
     assert 0.0 <= base.EXTERNAL_SIGNAL_STAGE1_5F_MIN_REQUEST_SUCCESS_RATE <= 1.0
     assert base.EXTERNAL_SIGNAL_STAGE1_5F_MIN_REQUEST_SUCCESS_RATE == 0.95
+
+
+def test_stage1_5f_has_launch_time_clock_skew_tolerance_config():
+    assert hasattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_TIME_CLOCK_SKEW_TOLERANCE_MS")
+    assert base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_TIME_CLOCK_SKEW_TOLERANCE_MS > 0
+    assert base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_TIME_CLOCK_SKEW_TOLERANCE_MS <= 5 * 60 * 1000

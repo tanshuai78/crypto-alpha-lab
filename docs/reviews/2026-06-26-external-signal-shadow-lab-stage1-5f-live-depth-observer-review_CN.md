@@ -3,7 +3,7 @@
 **日期:** 2026-07-01  
 **对应设计:** `docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md`  
 **对应实现计划:** `docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md`  
-**当前运行重点:** Stage 1.5D title-contract symbol + transient detail retry hotfix source collector + Stage 1.5F live depth observer
+**当前运行重点:** Stage 1.5D title-contract symbol + transient detail retry hotfix source collector + Stage 1.5F delayed-launch age gate hotfix live depth observer
 
 ## 1. 当前结论
 
@@ -11,7 +11,7 @@
 decision = stage1_5f_running_waiting_for_post_watermark_event
 implementation_status = completed_and_locally_verified
 live_depth_evidence_status = not_collected_yet
-current_server_mode = 7d_title_contract_transient_hotfix_observation
+current_server_mode = 7d_delayed_launch_age_gate_hotfix_observation
 stage1_5g_allowed = plan_only_until_completed_12h_depth_observation
 ```
 
@@ -19,7 +19,7 @@ stage1_5g_allowed = plan_only_until_completed_12h_depth_observation
 
 ```text
 1. 保持 Stage 1.5D title-contract/transient-detail hotfix 版 7d collector 运行。
-2. 保持 Stage 1.5F title-contract/transient-detail hotfix 版 live depth observer 运行。
+2. 重新 bootstrap 并启动 Stage 1.5F delayed-launch age gate hotfix 版 live depth observer。
 3. 定期检查 raw payload、1.5D events、1.5F summary。
 4. 先写 Stage 1.5G Live Depth Evidence Review plan。
 ```
@@ -54,7 +54,7 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 维持 title-contract/transient-detail hotfix 版 1.5D/1.5F 运行，并每 2-4 小时巡检。
+P0: 维持 title-contract/transient-detail hotfix 版 1.5D collector + delayed-launch age gate hotfix 版 1.5F observer，并每 2-4 小时巡检。
 理由: 当前没有 post-watermark 新事件，主要风险是进程静默退出、路径变量误查、或 raw payload 中出现新事件但 events 未写入。
 
 P1: 等待 Stage 1.5D 写入 watermark 之后的新 futures_contract_launch event-symbol。
@@ -94,20 +94,20 @@ P5: 如果 1.5G 判定 depth evidence 足够且盘口质量通过，只允许进
 
 ## 4. 当前服务器路径
 
-### 4.1 当前应使用的 title-contract/transient-detail hotfix 路径
+### 4.1 当前应使用的 delayed-launch age gate hotfix 路径
 
 ```bash
 export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 ```
 
-title-contract/transient-detail hotfix 部署后应记录的实际路径：
+delayed-launch age gate hotfix 部署后应记录的实际路径：
 
 ```text
 STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_title_contract_transient_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix
 ```
 
 ### 4.2 不再作为当前监控目标的旧路径
@@ -119,6 +119,7 @@ data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260629T1333
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d
 data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_empty_detail_retry_hotfix
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix
+data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
 data/external_signal_shadow/stage1_5d/live_event_source_smoke_interrupted_*
 data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 ```
@@ -172,7 +173,7 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 
 ## 7. 部署 Runbook
 
-### 7.1 本地同步到服务器
+### 7.1 本地验证并同步到服务器
 
 在本地 Mac 执行：
 
@@ -181,14 +182,13 @@ cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 export SERVER="root@47.82.4.85"
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_config.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
+  tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py \
   -q
 
-# 可选全仓验证，本地当前结果为 1406 passed：
+# 本地当前完整验证结果：1428 passed
+# 如需提交前全仓复核：
 # PYTHONPATH=src:. .venv/bin/python -m pytest -q
 
 rsync -avzP \
@@ -201,6 +201,8 @@ rsync -avzP \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/ \
   "$SERVER:/root/crypto-alpha-lab/"
 ```
+
+本次 hotfix 只要求重启 Stage 1.5F。Stage 1.5D title-contract/transient-detail collector 可以继续运行，因为事件源 parser/collector 本次未改。
 
 ### 7.2 服务器 pytest 依赖修复
 
@@ -239,41 +241,42 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_config.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
+  tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py \
   -q
 ```
 
 预期：
 
 ```text
-171 passed 左右
+44 passed 左右
 ```
 
-### 7.3 停止旧 hotfix 会话
+### 7.3 停止旧 Stage 1.5F observer
 
-启动 title-contract/transient-detail hotfix 前，先停掉旧 1.5D/1.5F 会话，避免两个 observer 同时消费不同 output root：
+本次不默认停止 Stage 1.5D collector。只停止旧 1.5F observer，避免两个 observer 同时消费不同 output root：
 
 ```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
 tmux ls
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
 
-tmux kill-session -t stage1_5d_continuous_7d 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_u_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_u_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_empty_detail_retry_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_empty_detail_retry_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix 2>/dev/null || true
 ```
 
-### 7.4 启动 title-contract/transient-detail hotfix 版 Stage 1.5D 7d run
+如果 Stage 1.5D collector 不在运行，再使用 7.4 启动；否则跳过 7.4。
+
+### 7.4 可选：启动 Stage 1.5D title-contract/transient-detail 7d collector
+
+仅当 `ps` 没有看到 `run_stage1_5d_live_event_source_smoke_collector.py` 时执行：
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -298,7 +301,7 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_l
 echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
 ```
 
-### 7.5 Bootstrap title-contract/transient-detail hotfix 版 Stage 1.5F watermark
+### 7.5 Bootstrap delayed-launch age gate hotfix 版 Stage 1.5F watermark
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -312,10 +315,14 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
 fi
 
 export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
+echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
+echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+
+# 新 root，只用于 delayed-launch age gate hotfix；bootstrap rows 不产生正式 live evidence。
 rm -rf "$STAGE1_5F_OUT"
 
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
@@ -329,10 +336,18 @@ cat "$STAGE1_5F_OUT/watermark.json"
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json"
 ```
 
-### 7.6 启动 title-contract/transient-detail hotfix 版 Stage 1.5F observer
+### 7.6 启动 delayed-launch age gate hotfix 版 Stage 1.5F observer
 
 ```bash
-tmux new -d -s stage1_5f_live_depth_7d_title_contract_transient_hotfix "
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
+export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
+export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
+
+tmux new -d -s stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -348,6 +363,26 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 "
 ```
 
+### 7.7 部署后首次检查
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
+
+date -u
+tmux ls
+ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
+
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null || true
+wc -l "$STAGE1_5F_OUT"/heartbeat/*.jsonl 2>/dev/null || true
+find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+find "$STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
+```
+
 ## 8. 日常监控
 
 ### 8.1 一键设置路径
@@ -359,7 +394,7 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -419,7 +454,7 @@ pre_launch_validation_deferred_count 增长 = title/exchangeInfo 候选已经识
 ### 9.1 查看 1.5F watermark 时间
 
 ```bash
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
 
 python - <<'PY'
 import json
@@ -457,7 +492,7 @@ grep -RniE "Futures Will Launch|Will Launch.*Perpetual|USDⓈ-Margined|USDS-Marg
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix"
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 ```
@@ -555,12 +590,12 @@ validation=pending_exchangeinfo_missing = 候选 symbol 还未出现在 exchange
 validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确拒绝，例如非 PERPETUAL 或资产不在 allowlist。
 ```
 
-## 10. title-contract/transient-detail hotfix 首次输出判读模板
+## 10. delayed-launch age gate hotfix 首次输出判读模板
 
-title-contract/transient-detail hotfix 重新部署后，首次输出应类似：
+delayed-launch age gate hotfix 重新部署后，首次输出应类似：
 
 ```text
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix
 STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_title_contract_transient_hotfix
 
 decision = stage1_5f_observer_running_no_new_event
@@ -582,8 +617,8 @@ heartbeat_count = 1
 判读：
 
 ```text
-status = normal_initial_title_contract_transient_hotfix_run
-path_status = correct_title_contract_transient_hotfix_paths
+status = normal_initial_delayed_launch_age_gate_hotfix_run
+path_status = correct_delayed_launch_age_gate_hotfix_paths
 1.5D_status = running_and_writing_heartbeats
 1.5F_status = running_and_waiting_for_post_watermark_event
 depth_collection_status = not_started_because_no_new_post_watermark_event_symbol
@@ -717,3 +752,32 @@ for p in glob.glob(os.path.join(os.environ["STAGE1_5D_EVENTS_OUT"], "events", "*
 print(rows[-3:])
 PY
 ```
+
+### 12.7 2026-07-03 Delayed Launch Age Gate and Evidence Labeling Rules (M3)
+
+Deployment target after this hotfix:
+
+```text
+Stage 1.5D root: live_event_source_continuous_*_7d_title_contract_transient_hotfix
+Stage 1.5F root: live_depth_observer_7d_delayed_launch_age_gate_hotfix
+Stage 1.5F tmux: stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix
+```
+
+Delayed contract launch (e.g., onboarded hours before launch) incidents exposed limitation in using detected_at_ms for the 15-minute observation age gate, leading to premature rejections.
+
+Implementation checks:
+- `symbol_effective_launch_times_ms[symbol]` / `symbol_onboard_times_ms[symbol]` can be used as `observation_age_base_ms`.
+- `symbol_resolved_at_ms` is allowed only with delayed-launch evidence; ordinary late parser retry rows fall back to `detected_at_ms`.
+- `pending, launch_time_in_future` must not write `events_rejected/*.jsonl` and must not advance watermark.
+- accepted/rejected rows must include `observation_age_base_ms`, `observation_age_basis`, `event_age_ms`, `max_event_age_ms`, `watermark_max_seen_detected_at_ms`, and `watermark_version`.
+
+Evidence labeling guardrails:
+1. `announcement_and_launch_time`:
+   - Both announcement capture (detected_at_ms) and launch/onboard time (symbol_effective_launch_times_ms / symbol_onboard_times_ms) are strictly after the watermark.
+   - This represents fully valid, zero-lag announcement edge evidence.
+2. `launch_time_only`:
+   - Announcement capture was before/equal to watermark, but launch/onboard time is after the watermark.
+   - Live depth observer can still capture the launch orderbook, but this evidence does not prove announcement edge.
+3. `recovery_validation_only`:
+   - Both announcement capture and launch/onboard time are before/equal to the watermark.
+   - Used for debugging parser, retry, and loader behaviors only. Strictly forbidden from being merged into formal evidence.

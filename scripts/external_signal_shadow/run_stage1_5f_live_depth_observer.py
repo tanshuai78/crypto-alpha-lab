@@ -349,7 +349,8 @@ def main():
             estimate_requests_per_min,
         )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
-            classify_event_symbol_eligibility,
+            classify_event_symbol_eligibility_with_diagnostics,
+            classify_live_depth_evidence_basis,
             flatten_event_symbols,
             make_event_symbol_id,
         )
@@ -391,7 +392,7 @@ def main():
                 if event_symbol_id in states:
                     continue
 
-                status, reason = classify_event_symbol_eligibility(
+                status, reason, eligibility_diag = classify_event_symbol_eligibility_with_diagnostics(
                     row=flat_event,
                     symbol=symbol,
                     now_ms=now_ms,
@@ -400,6 +401,10 @@ def main():
                     budget_state=budget_state,
                 )
                 logger.info(f"Classified event {event_symbol_id} ({symbol}): status={status}, reason={reason}")
+
+                if status == "pending":
+                    # Do not write accepted/rejected, do not update watermark
+                    continue
 
                 if status == "eligible":
                     new_est_rate = estimate_requests_per_min(
@@ -419,6 +424,7 @@ def main():
 
                         append_jsonl(state_file, new_state.to_dict())
 
+                        basis_diag = classify_live_depth_evidence_basis(flat_event, watermark)
                         accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
                         append_jsonl(accepted_path, {
                             "event_symbol_id": event_symbol_id,
@@ -426,6 +432,8 @@ def main():
                             "event_id": flat_event.get("event_id"),
                             "detected_at_ms": flat_event.get("detected_at_ms"),
                             "accepted_at_ms": now_ms,
+                            **eligibility_diag,
+                            **basis_diag,
                         })
                         watermark = update_watermark_with_event(watermark, flat_event)
                         write_watermark_atomic(watermark_path, watermark)
@@ -437,6 +445,7 @@ def main():
                     if reason == "pre_watermark":
                         pre_watermark_ignored += 1
                     else:
+                        basis_diag = classify_live_depth_evidence_basis(flat_event, watermark)
                         rejected_path = build_daily_path(output_root, "events_rejected", now_ms)
                         append_jsonl(rejected_path, {
                             "event_symbol_id": event_symbol_id,
@@ -444,6 +453,8 @@ def main():
                             "rejection_reason": reason,
                             "depth_observation_started": False,
                             "rejected_at_ms": now_ms,
+                            **eligibility_diag,
+                            **basis_diag,
                         })
 
         # 6.3 Fetch public depth for active observations
