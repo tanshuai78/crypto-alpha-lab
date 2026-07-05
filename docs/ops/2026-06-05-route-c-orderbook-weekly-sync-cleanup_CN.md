@@ -450,10 +450,10 @@ overlap 审计确认可用后执行：
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 mkdir -p reports/route_c1
 
-# 将 live 1m liquidation JSONL 路径替换为实际路径
+# live smoke 直接读取已合并好的 1m price/liquidation 数据集
 PYTHONPATH=src uv run python scripts/review_route_c1_price_only.py \
   --run-mode live_smoke_7d \
-  --dataset data/trend_regime_liquidation_1m.jsonl \
+  --dataset data/route_c1_live/route_c1_live_price_1m_dataset.jsonl \
   --symbols BTCUSDT ETHUSDT SOLUSDT \
   --output reports/route_c1/route_c1_live_smoke_7d_summary.json \
   --review-output docs/reviews/$(date +%Y-%m-%d)-route-c1-live-smoke-7d-review.md
@@ -484,6 +484,13 @@ print('baseline_match_rate:', s['baseline_match_rate'])
 | `price_risk_not_confirmed` | 任一 ratio gate 未过 | 停止等待，分析具体弱项 |
 | `baseline_match_failed` | match_rate < 0.70 | 检查 live liq 数据质量 |
 | `data_unavailable` | 事件数为 0 | 检查 liquidation collector 是否正常 |
+
+补充说明：
+
+- `Price Risk Ratios` 才是这条路线的核心信号强度指标，`baseline_match_rate` 是对照覆盖质量指标，不是信号强弱本身。
+- 这次 `baseline_match_rate = 0.589` 说明有一部分事件没有找到足够像的对照窗口，但不代表价格风险信号弱；相反，这次三个 ratio 都已经过了各自门槛。
+- 最低成本的提升方式不是先放宽正式门槛，而是继续积累更长、更分散的 live 数据，让样本在 `month/day` 维度更均衡。
+- 这里的 baseline 不是“另一个 liquidation 事件”，而是“相似但未被 liquidation 污染的正常对照窗口”，用于估计事件发生前后的反事实波动水平。
 
 **如果 proxy_kill_switch_weak = True 且 7d live smoke 也弱** → 停止 Route C1，不进入 30 天阶段。
 
