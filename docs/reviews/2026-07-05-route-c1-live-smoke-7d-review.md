@@ -89,6 +89,19 @@ symbol / month / hour / vol bucket 是否能配得上
 只能说“在少数能匹配上的样本里看起来更强”
 这就是为什么 baseline_match_rate 会被拿来当门槛，而不是装饰字段。
 
+## 从 Candidate Alpha 到可考虑实盘的最短验收表
+
+| 阶段 | 必须满足 | 通过标准 | 不通过时怎么做 |
+|---|---|---|---|
+| 1. 研究成立 | `Price Risk Ratios` 过线，`baseline_match_rate >= 0.70`，样本不过度集中 | 事件后强度和对照覆盖都稳定 | 继续采集 live 数据，不改正式门槛 |
+| 2. 独立复核 | 换一段独立 live 窗口或不同 regime 再跑一次 | 方向不反转，强度不明显退化 | 暂停推广，先查样本结构 |
+| 3. 成本后为正 | 显式扣掉手续费、滑点、盘口深度和延迟 | 预期净收益仍为正 | 先别谈 alpha，继续优化执行或放弃 |
+| 4. 执行可落地 | shadow / paper 跑完整周期，不能频繁卡腿或拒单 | 下单、撤单、重试路径稳定 | 修执行，不进实盘 |
+| 5. 风控闭环 | 仓位上限、单腿暴露时间、熔断条件都明确 | 先有风控，再谈收益 | 不进实盘 |
+| 6. 小资金试运行 | 上面都过，再做小资金试跑 | 运行稳定、无静默失败 | 回退到 shadow / paper |
+
+结论：这条 liquidation 线现在已经进入 candidate alpha 观察区，但还没到“可考虑实盘”的阶段。当前最短板仍然是对照覆盖率，而不是价格风险强度。
+
 ## Next Path
 
 - Ratios below gate thresholds. Continue 7d live overlap collection.
