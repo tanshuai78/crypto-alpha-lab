@@ -26,6 +26,20 @@
 | post_event_range_ratio_median | 1.693 | >= 1.4 |
 | post_event_abs_excursion_p90_ratio | 3.806 | >= 1.3 |
 
+post_event_vol_ratio_median
+看的是 5 分钟 realized volatility 的中位数比值
+1 表示事件后波动比正常更大
+你这里是 1.55，说明事件后波动明显放大
+
+post_event_range_ratio_median
+看的是 5 分钟 high-low range 的中位数比值
+1 表示 K 线实体/上下影的振幅比正常更大
+你这里是 1.69，说明区间明显放大
+
+post_event_abs_excursion_p90_ratio
+看的是绝对偏离的 90 分位比值
+它更偏向看“尾部最极端的那部分”
+你这里是 3.81，说明极端偏离很强
 ## Proxy Kill-Switch
 
 - `proxy_kill_switch_weak`: `false`
@@ -52,28 +66,33 @@
 ```
 decision: route_c1_baseline_match_failed
 ```
+baseline_match_rate 不是单纯由“采集时间长短”决定
+它主要取决于：
+
+事件样本分布是否均匀
+baseline 候选池是否足够大
+symbol / month / hour / vol bucket 是否能配得上
+是否有足够多的完整未来 5m 窗口
+为什么 baseline 比例不能太低
+因为这个脚本不是只看“事件后指标高不高”，而是看：
+
+事件后指标是否稳定地高于“相近正常样本”
+
+如果 baseline 太少、太偏，容易出现两个问题：
+
+结果偶然性变大
+
+少数能匹配上的 baseline 可能刚好不代表正常分布
+解释力下降
+
+你不能很有底气地说“事件后确实比正常更强”
+只能说“在少数能匹配上的样本里看起来更强”
+这就是为什么 baseline_match_rate 会被拿来当门槛，而不是装饰字段。
 
 ## Next Path
 
-- 当前不是信号强度不够，而是 baseline 对照覆盖率没过门槛。
-- 正式 `baseline_match_rate >= 0.70` 门槛先不改。
-- 最低成本的提升方式不是放宽正式规则，而是继续采集更长时间的 live 数据，让样本在 `month/day` 维度更分散。
-- 这次样本的主要问题是 `2026-06` 过度集中；如果后续新增数据仍然主要落在同一 regime，`baseline_match_rate` 不一定会明显改善。
-- 如果后面只是做诊断，可以临时开一个分析版 matcher，把 `hour` 放宽到 `±2h`、把 `vol bucket` 放宽到 `±3`，但这只能用于观察敏感性，不要升级成正式 smoke 标准。
-
-## Baseline 对照怎么选
-
-- `live event` 是被脚本识别出来的事件样本，代表某个 liquidation 冲击后的市场反应窗口。
-- `baseline` 不是另一条 liquidation 事件，而是“相似的正常对照窗口”。
-- 这里的“相似”不是指也发生了 liquidation，而是指：
-  - 同一个 symbol
-  - 同一个 month
-  - 有完整的未来 5 分钟价格窗口
-  - candidate 前后 30 分钟没有 liquidation 污染
-  - pre30_vol 落在相近分位桶
-  - 时间上尽量接近同一小时段
-- 之所以要求 baseline 不能被 liquidation 污染，是为了让对照组尽量代表“没有这次事件时的正常波动”。如果 baseline 自己也被 liquidation 影响了，对照就失真了，price-risk ratio 会被冲淡。
-- 所以这里找的不是“另一个 liquidation 事件”，而是“足够像、但没有被事件污染的正常市场片段”。这也是为什么 baseline_match_rate 会受约束比较多。
+- Ratios below gate thresholds. Continue 7d live overlap collection.
+- Run `audit_route_c1_data_overlap.py --mode live_overlap` after 7 days.
 
 ## Anti-Leakage Contract
 
