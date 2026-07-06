@@ -781,3 +781,93 @@ Evidence labeling guardrails:
 3. `recovery_validation_only`:
    - Both announcement capture and launch/onboard time are before/equal to the watermark.
    - Used for debugging parser, retry, and loader behaviors only. Strictly forbidden from being merged into formal evidence.
+
+
+### 12.8 2026-07-06 Stage 1.5F request_manifest symbol-key hotfix
+
+Why the hotfix was needed:
+Stage 1.5G requires per-symbol request success rate metrics to evaluate the reliability of data collection. Since the original Stage 1.5F request manifest rows written to `request_manifest/*.jsonl` only recorded global request details (e.g., requested_path, http_status, fetched_at_ms) without attributing them to a specific event-symbol or event, the Stage 1.5G review process was blocked by `request_manifest_symbol_key_missing`.
+
+Exact fields added to depth request manifest rows:
+- `request_type`: `"depth_snapshot"` (explicitly categorizes depth snapshot queries)
+- `audit_metadata_version`: `1` (identifies post-hotfix formal-auditable rows)
+- `event_symbol_id`: `<event_symbol_id_hash>` (SHA-256 hash uniquely identifying the observed symbol session)
+- `event_id`: `<event_id>` (references the source contract launch event)
+- `symbol`: `<symbol>` (the standard trading symbol queried, e.g., `"BTCUSDT"`)
+
+Why exchangeInfo rows stay global:
+Global `exchangeInfo` queries are not symbol-specific and provide exchange-wide metadata. Forcing symbol keys onto these rows would break data boundaries and falsely skew success metrics. Thus, global `exchangeInfo` requests remain global.
+
+部署要求：
+- 必须新建 Stage 1.5F output root。旧 root 中已经写出的 `request_manifest/*.jsonl` 不会被代码热修自动补齐 `event_symbol_id` / `symbol`，不能作为 Stage 1.5G formal audit 的完整证据。
+- `--stage1-5d-events-glob` 必须指向 `events/*.jsonl`，不能只指向 Stage 1.5D 根目录。
+- `exchangeInfo` 仍保持全局 manifest 行；只有 `depth_snapshot` 请求必须带 `request_type`、`audit_metadata_version`、`event_symbol_id`、`event_id`、`symbol`。
+
+部署命令（新 Stage 1.5F output root）：
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_title_contract_transient_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_SUMMARY="$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json"
+if [ ! -f "$STAGE1_5D_SUMMARY" ]; then
+  export STAGE1_5D_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
+fi
+export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_request_manifest_symbol_key_hotfix_${RUN_ID}"
+
+echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
+echo "STAGE1_5D_SUMMARY=$STAGE1_5D_SUMMARY"
+echo "STAGE1_5F_OUT=$STAGE1_5F_OUT"
+
+tmux new-session -d -s "stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix_${RUN_ID}" "
+  cd /root/crypto-alpha-lab &&
+  source .venv/bin/activate &&
+  .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+    --stage1-5d-events-glob \"$STAGE1_5D_EVENTS_OUT/events/*.jsonl\" \
+    --stage1-5d-summary \"$STAGE1_5D_SUMMARY\" \
+    --stage1-5e-summary \"$STAGE1_5E_SUMMARY\" \
+    --output-root \"$STAGE1_5F_OUT\" \
+    --live-public-readonly
+"
+```
+
+检查命令：确认新 manifest 的 depth rows 带完整 symbol key。
+```bash
+python - <<'PY'
+import glob
+import json
+import os
+
+root = os.environ["STAGE1_5F_OUT"]
+rows = []
+missing = []
+for p in sorted(glob.glob(f"{root}/request_manifest/**/*.jsonl", recursive=True)):
+    with open(p) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("request_type") == "depth_snapshot":
+                rows.append(row)
+                if not row.get("event_symbol_id") or not row.get("event_id") or not row.get("symbol"):
+                    missing.append(row)
+
+print("depth_manifest_rows", len(rows))
+print("missing_symbol_key_rows", len(missing))
+for row in rows[-5:]:
+    print({
+        "symbol": row.get("symbol"),
+        "event_symbol_id": row.get("event_symbol_id"),
+        "event_id": row.get("event_id"),
+        "http_status": row.get("http_status"),
+        "audit_metadata_version": row.get("audit_metadata_version"),
+    })
+PY
+```
+
+判定标准：
+- `missing_symbol_key_rows == 0`。
+- `depth_manifest_rows > 0` 只有在 Stage 1.5F 已经接受 post-watermark event-symbol 并开始盘口采集后才会出现；若仍为 0，但 heartbeat 正常且 `post_watermark_events_accepted == 0`，表示还在等待新事件。
+- 旧 output root 即使程序已升级，也不能补成 formal-auditable root；需要等待新 root 中产生 completed observation 后再运行 Stage 1.5G。

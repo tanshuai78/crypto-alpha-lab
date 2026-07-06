@@ -26,8 +26,8 @@
 
 - **正式证据数量 (Formal announcement_and_launch_time count):** `1`
 - **各证据标签统计 (Evidence label counts):**
-  - `announcement_and_launch_time`: 1
   - `recovery_validation_only`: 0
+  - `announcement_and_launch_time`: 1
   - `launch_time_only`: 0
 
 ## 4. 覆盖率与请求健康度审计 (Coverage & Request Health)

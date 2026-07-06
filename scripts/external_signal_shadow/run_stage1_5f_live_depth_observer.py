@@ -73,6 +73,29 @@ def get_mock_json_response(mock_dir: str, name: str) -> dict:
     raise FileNotFoundError(f"Mock response not found for {name} in {mock_dir}")
 
 
+def enrich_depth_request_manifest_row(
+    manifest_row: dict,
+    *,
+    event_symbol_id: str,
+    event_id: str,
+    symbol: str,
+) -> dict:
+    if not event_symbol_id:
+        raise ValueError("event_symbol_id_required")
+    if not event_id:
+        raise ValueError("event_id_required")
+    if not symbol:
+        raise ValueError("symbol_required")
+
+    row = dict(manifest_row or {})
+    row["request_type"] = "depth_snapshot"
+    row["audit_metadata_version"] = 1
+    row["event_symbol_id"] = event_symbol_id
+    row["event_id"] = event_id
+    row["symbol"] = symbol
+    return row
+
+
 def main():
     args = parse_args()
     output_root = args.output_root
@@ -493,9 +516,23 @@ def main():
                     "error": None,
                     "fetched_at_ms": now_ms,
                 }
+                manifest_row = enrich_depth_request_manifest_row(
+                    manifest_row,
+                    event_symbol_id=state.event_symbol_id,
+                    event_id=state.event_id,
+                    symbol=symbol,
+                )
+                request_manifest_rows.append(manifest_row)
+                manifest_path = build_daily_path(output_root, "request_manifest", now_ms)
+                append_jsonl(manifest_path, manifest_row)
             else:
                 res = fetch_depth_snapshot(symbol, live_public_readonly=args.live_public_readonly)
-                manifest_row = res["manifest_row"]
+                manifest_row = enrich_depth_request_manifest_row(
+                    res["manifest_row"],
+                    event_symbol_id=state.event_symbol_id,
+                    event_id=state.event_id,
+                    symbol=symbol,
+                )
                 request_manifest_rows.append(manifest_row)
                 manifest_path = build_daily_path(output_root, "request_manifest", now_ms)
                 append_jsonl(manifest_path, manifest_row)

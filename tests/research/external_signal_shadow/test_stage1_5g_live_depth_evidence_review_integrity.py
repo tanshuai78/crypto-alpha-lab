@@ -126,6 +126,24 @@ def test_validator_blocks_completed_state_without_snapshots():
     assert "completed_state_without_snapshots" in result.blockers
 
 
+def test_validator_blocks_completed_state_snapshot_count_mismatch():
+    result = validate_evidence_integrity(
+        accepted_events=[
+            {
+                "event_symbol_id": "es1",
+                "evidence_label": "announcement_and_launch_time",
+                "watermark_max_seen_detected_at_ms": 1000,
+                "watermark_version": 1,
+            }
+        ],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=[{"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 700}],
+        snapshots=[{"event_symbol_id": "es1"} for _ in range(20)],
+        summary={"completed_observation_count": 1},
+    )
+    assert "state_snapshot_count_mismatch" in result.blockers
+
+
 def test_raw_snapshot_integrity_blocks_crossed_book():
     from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
         validate_raw_snapshot_integrity,
@@ -212,4 +230,3 @@ def test_raw_snapshot_integrity_blocks_jsonl_parse_error_from_loader():
     )
     assert "jsonl_parse_error" in result.blockers
     assert result.jsonl_parse_error_ratio == 0.01
-

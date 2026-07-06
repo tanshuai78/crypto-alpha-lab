@@ -695,3 +695,544 @@ def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics
     assert row["max_event_age_ms"] == 15 * 60 * 1000
     assert row["watermark_max_seen_detected_at_ms"] == watermark_time
     assert row["watermark_version"] == 1
+
+
+def test_enrich_depth_request_manifest_row_adds_event_symbol_context_without_mutating_input():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    original = {
+        "requested_host": "fapi.binance.com",
+        "requested_path": "/fapi/v1/depth",
+        "http_status": 200,
+    }
+
+    enriched = enrich_depth_request_manifest_row(
+        original,
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="ETHUSD1",
+    )
+
+    assert enriched["request_type"] == "depth_snapshot"
+    assert enriched["audit_metadata_version"] == 1
+    assert enriched["event_symbol_id"] == "es1"
+    assert enriched["event_id"] == "ev1"
+    assert enriched["symbol"] == "ETHUSD1"
+    assert enriched["requested_path"] == "/fapi/v1/depth"
+    assert "event_symbol_id" not in original
+
+
+def test_enrich_depth_request_manifest_row_preserves_existing_core_manifest_fields():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    enriched = enrich_depth_request_manifest_row(
+        {
+            "requested_host": "fapi.binance.com",
+            "requested_path": "/fapi/v1/depth",
+            "http_status": 500,
+            "error": "http_error_500",
+        },
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="ETHUSD1",
+    )
+
+    assert enriched["http_status"] == 500
+    assert enriched["error"] == "http_error_500"
+    assert enriched["request_type"] == "depth_snapshot"
+    assert enriched["audit_metadata_version"] == 1
+    assert enriched["event_symbol_id"] == "es1"
+    assert enriched["event_id"] == "ev1"
+    assert enriched["symbol"] == "ETHUSD1"
+
+
+def test_enrich_depth_request_manifest_row_rejects_missing_event_symbol_id():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    with pytest.raises(ValueError, match="event_symbol_id_required"):
+        enrich_depth_request_manifest_row(
+            {"requested_path": "/fapi/v1/depth", "http_status": 200},
+            event_symbol_id="",
+            event_id="ev1",
+            symbol="ETHUSD1",
+        )
+
+
+def test_enrich_depth_request_manifest_row_rejects_missing_event_id():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    with pytest.raises(ValueError, match="event_id_required"):
+        enrich_depth_request_manifest_row(
+            {"requested_path": "/fapi/v1/depth", "http_status": 200},
+            event_symbol_id="es1",
+            event_id="",
+            symbol="ETHUSD1",
+        )
+
+
+def test_enrich_depth_request_manifest_row_rejects_missing_symbol():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    with pytest.raises(ValueError, match="symbol_required"):
+        enrich_depth_request_manifest_row(
+            {"requested_path": "/fapi/v1/depth", "http_status": 200},
+            event_symbol_id="es1",
+            event_id="ev1",
+            symbol="",
+        )
+
+
+def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_path):
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        f.write(json.dumps({
+            "bids": [["100.0", "10.0"]],
+            "asks": [["101.0", "10.0"]],
+            "T": 1000
+        }))
+
+    import time
+    now_ms = int(time.time() * 1000)
+    event_time = now_ms - 5000
+    watermark_time = now_ms - 10000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "e2",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": event_time,
+            "symbols": ["ABCUSDT"],
+            "source_name": "s1",
+            "title": "t2"
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    rows = load_all_jsonl_from_subdirs(str(output_root), "request_manifest")
+    depth_rows = [r for r in rows if r.get("request_type") == "depth_snapshot"]
+    assert len(depth_rows) == 1
+    row = depth_rows[0]
+    assert row["request_type"] == "depth_snapshot"
+    assert row["audit_metadata_version"] == 1
+    assert len(row["event_symbol_id"]) == 64
+    assert row["event_id"] == "e2"
+    assert row["symbol"] == "ABCUSDT"
+
+
+def test_failed_depth_manifest_row_contains_event_symbol_context():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        enrich_depth_request_manifest_row,
+    )
+    row = enrich_depth_request_manifest_row(
+        {
+            "requested_host": "fapi.binance.com",
+            "requested_path": "/fapi/v1/depth",
+            "http_status": 500,
+            "error": "http_error_500",
+        },
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="ETHUSD1",
+    )
+
+    assert row["request_type"] == "depth_snapshot"
+    assert row["audit_metadata_version"] == 1
+    assert row["event_symbol_id"] == "es1"
+    assert row["event_id"] == "ev1"
+    assert row["symbol"] == "ETHUSD1"
+    assert row["http_status"] == 500
+    assert row["error"] == "http_error_500"
+
+
+def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        f.write(json.dumps({
+            "bids": [["100.0", "10.0"]],
+            "asks": [["101.0", "10.0"]],
+            "T": 1000
+        }))
+
+    import time
+    now_ms = int(time.time() * 1000)
+    event_time = now_ms - 5000
+    watermark_time = now_ms - 10000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "e2",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": event_time,
+            "symbols": ["ABCUSDT"],
+            "source_name": "s1",
+            "title": "t2"
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    rows = load_all_jsonl_from_subdirs(str(output_root), "request_manifest")
+    depth_rows = [r for r in rows if r.get("request_type") == "depth_snapshot"]
+
+    keys = [(r.get("event_symbol_id"), r.get("fetched_at_ms"), r.get("requested_path")) for r in depth_rows]
+    assert len(keys) == len(set(keys))
+    assert len(depth_rows) == 1
+
+
+def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
+    def mock_fetch_public_json(url, live_public_readonly=False):
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "data": {"symbols": [{"symbol": "ABCUSDT"}]},
+                "manifest_row": {
+                    "requested_host": "fapi.binance.com",
+                    "requested_path": "/fapi/v1/exchangeInfo",
+                    "requested_url_hash": "mock_exinfo",
+                    "final_url_hash": "mock_exinfo",
+                    "http_status": 200,
+                    "payload_size_bytes": 100,
+                    "response_payload_hash": "mock_exinfo",
+                    "retry_count": 0,
+                    "error": None,
+                    "fetched_at_ms": 1000,
+                }
+            }
+        elif "depth" in url:
+            return {
+                "ok": True,
+                "data": {
+                    "bids": [["100.0", "10.0"]],
+                    "asks": [["101.0", "10.0"]],
+                    "T": 1000
+                },
+                "manifest_row": {
+                    "requested_host": "fapi.binance.com",
+                    "requested_path": "/fapi/v1/depth",
+                    "requested_url_hash": "mock_depth",
+                    "final_url_hash": "mock_depth",
+                    "http_status": 200,
+                    "payload_size_bytes": 100,
+                    "response_payload_hash": "mock_depth",
+                    "retry_count": 0,
+                    "error": None,
+                    "fetched_at_ms": 1000,
+                }
+            }
+        return {"ok": False, "error": "unknown_url"}
+
+    monkeypatch.setattr(
+        "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_public_json",
+        mock_fetch_public_json
+    )
+
+    import time
+    now_ms = int(time.time() * 1000)
+    event_time = now_ms - 5000
+    watermark_time = now_ms - 10000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "e2",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": event_time,
+            "symbols": ["ABCUSDT"],
+            "source_name": "s1",
+            "title": "t2"
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--live-public-readonly",
+        "--max-polls", "1",
+    ]
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    rows = load_all_jsonl_from_subdirs(str(output_root), "request_manifest")
+    depth_rows = [r for r in rows if r.get("request_type") == "depth_snapshot"]
+
+    keys = [(r.get("event_symbol_id"), r.get("fetched_at_ms"), r.get("requested_path")) for r in depth_rows]
+    assert len(keys) == len(set(keys))
+    assert len(depth_rows) == 1
+
+
+def test_exchangeinfo_manifest_row_is_not_depth_symbol_specific(monkeypatch, tmp_path):
+    def mock_fetch_public_json(url, live_public_readonly=False):
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "data": {"symbols": [{"symbol": "ABCUSDT"}]},
+                "manifest_row": {
+                    "requested_host": "fapi.binance.com",
+                    "requested_path": "/fapi/v1/exchangeInfo",
+                    "requested_url_hash": "mock_exinfo",
+                    "final_url_hash": "mock_exinfo",
+                    "http_status": 200,
+                    "payload_size_bytes": 100,
+                    "response_payload_hash": "mock_exinfo",
+                    "retry_count": 0,
+                    "error": None,
+                    "fetched_at_ms": 1000,
+                }
+            }
+        elif "depth" in url:
+            return {
+                "ok": True,
+                "data": {
+                    "bids": [["100.0", "10.0"]],
+                    "asks": [["101.0", "10.0"]],
+                    "T": 1000
+                },
+                "manifest_row": {
+                    "requested_host": "fapi.binance.com",
+                    "requested_path": "/fapi/v1/depth",
+                    "requested_url_hash": "mock_depth",
+                    "final_url_hash": "mock_depth",
+                    "http_status": 200,
+                    "payload_size_bytes": 100,
+                    "response_payload_hash": "mock_depth",
+                    "retry_count": 0,
+                    "error": None,
+                    "fetched_at_ms": 1000,
+                }
+            }
+        return {"ok": False, "error": "unknown_url"}
+
+    monkeypatch.setattr(
+        "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_public_json",
+        mock_fetch_public_json
+    )
+
+    import time
+    now_ms = int(time.time() * 1000)
+    event_time = now_ms - 5000
+    watermark_time = now_ms - 10000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "e2",
+            "event_type": "futures_contract_launch",
+            "detected_at_ms": event_time,
+            "symbols": ["ABCUSDT"],
+            "source_name": "s1",
+            "title": "t2"
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--live-public-readonly",
+        "--max-polls", "1",
+    ]
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    rows = load_all_jsonl_from_subdirs(str(output_root), "request_manifest")
+    exinfo_rows = [r for r in rows if r.get("requested_path") == "/fapi/v1/exchangeInfo"]
+    assert len(exinfo_rows) == 1
+    exinfo_row = exinfo_rows[0]
+    assert exinfo_row.get("event_symbol_id") is None
+    assert exinfo_row.get("symbol") is None
+    assert exinfo_row.get("request_type") is None

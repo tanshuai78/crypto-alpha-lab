@@ -218,6 +218,18 @@ def validate_evidence_integrity(
         es_id = st.get("event_symbol_id")
         if not es_id or es_id not in snapshots_by_id or not snapshots_by_id[es_id]:
             blockers.append("completed_state_without_snapshots")
+            continue
+
+        expected_snapshot_count = st.get("depth_snapshot_count")
+        if expected_snapshot_count is None:
+            continue
+        try:
+            expected_snapshot_count_int = int(expected_snapshot_count)
+        except (TypeError, ValueError):
+            blockers.append("state_snapshot_count_invalid")
+            continue
+        if len(snapshots_by_id[es_id]) != expected_snapshot_count_int:
+            blockers.append("state_snapshot_count_mismatch")
 
     # Compute formal counts
     formal_announcement_and_launch_count = 0
@@ -1120,7 +1132,6 @@ def generate_stage1_5g_chinese_review(summary: dict) -> str:
     lines.append("")
 
     return "\n".join(lines)
-
 
 
 

@@ -4,6 +4,38 @@ from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review im
 )
 
 
+def make_depth_snapshots(
+    *,
+    event_symbol_id="es1",
+    symbol="BTC/USDT",
+    count=700,
+    best_bid=100.0,
+    best_ask=100.1,
+    mid_price=100.05,
+    spread_bps=10.0,
+    buy_slippage_bps=5.0,
+    sell_slippage_bps=5.0,
+    top_bid_depth_usdt=1000.0,
+    top_ask_depth_usdt=1000.0,
+):
+    return [
+        {
+            "event_symbol_id": event_symbol_id,
+            "symbol": symbol,
+            "fetched_at_ms": i * 60000,
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "mid_price": mid_price,
+            "spread_bps": spread_bps,
+            "buy_slippage_bps": buy_slippage_bps,
+            "sell_slippage_bps": sell_slippage_bps,
+            "top_bid_depth_usdt": top_bid_depth_usdt,
+            "top_ask_depth_usdt": top_ask_depth_usdt,
+        }
+        for i in range(count)
+    ]
+
+
 def test_decision_not_ready_without_completed_observation():
     summary = {"completed_observation_count": 0, "post_watermark_events_accepted": 0}
     result = build_stage1_5g_review_summary(
@@ -73,41 +105,20 @@ def build_fixture_review_summary(
         }
     ]
 
-    # Create mock snapshots
+    # Create mock snapshots. The row count must match state.depth_snapshot_count.
     if good_depth:
-        snapshots = [
-            {
-                "event_symbol_id": "es1",
-                "symbol": "BTC/USDT",
-                "fetched_at_ms": i * 60000,
-                "best_bid": 100.0,
-                "best_ask": 100.1,
-                "mid_price": 100.05,
-                "spread_bps": 10.0,
-                "buy_slippage_bps": 5.0,
-                "sell_slippage_bps": 5.0,
-                "top_bid_depth_usdt": 1000.0,
-                "top_ask_depth_usdt": 1000.0,
-            }
-            for i in range(20)
-        ]
+        snapshots = make_depth_snapshots(count=700)
     else:
-        snapshots = [
-            {
-                "event_symbol_id": "es1",
-                "symbol": "BTC/USDT",
-                "fetched_at_ms": i * 60000,
-                "best_bid": 100.0,
-                "best_ask": 102.0,
-                "mid_price": 101.0,
-                "spread_bps": 200.0,
-                "buy_slippage_bps": 180.0,
-                "sell_slippage_bps": 180.0,
-                "top_bid_depth_usdt": 100.0,
-                "top_ask_depth_usdt": 100.0,
-            }
-            for i in range(20)
-        ]
+        snapshots = make_depth_snapshots(
+            count=100,
+            best_ask=102.0,
+            mid_price=101.0,
+            spread_bps=200.0,
+            buy_slippage_bps=180.0,
+            sell_slippage_bps=180.0,
+            top_bid_depth_usdt=100.0,
+            top_ask_depth_usdt=100.0,
+        )
 
     if request_manifest_rows is None:
         manifest = [{"event_symbol_id": "es1", "http_status": 200}]
@@ -171,22 +182,7 @@ def test_summary_includes_audit_replay_fields_for_sufficient_decision(tmp_path):
                 "watermark_max_seen_detected_at_ms": 1000,
             }
         ],
-        snapshots=[
-            {
-                "event_symbol_id": "es1",
-                "symbol": "BTC/USDT",
-                "fetched_at_ms": i * 60000,
-                "best_bid": 100.0,
-                "best_ask": 100.1,
-                "mid_price": 100.05,
-                "spread_bps": 10.0,
-                "buy_slippage_bps": 5.0,
-                "sell_slippage_bps": 5.0,
-                "top_bid_depth_usdt": 1000.0,
-                "top_ask_depth_usdt": 1000.0,
-            }
-            for i in range(20)
-        ],
+        snapshots=make_depth_snapshots(count=700),
         request_manifest_rows=[{"event_symbol_id": "es1", "http_status": 200}],
         output_root=tmp_path / "stage1_5f_root",
     )
@@ -274,36 +270,21 @@ def build_fixture_review_summary_with_events(labels, source_article_ids, good_de
             }
         )
         if good_depth:
-            snapshots.append(
-                {
-                    "event_symbol_id": es_id,
-                    "symbol": f"SYM_{i}",
-                    "fetched_at_ms": 1000,
-                    "best_bid": 100.0,
-                    "best_ask": 100.1,
-                    "mid_price": 100.05,
-                    "spread_bps": 10.0,
-                    "buy_slippage_bps": 5.0,
-                    "sell_slippage_bps": 5.0,
-                    "top_bid_depth_usdt": 1000.0,
-                    "top_ask_depth_usdt": 1000.0,
-                }
-            )
+            snapshots.extend(make_depth_snapshots(event_symbol_id=es_id, symbol=f"SYM_{i}", count=700))
         else:
-            snapshots.append(
-                {
-                    "event_symbol_id": es_id,
-                    "symbol": f"SYM_{i}",
-                    "fetched_at_ms": 1000,
-                    "best_bid": 100.0,
-                    "best_ask": 102.0,
-                    "mid_price": 101.0,
-                    "spread_bps": 200.0,
-                    "buy_slippage_bps": 180.0,
-                    "sell_slippage_bps": 180.0,
-                    "top_bid_depth_usdt": 100.0,
-                    "top_ask_depth_usdt": 100.0,
-                }
+            snapshots.extend(
+                make_depth_snapshots(
+                    event_symbol_id=es_id,
+                    symbol=f"SYM_{i}",
+                    count=100,
+                    best_ask=102.0,
+                    mid_price=101.0,
+                    spread_bps=200.0,
+                    buy_slippage_bps=180.0,
+                    sell_slippage_bps=180.0,
+                    top_bid_depth_usdt=100.0,
+                    top_ask_depth_usdt=100.0,
+                )
             )
 
     manifest = [{"event_symbol_id": st["event_symbol_id"], "http_status": 200} for st in states]
@@ -361,17 +342,13 @@ def test_decision_invalid_on_raw_snapshot_invalid():
             "watermark_max_seen_detected_at_ms": 1000,
         }
     ]
-    snapshots = [
-        {
-            "event_symbol_id": "es1",
-            "symbol": "BTC/USDT",
-            "fetched_at_ms": 1000,
-            "best_bid": 105.0,
-            "best_ask": 100.0,  # crossed book
-            "mid_price": 102.5,
-            "spread_bps": -50.0,
-        }
-    ]
+    snapshots = make_depth_snapshots(
+        count=700,
+        best_bid=105.0,
+        best_ask=100.0,  # crossed book
+        mid_price=102.5,
+        spread_bps=-50.0,
+    )
     manifest = [{"event_symbol_id": "es1", "http_status": 200}]
 
     result = build_stage1_5g_review_summary(
@@ -409,21 +386,11 @@ def test_decision_observation_only_on_thin_book_or_high_slippage():
         }
     ]
     # Snapshot spread exceeds max spread bps (100) or slippage exceeds max
-    snapshots = [
-        {
-            "event_symbol_id": "es1",
-            "symbol": "BTC/USDT",
-            "fetched_at_ms": 1000,
-            "best_bid": 100.0,
-            "best_ask": 100.1,
-            "mid_price": 100.05,
-            "spread_bps": 10.0,
-            "buy_slippage_bps": 200.0,  # high slippage
-            "sell_slippage_bps": 200.0,
-            "top_bid_depth_usdt": 1000.0,
-            "top_ask_depth_usdt": 1000.0,
-        }
-    ]
+    snapshots = make_depth_snapshots(
+        count=700,
+        buy_slippage_bps=200.0,  # high slippage
+        sell_slippage_bps=200.0,
+    )
     manifest = [{"event_symbol_id": "es1", "http_status": 200}]
 
     result = build_stage1_5g_review_summary(
@@ -451,3 +418,82 @@ def test_decision_invalid_on_per_symbol_request_success_failure():
     )
     assert result["decision"] == "stage1_5g_depth_evidence_invalid"
     assert "per_symbol_request_success_rate_below_threshold" in result["blockers"]
+
+
+def test_stage1_5g_accepts_completed_formal_evidence_with_symbol_keyed_manifest():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import build_stage1_5g_review_summary
+
+    snapshots = make_depth_snapshots(event_symbol_id="es1", symbol="ETHUSD1", count=700)
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{
+            "event_symbol_id": "es1",
+            "symbol": "ETHUSD1",
+            "status": "completed",
+            "depth_snapshot_count": 700,
+            "max_gap_ms": 60000,
+        }],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "ETHUSD1",
+            "source_article_id": "article1",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[
+            {
+                "request_type": "depth_snapshot",
+                "audit_metadata_version": 1,
+                "event_symbol_id": "es1",
+                "event_id": "ev1",
+                "symbol": "ETHUSD1",
+                "requested_path": "/fapi/v1/depth",
+                "http_status": 200,
+            }
+        ],
+    )
+
+    assert "request_manifest_symbol_key_missing" not in result["blockers"]
+    assert result["decision"] == "stage1_5g_depth_evidence_sufficient_for_stage1_5h_plan"
+
+
+def test_stage1_5g_blocks_completed_formal_evidence_with_unkeyed_depth_manifest():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import build_stage1_5g_review_summary
+
+    snapshots = make_depth_snapshots(event_symbol_id="es1", symbol="ETHUSD1", count=700)
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{
+            "event_symbol_id": "es1",
+            "symbol": "ETHUSD1",
+            "status": "completed",
+            "depth_snapshot_count": 700,
+            "max_gap_ms": 60000,
+        }],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "ETHUSD1",
+            "source_article_id": "article1",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[
+            {
+                "request_type": "depth_snapshot",
+                "requested_path": "/fapi/v1/depth",
+                "http_status": 200,
+            }
+        ],
+    )
+    assert "request_manifest_symbol_key_missing" in result["blockers"]
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
