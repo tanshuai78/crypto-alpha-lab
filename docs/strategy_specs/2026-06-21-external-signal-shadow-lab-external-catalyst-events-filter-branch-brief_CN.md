@@ -119,6 +119,88 @@ Stage 1.4 输入：funding / OI / price / forceOrder snapshot
 Stage 1.5 输入：external catalyst events
 ```
 
+### 4.1 `replay` 这个词在这里是什么意思
+
+在程序开发里，`replay` 一般表示：
+
+```text
+把一段已经发生过的历史输入重新喂给系统，
+按今天定义好的规则重新跑一遍，
+看看系统会给出什么结果。
+```
+
+在本分支里，`replay` 不是动画回放，也不是模拟下单，而是：
+
+```text
+把历史 external catalyst event 按统一的 available_at_ms、entry delay、cost、baseline、filter group 重新计算，
+检查这类事件过去是否真的比随机基线或普通价格基线更有信息量。
+```
+
+一句话理解：
+
+```text
+replay = 历史事件的离线体检
+```
+
+它回答的是“这类事件过去值不值得继续研究”，而不是“今天能不能立刻交易”。
+
+### 4.2 全流程图：每一步的作用和目的
+
+```mermaid
+flowchart TD
+    A[外部原始事件源 raw payload<br/>例如交易所公告 / unlock calendar] --> B[Source Audit<br/>检查来源可信度、字段完整性、时间戳质量]
+    B --> C{通过安全与完整性检查?}
+    C -- 否 --> C1[Reject / Quarantine<br/>隔离或仅 observation-only]
+    C -- 是 --> D[Normalize<br/>统一 event_type、symbol、source_url、source_published_at_ms]
+    D --> E[构建 available_at_ms<br/>保守估计市场最早可知时间]
+    E --> F[Hard Veto Filter<br/>先排除高风险、不可审计、带 hindsight 风险的事件]
+    F --> G{具备 replay 资格?}
+    G -- 否 --> G1[只保留标签或观察记录<br/>不进入 replay]
+    G -- 是 --> H[Context Label Filter<br/>补充 liquidation / funding / OI / regime 等上下文标签]
+    H --> I[固定分组 replay<br/>按 event_type、delay、filter_group 做历史对比]
+    I --> J[Review<br/>检查收益、基线、左尾、集中度]
+    J --> K{是否值得继续研究?}
+    K -- 否 --> K1[停止或降级为 observation-only]
+    K -- 是 --> L[Stage 1.5D Live Source Collector<br/>开始真实世界事件源观察]
+    L --> M[Stage 1.5F Live Depth Observer<br/>只对 post-watermark 新事件录制盘口]
+    M --> N[Stage 1.5G Evidence Review<br/>审查 12h depth 证据是否足够]
+    N --> O[决定是否进入后续 shadow / execution simulator 设计]
+```
+
+各步骤的作用：
+
+```text
+raw payload:
+  保存原始证据，避免后面出现“我不知道原文是什么”的审计断层。
+
+source audit:
+  判断来源是否可信、是否有足够历史、字段是否稳定。
+
+normalize:
+  把不同来源、不同语言、不同页面结构压成统一事件表。
+
+available_at_ms:
+  保守估计“市场最早可能知道这个事件”的时间，防止 hindsight bias。
+
+hard veto filter:
+  先做硬性排雷，不让危险或不可审计事件进入后续统计。
+
+context label filter:
+  给事件补充“发生时市场处于什么状态”的说明，帮助分组对比，但不直接当交易信号。
+
+replay:
+  做历史证伪，检查某类事件是否真的比随机基线更有信息量。
+
+live source collector:
+  进入真实世界观测，检查公告延迟、字段稳定性、symbols 解析是否可靠。
+
+live depth observer:
+  记录真实盘口，而不是继续用 close-price proxy 假装可成交。
+
+evidence review:
+  判断“是否值得继续研究执行条件”，而不是直接证明 alpha 或允许交易。
+```
+
 ---
 
 ## 5. 这个分支不是什么
@@ -292,6 +374,31 @@ liquidity_depth_veto
 hindsight_risk_veto
 ```
 
+这些字段的中文解释：
+
+```text
+source_integrity_veto:
+  来源完整性否决。意思是“这个来源本身不可信或结构不稳定”，例如字段经常缺失、页面结构飘移严重、来源真假难辨。
+
+forbidden_payload_veto:
+  禁止载荷否决。意思是原始 payload 中出现了不该出现的敏感字段，例如 api_key、wallet_seed、raw_tx、order_request，一旦出现必须直接拒绝。
+
+available_at_veto:
+  可得时间否决。意思是我们无法保守地定义市场最早何时知道这个事件；如果 available_at_ms 不可靠，后面的 replay 会产生 hindsight bias。
+
+first_hour_no_trade_veto:
+  首小时不交易否决。意思是公告刚出来的前一小时太容易出现跳空、插针、盘口剧烈失真，因此即使事件本身通过也不能把首小时当成可交易区间。
+
+asset_quality_veto:
+  资产质量否决。意思是标的本身太差，例如历史过短、过于边缘、缺乏稳定市场结构，不适合进入严肃研究。
+
+liquidity_depth_veto:
+  流动性深度否决。意思是盘口太浅、价差太大、成交容量太差，即使价格走势看起来不错，也不适合后续执行研究。
+
+hindsight_risk_veto:
+  事后偏见否决。意思是这个事件今天看起来很清楚，但当时市场未必真的知道或能获得同样信息，因此不能拿来当真实可交易证据。
+```
+
 ### 9.2 Context Label Filter
 
 包括：
@@ -311,6 +418,73 @@ deleveraging_proxy_context
 ```text
 deleveraging_proxy_context 在 Stage 1.4E 失败后只能 diagnostic-only，不能作为 hard filter。
 ```
+
+这些字段的中文解释：
+
+```text
+local_liquidation_context:
+  本地清算上下文标签。用于描述事件附近是否同时出现清算放大、强平聚集等现象。
+
+funding_crowding_context:
+  资金费率拥挤上下文。用于描述当时多空哪一边更拥挤，但它只是标签，不是入场按钮。
+
+oi_crowding_context:
+  持仓量拥挤上下文。用于描述事件前后 OI 是否堆积，帮助判断是否存在杠杆挤压背景。
+
+price_reaction_context:
+  价格反应上下文。用于描述事件发生后价格是立即跳变、延迟反应，还是基本没有反应。
+
+orderbook_execution_context:
+  盘口执行上下文。用于描述价差、深度、滑点代理等执行环境信息，帮助后续判断“理论收益”能否落地。
+
+btc_regime_context:
+  BTC 市场状态上下文。用于标记当时大盘是否处于强趋势、风险偏好切换或整体波动异常阶段。
+
+deleveraging_proxy_context:
+  去杠杆代理上下文。它来自更早阶段对 OI/price flush 的尝试；由于 Stage 1.4E 已经证明它不能作为可靠硬过滤器，所以这里只允许当诊断标签看，不能决定事件去留。
+```
+
+### 9.3 Filter 原理回顾
+
+这里的 `filter` 更接近：
+
+```text
+事件研究（event study）里的分层筛选器 + 风险审计矩阵
+```
+
+而不是：
+
+```text
+直接告诉你买卖的交易策略
+```
+
+可以把它理解成三层：
+
+```text
+第一层：先排雷
+  用 Hard Veto Filter 把明显不可信、不可审计、带 hindsight 风险的事件直接剔除。
+
+第二层：再贴标签
+  用 Context Label Filter 给事件补充“发生时市场处于什么状态”的说明。
+
+第三层：做固定分组 replay
+  检查不同 filter group 是否真的增加了信息量，而不是只是事后讲故事。
+```
+
+所以本分支的 `filter` 原理不是“过滤后就能交易”，而是：
+
+```text
+用一套有审计边界的筛选器，把原本杂乱的外部事件压成可以比较、可以证伪、可以复核的研究样本。
+```
+
+如果和论文方法论做类比，它更像：
+
+```text
+event study + baseline comparison + risk filter matrix
+```
+
+而不是某一篇论文里的现成交易规则。
+本项目借鉴的是“先定义事件、再定义标签、再做基线比较、最后决定是否值得继续”的研究流程，而不是直接复刻某篇 paper 的最终策略。
 
 ---
 
@@ -482,7 +656,7 @@ docs/plans/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expan
 docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-expansion-review_CN.md
 ```
 
-### 10.5 Stage 1.5D：Live Event-Source Collector（已实现，7d U-settled hotfix observation 运行中）
+### 10.5 Stage 1.5D：Live Event-Source Collector（已实现，7d title-contract/transient-detail hotfix observation 运行中）
 
 目标：
 
@@ -506,10 +680,14 @@ docs/reviews/2026-06-24-external-signal-shadow-lab-stage1-5c1-price-coverage-exp
 当前状态：
 
 ```text
-current_server_mode = 7d_u_settled_hotfix_observation
-current_stage1_5d_output_root_pattern = data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_u_hotfix
+current_server_mode = 7d_title_contract_transient_hotfix_observation
+current_stage1_5d_output_root_pattern = data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_title_contract_transient_hotfix
 primary_event_type_under_live_observation = futures_contract_launch
-known_recent_edge_case = BTCU/ETHU U-settled raw contract symbols
+known_recent_edge_cases =
+  1. BTCU/ETHU U-settled raw contract symbols
+  2. Multiple USDⓈ-Margined TradFi title-only events
+  3. empty detail payload / transient 202 detail response
+  4. title contract symbol delayed launch, e.g. ETHUSD1
 ```
 
 解释：
@@ -629,9 +807,26 @@ data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibilit
 当前状态：
 
 ```text
-current_stage1_5f_output_root = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_u_hotfix
+current_stage1_5f_output_root = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix
+current_stage1_5f_mode = delayed_launch_age_gate_hotfix_observation
 expected_idle_decision_before_new_event = stage1_5f_observer_running_no_new_event
 post_watermark_events_accepted = 0 表示尚未有可观察的新事件，不表示程序失败。
+```
+
+几个容易误解的概念说明：
+
+```text
+bootstrap:
+  启动观察器时，先把“当前已经存在的旧事件”划进起跑线，避免它们被误当成新事件。
+
+watermark:
+  观察器保存的一条“新旧事件分界线”。只有 watermark 之后的新 event-symbol，才允许进入 1.5F 盘口录制。
+
+post-watermark event:
+  指在这条分界线之后第一次被 1.5D 写出来的新事件。只有这种事件才有资格被当作“实时观察对象”。
+
+depth snapshot:
+  一次公开盘口快照，可以用来估算 spread、top depth、500 USDT slippage proxy 等执行相关证据。
 ```
 
 1.5F 成功的最低条件：
@@ -710,6 +905,44 @@ P4: scheduled token unlock / emission
   当前 blocker：第三方 calendar 存在 hindsight risk，需要严格 source audit。
 ```
 
+P1 的 blocker 细化说明：
+
+| blocker | 这表示什么问题 | 为什么会卡住研究 | 最小解决路径 |
+|---|---|---|---|
+| `sample` | 可安全研究的历史 delisting 样本数量、天数、symbol 覆盖不够 | 样本太少时，结果容易被少数极端事件支配 | 先做样本清点表，确认 `event_count`、`event_days`、`symbols_with_events`，必要时先只研究 Binance futures-related delisting |
+| `market_scope` | 公告到底影响 `spot / futures / margin / borrow` 哪个市场层级不清楚 | 不同 scope 的机制完全不同，混在一起 replay 会失真 | 在 schema 中强制拆出 `market_scope` 字段，第一版先限定单一 scope |
+| `effective_time` | 公告发布时间与真正生效时间可能不同 | 不明确研究的是“公告冲击”还是“正式下线冲击”，时间锚点会混乱 | 同时保存 `source_published_at_ms / available_at_ms / effective_time_ms`，并在 replay 中固定 anchor |
+| `futures historical existence` | 当时该资产是否真的有可研究的 futures 市场不明确 | 没有历史合约市场就无法做统一的 futures replay | 补 historical exchangeInfo / symbol existence 审计，只保留确实存在 futures 市场的样本 |
+| `shortability` | 是否真的存在可做空路径不明确 | 不能把“理论下跌”误写成“可执行做空” | 第一版只做 observation / replay，不把 short path 解释成 execution claim |
+
+P2、P3、P4 也建议说明清楚：
+
+```text
+P2: margin_enablement / borrow_enablement / leverage_enablement
+  问题本质：
+    这类公告往往不是一个统一页面结构，字段分散在不同产品线里。
+  关键风险：
+    很难稳定提取 source coverage、symbol、available_at_ms、effective product scope。
+  最小解决路径：
+    先限定单一来源和单一产品族，例如只看某交易所的 margin enablement 公告，再做 schema 审计。
+
+P3: trading_pair_addition / spot listing / futures listing family
+  问题本质：
+    “listing” 这个词看起来相似，但 spot listing、futures listing、trading pair addition 的市场机制完全不同。
+  关键风险：
+    如果把它们混成一个 event_type，replay 得到的是混合机制的伪结论。
+  最小解决路径：
+    强制拆分 event_type，至少区分 spot listing、futures listing、pair addition，不允许合并统计。
+
+P4: scheduled token unlock / emission
+  问题本质：
+    第三方 unlock calendar 往往带有 hindsight risk，也未必能保证当时市场真实可见。
+  关键风险：
+    今天能查到的 unlock schedule，不代表当时市场真的以同样形式获得了这条信息。
+  最小解决路径：
+    先做严格 source audit，明确 source_published_at_ms / available_at_ms / confidence，再决定能否进入 replay。
+```
+
 当前建议：
 
 ```text
@@ -731,6 +964,25 @@ available_at_policy_defined = true
 forbidden_payload_count = 0
 ```
 
+字段解释：
+
+```text
+historical_events_found >= 30:
+  至少要找到 30 条历史事件，否则样本太少，source audit 很难说明问题。
+
+source_integrity_pass_rate >= 95%:
+  来源完整性通过率至少 95%。意思是大多数样本都能稳定抽到关键字段。
+
+symbol_mapping_pass_rate >= 95%:
+  symbol 映射通过率至少 95%。意思是公告里的标的能被正确标准化成研究用 symbol。
+
+available_at_policy_defined = true:
+  必须先明确 available_at_ms 的构造规则。没有这条规则，所有后续 replay 都会有事后偏见风险。
+
+forbidden_payload_count = 0:
+  原始数据中不允许出现任何敏感字段。这个值只要不是 0，就说明安全边界已经被破坏。
+```
+
 ### 11.2 Replay research pass
 
 ```text
@@ -746,6 +998,40 @@ max_single_day_event_share <= 0.30
 max_single_symbol_event_share <= 0.60
 ```
 
+字段解释：
+
+```text
+event_count >= 30:
+  用于 replay 的事件数量至少 30 条，避免结果完全由小样本波动决定。
+
+event_days >= 10:
+  事件至少分布在 10 个自然日，避免只集中在某一天的特殊市场环境。
+
+symbols_with_events >= 3:
+  至少涉及 3 个 symbol，避免只靠单一标的撑结果。
+
+median_net_return_after_50bps > 0:
+  扣掉 50 bps 成本后的中位收益仍为正，表示结果不是纯纸面利润。
+
+baseline_excess_net_bps > 0:
+  事件组收益要高于随机 baseline，说明事件本身有增量信息。
+
+price_baseline_excess_net_bps > 0:
+  事件组收益也要高于普通价格基线，避免只是市场本来就在动。
+
+left_tail_p05 不差于 random baseline:
+  左尾风险不能明显恶化。简单理解：即使有收益，也不能靠承担更差的极端回撤换来。
+
+top_5_positive_events_gross_profit_share <= 0.40:
+  前 5 个最好事件贡献的利润不能超过 40%，否则说明结果过度依赖极少数幸运样本。
+
+max_single_day_event_share <= 0.30:
+  单日事件占比不能太高，避免样本全挤在某一天。
+
+max_single_symbol_event_share <= 0.60:
+  单一 symbol 事件占比不能太高，避免结果只是某一个币的局部现象。
+```
+
 ### 11.3 停止条件
 
 ```text
@@ -756,6 +1042,31 @@ available_at_ms 无法保守构建
 成本后中位收益为负
 收益由单日 / 单币 / Top 5 极端事件贡献
 filter matrix 没有增量价值
+```
+
+字段解释：
+
+```text
+source 无法审计:
+  指来源本身不可信或字段不稳定，根本不值得继续。
+
+available_at_ms 无法保守构建:
+  指无法回答“市场最早什么时候知道这个事件”，这会直接让 replay 失真。
+
+事件数不足且不可扩展:
+  不是暂时少，而是从结构上就很难积累到足够样本。
+
+表现不优于 random baseline:
+  说明事件组并没有显著强于随机对照。
+
+成本后中位收益为负:
+  说明纸面优势一扣成本就消失。
+
+收益由单日 / 单币 / Top 5 极端事件贡献:
+  说明结果过度集中，不稳健。
+
+filter matrix 没有增量价值:
+  说明加不加 filter 都差不多，那这条研究支线的筛选器就没有存在意义。
 ```
 
 ---
@@ -781,6 +1092,34 @@ maker-first execution
 position sizing
 ```
 
+这些概念的中文解释：
+
+```text
+TradeIntent:
+  可以理解成“准备下单”的结构化意图对象。一旦系统开始生成它，就意味着研究流程已经越过了只读观察边界。
+
+7d live source observation:
+  连续 7 天观察真实事件源是否稳定，例如公告延迟、字段结构、heartbeat、request health。
+
+7d live depth observation:
+  连续观察 watermark 后新事件的真实盘口快照，而不是继续依赖历史价格代理。
+
+30d shadow observation:
+  更长时间的只读验证窗口，用来积累运行和证据质量，不是 paper trading。
+
+paper trading:
+  模拟下单、虚拟成交。虽然不是真钱，但已经属于执行层测试，因此本阶段禁止。
+
+live trading:
+  真正连接交易所并下单，本阶段更不允许。
+
+maker-first execution:
+  偏执行设计的话题，意思是尽量用挂单而不是吃单成交。本分支当前完全不碰这一层。
+
+position sizing:
+  仓位大小分配逻辑。只要还在 Stage 1.5 研究阶段，就不该开始讨论具体仓位。
+```
+
 任何策略设计必须另起 Stage 2 / Stage 3，并满足项目 pre-live checklist。
 
 ---
@@ -788,15 +1127,15 @@ position sizing
 ## 13. 当前正式建议
 
 ```text
-decision = continue_stage1_5d_1_5f_7d_u_settled_hotfix_observation_and_prepare_stage1_5g_plan
+decision = continue_stage1_5d_1_5f_7d_title_contract_transient_and_delayed_launch_observation_and_prepare_stage1_5g_plan
 stage1_5a_source_audit_status = completed
 stage1_5b_minimal_event_table_status = completed
 stage1_5c_historical_replay_status = completed_with_promising_cells
 stage1_5c1_price_coverage_status = completed_ready_for_1_5c_rerun
-stage1_5d_live_source_collector_status = implemented_7d_u_settled_hotfix_observation_running
-stage1_5d_symbol_extraction_status = multiple_tradfi_and_u_settled_hotfix_applied
+stage1_5d_live_source_collector_status = implemented_7d_title_contract_transient_hotfix_observation_running
+stage1_5d_symbol_extraction_status = multiple_tradfi_u_settled_title_contract_and_transient_detail_hotfix_applied
 stage1_5e_execution_feasibility_audit_status = completed_proxy_failed
-stage1_5f_live_depth_observer_status = implemented_waiting_for_post_watermark_event_or_collecting_when_event_arrives
+stage1_5f_live_depth_observer_status = implemented_delayed_launch_age_gate_hotfix_waiting_for_post_watermark_event_or_collecting_when_event_arrives
 stage1_5g_live_depth_evidence_review_status = next_plan_to_write_not_yet_executable_as_final_review_until_completed_depth_evidence_exists
 primary_event_type_under_research = futures_contract_launch
 primary_promising_cell = futures_contract_launch_long_attention_diagnostic_12h_close_price_replay_only
@@ -812,6 +1151,82 @@ paper_trading_allowed = false
 live_trading_allowed = false
 execution_engine_allowed = false
 alpha_interpretation_allowed = false
+```
+
+字段解释：
+
+```text
+decision:
+  当前总决策。它告诉你“现在应该继续做什么”，而不是告诉你“策略已经有效”。
+
+stage1_5a_source_audit_status:
+  事件源审计状态。completed 表示来源可信度和字段完整性已经过第一关。
+
+stage1_5b_minimal_event_table_status:
+  最小事件表状态。completed 表示历史事件已经被整理成统一表格。
+
+stage1_5c_historical_replay_status:
+  历史 replay 状态。completed_with_promising_cells 表示出现了值得继续看的 cell，但不等于策略通过。
+
+stage1_5c1_price_coverage_status:
+  价格覆盖扩展状态。说明 replay 用的价格数据覆盖问题已经补过。
+
+stage1_5d_live_source_collector_status:
+  真实事件源采集器状态。implemented_*_running 表示程序已经部署并在持续跑。
+
+stage1_5d_symbol_extraction_status:
+  符号抽取状态。说明多合约 TradFi、U-settled、title-contract 等 edge case 的 parser/hotfix 已经纳入。
+
+stage1_5e_execution_feasibility_audit_status:
+  执行可行性审计状态。completed_proxy_failed 表示 historical proxy 不足以证明可成交性，这是一个“安全阻断”而不是系统坏了。
+
+stage1_5f_live_depth_observer_status:
+  实时盘口观察器状态。implemented_waiting_for_post_watermark_event_or_collecting_when_event_arrives 表示程序已经可用，只是在等真正的新事件。
+
+stage1_5g_live_depth_evidence_review_status:
+  盘口证据审查状态。next_plan_to_write_* 表示现在可以写 plan，但还不能写最终结论。
+
+primary_event_type_under_research:
+  当前主研究对象。这里是 futures_contract_launch。
+
+primary_promising_cell:
+  当前最值得继续看的历史 replay 单元格。它只是“研究现象”，不是交易信号。
+
+exchange_delisting_notice_status:
+  次优先事件类型的状态。说明它还卡在 sample、market_scope、effective_time 等问题上。
+
+external_catalyst_events_collection_allowed:
+  是否允许继续收集外部事件数据。true 表示可以继续采，但不代表可以交易。
+
+historical_replay_completed:
+  历史 replay 是否已经做完。true 只表示研究步骤完成。
+
+live_event_source_collector_allowed:
+  是否允许 1.5D 继续跑。true 表示可继续只读观察。
+
+live_depth_observation_allowed:
+  是否允许 1.5F 继续录盘口。true 表示可继续收集证据。
+
+stage1_5g_plan_allowed:
+  是否允许开始写 1.5G 的设计/计划。true 表示可以规划下一步，但还不能提前下结论。
+
+execution_feasibility_audit_completed_but_failed_to_prove_execution:
+  这句很重要：审计已经做完，但没有证明执行可行，所以不能越过安全边界。
+
+execution_feasibility_claim_allowed = false:
+  不允许声称“已经证明可成交”。
+
+paper_trading_allowed = false:
+  不允许模拟下单。
+
+live_trading_allowed = false:
+  不允许真实下单。
+
+execution_engine_allowed = false:
+  不允许把执行引擎接进来。
+
+alpha_interpretation_allowed = false:
+  不允许把当前现象包装成 alpha 结论。
 ```
 
 一句话：
