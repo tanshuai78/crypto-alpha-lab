@@ -14,13 +14,33 @@
 真实根因是：
 
 ```text
-Stage 1.5D 的 detail retry queue 没有公平调度和 backoff。
+Stage 1.5D 的 detail retry queue 没有有界公平调度、持久化 scheduler state 和 backoff。
 每轮 detail fetch 预算只有 3 个，但长期被 3 个旧 HTTP 202 empty detail article 占满。
-新的 post-watermark TradFi futures launch article 进入 retry state 后，1 小时内从未获得一次 detail fetch attempt。
+新的 no-symbol TradFi futures launch article 进入 retry state 后，1 小时内从未获得一次 detail fetch attempt。
 最后被 detail_fetch_max_age 终态化为 symbols=[] / terminal_failed。
 ```
 
-因此修复目标不是“补某一篇 2026-07-09 TradFi 公告”，而是修复 Stage 1.5D 的 detail fallback 调度语义，防止旧 pending detail 请求饿死新事件。
+因此修复目标不是“补某一篇 2026-07-09 TradFi 公告”，而是修复 Stage 1.5D 的 detail fallback 调度语义，防止旧 pending detail 请求饿死新检测到的 no-symbol futures article。
+
+---
+
+## 0.1 Review Feedback Disposition
+
+本轮 review 的 9 条 required fixes 全部采纳。
+
+```text
+1. 调度公平性必须有有界 first-attempt SLA，而不是只靠排序。
+2. detail retry scheduler state 必须能跨进程重启恢复。
+3. 1.5D scheduler 不依赖 1.5F post-watermark；1.5D 内部只使用 newly_detected_no_symbol_futures_article 语义。
+4. announcement_detail_deferred manifest 必须限流或聚合，不能每轮无限写 JSONL。
+5. budget_starved 是 collection failure，不得污染 symbol parse failure counters。
+6. max-age failure taxonomy 拆成 never_attempted / attempted_transient / success_but_symbols_empty / validation_rejected。
+7. 增加 endpoint-level degraded circuit breaker，避免 detail endpoint 全局 202 时吞光 budget。
+8. 新 root 部署边界写硬，不修旧 artifacts，不把 missed event 当 formal evidence。
+9. implementation plan 必须补 Stage 1.5G / review 兼容测试。
+```
+
+采纳理由：这些要求都直接影响 live evidence 的可审计性、重启后的行为一致性、下游 1.5F/1.5G 解释边界，不属于过度工程。
 
 ---
 
@@ -121,6 +141,18 @@ Stage 1.5D 与 Stage 1.5F 的关系：
 ```
 
 因此，这次 1.5F 不采集是正确行为；错误发生在 1.5D 没有给出可用 symbol。
+
+术语边界：
+
+```text
+post-watermark:
+  1.5F 的消费边界，由 1.5F watermark 判断。
+
+newly_detected_no_symbol_futures_article:
+  1.5D scheduler 内部概念，表示当前 1.5D root 中新检测到、event_type=futures_contract_launch、title 无法抽 symbol、尚未 parsed/terminal 的 article。
+
+1.5D scheduler 不得读取或依赖 1.5F watermark 文件。
+```
 
 ---
 
@@ -295,7 +327,7 @@ review 误以为没有新 event，而实际是 1.5D terminal_failed。
 
 ```text
 Invariant 1:
-  新进入 detail_retry_state 的 post-watermark futures launch article 必须尽快获得至少一次 detail_fetch_attempt。
+  新进入 detail_retry_state 的 newly_detected_no_symbol_futures_article 必须在有界时间内获得首次 detail_fetch_attempt。
 
 Invariant 2:
   HTTP 202 / empty body / 429 / 5xx 的旧 transient article 必须 backoff，不能每轮抢占全部 detail budget。
@@ -315,9 +347,54 @@ Invariant 5:
 
 Invariant 6:
   修复不改变 Stage 1.5F watermark 语义，不允许用旧 missed event 伪造 formal 12h live evidence。
+
+Invariant 7:
+  scheduler state 必须可重启恢复，重启不能把旧 HTTP 202 article 重新当成无限抢 budget 的新 article。
+
+Invariant 8:
+  budget_starved 是 collector/scheduler collection failure，不得计入 symbol_empty 或 parser failure 统计。
 ```
 
-### 6.2 非目标
+### 6.2 First-Attempt 有界保证
+
+只写排序建议不够。修复后必须满足可测试 SLA：
+
+```text
+If EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL > 0
+and article is eligible
+and detail_fetch_attempt_count == 0,
+then it must receive first detail fetch attempt within:
+  EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_POLLS
+or
+  EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_MS
+```
+
+建议新增配置：
+
+```text
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_POLLS = 3
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_MS = 10 * 60 * 1000
+```
+
+实现上应拆成两个队列：
+
+```text
+never_attempted queue:
+  round-robin / aging score
+  目标是满足 first-attempt SLA。
+
+attempted_transient queue:
+  使用 backoff 和 endpoint degraded 状态控制重试频率。
+```
+
+不能继续依赖：
+
+```text
+dict insertion order
+simple sort only
+```
+
+### 6.3 非目标
 
 ```text
 不补采已经错过的 2026-07-09 12h formal evidence。
@@ -331,9 +408,9 @@ Invariant 6:
 
 ## 7. 推荐解决方案
 
-推荐方案：**fair scheduler + transient backoff + never-attempted protection + manifest diagnostics**。
+推荐方案：**bounded fair scheduler + scheduler state persistence + transient backoff + endpoint degraded circuit breaker + never-attempted protection + manifest diagnostics**。
 
-### 7.1 Fair Scheduler
+### 7.1 Bounded Fair Scheduler
 
 detail_retry_state 不能按 dict 插入顺序直接消费。
 
@@ -344,24 +421,71 @@ eligible_states =
   detail_retry_state rows where now_ms >= next_detail_retry_at_ms
 ```
 
-排序建议：
+调度必须先满足 first-attempt SLA，再处理旧 transient retry。
+
+推荐排序仅作为 tie-breaker：
 
 ```text
 1. detail_fetch_attempt_count == 0 优先
-2. first_detected_at_ms 较新且 post-watermark article 优先
+2. first_detected_at_ms 较早、defer_count 较高、接近 SLA breach 的 never-attempted article 优先
 3. last_retry_at_ms 较早优先
 4. transient_detail_error_count 较少优先
 ```
 
-最低可接受版本：
+最低可接受版本必须保证：
 
 ```text
-未尝试过 detail fetch 的 article 优先于已经多次 HTTP 202 的 article。
+未尝试过 detail fetch 的 article 在 max_first_attempt_delay_polls / max_first_attempt_delay_ms 内获得一次 fetch attempt。
 ```
 
-这样可保证新事件至少获得一次 detail fetch attempt。
+这能同时防止两类饥饿：
 
-### 7.2 Transient Backoff
+```text
+旧 HTTP 202 article 饿死新 article。
+持续新 article 进入时，较老 never-attempted article 被反向饿死。
+```
+
+### 7.2 Scheduler State Persistence
+
+调度状态不能只存在进程内。
+
+必须持久化或可重建以下字段：
+
+```text
+source_article_id
+first_detected_at_ms
+detail_fetch_attempt_count
+transient_detail_error_count
+non_transient_detail_error_count
+last_retry_at_ms
+next_detail_retry_at_ms
+first_deferred_at_ms
+last_deferred_at_ms
+defer_count
+terminal_state
+terminal_failure_type
+```
+
+可选实现：
+
+```text
+方案 A:
+  写 detail_retry_scheduler_state.json 或 detail_retry_state.jsonl。
+
+方案 B:
+  从 raw_payloads + request_manifest + events 重建 state。
+```
+
+最低要求：
+
+```text
+restart 后 old HTTP 202 article 仍处于 backoff。
+restart 后 never-attempted article 仍受 first-attempt SLA 保护。
+restart 后不会重复写 terminal_failed。
+restart 后不会把旧 transient article 重新当作新事件抢占全部 budget。
+```
+
+### 7.3 Transient Backoff
 
 当 detail fetch 返回 transient error：
 
@@ -401,7 +525,46 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC = 3600
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_NEVER_ATTEMPTED_MAX_DEFER_SEC = 10 * 60
 ```
 
-### 7.3 Never-Attempted Protection
+### 7.4 Endpoint-Level Degraded Circuit Breaker
+
+仅做 per-article backoff 不够。如果 Binance detail endpoint 整体进入 `HTTP 202 + empty body` 模式，多个 article 都会 transient failed。
+
+需要维护 endpoint-level health：
+
+```text
+detail_endpoint_recent_attempt_count
+detail_endpoint_recent_202_empty_count
+detail_endpoint_transient_error_rate
+detail_endpoint_consecutive_202_empty_count
+detail_endpoint_degraded_until_ms
+```
+
+建议新增配置：
+
+```text
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_202_RATE_THRESHOLD = 0.80
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE = 5
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC = 15 * 60
+```
+
+规则：
+
+```text
+If recent detail attempts have HTTP 202 / empty rate >= threshold:
+  mark detail endpoint degraded
+  reduce old attempted_transient retry frequency
+  preserve first-attempt SLA for never_attempted articles if budget allows
+  emit endpoint_degraded diagnostic
+```
+
+注意：
+
+```text
+endpoint degraded 不应禁止新 article 的首次 attempt。
+它只降低旧 transient article 的重复请求频率。
+```
+
+### 7.5 Never-Attempted Protection
 
 现有逻辑允许：
 
@@ -436,9 +599,30 @@ not parser evidence
 not symbol empty evidence
 ```
 
-### 7.4 Budget Deferred Manifest
+### 7.6 Budget Deferred Manifest Compaction
 
-当 article 因预算不足未被 fetch，应写 request_manifest 诊断行：
+当 article 因预算不足未被 fetch，应记录 scheduler diagnostic，但不能每轮每 article 写一行 JSONL。
+
+不可接受：
+
+```text
+每 poll 对每个 pending article 写一行 announcement_detail_deferred。
+```
+
+可接受方案：
+
+```text
+方案 A:
+  每个 source_article_id 只写 first_deferred row，后续 defer_count / last_deferred_at_ms 存入 scheduler_state。
+
+方案 B:
+  每 N 分钟最多写一行 compacted deferred snapshot。
+
+方案 C:
+  只在 heartbeat / summary 中输出 aggregate counters，并在 scheduler_state 保存 per-article deferred state。
+```
+
+推荐 compacted 字段：
 
 ```json
 {
@@ -446,9 +630,10 @@ not symbol empty evidence
   "source_type": "announcement_detail",
   "source_article_id": "84ad610bdd284699bc451b7baaa0ff7d",
   "url": "https://www.binance.com/en/support/announcement/84ad610bdd284699bc451b7baaa0ff7d",
-  "fetched_at_ms": null,
-  "deferred_at_ms": 0,
-  "defer_reason": "detail_budget_exhausted",
+  "first_deferred_at_ms": 0,
+  "last_deferred_at_ms": 0,
+  "defer_count": 17,
+  "latest_defer_reason": "detail_budget_exhausted",
   "detail_fetch_attempt_count": 0,
   "detail_budget_per_poll": 3,
   "pending_queue_size": 0,
@@ -460,7 +645,7 @@ not symbol empty evidence
 
 这个 manifest 不代表网络请求，只代表调度决策。字段名必须明确为 `deferred`，避免和真实 fetch 混淆。
 
-### 7.5 Request Manifest Schema Cleanup
+### 7.7 Request Manifest Schema Cleanup
 
 当前 manifest 中没有 `request_type`，导致诊断脚本只能看到：
 
@@ -496,6 +681,45 @@ attempted_success
 attempted_terminal
 ```
 
+Stage 1.5G / review 侧必须把：
+
+```text
+announcement_detail_deferred
+```
+
+解释为 scheduler decision，不是 HTTP request failure。
+
+### 7.8 Summary Counters
+
+新增独立 counters：
+
+```text
+detail_budget_deferred_count
+detail_budget_starved_count
+detail_never_attempted_expired_count
+detail_first_attempt_sla_breach_count
+detail_scheduler_pending_count
+detail_scheduler_backoff_count
+detail_endpoint_degraded_count
+detail_endpoint_degraded_active
+```
+
+明确禁止：
+
+```text
+budget_starved 不得计入 symbol_empty_event_count。
+budget_starved 不得计入 detail_symbol_parse_failed_count。
+budget_starved 不得计入 detail_success_symbols_empty_count。
+announcement_detail_deferred 不得计入 failed HTTP request。
+```
+
+原因：
+
+```text
+budget_starved 说明 collector 调度失败；
+它不是公告内容无 symbol，也不是 parser 无法抽 symbol。
+```
+
 ---
 
 ## 8. 状态机语义
@@ -528,6 +752,40 @@ terminal_failed_* 可以写 events/*.jsonl，但必须带 terminal_failure_type�
 terminal_failed_budget_starved 不能被解释为公告没有 symbol。
 它只能说明 collector 调度失败。
 ```
+
+### 8.1 Max-Age Failure Taxonomy
+
+`detail_retry_max_age_exceeded` 必须拆分，不得继续作为所有失败共用原因。
+
+```text
+A. detail_never_attempted_budget_starved
+   没有任何 detail request。
+   collection failure / scheduler failure。
+
+B. detail_transient_timeout
+   至少有一次 detail request，但长期 HTTP 202 / 429 / 5xx / timeout。
+   endpoint unavailable evidence。
+
+C. detail_success_symbols_empty
+   detail fetch 成功，payload trusted，parser 确实抽不到 symbol。
+   parser/content evidence。
+
+D. candidate_validation_rejected
+   detail 或 title 抽出 candidates，但 exchangeInfo 明确拒绝。
+   validation evidence。
+```
+
+对应字段：
+
+```text
+terminal_failure_type =
+  detail_never_attempted_budget_starved
+  detail_transient_timeout
+  detail_success_symbols_empty
+  candidate_validation_rejected
+```
+
+只有 `detail_success_symbols_empty` 才能接近“公告内容没有可用 symbol”的证据。A/B/D 都不能被解释为 symbol-empty content evidence。
 
 ---
 
@@ -564,6 +822,20 @@ data_failure_evidence
 
 不能作为 formal 12h live depth evidence。
 
+### 9.1 Stage 1.5G / Review Compatibility
+
+本 hotfix 会改变 request manifest 语义，因此 implementation plan 必须补 1.5G / review 兼容测试。
+
+最低要求：
+
+```text
+1. budget_starved 不被解释为 symbol_empty_event。
+2. announcement_detail_deferred 不被当作 HTTP request failure。
+3. request_type 能区分真实 request 与 scheduler decision。
+4. old unkeyed / unknown request_manifest 不能通过 formal audit。
+5. terminal_failure_type = detail_never_attempted_budget_starved 的 event 只能进入 collection_failure / recovery_validation，不得进入 formal evidence。
+```
+
 ---
 
 ## 10. 测试要求
@@ -585,6 +857,13 @@ detail_budget_per_poll = 3
 ```text
 D receives one detail fetch attempt within the poll or next eligible poll
 old A/B/C do not monopolize all budget
+```
+
+新增测试：
+
+```text
+test_never_attempted_article_receives_first_attempt_within_sla
+test_continuous_new_articles_do_not_starve_older_never_attempted_article
 ```
 
 ### 10.2 never-attempted 不允许 max_age terminal_failed
@@ -619,6 +898,12 @@ A is skipped
 detail budget can be used by other eligible articles
 ```
 
+新增测试：
+
+```text
+test_old_202_backoff_survives_restart_and_new_article_gets_attempt
+```
+
 ### 10.4 request_manifest 可审计
 
 期望字段：
@@ -634,7 +919,25 @@ defer_reason
 detail_fetch_attempt_count
 ```
 
-### 10.5 post-watermark TradFi regression
+### 10.5 scheduler state survives restart
+
+场景：
+
+```text
+old A/B/C already returned HTTP 202 and have next_detail_retry_at_ms in future
+process restarts
+new D enters as never_attempted article
+```
+
+期望：
+
+```text
+old A/B/C remain in backoff
+D receives first detail fetch attempt
+no duplicate terminal_failed rows
+```
+
+### 10.6 newly detected TradFi regression
 
 场景：
 
@@ -650,6 +953,17 @@ detail body later contains contract symbols
 detail fetch is attempted
 detail symbols are parsed or kept pending transient
 never silently expires without attempt
+```
+
+### 10.7 Stage 1.5G / review compatibility tests
+
+必须覆盖：
+
+```text
+budget_starved 不被解释为 symbol_empty_event。
+announcement_detail_deferred 不被当成 HTTP request failure。
+request_type 可区分真实 HTTP request 与 scheduler decision。
+old unknown request_type manifest 不得通过 formal audit。
 ```
 
 ---
@@ -670,7 +984,7 @@ never silently expires without attempt
 ```text
 1. 保留旧 1.5D / 1.5F root 作为 bug evidence。
 2. 本地测试通过后同步服务器。
-3. 启动新的 1.5D root，例如：
+3. 启动新的 1.5D root，并使用新的 scheduler metadata version，例如：
    live_event_source_continuous_YYYYMMDDTHHMMSSZ_7d_detail_retry_scheduler_hotfix
 4. 用新 1.5D root bootstrap 新 1.5F root。
 5. 等待新的 post-watermark futures launch event。
@@ -690,6 +1004,15 @@ parser/retry correctness check
 formal 12h live depth evidence
 ```
 
+硬边界：
+
+```text
+旧 root 的 terminal_failed rows 不允许人工改写成 parsed rows。
+修复后重新解析出的 2026-07-09 symbols 不允许作为 formal 12h live depth evidence。
+旧 root 只能用于 regression/recovery_validation。
+新 1.5F root 必须从新 1.5D root bootstrap watermark。
+```
+
 ---
 
 ## 12. Completion Criteria
@@ -698,12 +1021,17 @@ formal 12h live depth evidence
 
 ```text
 1. 旧 HTTP 202 detail article 不再永久占用全部 detail budget。
-2. 新 post-watermark no-symbol futures article 至少获得一次 detail fetch attempt。
-3. detail_fetch_attempt_count == 0 的 article 不会被写成 detail_retry_max_age_exceeded terminal_failed。
-4. request_manifest 能按 source_article_id 审计 detail fetch / defer / transient / terminal 状态。
-5. Stage 1.5F 不需要放宽任何 eligibility rule。
-6. 所有安全开关仍为 false。
-7. 测试覆盖 old backlog + new article fairness、never-attempted expiry、transient backoff、manifest schema。
+2. 新 no-symbol futures article 至少获得一次 detail fetch attempt。
+3. first-attempt SLA 有配置、有测试，并覆盖持续新 article 进入场景。
+4. scheduler state 能跨重启恢复，旧 HTTP 202 backoff 不会因重启失效。
+5. detail_fetch_attempt_count == 0 的 article 不会被写成 detail_retry_max_age_exceeded terminal_failed。
+6. request_manifest 能按 source_article_id 审计 detail fetch / defer / transient / terminal 状态，且 deferred diagnostics 不无限写爆。
+7. budget_starved 有独立 counters，不污染 symbol_empty / parser failure counters。
+8. endpoint-level degraded circuit breaker 有配置和测试。
+9. Stage 1.5F 不需要放宽任何 eligibility rule。
+10. Stage 1.5G / review 能正确区分 scheduler decision 与 HTTP request。
+11. 所有安全开关仍为 false。
+12. 测试覆盖 old backlog + new article fairness、restart persistence、never-attempted expiry、transient backoff、endpoint degraded、manifest schema、1.5G compatibility。
 ```
 
 ---

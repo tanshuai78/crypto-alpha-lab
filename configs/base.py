@@ -1553,6 +1553,37 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC = 3600
 EXTERNAL_SIGNAL_STAGE1_5D_TRANSIENT_DETAIL_FETCH_MAX_AGE_SEC = 86400
 # Transient detail responses such as Binance HTTP 202 + empty body are not terminal parser failures.
 
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_POLLS = 3
+# Eligible never-attempted announcement detail rows must receive a first attempt within this many polls.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_MS = 10 * 60 * 1000
+# Wall-clock SLA for first detail fallback attempt on newly detected no-symbol futures articles.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC = 60
+# Initial backoff for transient announcement detail failures such as HTTP 202 empty body.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC = 3600
+# Maximum per-article transient detail retry backoff.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_NEVER_ATTEMPTED_MAX_DEFER_SEC = 10 * 60
+# Maximum tolerated scheduler defer time before classifying never-attempted detail rows as collection failure.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_202_RATE_THRESHOLD = 0.80
+# Endpoint degradation threshold for recent HTTP 202 / empty detail responses.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE = 5
+# Minimum recent detail attempts required before endpoint degraded state can activate.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC = 15 * 60
+# Endpoint-level backoff for old transient detail retries when Binance detail endpoint is degraded.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEFERRED_MANIFEST_MIN_INTERVAL_SEC = 15 * 60
+# Per-article minimum interval for compacted announcement_detail_deferred diagnostic rows.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 1
+# Audit metadata version for Stage 1.5D detail retry scheduler diagnostics.
+
+
 
 
 EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS = ("USDT", "USDC", "U", "USD1")

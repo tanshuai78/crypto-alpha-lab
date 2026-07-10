@@ -219,10 +219,12 @@ def test_detail_fetch_transient_failure_does_not_permanently_dedup_article(tmp_p
             res["payload"] = json.dumps(res["payload"])
         return res
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
 
     assert rc == 0
     s = json.loads(summary.read_text())
@@ -944,10 +946,12 @@ def test_detail_retry_success_preserves_first_detected_at_ms(tmp_path):
         "--poll-interval-sec", "1",
     ]
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args):
-                rc = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+                    with patch("sys.argv", args):
+                        rc = main()
 
     assert rc == 0
     event_files = list((output_root / "events").glob("*.jsonl"))
@@ -1905,10 +1909,12 @@ def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_p
                 "error": None,
             }
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -1965,10 +1971,12 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
     def fake_payload_fetch1(url, live_public_readonly, timeout_sec, retry_budget=0):
         return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": None, "error": "empty_detail_payload"}
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch1):
-            with patch("sys.argv", args1):
-                rc1 = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch1):
+                    with patch("sys.argv", args1):
+                        rc1 = main()
 
     assert rc1 == 0
     events1 = _read_jsonl_files(output_root / "events")
@@ -1997,10 +2005,12 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
             "error": None,
         }
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch2):
-            with patch("sys.argv", args2):
-                rc2 = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch2):
+                    with patch("sys.argv", args2):
+                        rc2 = main()
 
     assert rc2 == 0
     events2 = _read_jsonl_files(output_root / "events")
@@ -2279,6 +2289,71 @@ def test_transient_detail_http_202_does_not_terminal_fail_by_max_retries(tmp_pat
     assert s["detail_transient_timeout_count"] == 0
 
 
+def test_transient_detail_http_202_does_not_terminal_fail_after_backoff_retries_exceed_max_retries(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-02)",
+                    "releaseDate": 1782980108049,
+                }]
+            }]
+        }
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        return {
+            "ok": False,
+            "payload": None,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 202,
+            "payload_size_bytes": 0,
+            "row_count": None,
+            "error": "detail_payload_http_status_202",
+        }
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "5",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+            with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+                    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                        with patch("sys.argv", args):
+                            rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(
+        row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and row.get("symbol_parse_status") == "terminal_failed"
+        for row in events
+    )
+    s = json.loads(summary.read_text())
+    assert s["detail_terminal_failed_count"] == 0
+    assert s.get("detail_symbol_parse_failed_count", 0) == 0
+    assert s.get("symbol_empty_event_count", 0) == 0
+
+
 def test_transient_detail_max_age_terminal_is_detail_unavailable_not_symbol_empty(tmp_path):
     list_payload = {
         "data": {
@@ -2346,3 +2421,156 @@ def test_transient_detail_max_age_terminal_is_detail_unavailable_not_symbol_empt
     assert s["detail_transient_timeout_count"] == 1
     assert s.get("detail_symbol_parse_failed_count", 0) == 0
     assert s.get("symbol_empty_event_count", 0) == 0
+
+
+def test_old_transient_detail_backlog_does_not_starve_new_article_first_attempt(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [
+                    {"code": "old1", "title": "Binance Futures Will Launch USDⓈ-Margined Old1 Perpetual Contract", "releaseDate": 1710000000000},
+                    {"code": "old2", "title": "Binance Futures Will Launch USDⓈ-Margined Old2 Perpetual Contract", "releaseDate": 1710000000001},
+                    {"code": "old3", "title": "Binance Futures Will Launch USDⓈ-Margined Old3 Perpetual Contract", "releaseDate": 1710000000002},
+                    {"code": "new_article_id", "title": "Binance Futures Will Launch USDⓈ-Margined New Perpetual Contract", "releaseDate": 1710000000003},
+                ]
+            }]
+        }
+    }
+
+    # First poll: old1, old2, old3 return HTTP 202. new_article_id returns success.
+    # detail budget = 3.
+    # In old code: old1, old2, old3 fetched (budget exhausted), new_article_id starved.
+    # In new code: never_attempted gets priority, so new_article_id must be fetched.
+    calls = []
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        calls.append(url)
+        if "new_article_id" in url:
+            return {
+                "ok": True,
+                "payload": json.dumps({"data": {"body": "Binance Futures will launch ETHUSD1 Perpetual Contract"}}),
+                "requested_url": url,
+                "final_url": url,
+                "http_status": 200,
+                "payload_size_bytes": 100,
+                "row_count": None,
+                "error": None,
+            }
+        # old articles return HTTP 202
+        return {
+            "ok": False,
+            "payload": None,
+            "requested_url": url,
+            "final_url": url,
+            "http_status": 202,
+            "payload_size_bytes": 0,
+            "row_count": None,
+            "error": "detail_payload_http_status_202",
+        }
+
+    # Mock exchangeInfo for symbol validation
+    def fake_fetch_exchange_info(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [{"symbol": "ETHUSD1", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USD1", "marginAsset": "USD1"}]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None
+            }
+        return fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget)
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "starve_smoke"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 3):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_exchange_info):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
+
+    assert rc == 0
+    assert any("new_article_id" in c for c in calls)
+    manifest_rows = _read_jsonl_files(output_root / "request_manifest")
+    assert any(
+        row.get("request_type") == "announcement_detail"
+        and row.get("source_article_id") == "new_article_id"
+        for row in manifest_rows
+    )
+    event_rows = _read_jsonl_files(output_root / "events")
+    assert not any(
+        row.get("source_article_id") == "new_article_id"
+        and row.get("symbol_parse_status") == "terminal_failed"
+        and row.get("detail_fetch_attempted") is False
+        for row in event_rows
+    )
+
+
+def test_never_attempted_detail_article_does_not_terminal_fail_as_symbol_empty(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [
+                    {"code": "never_attempted_starved", "title": "Binance Futures Will Launch USDⓈ-Margined Starved Perpetual Contract", "releaseDate": 1710000000000},
+                ]
+            }]
+        }
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    # Budget = 0 to simulate starvation
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "protect_smoke"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "2",
+        "--poll-interval-sec", "2",
+    ]
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 1):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+                with patch("sys.argv", args):
+                    rc = main()
+
+    assert rc == 0
+    event_rows = _read_jsonl_files(output_root / "events")
+    starved_events = [r for r in event_rows if r.get("source_article_id") == "never_attempted_starved"]
+    assert len(starved_events) == 1
+    event_row = starved_events[0]
+    assert event_row["terminal_failure_type"] == "detail_never_attempted_budget_starved"
+    assert event_row["detail_fetch_attempted"] is False
+    assert event_row["detail_fetch_status"] == "budget_starved"
+    assert event_row["symbol_parse_failed_reason"] == "detail_never_attempted_budget_starved"
+
+    s = json.loads(summary.read_text())
+    assert s["detail_budget_starved_count"] == 1
+    assert s["detail_never_attempted_expired_count"] == 1
+    assert s.get("symbol_empty_event_count", 0) == 0
+    assert s.get("detail_symbol_parse_failed_count", 0) == 0

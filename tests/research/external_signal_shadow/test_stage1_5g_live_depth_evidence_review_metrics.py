@@ -162,3 +162,39 @@ def test_depth_quality_fails_on_low_healthy_window_ratio():
     result = compute_depth_quality_metrics(snapshots)
     assert result["healthy_window_ratio"] == 0.05
     assert "healthy_window_ratio_below_threshold" in result["blockers"]
+
+
+def test_stage1_5g_depth_request_health_ignores_stage1_5d_announcement_detail_deferred_rows():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        compute_depth_request_health,
+    )
+    rows = [
+        {
+            "request_type": "announcement_detail_deferred",
+            "source_article_id": "article1",
+            "defer_count": 4,
+            "latest_defer_reason": "detail_budget_exhausted",
+            "symbol": "ALL",
+        }
+    ]
+
+    health = compute_depth_request_health(request_manifest_rows=rows, completed_states=[])
+
+    assert health.depth_request_manifest_rows_count == 0
+    assert health.scheduler_diagnostic_rows_count == 1
+    assert health.per_symbol_request_success_rate_min is None
+    assert "request_manifest_symbol_key_missing" not in health.blockers
+
+
+def test_budget_starved_terminal_failure_is_recovery_only_not_formal_evidence():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        classify_stage1_5d_terminal_failure,
+    )
+    event = {
+        "event_type": "futures_contract_launch",
+        "symbols": [],
+        "symbol_parse_status": "terminal_failed",
+        "terminal_failure_type": "detail_never_attempted_budget_starved",
+    }
+
+    assert classify_stage1_5d_terminal_failure(event) == "collection_failure"

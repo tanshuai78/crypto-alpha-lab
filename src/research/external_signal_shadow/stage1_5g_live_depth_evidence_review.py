@@ -299,6 +299,114 @@ def resolve_observation_config(
     return config, blockers
 
 
+def classify_stage1_5d_terminal_failure(event: dict) -> str:
+    terminal_failure_type = event.get("terminal_failure_type")
+    if terminal_failure_type in {
+        "detail_never_attempted_budget_starved",
+        "detail_transient_timeout",
+        "detail_unavailable_timeout",
+    }:
+        return "collection_failure"
+    if terminal_failure_type == "detail_success_symbols_empty":
+        return "content_or_parser_empty"
+    if terminal_failure_type == "candidate_validation_rejected":
+        return "validation_rejected"
+    if event.get("symbol_parse_status") == "terminal_failed":
+        return "unknown_terminal_failure"
+    return "not_terminal_failure"
+
+
+@dataclass(frozen=True)
+class DepthRequestHealthResult:
+    depth_request_manifest_rows_count: int
+    scheduler_diagnostic_rows_count: int
+    per_symbol_request_success_rate_min: float | None
+    global_request_success_rate: float
+    blockers: list[str]
+
+
+def compute_depth_request_health(
+    request_manifest_rows: list[dict],
+    completed_states: list[dict] = None,
+) -> DepthRequestHealthResult:
+    from configs import base
+    completed_states = completed_states or []
+    blockers = []
+
+    # Filter depth snapshot rows vs scheduler diagnostic rows
+    depth_manifest_rows = []
+    scheduler_diagnostic_rows_count = 0
+    for r in request_manifest_rows:
+        req_type = r.get("request_type")
+        if req_type is not None:
+            if req_type == "depth_snapshot":
+                depth_manifest_rows.append(r)
+            elif req_type in {"announcement_detail_deferred", "announcement_list", "announcement_detail", "exchange_info", "first_futures_bar_klines"}:
+                scheduler_diagnostic_rows_count += 1
+        else:
+            # Legacy check fallback
+            is_depth = bool(
+                r.get("event_symbol_id")
+                or r.get("symbol")
+                or r.get("requested_path") == base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_PATH
+            )
+            if is_depth:
+                depth_manifest_rows.append(r)
+
+    total_requests = len(depth_manifest_rows)
+    success_requests = sum(
+        1 for r in depth_manifest_rows
+        if 200 <= r.get("http_status", 0) < 300
+    )
+    global_request_success_rate = (
+        success_requests / total_requests if total_requests > 0 else 1.0
+    )
+
+    if total_requests > 0 and global_request_success_rate < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_REQUEST_SUCCESS_RATE:
+        blockers.append("global_request_success_rate_below_threshold")
+
+    if completed_states and any(
+        not (r.get("event_symbol_id") or r.get("symbol"))
+        for r in depth_manifest_rows
+    ):
+        blockers.append("request_manifest_symbol_key_missing")
+
+    symbol_success = {}
+    symbol_total = {}
+    for r in depth_manifest_rows:
+        key = r.get("event_symbol_id") or r.get("symbol")
+        if not key:
+            continue
+        symbol_total[key] = symbol_total.get(key, 0) + 1
+        if 200 <= r.get("http_status", 0) < 300:
+            symbol_success[key] = symbol_success.get(key, 0) + 1
+
+    symbol_rates = []
+    for key, total in symbol_total.items():
+        success = symbol_success.get(key, 0)
+        rate = success / total
+        symbol_rates.append(rate)
+
+    per_symbol_request_success_rate_min = None
+    if symbol_rates:
+        per_symbol_request_success_rate_min = min(symbol_rates)
+
+    if (
+        per_symbol_request_success_rate_min is not None
+        and per_symbol_request_success_rate_min
+        < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_PER_SYMBOL_REQUEST_SUCCESS_RATE
+    ):
+        blockers.append("per_symbol_request_success_rate_below_threshold")
+
+    return DepthRequestHealthResult(
+        depth_request_manifest_rows_count=total_requests,
+        scheduler_diagnostic_rows_count=scheduler_diagnostic_rows_count,
+        per_symbol_request_success_rate_min=per_symbol_request_success_rate_min,
+        global_request_success_rate=global_request_success_rate,
+        blockers=blockers,
+    )
+
+
 def compute_coverage_metrics(
     states: list[dict],
     request_manifest_rows: list[dict],
@@ -346,57 +454,11 @@ def compute_coverage_metrics(
     global_request_success_rate = 1.0
 
     if request_manifest_rows:
-        total_requests = len(request_manifest_rows)
-        success_requests = sum(
-            1 for r in request_manifest_rows
-            if 200 <= r.get("http_status", 0) < 300
-        )
-        global_request_success_rate = success_requests / total_requests if total_requests > 0 else 0.0
-
-        if global_request_success_rate < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_REQUEST_SUCCESS_RATE:
-            blockers.append("global_request_success_rate_below_threshold")
-
         completed_states = [st for st in states if st.get("status") == "completed"]
-
-        def is_depth_manifest_row(row: dict) -> bool:
-            if row.get("event_symbol_id") or row.get("symbol"):
-                return True
-            return row.get("requested_path") == base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_PATH
-
-        depth_manifest_rows = [r for r in request_manifest_rows if is_depth_manifest_row(r)]
-
-        if completed_states and any(
-            not (r.get("event_symbol_id") or r.get("symbol"))
-            for r in depth_manifest_rows
-        ):
-            blockers.append("request_manifest_symbol_key_missing")
-
-        # Group by symbol key (using event_symbol_id if present, otherwise symbol).
-        # Rows without a key cannot support per-symbol health and are blocked above.
-        symbol_success = {}
-        symbol_total = {}
-        for r in depth_manifest_rows:
-            key = r.get("event_symbol_id") or r.get("symbol")
-            if not key:
-                continue
-            symbol_total[key] = symbol_total.get(key, 0) + 1
-            if 200 <= r.get("http_status", 0) < 300:
-                symbol_success[key] = symbol_success.get(key, 0) + 1
-
-        symbol_rates = []
-        for key, total in symbol_total.items():
-            success = symbol_success.get(key, 0)
-            rate = success / total
-            symbol_rates.append(rate)
-
-        if symbol_rates:
-            per_symbol_request_success_rate_min = min(symbol_rates)
-
-        if per_symbol_request_success_rate_min < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_PER_SYMBOL_REQUEST_SUCCESS_RATE:
-            blockers.append("per_symbol_request_success_rate_below_threshold")
-    else:
-        # If there are states/events but request_manifest is empty, this is handled in decision engine as invalid
-        pass
+        health = compute_depth_request_health(request_manifest_rows, completed_states)
+        per_symbol_request_success_rate_min = health.per_symbol_request_success_rate_min if health.per_symbol_request_success_rate_min is not None else 1.0
+        global_request_success_rate = health.global_request_success_rate
+        blockers.extend(health.blockers)
 
     return {
         "expected_snapshot_count": expected_snapshot_count,
