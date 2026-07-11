@@ -151,11 +151,12 @@ def test_recovery_validation_only_is_excluded_from_formal_evidence():
 
 def test_valid_single_announcement_and_launch_time_allows_only_stage1_5h_design():
     result = build_fixture_review_summary(evidence_label="announcement_and_launch_time", good_depth=True)
-    assert result["decision"] == "stage1_5g_depth_evidence_sufficient_for_stage1_5h_plan"
-    assert result["allowed_next_action"] == "write_stage1_5h_shadow_execution_simulator_design"
+    assert result["decision"] == "stage1_5g_depth_evidence_clean_pass"
+    assert result["allowed_next_action"] == "write_stage1_5h_design_or_shadow_simulator_design"
     assert result["evidence_scope"] == "single_event"
     assert result["event_family_conclusion_allowed"] is False
     assert result["trade_signal_allowed"] is False
+
 
 
 def test_live_depth_evidence_basis_alias_can_drive_formal_completed_evidence():
@@ -268,7 +269,9 @@ def test_accepted_but_active_announcement_and_launch_time_does_not_trigger_suffi
         state_status="active",
         good_depth=True,
     )
-    assert result["decision"] != "stage1_5g_depth_evidence_sufficient_for_stage1_5h_plan"
+    assert result["decision"] != "stage1_5g_depth_evidence_clean_pass"
+    assert result["decision"] != "stage1_5g_depth_evidence_quarantined_pass"
+
 
 
 def test_completed_observation_without_request_manifest_is_invalid():
@@ -501,7 +504,8 @@ def test_stage1_5g_accepts_completed_formal_evidence_with_symbol_keyed_manifest(
     )
 
     assert "request_manifest_symbol_key_missing" not in result["blockers"]
-    assert result["decision"] == "stage1_5g_depth_evidence_sufficient_for_stage1_5h_plan"
+    assert result["decision"] == "stage1_5g_depth_evidence_clean_pass"
+
 
 
 def test_stage1_5g_blocks_completed_formal_evidence_with_unkeyed_depth_manifest():
@@ -539,3 +543,202 @@ def test_stage1_5g_blocks_completed_formal_evidence_with_unkeyed_depth_manifest(
     )
     assert "request_manifest_symbol_key_missing" in result["blockers"]
     assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+
+
+def make_skhy_quarantine_fixture():
+    launch_ms = 1_000_000
+    snapshots = make_depth_snapshots(event_symbol_id="es1", symbol="SKHYUSDT", count=718)
+    for i, s in enumerate(snapshots):
+        s["fetched_at_ms"] = launch_ms + i * 60_000
+    for i in range(11):
+        snapshots[i].update({
+            "best_bid": None,
+            "best_ask": None,
+            "mid_price": None,
+            "spread_bps": None,
+            "depth_status": "invalid",
+            "slippage_status": "invalid_depth",
+            "top_bid_depth_usdt": 0.0,
+            "top_ask_depth_usdt": 0.0,
+            "buy_slippage_bps": None,
+            "sell_slippage_bps": None,
+        })
+    snapshots[320].update({
+        "best_bid": None,
+        "best_ask": None,
+        "mid_price": None,
+        "spread_bps": None,
+        "depth_status": "invalid",
+        "slippage_status": "invalid_depth",
+        "top_bid_depth_usdt": 0.0,
+        "top_ask_depth_usdt": 0.0,
+        "buy_slippage_bps": None,
+        "sell_slippage_bps": None,
+    })
+    return launch_ms, snapshots
+
+
+
+def test_skhyusdt_quarantine_candidate_allows_design_only_not_execution():
+    launch_ms, snapshots = make_skhy_quarantine_fixture()
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{
+            "event_symbol_id": "es1",
+            "symbol": "SKHYUSDT",
+            "status": "completed",
+            "depth_snapshot_count": 718,
+            "max_gap_ms": 60_000,
+            "observation_started_at_ms": launch_ms,
+        }],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "SKHYUSDT",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {"SKHYUSDT": launch_ms},
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[{
+            "request_type": "depth_snapshot",
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "SKHYUSDT",
+            "http_status": 200,
+        } for _ in range(718)],
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_quarantined_pass"
+    assert result["allowed_next_action"] == "write_stage1_5h_design_only"
+    assert result["clean_depth_evidence_pass"] is False
+    assert result["quarantined_depth_evidence_pass"] is True
+    assert result["execution_feasibility_claim_allowed"] is False
+    assert result["paper_trading_allowed"] is False
+    assert result["live_trading_allowed"] is False
+    assert result["raw_integrity"]["invalid_book_count"] == 12
+    assert result["quarantine"]["observed_snapshot_count"] == 718
+    assert result["quarantine"]["expected_snapshot_count"] == 720
+    assert result["quarantine"]["expected_snapshot_count"] == result["coverage_metrics"]["expected_snapshot_count"]
+    assert result["quarantine"]["invalid_book_ratio_observed"] == result["quarantine"]["invalid_book_ratio"]
+    assert result["quarantine"]["book_availability_ratio"] >= 0.98
+    assert result["quarantine"]["midrun_invalid_book_count"] == 1
+    assert "depth_quality_input_rows" not in result["quarantine"]
+    assert "quarantined_invalid_book_rows" not in result["quarantine"]
+
+
+def test_two_midrun_invalid_books_keep_depth_evidence_invalid():
+    launch_ms, snapshots = make_skhy_quarantine_fixture()
+    snapshots[400].update(snapshots[320])
+    snapshots[400]["fetched_at_ms"] = launch_ms + 400 * 60_000
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{"event_symbol_id": "es1", "symbol": "SKHYUSDT", "status": "completed", "depth_snapshot_count": 718, "max_gap_ms": 60_000}],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "SKHYUSDT",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {"SKHYUSDT": launch_ms},
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[{"request_type": "depth_snapshot", "event_symbol_id": "es1", "symbol": "SKHYUSDT", "http_status": 200} for _ in range(718)],
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "midrun_invalid_book_count_exceeded" in result["blockers"]
+
+
+def test_quarantine_cannot_promote_observation_only_evidence_to_quarantined_pass():
+    launch_ms, snapshots = make_skhy_quarantine_fixture()
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{"event_symbol_id": "es1", "symbol": "SKHYUSDT", "status": "completed", "depth_snapshot_count": 718, "max_gap_ms": 60_000}],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "SKHYUSDT",
+            "evidence_label": "launch_time_only",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {"SKHYUSDT": launch_ms},
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[{"request_type": "depth_snapshot", "event_symbol_id": "es1", "symbol": "SKHYUSDT", "http_status": 200} for _ in range(718)],
+    )
+
+    assert result["decision"] != "stage1_5g_depth_evidence_quarantined_pass"
+    assert result["formal_announcement_and_launch_count"] == 0
+    assert result.get("quarantined_depth_evidence_pass") is not True
+
+
+def test_quarantine_expected_snapshot_count_missing_does_not_fallback_to_observed_rows(monkeypatch):
+    from configs import base
+
+    monkeypatch.delattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS", raising=False)
+    monkeypatch.delattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC", raising=False)
+    launch_ms, snapshots = make_skhy_quarantine_fixture()
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 1},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=[{"event_symbol_id": "es1", "symbol": "SKHYUSDT", "status": "completed", "depth_snapshot_count": 718, "max_gap_ms": 60_000}],
+        accepted_events=[{
+            "event_symbol_id": "es1",
+            "event_id": "ev1",
+            "symbol": "SKHYUSDT",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {"SKHYUSDT": launch_ms},
+        }],
+        snapshots=snapshots,
+        request_manifest_rows=[{"request_type": "depth_snapshot", "event_symbol_id": "es1", "symbol": "SKHYUSDT", "http_status": 200} for _ in range(718)],
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "missing_stage1_5f_observation_config" in result["blockers"] or "expected_snapshot_count_missing" in result["blockers"]
+    assert result.get("quarantined_depth_evidence_pass") is not True
+
+
+def test_chinese_review_includes_quarantine_section_for_quarantined_pass():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import generate_stage1_5g_chinese_review
+
+    markdown = generate_stage1_5g_chinese_review({
+        "decision": "stage1_5g_depth_evidence_quarantined_pass",
+        "allowed_next_action": "write_stage1_5h_design_only",
+        "evidence_scope": "single_event",
+        "event_family_conclusion_allowed": False,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "execution_feasibility_claim_allowed": False,
+        "blockers": [],
+        "warnings": ["not_clean_depth_evidence"],
+        "formal_announcement_and_launch_count": 1,
+        "evidence_label_counts": {"announcement_and_launch_time": 1},
+        "coverage_metrics": {},
+        "raw_integrity": {"invalid_book_count": 12},
+        "depth_quality": {},
+        "quarantine": {
+            "invalid_book_row_count": 12,
+            "book_availability_ratio": 0.9806,
+            "first_valid_book_latency_ms": 660000,
+            "max_consecutive_invalid": 11,
+            "max_consecutive_invalid_after_warmup": 1,
+            "execution_availability_claim": "partial_not_clean",
+        },
+    })
+
+    assert "Quarantine" in markdown or "隔离" in markdown
+    assert "partial_not_clean" in markdown
+    assert "write_stage1_5h_design_only" in markdown

@@ -247,3 +247,51 @@ def test_budget_starved_terminal_failure_is_recovery_only_not_formal_evidence():
     }
 
     assert classify_stage1_5d_terminal_failure(event) == "collection_failure"
+
+
+def test_quarantined_depth_quality_computes_correctly():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        RawSnapshotQuarantineResult,
+        compute_quarantined_depth_quality,
+    )
+    # 706 valid, 12 invalid
+    valid_rows = make_healthy_snapshots(count=706)
+    invalid_rows = []
+
+    quarantine_result = RawSnapshotQuarantineResult(
+        blockers=[],
+        warnings=[],
+        clean_depth_evidence_pass=False,
+        quarantined_depth_evidence_pass=True,
+        quarantine_candidate=True,
+        observed_snapshot_count=718,
+        expected_snapshot_count=720,
+        invalid_book_row_count=12,
+        invalid_book_minute_bucket_count=1,
+        invalid_book_ratio=12/718,
+        invalid_book_ratio_observed=12/718,
+        valid_snapshot_count_after_quarantine=706,
+        book_availability_ratio=706/720,
+        book_unavailable_ratio=12/720,
+        invalid_book_by_phase={},
+        invalid_book_by_reason={},
+        launch_warmup_invalid_row_count=12,
+        launch_warmup_invalid_minute_bucket_count=1,
+        midrun_invalid_book_count=0,
+        midrun_invalid_minute_bucket_count=0,
+        crossed_or_negative_book_count=0,
+        schema_invalid_count=0,
+        max_consecutive_invalid=12,
+        max_consecutive_invalid_after_warmup=0,
+        first_valid_book_latency_ms=660000,
+        depth_quality_input_rows=valid_rows,
+        quarantined_invalid_book_rows=invalid_rows,
+    )
+
+    quality = compute_quarantined_depth_quality(quarantine_result)
+    assert quality["depth_quality_clean_mode_available"] is False
+    assert quality["depth_quality_quarantined_mode_available"] is True
+    assert quality["depth_quality_input_mode"] == "quarantined_valid_rows"
+    assert quality["depth_quality_input_row_count"] == 706
+    assert quality["excluded_invalid_book_row_count"] == 12
+    assert quality["book_availability_quality"]["availability_ratio"] == 706/720

@@ -1,214 +1,329 @@
 # Stage 1.5G Live Depth Evidence Review - SKHYUSDT
 
+**审计日期:** 2026-07-11
 **审计对象:** `SKHYUSDT` Binance Futures launch live depth evidence
 **Stage 1.5F root:** `data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix`
-**最终审计结论:** `stage1_5g_depth_evidence_invalid`
-**允许的下一步行动:** `continue_observation`
-**交易权限:** `trade_signal_allowed=False`, `paper_trading_allowed=False`, `live_trading_allowed=False`, `execution_engine_allowed=False`
+**Stage 1.5G review run:** `data/external_signal_shadow/stage1_5g/reviews/20260711T131211Z`
+**最终审计结论:** `stage1_5g_depth_evidence_quarantined_pass`
+**允许的下一步行动:** `write_stage1_5h_design_only`
+
+---
 
 ## 1. 结论摘要
 
-本次 SKHYUSDT 事件已经完成从 1.5D 到 1.5F 的 live evidence 链路验证，但未通过 1.5G 的 raw snapshot integrity hard gate。
+本次 SKHYUSDT 事件已经完成 Stage 1.5D -> Stage 1.5F -> Stage 1.5G 的 formal live depth evidence 链路审计。
 
-已通过部分：
-
-- 1.5D 成功捕获 post-watermark futures launch 事件。
-- 1.5F 成功接受 SKHYUSDT，并完成 12h live depth observation。
-- 1.5G 已识别为 `announcement_and_launch_time` formal evidence。
-- coverage 通过：`718` 条快照，高于最低要求 `684`。
-- request health 通过：单币请求成功率约 `0.9986`。
-
-未通过部分：
-
-- raw snapshot integrity 未通过。
-- blocker: `invalid_book`。
-- invalid snapshot count: `12 / 718`，约 `1.67%`。
-- 12 条异常快照均为 depth endpoint 返回空/无效盘口：`best_bid=null`, `best_ask=null`, `spread_bps=null`, `depth_status=invalid`, `slippage_status=invalid_depth`。
-
-当前结论：
+本次不是 clean pass，而是 quarantined pass：
 
 ```text
-Stage 1.5D event capture: pass
-Stage 1.5F live depth collection: pass
-Stage 1.5G formal evidence recognition: pass
-Stage 1.5G coverage/request health: pass
-Stage 1.5G raw snapshot integrity: fail
+clean_depth_evidence_pass = false
+quarantined_depth_evidence_pass = true
+quarantine_candidate = true
+blockers = []
+allowed_next_action = write_stage1_5h_design_only
 ```
 
-因此，本次样本不能作为完全 clean 的 1.5G formal depth evidence；不得据此进入交易信号、paper trading、live trading 或 alpha 结论解释。
-
-## 2. 本次失败的直接原因
-
-`invalid_book` 的 12 条异常行主要集中在观察开始后的前 11 分钟，另有 1 条出现在中途。
-
-典型异常行特征：
-
-```json
-{
-  "symbol": "SKHYUSDT",
-  "best_bid": null,
-  "best_ask": null,
-  "spread_bps": null,
-  "depth_status": "invalid",
-  "slippage_status": "invalid_depth",
-  "top_bid_depth_usdt": 0.0,
-  "top_ask_depth_usdt": 0.0
-}
-```
-
-这说明 1.5F 在这些分钟请求 Binance depth 时，没有拿到有效 bids/asks。对新上线合约，这类情况可能来自：
-
-- 合约已进入 exchangeInfo，但盘口尚未稳定。
-- Binance depth endpoint 在 launch 初期返回空 bids/asks。
-- 做市/撮合初始化阶段出现短时不可用。
-- 中途单次 API payload 可解析但盘口为空。
-
-这不是 1.5D 未捕获事件，也不是 1.5F 没有采够 12h，而是 raw orderbook evidence 中存在少量无效盘口切片。
-
-## 3. 这几轮 1.5G 修补内容
-
-本次审计过程中，1.5G 暴露了多处与真实 1.5F artifacts 不兼容的问题。已经修补的是审查层兼容性问题，不是对原始数据做人工改写。
-
-### 3.1 evidence label 字段兼容
-
-问题：
-
-- 1.5G 原来只读取 `evidence_label`。
-- 真实 1.5F accepted event 写入的是 `live_depth_evidence_basis`。
-- 导致 1.5G 误报 `missing_evidence_label`。
-
-修补：
-
-- 1.5G 现在读取 `evidence_label`，缺失时 fallback 到 `live_depth_evidence_basis`。
-
-### 3.2 watermark 校验语义修正
-
-问题：
-
-- 1.5G 原来要求 accepted event 记录的 watermark 必须等于当前 `watermark.json`。
-- 真实运行中，accepted event 记录的是事件被接收时的旧 watermark；当前 watermark 会继续推进。
-- 导致正常 post-watermark event 被误判为 `watermark_max_seen_detected_at_ms_mismatch`。
-
-修补：
-
-- 合法条件改为：`event_watermark <= current_watermark`。
-- 只有 event watermark 大于当前 watermark，才视为脏数据。
-
-### 3.3 coverage 检查范围修正
-
-问题：
-
-- 1.5G 原来检查所有 observer states。
-- 真实 `observer_state.jsonl` 是状态历史流，同一个 `event_symbol_id` 有多条 active/completed 行。
-- 早期 active 行的 `depth_snapshot_count` 很低，导致误报 `insufficient_depth_snapshot_count`。
-
-修补：
-
-- 按 `event_symbol_id` 只取最新 state。
-- coverage 只检查 formal completed event symbols。
-- `checked_event_symbol_ids` 用于审计实际检查对象。
-
-### 3.4 raw snapshot schema 兼容
-
-问题：
-
-- 1.5F `DepthSnapshot` 不写 `mid_price`。
-- 1.5G raw integrity 原来强制要求 `mid_price` 非空。
-- 导致真实 1.5F 快照被批量误判为 `invalid_book`。
-
-修补：
-
-- 当 `mid_price` 缺失但 `best_bid`/`best_ask` 存在时，1.5G 用 `(best_bid + best_ask) / 2` 推导。
-- 仍保留 `bid<=0`, `ask<=0`, `bid>=ask`, `spread_bps<0` 等硬校验。
-
-## 4. 为什么修补后仍然失败
-
-前述修补清理的是审查层兼容性误判。修补后，1.5G 能正确进入真实 raw integrity 检查。
-
-最终剩余的 `12` 条 invalid book 是真实数据问题：这些快照中没有有效 bid/ask，不是字段兼容问题。按当前 1.5G 设计，raw snapshot integrity 是 hard gate：只要存在 invalid book，就判定本次 evidence invalid。
-
-这条规则保守但合理，因为如果 raw orderbook 自身不可用，后续 spread/slippage/top-depth 分位数会被污染。
-
-## 5. Quarantine 思路说明
-
-`quarantine` 的含义不是修改原始数据，也不是假装 invalid book 不存在。
-
-它的含义是：
-
-1. 保留所有原始 snapshot rows。
-2. 将无效盘口行单独标记为 `quarantined_invalid_book_rows`。
-3. 不让这些无效行参与 depth quality 计算。
-4. 在 summary 中显式报告 invalid count、invalid ratio、发生位置和原因。
-5. 只有在 invalid ratio 足够低、且不破坏 12h 证据完整性的前提下，才允许继续进入 depth quality。
-
-对本次样本，quarantine 后的口径可能是：
+含义：
 
 ```text
-total_snapshots = 718
-invalid_book_count = 12
-invalid_book_ratio = 1.67%
-valid_snapshots_for_depth_quality = 706
+1. 1.5D 成功捕获 post-watermark futures launch 事件。
+2. 1.5F 完成 12h live depth observation。
+3. 1.5G 已识别出 1 个 announcement_and_launch_time formal evidence。
+4. coverage 与 request health 通过。
+5. raw book 中存在 12 条 invalid book，因此不能 clean pass。
+6. invalid book 比例低、分布可解释、quarantine 后有效样本仍满足阈值，因此得到 quarantined pass。
 ```
 
-建议候选阈值，仅供后续 design 评审：
+安全边界：
 
 ```text
-EXTERNAL_SIGNAL_STAGE1_5G_MAX_INVALID_BOOK_RATIO = 0.02
-EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_MINUTES = 15
-```
-
-如果采用这个规则，本次前 11 分钟 launch warmup 空盘口可能被 quarantine；但第 321 条中途 invalid 仍需单独计入全局 invalid ratio。
-
-## 6. Quarantine 的风险
-
-采用 quarantine 会改变 1.5G 的证据定义，因此不能作为临时小补丁直接放行。
-
-主要风险：
-
-- 可能掩盖真实流动性不可用风险。
-- 新合约 launch 初期正是交易风险最高阶段，过滤掉前几分钟可能高估执行可行性。
-- 如果 invalid rows 集中在价格剧烈波动区间，删除它们会让 depth quality 看起来过于乐观。
-- 对实盘执行而言，`best_bid/best_ask=null` 代表该分钟不可成交，不能简单视为无害噪声。
-
-因此，即使采用 quarantine，也只能支持：
-
-```text
-allowed_next_action = write_stage1_5h_design_or_continue_observation
-trade_signal_allowed = false
-paper_trading_allowed = false
-live_trading_allowed = false
-execution_engine_allowed = false
-```
-
-不得直接推出 event-family alpha 结论。
-
-## 7. 待评审问题
-
-建议请其他 agent 重点评估以下问题：
-
-1. 1.5G 是否应保持 raw integrity hard gate，即任意 invalid book 都 invalid？
-2. 是否允许 `invalid_book_ratio <= 2%` 时 quarantine 后继续 depth quality？
-3. launch warmup invalid book 是否应与中途 invalid book 分开统计？
-4. 如果前 15 分钟被 quarantine，depth quality 是否仍能代表 launch-time execution feasibility？
-5. 1.5H 是否只需要 design evidence，还是必须要求 0 invalid book 的 clean evidence？
-6. 对个人投资者 500 USDT 风险上限而言，1.67% invalid book 是否已经足够说明执行风险过高？
-
-## 8. 当前建议
-
-短期建议：
-
-- 保留本次 1.5G invalid 结论，不手工改写为 pass。
-- 继续保留 1.5D/1.5F 运行，等待下一个事件。
-- 不要基于 SKHYUSDT 本次样本进入 1.5H execution simulator implementation。
-- 若要推进，应先写 `Stage 1.5G raw snapshot quarantine design`，再决定是否实现。
-
-最终状态：
-
-```text
-research_result_valid = false
-alpha_interpretation_allowed = false
+stage1_5h_implementation_allowed = false
 execution_feasibility_claim_allowed = false
 trade_signal_allowed = false
 paper_trading_allowed = false
 live_trading_allowed = false
+execution_engine_allowed = false
+alpha_interpretation_allowed = false
+```
+
+本次结果只允许进入 Stage 1.5H design，不允许进入 Stage 1.5H implementation，也不允许做 execution feasibility claim。
+
+---
+
+## 2. 核心审计结果
+
+### 2.1 Evidence 与结论
+
+```text
+decision = stage1_5g_depth_evidence_quarantined_pass
+allowed_next_action = write_stage1_5h_design_only
+formal_announcement_and_launch_count = 1
+blockers = []
+warnings = [launch_time_missing_warmup_anchor_degraded]
+```
+
+`launch_time_missing_warmup_anchor_degraded` 的含义：
+
+```text
+1. 本次 1.5G 没有拿到可用于 warmup 锚定的 launch_time_ms。
+2. 因此前 11 条初期 invalid book 不能严谨称为 launch_warmup_empty_book。
+3. 它们被降级分类为 observation_initial_empty_book。
+4. 该 warning 不阻断 quarantined pass，但说明本次样本不是 clean evidence。
+```
+
+### 2.2 Coverage 与 request health
+
+```text
+expected_snapshot_count = 720
+observed_snapshot_count = 718
+min_snapshot_count_required = 684
+valid_snapshot_count_after_quarantine = 706
+request_success_rate ~= 0.9986
+```
+
+解释：
+
+```text
+1. 12h 理论分钟级快照数是 720。
+2. 实际审计到 718 条 snapshot。
+3. quarantine 后仍有 706 条有效盘口，高于 684 条最低要求。
+4. request health 不构成本次阻断。
+```
+
+---
+
+## 3. Quarantine 结果
+
+### 3.1 invalid book 总量
+
+```text
+invalid_book_row_count = 12
+invalid_book_minute_bucket_count = 12
+invalid_book_ratio_observed = 12 / 718 = 0.016713091922005572
+book_availability_ratio = 706 / 720 = 0.9805555555555555
+book_unavailable_ratio = 12 / 720 = 0.016666666666666666
+```
+
+解释：
+
+```text
+invalid_book_ratio_observed 衡量已抓到 raw rows 中有多少盘口无效。
+book_availability_ratio 衡量整个应采集窗口中有多少有效盘口。
+```
+
+本次 `book_availability_ratio = 98.06%`，刚好超过第一版 quarantine 阈值 `0.98`。
+
+### 3.2 invalid book 分类
+
+```text
+invalid_book_by_phase:
+  launch_warmup = 0
+  observation_initial = 11
+  midrun = 1
+
+invalid_book_by_reason:
+  launch_warmup_empty_book = 0
+  observation_initial_empty_book = 11
+  midrun_empty_book = 1
+  crossed_or_negative_book = 0
+  schema_invalid = 0
+```
+
+解释：
+
+```text
+1. 前 11 条 invalid book 发生在 observation 初期，但由于缺少 launch_time_ms，只能标记为 observation_initial_empty_book。
+2. 中途有 1 条 midrun_empty_book。
+3. 没有 crossed book、negative book 或 schema invalid。
+4. 因此这些 invalid rows 可以 quarantine，但不能 clean pass。
+```
+
+### 3.3 连续性与首个有效盘口
+
+```text
+max_consecutive_invalid = 11
+max_consecutive_invalid_after_warmup = 1
+first_valid_book_latency_ms = 661950
+```
+
+解释：
+
+```text
+1. 最大连续 invalid 是 11 条，集中在 observation 初期。
+2. 初期之后最大连续 invalid 只有 1 条。
+3. 首个有效盘口延迟约 11.03 分钟，低于 15 分钟阈值。
+```
+
+该结果说明：
+
+```text
+初期盘口可用性不干净，但稳定后只有 1 条中途空盘口。
+```
+
+---
+
+## 4. Quarantine 后有效盘口质量
+
+本节只统计 `706` 条 quarantine 后的有效盘口，不包含 `12` 条 invalid book。
+
+### 4.1 Spread 与 slippage
+
+```text
+spread_bps_p50 = 1.1712687779075193
+spread_bps_p95 = 2.948591635308917
+buy_slippage_bps_500usdt_p50 = 0.874380647784001
+buy_slippage_bps_500usdt_p95 = 2.050259958923384
+sell_slippage_bps_500usdt_p50 = 0.8679232830582917
+sell_slippage_bps_500usdt_p95 = 1.8699513715880745
+```
+
+解释：
+
+```text
+1 bps = 0.01%。
+P50 是中位数，代表典型情况。
+P95 是 95 分位数，代表较差但非极端最差的情况。
+```
+
+含义：
+
+```text
+在有效盘口样本中，500 USDT 级别的静态吃单滑点较低。
+但这不是扣除成本后的收益，也不是交易可行性结论。
+```
+
+### 4.2 Top depth 与 capacity
+
+```text
+top_bid_depth_usdt_p05 = 49704.083725000004
+top_bid_depth_usdt_p50 = 77252.31575000001
+top_ask_depth_usdt_p05 = 50671.400125
+top_ask_depth_usdt_p50 = 82837.82325
+healthy_window_ratio = 1.0
+depth_capacity_ratio_to_risk_cap_p50 = 154.50463150000002
+```
+
+解释：
+
+```text
+P05 是 5 分位数，代表偏差情况下的低深度底线。
+P50 是中位数，代表典型深度。
+healthy_window_ratio = 1.0 只针对 quarantine 后的 706 条有效盘口，不包括 12 条 invalid book。
+depth_capacity_ratio_to_risk_cap_p50 = 154.5x 表示典型顶部深度约为 500 USDT 风险上限的 154.5 倍。
+```
+
+---
+
+## 5. 这是否代表扣除成本后有收益
+
+不代表。
+
+本次 1.5G 只审计 live depth evidence 的数据质量与静态盘口质量。它没有验证：
+
+```text
+alpha return
+方向收益
+手续费后收益
+funding / basis 成本
+挂单成交概率
+撤单失败
+延迟风险
+冲击成本
+入场和退出路径
+```
+
+因此本次最多支持下面这个结论：
+
+```text
+在 706 条有效盘口样本中，500 USDT 级别的静态盘口摩擦较低；
+但由于存在 12 条 invalid book，本样本只能作为 quarantined evidence，不能作为 clean execution feasibility evidence。
+```
+
+---
+
+## 6. Artifact 输出
+
+服务器复跑输出：
+
+```text
+stage1_5g_live_depth_evidence_review_summary.json
+quarantined_invalid_book_rows.jsonl = 12 rows
+depth_quality_input_rows.jsonl = 706 rows
+stage1_5g_quarantine_summary.json
+```
+
+路径：
+
+```text
+data/external_signal_shadow/stage1_5g/reviews/20260711T131211Z/quarantined_invalid_book_rows.jsonl
+data/external_signal_shadow/stage1_5g/reviews/20260711T131211Z/depth_quality_input_rows.jsonl
+data/external_signal_shadow/stage1_5g/reviews/20260711T131211Z/stage1_5g_quarantine_summary.json
+```
+
+原始 Stage 1.5F `depth_snapshots/**/*.jsonl` 不允许被修改。上述 artifact 只是 Stage 1.5G 派生审计结果。
+
+---
+
+## 7. 风险与局限性
+
+本次结论必须带 caveat：
+
+```text
+1. 本次不是 clean pass。
+2. 本次存在 12 / 718 = 1.67% invalid book。
+3. book availability 是 98.06%，不是 100%。
+4. 由于缺少 launch_time_ms，前 11 条 invalid 只能归为 observation_initial_empty_book。
+5. 1 条 midrun_empty_book 表明稳定后仍存在一次不可用盘口。
+6. 本审计基于 1-minute REST polling 静态盘口，不代表真实高频撮合环境。
+```
+
+严禁事项：
+
+```text
+execution_feasibility_claim_allowed = false
+stage1_5h_implementation_allowed = false
+trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
+alpha_interpretation_allowed = false
+```
+
+---
+
+## 8. 下一步
+
+允许：
+
+```text
+write_stage1_5h_design_only
+```
+
+Stage 1.5H design 可以研究：
+
+```text
+1. 如何消费 clean / quarantined 两种 1.5G evidence。
+2. 如何把 invalid book 作为 execution availability discount。
+3. 如何定义 entry/exit 的静态深度门槛。
+4. 如何设计后续 shadow simulator 的输入 schema。
+5. 哪些条件下 quarantined evidence 必须 hard veto。
+```
+
+不允许：
+
+```text
+Stage 1.5H implementation
+shadow simulator implementation
+paper trading
+live trading
+execution feasibility claim
+alpha claim
+```
+
+最终结论：
+
+```text
+SKHYUSDT Stage 1.5G live depth evidence = quarantined pass。
+它证明当前 pipeline 能捕获 post-watermark futures launch 并完成 12h live depth evidence 审计；
+但由于存在少量不可用盘口，它只能作为下一阶段 design 输入，不能作为执行可行性证明。
 ```

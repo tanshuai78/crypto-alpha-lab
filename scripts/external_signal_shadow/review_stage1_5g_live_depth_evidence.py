@@ -39,25 +39,6 @@ def main() -> int:
         print(f"Error: Stage 1.5F output root directory not found: {stage1_5f_root}", file=sys.stderr)
         return 1
 
-    # Load bundle
-    bundle = load_stage1_5g_inputs(stage1_5f_root)
-
-    # Build review summary
-    summary = build_stage1_5g_review_summary(
-        summary=bundle.summary,
-        watermark=bundle.watermark,
-        states=bundle.states,
-        accepted_events=bundle.accepted_events,
-        snapshots=bundle.snapshots,
-        request_manifest_rows=bundle.request_manifest_rows,
-        output_root=stage1_5f_root,
-        loader_blockers=bundle.loader_blockers,
-    )
-
-    # Add parse errors and line counts if loaded
-    summary["parse_error_count"] = bundle.parse_error_count
-    summary["total_jsonl_line_count"] = bundle.total_jsonl_line_count
-
     # Determine outputs
     utc_now = datetime.now(timezone.utc)
     run_id = utc_now.strftime("%Y%m%dT%H%M%SZ")
@@ -78,6 +59,26 @@ def main() -> int:
     else:
         review_path = Path(f"docs/reviews/{today_str}-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md")
 
+    # Load bundle
+    bundle = load_stage1_5g_inputs(stage1_5f_root)
+
+    # Build review summary
+    summary = build_stage1_5g_review_summary(
+        summary=bundle.summary,
+        watermark=bundle.watermark,
+        states=bundle.states,
+        accepted_events=bundle.accepted_events,
+        snapshots=bundle.snapshots,
+        request_manifest_rows=bundle.request_manifest_rows,
+        output_root=stage1_5f_root,
+        loader_blockers=bundle.loader_blockers,
+        review_output_root=out_root,
+    )
+
+    # Add parse errors and line counts if loaded
+    summary["parse_error_count"] = bundle.parse_error_count
+    summary["total_jsonl_line_count"] = bundle.total_jsonl_line_count
+
     # Create directories
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     review_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +91,7 @@ def main() -> int:
     review_content = generate_stage1_5g_chinese_review(summary)
     with open(review_path, "w", encoding="utf-8") as fh:
         fh.write(review_content + "\n")
+
 
     print(f"Stage 1.5G review summary written to: {summary_path}")
     print(f"Stage 1.5G markdown review written to: {review_path}")

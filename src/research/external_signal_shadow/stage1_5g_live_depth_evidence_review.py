@@ -515,7 +515,357 @@ class RawSnapshotIntegrityResult:
     invalid_book_count: int
 
 
+@dataclass(frozen=True)
+class RawSnapshotQuarantineResult:
+    blockers: list[str]
+    warnings: list[str]
+    clean_depth_evidence_pass: bool
+    quarantined_depth_evidence_pass: bool
+    quarantine_candidate: bool
+    observed_snapshot_count: int
+    expected_snapshot_count: int
+    invalid_book_row_count: int
+    invalid_book_minute_bucket_count: int
+    invalid_book_ratio: float
+    invalid_book_ratio_observed: float
+    valid_snapshot_count_after_quarantine: int
+    book_availability_ratio: float
+    book_unavailable_ratio: float
+    invalid_book_by_phase: dict[str, int]
+    invalid_book_by_reason: dict[str, int]
+    launch_warmup_invalid_row_count: int
+    launch_warmup_invalid_minute_bucket_count: int
+    midrun_invalid_book_count: int
+    midrun_invalid_minute_bucket_count: int
+    crossed_or_negative_book_count: int
+    schema_invalid_count: int
+    max_consecutive_invalid: int
+    max_consecutive_invalid_after_warmup: int
+    first_valid_book_latency_ms: int | None
+    depth_quality_input_rows: list[dict]
+    quarantined_invalid_book_rows: list[dict]
+
+
+def _minute_bucket_ms(ts_ms: int) -> int:
+    return int(ts_ms) // 60000 * 60000
+
+
+def _is_schema_invalid_snapshot(row: dict) -> bool:
+    return not row.get("event_symbol_id") or not row.get("symbol") or row.get("fetched_at_ms") is None
+
+
+def _is_empty_book_snapshot(row: dict) -> bool:
+    return row.get("best_bid") is None or row.get("best_ask") is None or row.get("spread_bps") is None
+
+
+def _is_crossed_or_negative_book(row: dict) -> bool:
+    bid = row.get("best_bid")
+    ask = row.get("best_ask")
+    spread = row.get("spread_bps")
+    if bid is None or ask is None:
+        return False
+    try:
+        bid_f = float(bid)
+        ask_f = float(ask)
+        spread_f = None if spread is None else float(spread)
+    except (TypeError, ValueError):
+        return True
+    return bid_f <= 0 or ask_f <= 0 or bid_f >= ask_f or (spread_f is not None and spread_f < 0)
+
+
+
+def _resolve_event_launch_time_ms(event: dict, state: dict | None = None) -> int | None:
+    symbol = event.get("symbol") or (state or {}).get("symbol")
+    for field in ("symbol_effective_launch_times_ms", "symbol_onboard_times_ms"):
+        mapping = event.get(field) or (state or {}).get(field) or {}
+        if symbol and isinstance(mapping, dict) and mapping.get(symbol) is not None:
+            return int(mapping[symbol])
+    for obj in (event, state or {}):
+        basis = obj.get("observation_age_basis")
+        if basis in {"symbol_effective_launch_time", "symbol_onboard_time"} and obj.get("observation_age_base_ms") is not None:
+            return int(obj["observation_age_base_ms"])
+    return None
+
+
+def _resolve_observation_start_ms(event_symbol_id: str, snapshots: list[dict], event: dict, state: dict | None = None) -> int | None:
+    for obj in (state or {}, event):
+        for field in ("observation_started_at_ms", "accepted_at_ms"):
+            if obj.get(field) is not None:
+                return int(obj[field])
+    times = [int(s["fetched_at_ms"]) for s in snapshots if s.get("event_symbol_id") == event_symbol_id and s.get("fetched_at_ms") is not None]
+    return min(times) if times else None
+
+
+def compute_raw_snapshot_quarantine_metrics(
+    snapshots: list[dict],
+    states: list[dict],
+    accepted_events: list[dict],
+    expected_snapshot_count: int,
+) -> RawSnapshotQuarantineResult:
+    from configs import base
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    events_by_id = {e["event_symbol_id"]: e for e in accepted_events if e.get("event_symbol_id")}
+    states_by_id = {s["event_symbol_id"]: s for s in states if s.get("event_symbol_id")}
+
+    # Group valid snapshots by event_symbol_id
+    schema_invalid_rows = []
+    valid_schema_rows = []
+    for r in snapshots:
+        if _is_schema_invalid_snapshot(r):
+            schema_invalid_rows.append(r)
+        else:
+            valid_schema_rows.append(r)
+
+    schema_invalid_count = len(schema_invalid_rows)
+
+    # Sort valid_schema_rows by (event_symbol_id, fetched_at_ms)
+    valid_schema_rows.sort(key=lambda x: (x["event_symbol_id"], x["fetched_at_ms"]))
+
+    # Group valid rows by event_symbol_id
+    from collections import defaultdict
+    rows_by_symbol = defaultdict(list)
+    for r in valid_schema_rows:
+        rows_by_symbol[r["event_symbol_id"]].append(r)
+
+    quarantined_invalid_book_rows = []
+    depth_quality_input_rows = []
+
+    invalid_book_row_count = 0
+    crossed_or_negative_book_count = 0
+    launch_warmup_invalid_row_count = 0
+    midrun_invalid_book_count = 0
+
+    invalid_book_by_phase = {"launch_warmup": 0, "observation_initial": 0, "midrun": 0}
+    invalid_book_by_reason = {
+        "launch_warmup_empty_book": 0,
+        "observation_initial_empty_book": 0,
+        "midrun_empty_book": 0,
+        "crossed_or_negative_book": 0,
+        "schema_invalid": 0,
+    }
+
+    # Track consecutive invalid rows
+    max_consecutive_invalid = 0
+    max_consecutive_invalid_after_warmup = 0
+
+    # Calculate first valid book latency
+    first_valid_book_ts_by_symbol = {}
+    launch_ts_by_symbol = {}
+    observation_start_ts_by_symbol = {}
+
+    for event_symbol_id, symbol_rows in rows_by_symbol.items():
+        # Get event and state
+        event = events_by_id.get(event_symbol_id, {})
+        state = states_by_id.get(event_symbol_id, {})
+
+        launch_time_ms = _resolve_event_launch_time_ms(event, state)
+        observation_start_ms = _resolve_observation_start_ms(event_symbol_id, snapshots, event, state)
+
+        launch_ts_by_symbol[event_symbol_id] = launch_time_ms
+        observation_start_ts_by_symbol[event_symbol_id] = observation_start_ms
+
+        if launch_time_ms is None:
+            warnings.append("launch_time_missing_warmup_anchor_degraded")
+
+        # Track consecutive counts for this symbol
+        curr_consec = 0
+        curr_consec_after_warmup = 0
+
+        first_valid_ts = None
+
+        for r in symbol_rows:
+            fetched_at_ms = r["fetched_at_ms"]
+            # Determine phase
+            if launch_time_ms is not None:
+                is_warmup = (
+                    launch_time_ms
+                    <= fetched_at_ms
+                    < launch_time_ms + base.EXTERNAL_SIGNAL_STAGE1_5G_LAUNCH_WARMUP_WINDOW_MS
+                )
+                phase = "launch_warmup" if is_warmup else "midrun"
+            else:
+                is_warmup = observation_start_ms is not None and fetched_at_ms < observation_start_ms + base.EXTERNAL_SIGNAL_STAGE1_5G_LAUNCH_WARMUP_WINDOW_MS
+                phase = "observation_initial" if is_warmup else "midrun"
+
+            # Check validity
+            is_crossed = _is_crossed_or_negative_book(r)
+            is_empty = _is_empty_book_snapshot(r)
+
+            if is_crossed or is_empty:
+                # Invalid book
+                invalid_book_row_count += 1
+                curr_consec += 1
+                if phase == "midrun":
+                    curr_consec_after_warmup += 1
+                else:
+                    curr_consec_after_warmup = 0
+
+                reason = ""
+                if is_crossed:
+                    reason = "crossed_or_negative_book"
+                    crossed_or_negative_book_count += 1
+                else:
+                    # is_empty
+                    if phase == "launch_warmup":
+                        reason = "launch_warmup_empty_book"
+                        launch_warmup_invalid_row_count += 1
+                    elif phase == "observation_initial":
+                        reason = "observation_initial_empty_book"
+                    else:
+                        reason = "midrun_empty_book"
+                        midrun_invalid_book_count += 1
+
+                invalid_book_by_phase[phase] += 1
+                invalid_book_by_reason[reason] += 1
+
+                # Keep copy of row and attach reason & phase
+                quarantined_row = dict(r)
+                quarantined_row["quarantine_reason"] = reason
+                quarantined_row["quarantine_phase"] = phase
+                quarantined_invalid_book_rows.append(quarantined_row)
+            else:
+                # Valid book
+                depth_quality_input_rows.append(r)
+                curr_consec = 0
+                curr_consec_after_warmup = 0
+                if first_valid_ts is None:
+                    first_valid_ts = fetched_at_ms
+
+            max_consecutive_invalid = max(max_consecutive_invalid, curr_consec)
+            max_consecutive_invalid_after_warmup = max(max_consecutive_invalid_after_warmup, curr_consec_after_warmup)
+
+        if first_valid_ts is not None:
+            first_valid_book_ts_by_symbol[event_symbol_id] = first_valid_ts
+
+    # Add schema invalid rows to quarantined_invalid_book_rows
+    for r in schema_invalid_rows:
+        quarantined_row = dict(r)
+        quarantined_row["quarantine_reason"] = "schema_invalid"
+        quarantined_row["quarantine_phase"] = "none"
+        quarantined_invalid_book_rows.append(quarantined_row)
+        invalid_book_by_reason["schema_invalid"] += 1
+        invalid_book_row_count += 1
+
+    # Let's count minute buckets for invalid rows
+    # A minute bucket is identified by _minute_bucket_ms(fetched_at_ms)
+    invalid_buckets = set()
+    launch_warmup_invalid_buckets = set()
+    midrun_invalid_buckets = set()
+
+    for r in quarantined_invalid_book_rows:
+        fetched_at_ms = r.get("fetched_at_ms")
+        if fetched_at_ms is not None:
+            bucket = _minute_bucket_ms(fetched_at_ms)
+            invalid_buckets.add(bucket)
+            phase = r.get("quarantine_phase")
+            if phase == "launch_warmup":
+                launch_warmup_invalid_buckets.add(bucket)
+            elif phase == "midrun":
+                midrun_invalid_buckets.add(bucket)
+
+    invalid_book_minute_bucket_count = len(invalid_buckets)
+    launch_warmup_invalid_minute_bucket_count = len(launch_warmup_invalid_buckets)
+    midrun_invalid_minute_bucket_count = len(midrun_invalid_buckets)
+
+    # First valid book latency
+    first_valid_book_latency_ms = None
+    if first_valid_book_ts_by_symbol:
+        latencies = []
+        for event_symbol_id, first_ts in first_valid_book_ts_by_symbol.items():
+            anchor = launch_ts_by_symbol.get(event_symbol_id)
+            if anchor is None:
+                anchor = observation_start_ts_by_symbol.get(event_symbol_id)
+            if anchor is not None:
+                latencies.append(first_ts - anchor)
+        if latencies:
+            first_valid_book_latency_ms = max(latencies)
+
+    observed_snapshot_count = len(snapshots)
+    valid_snapshot_count_after_quarantine = len(depth_quality_input_rows)
+
+    # Ratios
+    invalid_book_ratio = invalid_book_row_count / observed_snapshot_count if observed_snapshot_count > 0 else 0.0
+    invalid_book_ratio_observed = invalid_book_ratio
+    book_availability_ratio = valid_snapshot_count_after_quarantine / expected_snapshot_count if expected_snapshot_count > 0 else 0.0
+    book_unavailable_ratio = invalid_book_row_count / expected_snapshot_count if expected_snapshot_count > 0 else 0.0
+
+    # Gates & Blockers
+    if expected_snapshot_count <= 0:
+        blockers.append("expected_snapshot_count_missing")
+    else:
+        if book_availability_ratio < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_BOOK_AVAILABILITY_RATIO:
+            blockers.append("book_availability_ratio_below_threshold")
+
+    if invalid_book_ratio > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_INVALID_BOOK_RATIO:
+        blockers.append("invalid_book_ratio_above_threshold")
+
+    if first_valid_book_latency_ms is not None and first_valid_book_latency_ms > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_FIRST_VALID_BOOK_LATENCY_MS:
+        blockers.append("first_valid_book_latency_too_high")
+
+    if launch_warmup_invalid_row_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_ROW_COUNT:
+        blockers.append("launch_warmup_invalid_row_count_exceeded")
+
+    if launch_warmup_invalid_minute_bucket_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_MINUTE_BUCKET_COUNT:
+        blockers.append("launch_warmup_invalid_minute_bucket_count_exceeded")
+
+    if observed_snapshot_count > 0 and (midrun_invalid_book_count / observed_snapshot_count) > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_RATIO:
+        blockers.append("midrun_invalid_book_ratio_exceeded")
+
+    if midrun_invalid_book_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_COUNT:
+        blockers.append("midrun_invalid_book_count_exceeded")
+
+    if max_consecutive_invalid_after_warmup > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_CONSECUTIVE_INVALID_AFTER_WARMUP:
+        blockers.append("max_consecutive_invalid_after_warmup_exceeded")
+
+    if valid_snapshot_count_after_quarantine < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_VALID_SNAPSHOTS_AFTER_QUARANTINE:
+        blockers.append("valid_snapshot_count_after_quarantine_below_threshold")
+
+    if crossed_or_negative_book_count > 0 and not base.EXTERNAL_SIGNAL_STAGE1_5G_CROSSED_OR_NEGATIVE_BOOK_ALLOWED:
+        blockers.append("crossed_or_negative_book")
+
+    if schema_invalid_count > 0:
+        blockers.append("schema_invalid")
+
+    clean_depth_evidence_pass = (invalid_book_row_count == 0) and (not blockers)
+    quarantine_candidate = (invalid_book_row_count > 0) and (crossed_or_negative_book_count == 0) and (schema_invalid_count == 0)
+    quarantined_depth_evidence_pass = quarantine_candidate and (not blockers)
+
+    return RawSnapshotQuarantineResult(
+        blockers=sorted(list(set(blockers))),
+        warnings=sorted(list(set(warnings))),
+        clean_depth_evidence_pass=clean_depth_evidence_pass,
+        quarantined_depth_evidence_pass=quarantined_depth_evidence_pass,
+        quarantine_candidate=quarantine_candidate,
+        observed_snapshot_count=observed_snapshot_count,
+        expected_snapshot_count=expected_snapshot_count,
+        invalid_book_row_count=invalid_book_row_count,
+        invalid_book_minute_bucket_count=invalid_book_minute_bucket_count,
+        invalid_book_ratio=invalid_book_ratio,
+        invalid_book_ratio_observed=invalid_book_ratio_observed,
+        valid_snapshot_count_after_quarantine=valid_snapshot_count_after_quarantine,
+        book_availability_ratio=book_availability_ratio,
+        book_unavailable_ratio=book_unavailable_ratio,
+        invalid_book_by_phase=invalid_book_by_phase,
+        invalid_book_by_reason=invalid_book_by_reason,
+        launch_warmup_invalid_row_count=launch_warmup_invalid_row_count,
+        launch_warmup_invalid_minute_bucket_count=launch_warmup_invalid_minute_bucket_count,
+        midrun_invalid_book_count=midrun_invalid_book_count,
+        midrun_invalid_minute_bucket_count=midrun_invalid_minute_bucket_count,
+        crossed_or_negative_book_count=crossed_or_negative_book_count,
+        schema_invalid_count=schema_invalid_count,
+        max_consecutive_invalid=max_consecutive_invalid,
+        max_consecutive_invalid_after_warmup=max_consecutive_invalid_after_warmup,
+        first_valid_book_latency_ms=first_valid_book_latency_ms,
+        depth_quality_input_rows=depth_quality_input_rows,
+        quarantined_invalid_book_rows=quarantined_invalid_book_rows,
+    )
+
+
 def validate_raw_snapshot_integrity(
+
     snapshots: list[dict],
     parse_error_count: int = 0,
     total_jsonl_line_count: int = 0,
@@ -769,6 +1119,32 @@ def compute_depth_quality_metrics(snapshots: list[dict]) -> dict:
     }
 
 
+def compute_quarantined_depth_quality(quarantine_result: RawSnapshotQuarantineResult) -> dict:
+    quality = compute_depth_quality_metrics(quarantine_result.depth_quality_input_rows)
+    return {
+        "depth_quality_clean_mode_available": False,
+        "depth_quality_quarantined_mode_available": True,
+        "quarantined_depth_quality": {
+            **quality,
+            "input_valid_rows": quarantine_result.valid_snapshot_count_after_quarantine,
+            "excluded_invalid_rows": quarantine_result.invalid_book_row_count,
+        },
+        "book_availability_quality": {
+            "availability_ratio": quarantine_result.book_availability_ratio,
+            "unavailable_ratio": quarantine_result.book_unavailable_ratio,
+            "max_consecutive_invalid": quarantine_result.max_consecutive_invalid,
+            "max_consecutive_invalid_after_warmup": quarantine_result.max_consecutive_invalid_after_warmup,
+            "first_valid_book_latency_ms": quarantine_result.first_valid_book_latency_ms,
+        },
+        "depth_quality_input_mode": "quarantined_valid_rows",
+        "depth_quality_input_row_count": quarantine_result.valid_snapshot_count_after_quarantine,
+        "excluded_invalid_book_row_count": quarantine_result.invalid_book_row_count,
+        "blockers": quality.get("blockers", []),
+        "warnings": quality.get("warnings", []),
+    }
+
+
+
 def _build_event_level_decisions(
     accepted_events: list[dict],
     states: list[dict],
@@ -830,6 +1206,62 @@ def _with_stage1_5g_audit_fields(
     return enriched
 
 
+def summarize_raw_snapshot_quarantine_result(quarantine_result: RawSnapshotQuarantineResult) -> dict:
+    return {
+        "blockers": quarantine_result.blockers,
+        "warnings": quarantine_result.warnings,
+        "clean_depth_evidence_pass": quarantine_result.clean_depth_evidence_pass,
+        "quarantined_depth_evidence_pass": quarantine_result.quarantined_depth_evidence_pass,
+        "quarantine_candidate": quarantine_result.quarantine_candidate,
+        "observed_snapshot_count": quarantine_result.observed_snapshot_count,
+        "expected_snapshot_count": quarantine_result.expected_snapshot_count,
+        "invalid_book_row_count": quarantine_result.invalid_book_row_count,
+        "invalid_book_minute_bucket_count": quarantine_result.invalid_book_minute_bucket_count,
+        "invalid_book_ratio": quarantine_result.invalid_book_ratio,
+        "invalid_book_ratio_observed": quarantine_result.invalid_book_ratio_observed,
+        "valid_snapshot_count_after_quarantine": quarantine_result.valid_snapshot_count_after_quarantine,
+        "book_availability_ratio": quarantine_result.book_availability_ratio,
+        "book_unavailable_ratio": quarantine_result.book_unavailable_ratio,
+        "invalid_book_by_phase": quarantine_result.invalid_book_by_phase,
+        "invalid_book_by_reason": quarantine_result.invalid_book_by_reason,
+        "launch_warmup_invalid_row_count": quarantine_result.launch_warmup_invalid_row_count,
+        "launch_warmup_invalid_minute_bucket_count": quarantine_result.launch_warmup_invalid_minute_bucket_count,
+        "midrun_invalid_book_count": quarantine_result.midrun_invalid_book_count,
+        "midrun_invalid_minute_bucket_count": quarantine_result.midrun_invalid_minute_bucket_count,
+        "crossed_or_negative_book_count": quarantine_result.crossed_or_negative_book_count,
+        "schema_invalid_count": quarantine_result.schema_invalid_count,
+        "max_consecutive_invalid": quarantine_result.max_consecutive_invalid,
+        "max_consecutive_invalid_after_warmup": quarantine_result.max_consecutive_invalid_after_warmup,
+        "first_valid_book_latency_ms": quarantine_result.first_valid_book_latency_ms,
+        "depth_quality_input_row_count": len(quarantine_result.depth_quality_input_rows),
+        "quarantined_invalid_book_row_count": len(quarantine_result.quarantined_invalid_book_rows),
+    }
+
+
+def write_stage1_5g_quarantine_artifacts(review_output_root: Path, quarantine_result: RawSnapshotQuarantineResult) -> dict[str, str]:
+    review_output_root.mkdir(parents=True, exist_ok=True)
+    invalid_path = review_output_root / "quarantined_invalid_book_rows.jsonl"
+    valid_path = review_output_root / "depth_quality_input_rows.jsonl"
+    summary_path = review_output_root / "stage1_5g_quarantine_summary.json"
+
+    with invalid_path.open("w", encoding="utf-8") as fh:
+        for row in quarantine_result.quarantined_invalid_book_rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    with valid_path.open("w", encoding="utf-8") as fh:
+        for row in quarantine_result.depth_quality_input_rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(summarize_raw_snapshot_quarantine_result(quarantine_result), fh, indent=2, ensure_ascii=False)
+
+    return {
+        "quarantined_rows_path": str(invalid_path),
+        "depth_quality_input_rows_path": str(valid_path),
+        "quarantine_summary_path": str(summary_path),
+    }
+
+
 def build_stage1_5g_review_summary(
     summary: dict,
     watermark: dict,
@@ -839,7 +1271,15 @@ def build_stage1_5g_review_summary(
     request_manifest_rows: list[dict],
     output_root: str | Path | None = None,
     loader_blockers: list[str] | None = None,
+    *,
+    review_output_root: str | Path | None = None,
 ) -> dict:
+    """
+    Build Stage 1.5G review summary.
+
+    :param output_root: Stage 1.5F source artifact root (read-only audit provenance).
+    :param review_output_root: Stage 1.5G review output root (where derived quarantine artifacts may be written).
+    """
     from configs import base
 
     all_blockers: list[str] = []
@@ -1003,8 +1443,30 @@ def build_stage1_5g_review_summary(
         parse_error_count=summary.get("parse_error_count", 0),  # passed down from bundle if available
         total_jsonl_line_count=summary.get("total_jsonl_line_count", 0),
     )
-    if raw_integrity_result.blockers:
-        all_blockers.extend(raw_integrity_result.blockers)
+
+    expected_snapshot_count = coverage_result.get("expected_snapshot_count", 0)
+    quarantine_result = compute_raw_snapshot_quarantine_metrics(
+        snapshots=snapshots,
+        states=states,
+        accepted_events=accepted_events,
+        expected_snapshot_count=expected_snapshot_count,
+    )
+
+    has_invalid_book = (raw_integrity_result.invalid_book_count > 0)
+    raw_integrity_blockers_other_than_invalid = [b for b in raw_integrity_result.blockers if b != "invalid_book"]
+
+    # Write quarantine artifacts if there are invalid rows and output root is given
+    quarantine_dict = summarize_raw_snapshot_quarantine_result(quarantine_result) if quarantine_result else {}
+    if quarantine_result and quarantine_result.invalid_book_row_count > 0 and review_output_root is not None:
+        from pathlib import Path
+        paths = write_stage1_5g_quarantine_artifacts(Path(review_output_root), quarantine_result)
+        quarantine_dict.update(paths)
+
+    # 7a. Hard Fail on raw integrity other than invalid_book
+    if raw_integrity_blockers_other_than_invalid:
+        all_blockers.extend(raw_integrity_blockers_other_than_invalid)
+        if has_invalid_book:
+            all_blockers.append("invalid_book")
         return finish({
             "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
             "decision": "stage1_5g_depth_evidence_invalid",
@@ -1023,34 +1485,50 @@ def build_stage1_5g_review_summary(
             "execution_feasibility_claim_allowed": False,
             "coverage_metrics": coverage_result,
             "raw_integrity": raw_integrity_result.__dict__,
+            "quarantine": quarantine_dict,
+        }, integrity_result.formal_completed_event_symbol_ids)
+
+    # 7b. If invalid_book exists and quarantine has blockers, it's invalid
+    if has_invalid_book and not quarantine_result.quarantined_depth_evidence_pass:
+        all_blockers.extend(quarantine_result.blockers)
+        if "invalid_book" not in all_blockers:
+            all_blockers.append("invalid_book")
+        return finish({
+            "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
+            "decision": "stage1_5g_depth_evidence_invalid",
+            "allowed_next_action": "continue_observation",
+            "evidence_scope": "none",
+            "event_family_conclusion_allowed": False,
+            "blockers": sorted(list(set(all_blockers))),
+            "warnings": all_warnings,
+            "evidence_label_counts": integrity_result.evidence_label_counts,
+            "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+            "trade_signal_allowed": False,
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+            "execution_feasibility_claim_allowed": False,
+            "coverage_metrics": coverage_result,
+            "raw_integrity": raw_integrity_result.__dict__,
+            "quarantine": quarantine_dict,
         }, integrity_result.formal_completed_event_symbol_ids)
 
     # 8. No Completed Formal Evidence Check
     if integrity_result.formal_announcement_and_launch_count == 0:
-        return finish({
-            "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
-            "decision": "stage1_5g_depth_evidence_observation_only",
-            "allowed_next_action": "continue_observation",
-            "evidence_scope": "none",
-            "event_family_conclusion_allowed": False,
-            "blockers": sorted(list(set(all_blockers))),
-            "warnings": all_warnings,
-            "evidence_label_counts": integrity_result.evidence_label_counts,
-            "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
-            "trade_signal_allowed": False,
-            "paper_trading_allowed": False,
-            "live_trading_allowed": False,
-            "execution_engine_allowed": False,
-            "alpha_interpretation_allowed": False,
-            "execution_feasibility_claim_allowed": False,
-            "coverage_metrics": coverage_result,
-            "raw_integrity": raw_integrity_result.__dict__,
-        }, integrity_result.formal_completed_event_symbol_ids)
+        if has_invalid_book:
+            depth_quality_result = compute_quarantined_depth_quality(quarantine_result)
+        else:
+            quality = compute_depth_quality_metrics(snapshots)
+            depth_quality_result = {
+                **quality,
+                "depth_quality_clean_mode_available": True,
+                "depth_quality_quarantined_mode_available": False,
+                "depth_quality_input_mode": "clean_all_rows",
+                "depth_quality_input_row_count": len(snapshots),
+                "excluded_invalid_book_row_count": 0,
+            }
 
-    # 9. Depth Quality Check
-    depth_quality_result = compute_depth_quality_metrics(snapshots)
-    if depth_quality_result["blockers"]:
-        all_blockers.extend(depth_quality_result["blockers"])
         return finish({
             "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
             "decision": "stage1_5g_depth_evidence_observation_only",
@@ -1069,11 +1547,73 @@ def build_stage1_5g_review_summary(
             "execution_feasibility_claim_allowed": False,
             "coverage_metrics": coverage_result,
             "raw_integrity": raw_integrity_result.__dict__,
+            "quarantine": quarantine_dict,
             "depth_quality": depth_quality_result,
         }, integrity_result.formal_completed_event_symbol_ids)
 
+    # 9. Depth Quality Check
+    if has_invalid_book:
+        depth_quality_result = compute_quarantined_depth_quality(quarantine_result)
+    else:
+        quality = compute_depth_quality_metrics(snapshots)
+        depth_quality_result = {
+            **quality,
+            "depth_quality_clean_mode_available": True,
+            "depth_quality_quarantined_mode_available": False,
+            "depth_quality_input_mode": "clean_all_rows",
+            "depth_quality_input_row_count": len(snapshots),
+            "excluded_invalid_book_row_count": 0,
+        }
+
+    # If depth quality blockers exists:
+    if depth_quality_result.get("blockers"):
+        if has_invalid_book:
+            all_blockers.extend(depth_quality_result["blockers"])
+            return finish({
+                "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
+                "decision": "stage1_5g_depth_evidence_invalid",
+                "allowed_next_action": "continue_observation",
+                "evidence_scope": "none",
+                "event_family_conclusion_allowed": False,
+                "blockers": sorted(list(set(all_blockers))),
+                "warnings": all_warnings,
+                "evidence_label_counts": integrity_result.evidence_label_counts,
+                "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+                "trade_signal_allowed": False,
+                "paper_trading_allowed": False,
+                "live_trading_allowed": False,
+                "execution_engine_allowed": False,
+                "alpha_interpretation_allowed": False,
+                "execution_feasibility_claim_allowed": False,
+                "coverage_metrics": coverage_result,
+                "raw_integrity": raw_integrity_result.__dict__,
+                "quarantine": quarantine_dict,
+                "depth_quality": depth_quality_result,
+            }, integrity_result.formal_completed_event_symbol_ids)
+        else:
+            all_blockers.extend(depth_quality_result["blockers"])
+            return finish({
+                "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
+                "decision": "stage1_5g_depth_evidence_observation_only",
+                "allowed_next_action": "continue_observation",
+                "evidence_scope": "none",
+                "event_family_conclusion_allowed": False,
+                "blockers": sorted(list(set(all_blockers))),
+                "warnings": all_warnings,
+                "evidence_label_counts": integrity_result.evidence_label_counts,
+                "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+                "trade_signal_allowed": False,
+                "paper_trading_allowed": False,
+                "live_trading_allowed": False,
+                "execution_engine_allowed": False,
+                "alpha_interpretation_allowed": False,
+                "execution_feasibility_claim_allowed": False,
+                "coverage_metrics": coverage_result,
+                "raw_integrity": raw_integrity_result.__dict__,
+                "depth_quality": depth_quality_result,
+            }, integrity_result.formal_completed_event_symbol_ids)
+
     # 10. Sufficient Check and Scope Determination
-    # Group unique symbols and articles from completed formal evidence symbols
     formal_ids = integrity_result.formal_completed_event_symbol_ids
     unique_symbols = set()
     unique_articles = set()
@@ -1098,16 +1638,33 @@ def build_stage1_5g_review_summary(
         event_family_conclusion_allowed = True
         evidence_scope = "event_family"
 
+    if has_invalid_book:
+        decision = "stage1_5g_depth_evidence_quarantined_pass"
+        allowed_next_action = "write_stage1_5h_design_only"
+        clean_pass_val = False
+        quarantined_pass_val = True
+        quarantine_candidate_val = True
+    else:
+        decision = "stage1_5g_depth_evidence_clean_pass"
+        allowed_next_action = "write_stage1_5h_design_or_shadow_simulator_design"
+        clean_pass_val = True
+        quarantined_pass_val = False
+        quarantine_candidate_val = False
+
     return finish({
         "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
-        "decision": "stage1_5g_depth_evidence_sufficient_for_stage1_5h_plan",
-        "allowed_next_action": "write_stage1_5h_shadow_execution_simulator_design",
+        "decision": decision,
+        "allowed_next_action": allowed_next_action,
+        "clean_depth_evidence_pass": clean_pass_val,
+        "quarantined_depth_evidence_pass": quarantined_pass_val,
+        "quarantine_candidate": quarantine_candidate_val,
         "evidence_scope": evidence_scope,
         "event_family_conclusion_allowed": event_family_conclusion_allowed,
         "blockers": sorted(list(set(all_blockers))),
         "warnings": all_warnings,
         "evidence_label_counts": integrity_result.evidence_label_counts,
         "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+        "stage1_5h_implementation_allowed": False,
         "trade_signal_allowed": False,
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
@@ -1116,8 +1673,10 @@ def build_stage1_5g_review_summary(
         "execution_feasibility_claim_allowed": False,
         "coverage_metrics": coverage_result,
         "raw_integrity": raw_integrity_result.__dict__,
+        "quarantine": quarantine_dict,
         "depth_quality": depth_quality_result,
     }, integrity_result.formal_completed_event_symbol_ids)
+
 
 
 def generate_stage1_5g_chinese_review(summary: dict) -> str:
@@ -1201,7 +1760,26 @@ def generate_stage1_5g_chinese_review(summary: dict) -> str:
         lines.append("- 未计算 (Not evaluated)")
     lines.append("")
 
-    lines.append("## 6. 深度与滑点审计 (Depth & Slippage Quality)")
+    quarantine = summary.get("quarantine")
+    if quarantine:
+        lines.append("## 6. Quarantine 审计")
+        lines.append("")
+        lines.append(f"- **隔离的无效订单簿行数 (invalid_book_row_count):** `{quarantine.get('invalid_book_row_count')}`")
+        lines.append(f"- **隔离的无效订单簿分钟数 (invalid_book_minute_bucket_count):** `{quarantine.get('invalid_book_minute_bucket_count')}`")
+        lines.append(f"- **订单簿可用率 (book_availability_ratio):** `{quarantine.get('book_availability_ratio')}`")
+        lines.append(f"- **订单簿不可用率 (book_unavailable_ratio):** `{quarantine.get('book_unavailable_ratio')}`")
+        lines.append(f"- **首个有效订单簿延迟时间 (first_valid_book_latency_ms):** `{quarantine.get('first_valid_book_latency_ms')} ms`")
+        lines.append(f"- **最大连续无效行数 (max_consecutive_invalid):** `{quarantine.get('max_consecutive_invalid')}`")
+        lines.append(f"- **Warmup后最大连续无效行数 (max_consecutive_invalid_after_warmup):** `{quarantine.get('max_consecutive_invalid_after_warmup')}`")
+        lines.append(f"- **执行可用性声明 (execution_availability_claim):** `{quarantine.get('execution_availability_claim')}`")
+        lines.append(f"- **隔离无效行路径 (quarantined_rows_path):** `{quarantine.get('quarantined_rows_path')}`")
+        lines.append(f"- **深度质量输入行路径 (depth_quality_input_rows_path):** `{quarantine.get('depth_quality_input_rows_path')}`")
+        lines.append("")
+        lines.append("> [!WARNING]")
+        lines.append("> quarantined pass 只能支持 1.5H design，不允许 execution feasibility claim / paper / live。")
+        lines.append("")
+
+    lines.append("## 7. 深度与滑点审计 (Depth & Slippage Quality)")
     lines.append("")
     if depth_quality:
         lines.append(f"- **P50 价差 (Spread bps P50):** `{depth_quality.get('spread_bps_p50')} bps`")
@@ -1220,7 +1798,7 @@ def generate_stage1_5g_chinese_review(summary: dict) -> str:
         lines.append("- 未计算 (Not evaluated)")
     lines.append("")
 
-    lines.append("## 7. 风险与局限性声明 (Risks & Limitations)")
+    lines.append("## 8. 风险与局限性声明 (Risks & Limitations)")
     lines.append("")
     lines.append("> [!IMPORTANT]")
     lines.append("> 本审计所用到的 1-minute 静态深度/滑点，仅仅代表 Polling 采样时刻的静态订单簿数据截面（static lower-bound proxy），不能代表实盘高频爆拉或砸盘撮合下的真实 execution 可行性与深度。")

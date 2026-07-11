@@ -1717,3 +1717,41 @@ EXTERNAL_SIGNAL_STAGE1_5G_MAX_NULL_RATIO = 0.01
 EXTERNAL_SIGNAL_STAGE1_5G_MAX_DUPLICATE_SNAPSHOT_RATIO = 0.05
 EXTERNAL_SIGNAL_STAGE1_5G_MIN_EVENT_FAMILY_SAMPLE_REQUIRED = 3
 EXTERNAL_SIGNAL_STAGE1_5G_MIN_SOURCE_ARTICLES_REQUIRED = 2
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_INVALID_BOOK_RATIO = 0.02
+# Maximum invalid book row ratio allowed for quarantined evidence. 0.02 = 2%.
+
+EXTERNAL_SIGNAL_STAGE1_5G_LAUNCH_WARMUP_WINDOW_MS = 15 * 60 * 1000
+# Window after effective launch time where empty book can be classified as launch warmup.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_ROW_COUNT = 15
+# Maximum invalid snapshot rows allowed inside launch warmup.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_MINUTE_BUCKET_COUNT = 12
+# Maximum invalid UTC minute buckets allowed inside launch warmup.
+# 12 is intentionally lower than the 15-minute warmup window: warmup may be mostly unavailable,
+# but a full 15/15 minute unavailable launch window is not accepted in first quarantine version.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_RATIO = 0.002
+# Maximum invalid book ratio after warmup. 0.002 = 0.2%.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_COUNT = 1
+# Maximum invalid book rows allowed after warmup in first quarantine version.
+# SKHYUSDT had exactly one midrun invalid row; count=1 is the boundary pass case.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_CONSECUTIVE_INVALID_AFTER_WARMUP = 1
+# Maximum consecutive invalid rows allowed after warmup.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MIN_VALID_SNAPSHOTS_AFTER_QUARANTINE = 684
+# Minimum valid book rows after excluding quarantined invalid rows.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MIN_BOOK_AVAILABILITY_RATIO = 0.98
+# Minimum valid_book_count / expected_snapshot_count for quarantined evidence.
+# This is an AND condition with MIN_VALID_SNAPSHOTS_AFTER_QUARANTINE.
+# 684/720 satisfies coverage but not availability; availability prevents over-accepting sparse valid books.
+
+EXTERNAL_SIGNAL_STAGE1_5G_MAX_FIRST_VALID_BOOK_LATENCY_MS = 15 * 60 * 1000
+# Maximum latency from launch/warmup anchor to first valid book.
+
+EXTERNAL_SIGNAL_STAGE1_5G_CROSSED_OR_NEGATIVE_BOOK_ALLOWED = False
+# Crossed or negative books are hard blockers in first quarantine version.
