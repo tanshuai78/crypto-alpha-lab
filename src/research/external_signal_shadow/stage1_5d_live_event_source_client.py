@@ -255,3 +255,21 @@ def fetch_public_payload(url: str, live_public_readonly: bool, timeout_sec: floa
         "row_count": None,
         "error": str(last_error),
     }
+
+
+def build_announcement_detail_fallback_urls(url: str) -> list[str]:
+    validate_announcement_detail_url(url)
+    parsed = urllib.parse.urlparse(url)
+    parts = [p for p in parsed.path.split("/") if p]
+    code = parts[-1]
+    candidates = [
+        url,
+        f"https://www.binance.com/en/support/announcement/detail/{code}",
+        f"https://www.binance.com/en/support/announcement/{code}",
+    ]
+    unique = []
+    for candidate in candidates:
+        if candidate not in unique:
+            validate_announcement_detail_url(candidate)
+            unique.append(candidate)
+    return unique

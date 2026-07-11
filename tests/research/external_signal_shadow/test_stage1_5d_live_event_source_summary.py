@@ -132,6 +132,10 @@ def test_summary_includes_detail_fallback_counters():
             "detail_http_not_ready_count": 2,
             "detail_terminal_failed_count": 1,
             "detail_transient_timeout_count": 4,
+            "detail_degraded_recent_retry_count": 5,
+            "detail_fetch_fallback_attempt_count": 6,
+            "detail_fetch_fallback_success_count": 7,
+            "detail_fetch_attempt_manifest_mismatch_count": 0,
         },
     )
 
@@ -148,5 +152,8 @@ def test_summary_includes_detail_fallback_counters():
     assert summary["detail_http_not_ready_count"] == 2
     assert summary["detail_terminal_failed_count"] == 1
     assert summary["detail_transient_timeout_count"] == 4
-
+    assert summary["detail_degraded_recent_retry_count"] == 5
+    assert summary["detail_fetch_fallback_attempt_count"] == 6
+    assert summary["detail_fetch_fallback_success_count"] == 7
+    assert summary["detail_fetch_attempt_manifest_mismatch_count"] == 0
 

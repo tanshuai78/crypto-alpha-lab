@@ -1583,6 +1583,25 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEFERRED_MANIFEST_MIN_INTERVAL_SEC = 15 * 60
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 1
 # Audit metadata version for Stage 1.5D detail retry scheduler diagnostics.
 
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_ARTICLE_WINDOW_SEC = 3 * 60 * 60
+# Articles detected within this window are considered recent enough for protected degraded retry cadence.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_RETRY_INTERVAL_SEC = 10 * 60
+# Minimum retry interval for recent transient articles even while endpoint degraded is active.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_RETRY_BUDGET_PER_POLL = 1
+# Maximum protected recent transient retries per poll during endpoint degraded state.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_RETRY_MAX_CYCLES = 6
+# Maximum protected recent transient logical retry cycles before the article is treated like old transient backlog.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL = 4
+# Hard cap for actual announcement detail HTTP requests per poll, including fallback URL attempts.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FALLBACK_MAX_URLS_PER_ARTICLE = 2
+# Maximum detail URL variants attempted for one article in one logical retry cycle.
+
+
 
 
 

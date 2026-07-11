@@ -9,6 +9,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_client impo
     host_allowed,
     validate_announcement_detail_url,
     validate_url_allowlist,
+    build_announcement_detail_fallback_urls,
 )
 
 
@@ -220,5 +221,23 @@ def test_fetch_public_payload_treats_http_503_as_not_ready():
     assert result["error"] == "detail_payload_http_status_503"
 
 
+def test_build_announcement_detail_fallback_urls_returns_allowlisted_detail_variants():
+    urls = build_announcement_detail_fallback_urls(
+        "https://www.binance.com/en/support/announcement/d0833e4ae9b542be90dbf3fe1c960c53"
+    )
+    assert "https://www.binance.com/en/support/announcement/detail/d0833e4ae9b542be90dbf3fe1c960c53" in urls
+    assert urls[0].endswith("/announcement/d0833e4ae9b542be90dbf3fe1c960c53")
+    assert len(urls) == len(set(urls))
+    for url in urls:
+        validate_announcement_detail_url(url)
 
 
+def test_build_announcement_detail_fallback_urls_with_detail_primary():
+    urls = build_announcement_detail_fallback_urls(
+        "https://www.binance.com/en/support/announcement/detail/d0833e4ae9b542be90dbf3fe1c960c53"
+    )
+    assert "https://www.binance.com/en/support/announcement/d0833e4ae9b542be90dbf3fe1c960c53" in urls
+    assert urls[0].endswith("/announcement/detail/d0833e4ae9b542be90dbf3fe1c960c53")
+    assert len(urls) == len(set(urls))
+    for url in urls:
+        validate_announcement_detail_url(url)

@@ -129,10 +129,15 @@ def build_smoke_summary(
         "detail_endpoint_degraded_count": counters.get("detail_endpoint_degraded_count", 0),
         "detail_endpoint_degraded_active": counters.get("detail_endpoint_degraded_active", 0),
         "detail_success_symbols_empty_count": counters.get("detail_success_symbols_empty_count", 0),
+        "detail_degraded_recent_retry_count": counters.get("detail_degraded_recent_retry_count", 0),
+        "detail_fetch_fallback_attempt_count": counters.get("detail_fetch_fallback_attempt_count", 0),
+        "detail_fetch_fallback_success_count": counters.get("detail_fetch_fallback_success_count", 0),
+        "detail_fetch_attempt_manifest_mismatch_count": counters.get(
+            "detail_fetch_attempt_manifest_mismatch_count", 0
+        ),
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
         "execution_engine_allowed": False,
         "alpha_interpretation_allowed": False,
     }
-
 

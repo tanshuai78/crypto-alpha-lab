@@ -387,3 +387,82 @@ def test_endpoint_degraded_preserves_budget_cap_for_many_never_attempted_article
     assert len(selected) == 3
     assert all(state[code]["detail_fetch_attempt_count"] == 0 for code in selected)
 
+
+def test_endpoint_degraded_allows_recent_transient_retry_with_protected_budget():
+    now_ms = 4 * 60 * 60 * 1000
+    state = {
+        "recent": {
+            "source_article_id": "recent",
+            "first_detected_at_ms": now_ms - 30 * 60 * 1000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "transient_detail_error_count": 2,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 11 * 60 * 1000,
+        },
+        "old": {
+            "source_article_id": "old",
+            "first_detected_at_ms": now_ms - 12 * 60 * 60 * 1000,
+            "detail_http_request_count": 8,
+            "detail_retry_cycle_count": 8,
+            "transient_detail_error_count": 8,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 11 * 60 * 1000,
+        },
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state=state,
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms + 60_000,
+        degraded_recent_article_window_ms=3 * 60 * 60 * 1000,
+        degraded_recent_retry_interval_ms=10 * 60 * 1000,
+        degraded_recent_retry_budget_per_poll=1,
+        degraded_recent_retry_max_cycles=6,
+    )
+
+    assert selected == ["recent"]
+
+
+def test_endpoint_degraded_recent_retry_respects_interval_and_attempt_cap():
+    now_ms = 4 * 60 * 60 * 1000
+    state = {
+        "too_soon": {
+            "source_article_id": "too_soon",
+            "first_detected_at_ms": now_ms - 30 * 60 * 1000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "transient_detail_error_count": 2,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 2 * 60 * 1000,
+        },
+        "too_many": {
+            "source_article_id": "too_many",
+            "first_detected_at_ms": now_ms - 30 * 60 * 1000,
+            "detail_http_request_count": 6,
+            "detail_retry_cycle_count": 6,
+            "transient_detail_error_count": 6,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 11 * 60 * 1000,
+        },
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state=state,
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms + 60_000,
+        degraded_recent_article_window_ms=3 * 60 * 60 * 1000,
+        degraded_recent_retry_interval_ms=10 * 60 * 1000,
+        degraded_recent_retry_budget_per_poll=1,
+        degraded_recent_retry_max_cycles=6,
+    )
+
+    assert selected == []
+
+
+def test_serialize_retry_articles_fills_http_request_and_retry_cycle_counts():
+    serialized = serialize_retry_articles({"a": {"source_article_id": "a"}})
+    assert serialized["a"]["detail_http_request_count"] == 0
+    assert serialized["a"]["detail_retry_cycle_count"] == 0

@@ -23,6 +23,10 @@ def select_detail_retry_attempts(
     now_ms: int,
     detail_budget_per_poll: int,
     endpoint_degraded_until_ms: int,
+    degraded_recent_article_window_ms: int | None = None,
+    degraded_recent_retry_interval_ms: int | None = None,
+    degraded_recent_retry_budget_per_poll: int = 0,
+    degraded_recent_retry_max_cycles: int | None = None,
     max_first_attempt_delay_polls: int | None = None,
     max_first_attempt_delay_ms: int | None = None,
 ) -> list[str]:
@@ -36,7 +40,10 @@ def select_detail_retry_attempts(
             continue
         if now_ms < int(state.get("next_detail_retry_at_ms") or 0):
             continue
-        if int(state.get("detail_fetch_attempt_count") or 0) <= 0:
+        attempt_count = state.get("detail_http_request_count")
+        if attempt_count is None:
+            attempt_count = state.get("detail_fetch_attempt_count", 0)
+        if int(attempt_count or 0) <= 0:
             never_attempted.append((code, state))
         else:
             attempted.append((code, state))
@@ -55,8 +62,38 @@ def select_detail_retry_attempts(
         )
     )
 
+    selected_never = never_attempted[:detail_budget_per_poll]
+    remaining_budget = detail_budget_per_poll - len(selected_never)
+
     if now_ms < endpoint_degraded_until_ms:
-        attempted = []
+        if remaining_budget <= 0 or degraded_recent_retry_budget_per_poll <= 0:
+            selected_attempted = []
+        else:
+            eligible_recent = []
+            for code, state in attempted:
+                first_detected_at_ms = int(state.get("first_detected_at_ms") or 0)
+                if degraded_recent_article_window_ms is not None:
+                    if now_ms - first_detected_at_ms > degraded_recent_article_window_ms:
+                        continue
+                cycle_count = int(state.get("detail_retry_cycle_count", state.get("detail_fetch_attempt_count", 0)) or 0)
+                if degraded_recent_retry_max_cycles is not None:
+                    if cycle_count >= degraded_recent_retry_max_cycles:
+                        continue
+                last_retry_at_ms = int(state.get("last_retry_at_ms") or 0)
+                if degraded_recent_retry_interval_ms is not None:
+                    if now_ms - last_retry_at_ms < degraded_recent_retry_interval_ms:
+                        continue
+                eligible_recent.append((code, state))
+
+            eligible_recent.sort(
+                key=lambda item: (
+                    int(item[1].get("last_retry_at_ms") or 0),
+                    int(item[1].get("transient_detail_error_count") or 0),
+                    int(item[1].get("first_detected_at_ms") or 0),
+                    item[0],
+                )
+            )
+            selected_attempted = eligible_recent[:min(remaining_budget, degraded_recent_retry_budget_per_poll)]
     else:
         attempted.sort(
             key=lambda item: (
@@ -66,9 +103,11 @@ def select_detail_retry_attempts(
                 item[0],
             )
         )
+        selected_attempted = attempted[:remaining_budget]
 
-    ordered = never_attempted + attempted
-    return [code for code, _ in ordered[:detail_budget_per_poll]]
+    ordered = selected_never + selected_attempted
+    return [code for code, _ in ordered]
+
 
 
 def _first_attempt_sla_breached(
@@ -150,7 +189,9 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "symbol_parse_failed_reason": state.get("symbol_parse_failed_reason"),
             "pending_reason": state.get("pending_reason") or "title_symbol_missing",
             "source_published_at_ms_confidence": state.get("source_published_at_ms_confidence") or "medium",
-            "detail_fetch_attempt_count": int(state.get("detail_fetch_attempt_count") or 0),
+            "detail_http_request_count": int(state.get("detail_http_request_count") or 0),
+            "detail_retry_cycle_count": int(state.get("detail_retry_cycle_count") or 0),
+            "detail_fetch_attempt_count": int(state.get("detail_http_request_count") or state.get("detail_fetch_attempt_count") or 0),
             "transient_detail_error_count": int(state.get("transient_detail_error_count") or 0),
             "non_transient_detail_error_count": int(state.get("non_transient_detail_error_count") or 0),
             "last_retry_at_ms": int(state.get("last_retry_at_ms") or 0),
@@ -216,7 +257,11 @@ def update_detail_endpoint_health(
 
     recent = health["recent_detail_attempt_results"]
     if len(recent) >= degraded_min_sample:
-        transient_failures = sum(1 for r in recent if r in {"http_202_empty", "http_429", "http_5xx", "network_error"})
+        transient_failures = sum(
+            1
+            for r in recent
+            if r in {"http_202_empty", "http_200_empty_untrusted_payload", "http_429", "http_5xx", "network_error"}
+        )
         error_rate = transient_failures / len(recent)
         health["detail_endpoint_transient_error_rate"] = error_rate
         if error_rate >= degraded_rate_threshold:
@@ -226,3 +271,49 @@ def update_detail_endpoint_health(
 
     return health
 
+
+def update_detail_endpoint_health_by_variant(
+    endpoint_health: dict,
+    *,
+    now_ms: int,
+    variant: str,
+    result_code: str,
+    degraded_rate_threshold: float,
+    degraded_min_sample: int,
+    degraded_backoff_sec: int,
+) -> dict:
+    health = dict(endpoint_health)
+    if "by_variant" not in health:
+        health["by_variant"] = {}
+
+    if variant not in health["by_variant"]:
+        health["by_variant"][variant] = {
+            "recent_detail_attempt_results": [],
+            "detail_endpoint_degraded_until_ms": 0,
+            "detail_endpoint_transient_error_rate": 0.0,
+        }
+
+    var_health = dict(health["by_variant"][variant])
+    if "recent_detail_attempt_results" not in var_health:
+        var_health["recent_detail_attempt_results"] = []
+
+    var_health["recent_detail_attempt_results"].append(result_code)
+    max_samples = max(10, degraded_min_sample * 2)
+    var_health["recent_detail_attempt_results"] = var_health["recent_detail_attempt_results"][-max_samples:]
+
+    recent = var_health["recent_detail_attempt_results"]
+    if len(recent) >= degraded_min_sample:
+        transient_failures = sum(
+            1
+            for r in recent
+            if r in {"http_202_empty", "http_200_empty_untrusted_payload", "http_429", "http_5xx", "network_error"}
+        )
+        error_rate = transient_failures / len(recent)
+        var_health["detail_endpoint_transient_error_rate"] = error_rate
+        if error_rate >= degraded_rate_threshold:
+            var_health["detail_endpoint_degraded_until_ms"] = now_ms + degraded_backoff_sec * 1000
+    else:
+        var_health["detail_endpoint_transient_error_rate"] = 0.0
+
+    health["by_variant"][variant] = var_health
+    return health
