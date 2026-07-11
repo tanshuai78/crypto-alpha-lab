@@ -151,6 +151,10 @@ VALID_EVIDENCE_LABELS = {
 }
 
 
+def get_event_evidence_label(event: dict) -> str | None:
+    return event.get("evidence_label") or event.get("live_depth_evidence_basis")
+
+
 @dataclass(frozen=True)
 class EvidenceIntegrityResult:
     blockers: list[str]
@@ -181,7 +185,7 @@ def validate_evidence_integrity(
     # 2. Verify Accepted Events
     evidence_label_counts = {lbl: 0 for lbl in VALID_EVIDENCE_LABELS}
     for event in accepted_events:
-        label = event.get("evidence_label")
+        label = get_event_evidence_label(event)
         if not label:
             blockers.append("missing_evidence_label")
             continue
@@ -195,7 +199,13 @@ def validate_evidence_integrity(
         if watermark:
             if event.get("watermark_version") != watermark.get("watermark_version"):
                 blockers.append("watermark_version_mismatch")
-            if event.get("watermark_max_seen_detected_at_ms") != watermark.get("max_seen_detected_at_ms"):
+            event_watermark_ms = event.get("watermark_max_seen_detected_at_ms")
+            current_watermark_ms = watermark.get("max_seen_detected_at_ms")
+            if (
+                event_watermark_ms is None
+                or current_watermark_ms is None
+                or int(event_watermark_ms) > int(current_watermark_ms)
+            ):
                 blockers.append("watermark_max_seen_detected_at_ms_mismatch")
 
     # 3. Cross-Validation Join Checks
@@ -237,7 +247,7 @@ def validate_evidence_integrity(
 
     for event in accepted_events:
         es_id = event.get("event_symbol_id")
-        label = event.get("evidence_label")
+        label = get_event_evidence_label(event)
         if es_id and es_id in state_by_id:
             st = state_by_id[es_id]
             # Must join with completed state AND snapshots must exist
@@ -411,6 +421,7 @@ def compute_coverage_metrics(
     states: list[dict],
     request_manifest_rows: list[dict],
     summary: dict | None = None,
+    event_symbol_ids: set[str] | None = None,
 ) -> dict:
     from configs import base
 
@@ -440,8 +451,23 @@ def compute_coverage_metrics(
         base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_SNAPSHOT_GAP_FLOOR_MS,
     )
 
-    # Validate each symbol state
+    latest_state_by_id: dict[str, dict] = {}
     for st in states:
+        es_id = st.get("event_symbol_id")
+        if es_id:
+            latest_state_by_id[es_id] = st
+
+    states_to_check = list(latest_state_by_id.values()) if latest_state_by_id else states
+    if event_symbol_ids is not None:
+        states_to_check = [
+            st
+            for st in states_to_check
+            if st.get("event_symbol_id") in event_symbol_ids
+        ]
+
+    # Validate formal completed event-symbol states only when caller supplies
+    # event_symbol_ids. Other accepted/active states are not part of 1.5G formal evidence.
+    for st in states_to_check:
         count = st.get("depth_snapshot_count", 0)
         max_gap = st.get("max_gap_ms", 0)
         if count < min_snapshot_count_required:
@@ -454,7 +480,7 @@ def compute_coverage_metrics(
     global_request_success_rate = 1.0
 
     if request_manifest_rows:
-        completed_states = [st for st in states if st.get("status") == "completed"]
+        completed_states = [st for st in states_to_check if st.get("status") == "completed"]
         health = compute_depth_request_health(request_manifest_rows, completed_states)
         per_symbol_request_success_rate_min = health.per_symbol_request_success_rate_min if health.per_symbol_request_success_rate_min is not None else 1.0
         global_request_success_rate = health.global_request_success_rate
@@ -465,9 +491,14 @@ def compute_coverage_metrics(
         "min_snapshot_count_required": min_snapshot_count_required,
         "snapshot_interval_ms": snapshot_interval_ms,
         "computed_max_gap_ms": computed_max_gap_ms,
+        "checked_event_symbol_ids": sorted(
+            st.get("event_symbol_id")
+            for st in states_to_check
+            if st.get("event_symbol_id")
+        ),
         "per_symbol_request_success_rate_min": per_symbol_request_success_rate_min,
         "global_request_success_rate": global_request_success_rate,
-        "blockers": blockers,
+        "blockers": sorted(set(blockers)),
         "warnings": warnings,
     }
 
@@ -530,6 +561,8 @@ def validate_raw_snapshot_integrity(
             ask = sn.get("best_ask")
             mid = sn.get("mid_price")
             spread = sn.get("spread_bps")
+            if mid is None and bid is not None and ask is not None:
+                mid = (float(bid) + float(ask)) / 2.0
 
             is_invalid = False
             if bid is None or ask is None or mid is None or spread is None:
@@ -757,7 +790,7 @@ def _build_event_level_decisions(
                 "event_id": event.get("event_id"),
                 "symbol": event.get("symbol"),
                 "source_article_id": event.get("source_article_id"),
-                "evidence_label": event.get("evidence_label"),
+                "evidence_label": get_event_evidence_label(event),
                 "state_status": st.get("status"),
                 "depth_snapshot_count": st.get("depth_snapshot_count", 0),
                 "formal_completed": es_id in formal_ids,
@@ -941,6 +974,7 @@ def build_stage1_5g_review_summary(
         states=states,
         request_manifest_rows=request_manifest_rows,
         summary=summary,
+        event_symbol_ids=integrity_result.formal_completed_event_symbol_ids,
     )
     if coverage_result["blockers"]:
         all_blockers.extend(coverage_result["blockers"])
@@ -1194,6 +1228,3 @@ def generate_stage1_5g_chinese_review(summary: dict) -> str:
     lines.append("")
 
     return "\n".join(lines)
-
-
-

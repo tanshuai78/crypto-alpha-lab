@@ -158,6 +158,48 @@ def test_valid_single_announcement_and_launch_time_allows_only_stage1_5h_design(
     assert result["trade_signal_allowed"] is False
 
 
+def test_live_depth_evidence_basis_alias_can_drive_formal_completed_evidence():
+    summary = {"completed_observation_count": 1}
+    watermark = {"watermark_version": 1, "max_seen_detected_at_ms": 1000}
+    result = build_stage1_5g_review_summary(
+        summary=summary,
+        watermark=watermark,
+        states=[
+            {
+                "event_symbol_id": "es1",
+                "symbol": "SKHYUSDT",
+                "status": "completed",
+                "depth_snapshot_count": 700,
+                "max_gap_ms": 60000,
+            }
+        ],
+        accepted_events=[
+            {
+                "event_symbol_id": "es1",
+                "event_id": "ev1",
+                "symbol": "SKHYUSDT",
+                "live_depth_evidence_basis": "announcement_and_launch_time",
+                "watermark_version": 1,
+                "watermark_max_seen_detected_at_ms": 1000,
+            }
+        ],
+        snapshots=make_depth_snapshots(event_symbol_id="es1", symbol="SKHYUSDT", count=700),
+        request_manifest_rows=[
+            {
+                "request_type": "depth_snapshot",
+                "event_symbol_id": "es1",
+                "event_id": "ev1",
+                "symbol": "SKHYUSDT",
+                "http_status": 200,
+            }
+        ],
+    )
+
+    assert "missing_evidence_label" not in result["blockers"]
+    assert result["formal_announcement_and_launch_count"] == 1
+    assert result["event_level_decisions"][0]["evidence_label"] == "announcement_and_launch_time"
+
+
 def test_summary_includes_audit_replay_fields_for_sufficient_decision(tmp_path):
     result = build_stage1_5g_review_summary(
         summary={"completed_observation_count": 1},

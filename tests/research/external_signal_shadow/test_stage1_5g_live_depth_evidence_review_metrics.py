@@ -34,6 +34,55 @@ def test_compute_expected_snapshot_count_from_summary_config_snapshot():
     assert metrics["blockers"] == []
 
 
+def test_coverage_only_checks_formal_completed_event_symbols_when_provided():
+    metrics = compute_coverage_metrics(
+        states=[
+            {
+                "event_symbol_id": "formal_es1",
+                "status": "completed",
+                "depth_snapshot_count": 718,
+                "max_gap_ms": 60000,
+            },
+            {
+                "event_symbol_id": "active_es2",
+                "status": "active",
+                "depth_snapshot_count": 1,
+                "max_gap_ms": 60000,
+            },
+        ],
+        request_manifest_rows=[],
+        summary={"observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000},
+        event_symbol_ids={"formal_es1"},
+    )
+    assert metrics["min_snapshot_count_required"] == 684
+    assert metrics["checked_event_symbol_ids"] == ["formal_es1"]
+    assert metrics["blockers"] == []
+
+
+def test_coverage_uses_latest_state_per_formal_event_symbol_id():
+    metrics = compute_coverage_metrics(
+        states=[
+            {
+                "event_symbol_id": "formal_es1",
+                "status": "active",
+                "depth_snapshot_count": 1,
+                "max_gap_ms": 60000,
+            },
+            {
+                "event_symbol_id": "formal_es1",
+                "status": "completed",
+                "depth_snapshot_count": 718,
+                "max_gap_ms": 60000,
+            },
+        ],
+        request_manifest_rows=[],
+        summary={"observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000},
+        event_symbol_ids={"formal_es1"},
+    )
+    assert metrics["checked_event_symbol_ids"] == ["formal_es1"]
+    assert metrics["blockers"] == []
+
+
 def test_coverage_blocks_when_observation_config_missing(monkeypatch):
     monkeypatch.delattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS", raising=False)
     monkeypatch.delattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC", raising=False)

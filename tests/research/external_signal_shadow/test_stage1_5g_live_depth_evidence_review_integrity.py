@@ -27,6 +27,48 @@ def test_validator_accepts_announcement_and_launch_time_post_watermark():
     assert result.formal_completed_event_symbol_ids == {"es1"}
 
 
+def test_validator_accepts_live_depth_evidence_basis_alias_from_stage1_5f():
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "SKHYUSDT",
+        "source_article_id": "a1",
+        "live_depth_evidence_basis": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+    }
+    result = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=[{"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 1}],
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "missing_evidence_label" not in result.blockers
+    assert result.evidence_label_counts["announcement_and_launch_time"] == 1
+    assert result.formal_announcement_and_launch_count == 1
+    assert result.formal_completed_event_symbol_ids == {"es1"}
+
+
+def test_validator_accepts_event_watermark_before_current_watermark():
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "SKHYUSDT",
+        "source_article_id": "a1",
+        "live_depth_evidence_basis": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+    }
+    result = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 2000, "watermark_version": 1},
+        states=[{"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 1}],
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "watermark_max_seen_detected_at_ms_mismatch" not in result.blockers
+    assert result.formal_announcement_and_launch_count == 1
+
+
 def test_validator_blocks_missing_evidence_label():
     event = {
         "event_symbol_id": "es1",
@@ -66,7 +108,7 @@ def test_validator_blocks_watermark_mismatch():
     event = {
         "event_symbol_id": "es1",
         "evidence_label": "announcement_and_launch_time",
-        "watermark_max_seen_detected_at_ms": 999,
+        "watermark_max_seen_detected_at_ms": 1001,
         "watermark_version": 1,
     }
     result = validate_evidence_integrity(
@@ -161,6 +203,27 @@ def test_raw_snapshot_integrity_blocks_crossed_book():
     ]
     result = validate_raw_snapshot_integrity(snapshots)
     assert "invalid_book" in result.blockers
+
+
+def test_raw_snapshot_integrity_accepts_stage1_5f_snapshot_without_mid_price():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_raw_snapshot_integrity,
+    )
+    snapshots = [
+        {
+            "event_symbol_id": "es1",
+            "symbol": "SKHYUSDT",
+            "fetched_at_ms": 1,
+            "best_bid": 100.0,
+            "best_ask": 101.0,
+            "spread_bps": 100.0,
+            "top_bid_depth_usdt": 1000.0,
+            "top_ask_depth_usdt": 1000.0,
+        }
+    ]
+    result = validate_raw_snapshot_integrity(snapshots)
+    assert "invalid_book" not in result.blockers
+    assert result.invalid_book_count == 0
 
 
 def test_raw_snapshot_integrity_blocks_non_monotonic_time_per_event_symbol():
