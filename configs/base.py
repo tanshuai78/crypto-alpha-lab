@@ -1755,3 +1755,33 @@ EXTERNAL_SIGNAL_STAGE1_5G_MAX_FIRST_VALID_BOOK_LATENCY_MS = 15 * 60 * 1000
 
 EXTERNAL_SIGNAL_STAGE1_5G_CROSSED_OR_NEGATIVE_BOOK_ALLOWED = False
 # Crossed or negative books are hard blockers in first quarantine version.
+
+
+# ─── External Signal Shadow Lab: Stage 1.5H Read-Only Static Proxy ─────────────
+
+EXTERNAL_SIGNAL_STAGE1_5H_MAX_SPREAD_P95_BPS = 10.0
+# Maximum p95 spread for static proxy reporting. Report blocker only; never enables trading.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MAX_BUY_SLIPPAGE_500USDT_P95_BPS = 10.0
+# Maximum p95 estimated buy-side 500 USDT slippage for report health classification.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MAX_SELL_SLIPPAGE_500USDT_P95_BPS = 10.0
+# Maximum p95 estimated sell-side 500 USDT slippage for report health classification.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MIN_TOP_BID_DEPTH_USDT_P05 = 5_000.0
+# Minimum p05 top bid depth. This is a report quality threshold, not a sizing rule.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MIN_TOP_ASK_DEPTH_USDT_P05 = 5_000.0
+# Minimum p05 top ask depth. This is a report quality threshold, not a sizing rule.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MIN_BOOK_AVAILABILITY_RATIO = 0.98
+# Minimum valid-book availability ratio for a quarantined single-event static proxy report.
+
+EXTERNAL_SIGNAL_STAGE1_5H_MAX_FIRST_VALID_BOOK_LATENCY_MS = 15 * 60 * 1000
+# Maximum first-valid-book latency before the report must mark launch warmup as not usable.
+
+EXTERNAL_SIGNAL_STAGE1_5H_CONSERVATIVE_ROUND_TRIP_COST_BPS = 50.0
+# Conservative round-trip cost floor. Do not add this to observed slippage; use max(floor, observed).
+
+EXTERNAL_SIGNAL_STAGE1_5H_MIN_EVENT_FAMILY_SAMPLE_REQUIRED = 3
+# Minimum clean/quarantined independent events before any future event-family report design is allowed.
