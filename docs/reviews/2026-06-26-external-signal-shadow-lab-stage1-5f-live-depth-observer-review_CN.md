@@ -3,33 +3,36 @@
 **日期:** 2026-07-01  
 **对应设计:** `docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md`  
 **对应实现计划:** `docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md`  
-**当前运行重点:** Stage 1.5D title-contract symbol + transient detail retry hotfix source collector + Stage 1.5F request_manifest symbol-key hotfix live depth observer
+**当前运行重点:** Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix source collector + Stage 1.5F live depth observer
 
 ## 1. 当前结论
 
 ```text
-decision = stage1_5d_scheduler_hotfix_ready_for_deploy
+decision = stage1_5d_detail_endpoint_fallback_hotfix_ready_for_deploy
 implementation_status = completed_and_locally_verified
-live_depth_evidence_status = not_collected_yet
-target_server_mode = 7d_detail_retry_scheduler_starvation_hotfix
-stage1_5g_allowed = plan_only_until_completed_12h_depth_observation
+skhyusdt_stage1_5g_status = quarantined_depth_evidence_pass_design_only
+target_server_mode = 7d_detail_endpoint_fallback_hotfix
+stage1_5h_allowed = design_only
 ```
 
-当前主线已经从上一轮 `request_manifest symbol-key hotfix` 前移到 `Stage 1.5D detail retry scheduler starvation hotfix`。后续部署必须同时更新 1.5D 和 1.5F：
+当前主线已经从 `Stage 1.5D detail retry scheduler starvation hotfix` 前移到 `Stage 1.5D detail endpoint degraded retry cadence + detail fetch fallback hotfix`。后续部署必须同时更新 1.5D 和 1.5F：
 
 ```text
-1. Stage 1.5D 使用新的 detail retry scheduler，避免新公告被旧 202/empty detail 重试队列饿死。
-2. Stage 1.5D 必须启动新的 output root，旧 root 不改写、不补写、不作为 formal evidence。
-3. Stage 1.5F 继续使用 request_manifest symbol-key 代码，但必须消费新的 1.5D root，并 bootstrap 新 watermark。
-4. Stage 1.5G 只能审查新 root 中完成 12h 的 formal event-symbol depth evidence。
+1. Stage 1.5D 使用新的 degraded recent retry cadence，避免 endpoint degraded 后长期不重试近期公告。
+2. Stage 1.5D 使用 fallback detail URL，但 fallback 请求必须计入 HTTP request budget。
+3. Stage 1.5D 区分 detail_retry_cycle_count 和 detail_http_request_count，避免审计混淆。
+4. Stage 1.5D 使用 endpoint_health_by_variant，primary URL degraded 不得污染 fallback URL health。
+5. Stage 1.5D 必须启动新的 output root；旧 SKHYUSDT root 只读保存，不改写、不补写。
+6. Stage 1.5F 必须消费新的 1.5D root，并 bootstrap 新 watermark。
 ```
 
 当前可以做：
 
 ```text
-1. 按第 7 章重新同步、停止旧进程、启动新的 1.5D collector 和 1.5F observer。
-2. 按第 8 章检查 1.5D scheduler state、1.5D events、1.5F summary、depth snapshots 和 request_manifest。
-3. 保留旧 root 用于 regression / recovery validation，不混入正式 12h live depth evidence。
+1. 按第 7 章同步代码、停止旧进程、启动新的 1.5D collector 和 1.5F observer。
+2. 按第 8 章检查 1.5D scheduler/fallback state、1.5D events、1.5F summary、depth snapshots 和 request_manifest。
+3. 保留旧 SKHYUSDT evidence root 用于 Stage 1.5H design-only 输入，不再继续写入。
+4. 基于 2026-07-11 Stage 1.5G quarantined pass 结论编写 1.5H design。
 ```
 
 当前不能做：
@@ -39,7 +42,8 @@ stage1_5g_allowed = plan_only_until_completed_12h_depth_observation
 2. 不能声明 alpha。
 3. 不能启动 paper/live trading。
 4. 不能把旧事件当前盘口倒推为历史 12h entry 可成交。
-5. 不能用旧 root 修复后重新解析出的 missed event 作为 formal live evidence。
+5. 不能把 SKHYUSDT quarantined pass 当成 clean pass。
+6. 不能基于 quarantined pass 实现 simulator、paper trading 或 live trading；只允许 write_stage1_5h_design_only。
 ```
 
 ## 2. Safety Boundaries
@@ -62,30 +66,27 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 部署 Stage 1.5D detail retry scheduler starvation hotfix，并用新的 1.5D root 启动 7d collector。
-理由: 2026-07-09 Multiple TradFi 事件已经证明旧 detail retry 队列会被旧 202/empty detail article 占满，导致新公告 detail 从未及时 fetch。
+P0: 部署 Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix，并用新的 1.5D root 启动 7d collector。
+理由: scheduler fairness 已解决“新公告拿不到第一次 detail fetch”的问题，但 2026-07-10 Multiple TradFi 事件证明 Binance detail endpoint 可能长期返回 HTTP 202 + empty，需要 fallback 和 degraded recent retry cadence。
 
 P1: 用新的 1.5D root bootstrap 一个新的 Stage 1.5F root。
-理由: watermark 必须从新 root 建立；旧 root 中的 terminal_failed/missed rows 不允许人工修复成 formal evidence。
+理由: watermark 必须从新 root 建立；旧 SKHYUSDT root 已经完成 1.5G 审计，只读保留。
 
 P2: 等待新 root 中出现 post-watermark futures_contract_launch event-symbol。
-理由: 只有新 root 中由修复后 1.5D 捕获并解析出的 event-symbol，才有资格进入 1.5F 12h live depth observation。
+理由: 只有新 root 中由修复后 1.5D 捕获并解析出的 event-symbol，才有资格进入新一轮 1.5F 12h live depth observation。
 
 P3: 一旦 1.5F 出现 post_watermark_events_accepted > 0，切换到 30-60 分钟巡检频率。
 理由: 新事件后的前 12h 是证据窗口，必须确认 active_observation_count、depth_snapshots、request_success_rate 正常增长。
 
-P4: 等至少一个 event-symbol 完成 12h observation，再执行 Stage 1.5G Live Depth Evidence Review。
-理由: 1.5G 审查的是完整 depth evidence，不是观察器是否启动；没有足量 snapshots 时不能给执行可行性结论。
-
-P5: 如果 1.5G 判定 depth evidence 足够且盘口质量通过，只允许进入 Stage 1.5H shadow execution simulator 设计/计划。
-理由: depth evidence 只能说明“值得模拟执行审查”，不能直接证明 alpha，也不能跳到 paper/live。
+P4: 已完成的 SKHYUSDT 1.5G 结论可作为 1.5H design-only 输入。
+理由: 1.5G 结论为 stage1_5g_depth_evidence_quarantined_pass，allowed_next_action=write_stage1_5h_design_only，不允许进入 implementation/paper/live。
 ```
 
 并行可做：
 
 ```text
-1. 继续完善 Stage 1.5G review 文档和 fixture。
-2. 整理 7d artifacts rsync 回本地的命令。
+1. 编写 Stage 1.5H design，必须显式消费 clean/quarantined/invalid 三类 1.5G evidence。
+2. 继续运行新的 1.5D/1.5F root，等待下一个 clean 或 quarantined evidence。
 3. 定期复核 safety grep，确保没有 private endpoint、api key、order endpoint。
 ```
 
@@ -96,7 +97,7 @@ P5: 如果 1.5G 判定 depth evidence 足够且盘口质量通过，只允许进
 2. live trading。
 3. execution engine 接入。
 4. alpha 结论包装。
-5. 用旧事件当前盘口倒推历史可成交性。
+5. Stage 1.5H simulator implementation。
 ```
 
 ## 4. 当前服务器路径
@@ -109,8 +110,8 @@ P5: 如果 1.5G 判定 depth evidence 足够且盘口质量通过，只允许进
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
@@ -121,28 +122,43 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 最新部署后应看到：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_retry_scheduler_starvation_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
 ```
 
 ### 4.2 旧路径处理规则
 
-以下路径只用于历史排障、regression 或 recovery validation，不作为当前 formal evidence 主路径：
+以下路径只用于历史排障、regression 或已完成 evidence 复核，不作为当前新部署写入路径：
 
 ```text
 data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d
 data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_empty_detail_retry_hotfix
 data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_title_contract_transient_hotfix
+data/external_signal_shadow/stage1_5d/live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d_empty_detail_retry_hotfix
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d_title_contract_transient_hotfix
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d_delayed_launch_age_gate_hotfix
 data/external_signal_shadow/stage1_5f/live_depth_observer_7d_request_manifest_symbol_key_hotfix
-data/external_signal_shadow/stage1_5d/live_event_source_smoke_interrupted_*
-data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
+data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix
 ```
 
-不要修改旧 `events/*.jsonl`、不要删除旧 root、不要把旧 root 中修复后重放出的 symbol 当作正式 12h live evidence。
+SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
+
+```text
+1.5D: data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260710T090542Z_7d_detail_retry_scheduler_starvation_hotfix
+1.5F: data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix
+1.5G: data/external_signal_shadow/stage1_5g/reviews/20260711T131211Z
+```
+
+规则：
+
+```text
+1. 不 rm -rf 旧 SKHYUSDT evidence root。
+2. 不在旧 root 上继续启动 1.5F。
+3. 不把旧 root 和新 root 的 events/depth_snapshots/request_manifest 混合审计。
+4. 新 1.5D/1.5F 部署必须使用 detail_endpoint_fallback_hotfix 后缀。
+```
 
 ## 5. Stage 1.5F 原理速记
 
@@ -158,14 +174,14 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 一句话：
 
 ```text
-1.5F 是录像机，1.5G 是看片审查员。当前还没有 post-watermark 新事件，因此还没有片子可审。
+1.5F 是录像机，1.5G 是看片审查员。新 root 初始状态通常是在等待 post-watermark 新事件；SKHYUSDT 已完成的片子只读保留，用于 1.5H design-only。
 ```
 
 ## 6. Hotfix 背景
 
-本文件记录过多轮 hotfix。当前部署主线是 2026-07-10 的 `Stage 1.5D detail retry scheduler starvation hotfix`，前置修复包括 title-contract extraction、transient detail retry、delayed-launch age gate、Stage 1.5F request_manifest symbol-key。
+本文件记录过多轮 hotfix。当前部署主线是 2026-07-11 的 `Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix`，前置修复包括 title-contract extraction、transient detail retry、delayed-launch age gate、Stage 1.5F request_manifest symbol-key、Stage 1.5D detail retry scheduler starvation。
 
-### 6.1 当前必须修复的问题
+### 6.1 已修复的 scheduler starvation 问题
 
 2026-07-09 的 Multiple USDⓈ-Margined TradFi Perpetual Contracts 事件暴露了 scheduler starvation：
 
@@ -177,17 +193,29 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 5. 新公告未及时获得第一次 detail fetch，最终被旧 max-age 分支误记成 parser/symbol empty failure。
 ```
 
-根因不是公告没有 symbol，而是 collector 的 detail retry 调度不公平：旧 transient article 持续消耗预算，新 no-symbol futures article 不能在有界时间内获得第一次 detail request。
+根因不是公告没有 symbol，而是 collector 的 detail retry 调度不公平：旧 transient article 持续消耗预算，新 no-symbol futures article 不能在有界时间内获得第一次 detail request。该问题由 scheduler fairness、state persistence、backoff、budget_starved taxonomy 解决。
 
-### 6.2 新 scheduler 的关键语义
+### 6.2 本轮必须修复的 endpoint fallback 问题
+
+2026-07-10 的 Multiple USDⓈ-Margined TradFi 事件证明，scheduler fairness 之后仍可能遇到 detail endpoint degraded：
 
 ```text
-1. never-attempted article 有 first-attempt SLA，不允许被旧 transient article 无限饿死。
-2. old HTTP 202/empty/429/5xx/timeout article 进入 backoff，不再每轮抢占预算。
-3. scheduler state 持久化到 detail_retry_scheduler_state.json，重启后不丢 pending/backoff/defer 状态。
-4. announcement_detail_deferred 是调度诊断，不是 HTTP 请求失败，也不是 parser failure。
-5. never-attempted 到 max-age 后是 collection failure：detail_never_attempted_budget_starved，不得计入 symbol_empty/parser_failed。
-6. endpoint degraded 时限制旧 transient retry，但保留有界 first-attempt budget。
+1. 新公告已经进入 scheduler state。
+2. 新公告已经获得 announcement_detail HTTP request。
+3. primary detail URL 长期返回 HTTP 202 + empty body。
+4. article 进入 endpoint degraded/backoff，但没有可审计 fallback path。
+5. 如果不修复，近期公告可能长期无法从 detail payload 解析 symbol。
+```
+
+本轮修复重点：
+
+```text
+1. degraded recent article retry cadence：近期公告在 endpoint degraded 后仍有有界 retry。
+2. detail fallback URL：仅对 HTTP 202 / empty untrusted payload 尝试 fallback。
+3. HTTP request budget：primary + fallback 都计入 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL。
+4. cycle/request 拆分：detail_retry_cycle_count 不等于 detail_http_request_count。
+5. endpoint_health_by_variant：primary degraded 不污染 fallback variant。
+6. fallback provenance：payload_trusted、detail_fetch_variant、detail_fetch_url_used、payload hash 必须可审计。
 ```
 
 ### 6.3 仍需保留的前置修复语义
@@ -198,6 +226,7 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 3. detail_contract_symbol 候选必须通过 Binance USD-M exchangeInfo 验证。
 4. Stage 1.5F depth request_manifest 的 depth_snapshot rows 必须带 event_symbol_id / event_id / symbol。
 5. delayed launch 事件的 age gate 使用 launch/onboard evidence，但不能绕过 watermark。
+6. Stage 1.5G quarantine pass 只能进入 design-only，不能作为 execution feasibility claim。
 ```
 
 部署纪律：
@@ -208,21 +237,22 @@ data/external_signal_shadow/stage1_5d/live_event_source_smoke_invalid_*
 3. hotfix 部署后启动新的 1.5D output root。
 4. 对新的 1.5D root bootstrap 一个匹配的新 1.5F output root。
 5. 2026-07-09 missed event 只能用于 regression / recovery_validation，不得作为 formal 12h live depth evidence。
+6. SKHYUSDT completed evidence root 只读保留，不继续写入。
 ```
 
 ## 7. 部署 Runbook
 
-### 7.1 本地验证并同步到服务器
+### 7.1 本地同步到服务器
 
-在本地 Mac 执行：
+本轮部署目标：把已提交的 Stage 1.5D detail endpoint fallback hotfix 和 Stage 1.5F/1.5G 兼容修补同步到服务器。
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
-export SERVER="root@47.82.4.85"
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
   tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
   -q
 
@@ -239,6 +269,7 @@ PYTHONPATH=src:. .venv/bin/python -m pytest \
 
 git diff --check
 
+export SERVER=root@47.82.4.85
 rsync -avzP \
   --exclude='data' \
   --exclude='.git' \
@@ -250,17 +281,24 @@ rsync -avzP \
   "$SERVER:/root/crypto-alpha-lab/"
 ```
 
-本次 hotfix 修改了 Stage 1.5D collector。部署后必须重启 1.5D，并用新的 1.5D root 重新 bootstrap 1.5F。
+如果本地已完成提交且只需要部署服务器，可直接执行 `rsync`，但不要跳过服务器端最小验证。
 
-### 7.2 服务器 pytest 依赖修复
+### 7.2 服务器最小验证
 
-如果服务器报：
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
 
-```text
-/root/crypto-alpha-lab/.venv/bin/python: No module named pytest
+PYTHONPATH=src:. .venv/bin/python -m pytest \
+  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
+  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_config.py \
+  -q
 ```
 
-执行：
+若服务器缺少 pytest：
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -269,19 +307,6 @@ source .venv/bin/activate
 python -m ensurepip --upgrade 2>/dev/null || true
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
-```
-
-服务器最小验证：
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_config.py \
-  -q
 ```
 
 ### 7.3 停止旧 Stage 1.5D / 1.5F 进程
@@ -302,28 +327,34 @@ tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/
 tmux kill-session -t stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 
-# 本次必须停止旧 1.5D collector，否则仍会使用旧 scheduler。
+# 停止旧 1.5D collector。
 tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep || true
 ```
 
-如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程，避免两个进程同时写不同 root。
+如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程，避免多个进程同时采集或写入不同证据 root。
 
-### 7.4 启动 Stage 1.5D detail retry scheduler starvation hotfix collector
+### 7.4 启动 Stage 1.5D detail endpoint fallback hotfix collector
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_detail_endpoint_fallback_hotfix"
 
+if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
+  echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
+  exit 1
+fi
 mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -354,15 +385,23 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
     data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
 fi
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_detail_endpoint_fallback_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
+if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ ! -d "$STAGE1_5D_EVENTS_OUT" ]; then
+  echo "Missing STAGE1_5D_EVENTS_OUT" >&2
+  exit 1
+fi
+if [ -e "$STAGE1_5F_OUT" ]; then
+  echo "Refuse to overwrite existing STAGE1_5F_OUT=$STAGE1_5F_OUT" >&2
+  exit 1
+fi
+
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
-
-rm -rf "$STAGE1_5F_OUT"
 
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
   --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
@@ -383,12 +422,17 @@ bootstrap 只建立新旧边界，不对 bootstrap 前 rows 产生正式 live de
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
-tmux new -d -s stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix "
+if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
+  echo "Missing STAGE1_5D_EVENTS_OUT or STAGE1_5F_OUT" >&2
+  exit 1
+fi
+
+tmux new -d -s stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -410,8 +454,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
 
 date -u
 tmux ls
@@ -436,14 +480,14 @@ find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/n
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_scheduler_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 ```
 
-### 8.2 进程、摘要和 scheduler state 检查
+### 8.2 进程、摘要和 request 计数检查
 
 ```bash
 date -u
@@ -466,11 +510,11 @@ tail -n 3 "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
 tail -n 3 "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
 ```
 
-### 8.3 Stage 1.5D scheduler 专项检查
+### 8.3 Stage 1.5D scheduler/fallback 专项检查
 
 ```bash
 cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null | python -m json.tool | grep -E \
-"detail_budget_deferred_count|detail_budget_starved_count|detail_never_attempted_expired_count|detail_first_attempt_sla_breach_count|detail_scheduler_pending_count|detail_scheduler_backoff_count|detail_endpoint_degraded" || true
+"detail_budget_deferred_count|detail_budget_starved_count|detail_never_attempted_expired_count|detail_first_attempt_sla_breach_count|detail_scheduler_pending_count|detail_scheduler_backoff_count|detail_endpoint_degraded|detail_degraded_recent_retry_count|detail_fetch_fallback_attempt_count|detail_fetch_fallback_success_count|detail_fetch_attempt_manifest_mismatch_count" || true
 
 python - <<'PY'
 import json
@@ -485,13 +529,17 @@ if state_path.exists():
     print("metadata_version", state.get("metadata_version"))
     print("pending_articles", len(articles))
     print("endpoint_health", state.get("endpoint_health", {}))
+    print("endpoint_health_by_variant", state.get("endpoint_health_by_variant") or state.get("endpoint_health", {}).get("by_variant", {}))
     for code, row in list(articles.items())[-5:]:
         print({
             "code": code,
-            "attempts": row.get("detail_fetch_attempt_count"),
+            "detail_retry_cycle_count": row.get("detail_retry_cycle_count"),
+            "detail_http_request_count": row.get("detail_http_request_count"),
+            "detail_fetch_attempt_count": row.get("detail_fetch_attempt_count"),
             "transient_errors": row.get("transient_detail_error_count"),
             "defer_count": row.get("defer_count"),
             "next_retry_at_ms": row.get("next_detail_retry_at_ms"),
+            "terminal_failure_type": row.get("terminal_failure_type"),
             "title": (row.get("title") or "")[:120],
         })
 PY
@@ -501,7 +549,12 @@ PY
 
 ```text
 正常: scheduler_state_exists=true 或 summary 中 scheduler counters 可读。
+正常: summary 可读 detail_fetch_fallback_attempt_count / detail_fetch_fallback_success_count。
+正常: endpoint_health_by_variant 可区分 primary 和 fallback URL variant。
 正常: 新 no-symbol futures article 有 announcement_detail request row，或仍处于 scheduler pending/backoff/deferred。
+异常: detail_fetch_attempt_manifest_mismatch_count > 0。
+异常: fallback 请求数量突破 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL。
+异常: 429/5xx/timeout/url_validation_failed 后立即 fallback。
 异常: detail_fetch_attempted=false 的新 article 被 terminal_failed + symbol_empty/parser_failed。
 异常: request_type 全部 unknown，无法区分 announcement_list / announcement_detail / exchange_info。
 异常: 同一 source_article_id 每分钟无限写 announcement_detail_deferred 行。
@@ -543,9 +596,9 @@ PY
 判定标准：
 
 ```text
-missing_symbol_key_rows 必须等于 0。
-depth_manifest_rows 为 0 且 post_watermark_events_accepted=0，表示仍在等待新事件。
-depth_manifest_rows > 0 时，所有 depth_snapshot rows 必须带 event_symbol_id / event_id / symbol。
+depth_manifest_rows > 0 后，missing_symbol_key_rows 必须为 0。
+exchangeInfo rows 不对应单个 event-symbol，不要求 event_symbol_id。
+announcement_detail_deferred rows 是 1.5D scheduler diagnostic，不应被 1.5F/1.5G depth request health 当成 depth_snapshot。
 ```
 
 ## 9. Raw Payload 与 Events 检查
@@ -683,16 +736,18 @@ validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确�
 
 ## 10. 首次输出判读模板
 
-新一轮 detail retry scheduler starvation hotfix 部署后，首次输出应类似：
+新一轮 detail endpoint fallback hotfix 部署后，首次输出应类似：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_retry_scheduler_starvation_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_detail_retry_scheduler_starvation_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
 
 1.5D:
   heartbeat rows > 0
   request_manifest rows > 0
   detail_retry_scheduler_state.json exists or summary scheduler counters readable
+  detail_fetch_fallback_attempt_count readable
+  detail_fetch_attempt_manifest_mismatch_count = 0
 
 1.5F:
   decision = stage1_5f_observer_running_no_new_event
@@ -709,7 +764,7 @@ STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_7d_det
 判读：
 
 ```text
-status = normal_initial_detail_retry_scheduler_starvation_hotfix_run
+status = normal_initial_detail_endpoint_fallback_hotfix_run
 path_status = current_1_5d_and_1_5f_roots_match
 1.5D_status = running_and_writing_heartbeats_request_manifest_scheduler_state
 1.5F_status = running_and_waiting_for_post_watermark_event
@@ -724,30 +779,57 @@ depth_collection_status = not_started_because_no_new_post_watermark_event_symbol
 3. heartbeat_count 应持续增长；如果不增长，优先检查 tmux / ps / stderr。
 4. 1.5D request_manifest 中 request_type 不应全部为 unknown。
 5. 新 no-symbol futures article 不应直接变成 detail_fetch_attempted=false + terminal_failed + symbol_empty/parser_failed。
+6. HTTP 202 + empty body 可以存在，但应进入 transient/backoff/degraded recent retry/fallback 语义，不能被误判为 parser 证据。
 ```
 
-## 11. Stage 1.5G 衔接
+## 11. Stage 1.5G / Stage 1.5H 衔接
 
-可以现在写 `Stage 1.5G Live Depth Evidence Review plan`，但不能执行正式 evidence review 结论，直到 1.5F 至少完成一个 event-symbol 的 12h observation。
-
-1.5G 将审查：
+SKHYUSDT 已完成一轮 12h Stage 1.5F observation，并通过 Stage 1.5G quarantine-aware review：
 
 ```text
-1. 是否覆盖完整 12h observation window。
-2. snapshot 数量是否达到 min_snapshot_count_required。
-3. snapshot 时间分布是否均匀，是否存在大 gap。
-4. spread、top depth、500 USDT buy/sell slippage proxy 是否可接受。
-5. request_manifest / heartbeat / timestamp quality 是否支持审计。
-6. close-price replay 是否被真实盘口证据支持，还是仍可能是幻觉。
+decision = stage1_5g_depth_evidence_quarantined_pass
+allowed_next_action = write_stage1_5h_design_only
+clean_depth_evidence_pass = false
+quarantined_depth_evidence_pass = true
+quarantine_candidate = true
+execution_feasibility_claim_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
 ```
 
-1.5G 不允许：
+这意味着：
 
 ```text
-1. 不证明 alpha。
-2. 不启动 paper/live。
-3. 不把盘口证据等同于真实成交收益。
-4. 不把旧事件当前盘口当历史证据。
+1. 可以写 Stage 1.5H design。
+2. 1.5H design 必须明确区分 clean / quarantined / invalid depth evidence。
+3. 1.5H design 必须把 invalid book quarantine 后的 book_availability_ratio 作为 execution availability discount。
+4. 不能直接实现 Stage 1.5H simulator。
+5. 不能声明 execution feasibility，更不能进入 paper/live。
+```
+
+后续新 root 完成 12h observation 后，再运行 Stage 1.5G：
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
+
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
+  --stage1-5f-output-root "$STAGE1_5F_OUT" \
+  --output-root "$STAGE1_5G_OUT" \
+  --output-summary "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
+  --output-review "docs/reviews/$(date -u +%Y-%m-%d)-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md"
+```
+
+判定：
+
+```text
+stage1_5g_depth_evidence_clean_pass -> 可写 1.5H design / shadow simulator design plan，但仍不能 paper/live。
+stage1_5g_depth_evidence_quarantined_pass -> 只允许 write_stage1_5h_design_only。
+stage1_5g_depth_evidence_invalid -> continue_observation。
 ```
 
 ## 12. 历史问题索引
@@ -937,3 +1019,29 @@ symbol = <actual_depth_symbol>
 ```
 
 当前部署和检查命令以第 7/8 章为准，本节只保留历史问题和判读标准，避免重复维护多套命令。
+
+### 12.10 2026-07-11 Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix
+
+修复原因：
+2026-07-10 Multiple TradFi 事件证明，scheduler starvation 修复后仍可能遇到另一个独立问题：Binance announcement detail endpoint 对某些文章长期返回 `HTTP 202` + empty body。此时 collector 已经公平地给新公告 detail fetch 机会，但 primary detail URL 仍拿不到可信 payload，导致 symbol 无法解析。
+
+修复后语义：
+
+```text
+1. detail_retry_cycle_count 表示 scheduler 选中 article 的 logical retry cycle。
+2. detail_http_request_count 表示真实 announcement_detail / fallback HTTP request 数量。
+3. fallback request 必须计入 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL。
+4. fallback 只允许用于 HTTP 202 / empty untrusted payload；429/5xx/timeout/url_validation_failed 不允许同 poll fallback。
+5. endpoint_health_by_variant 按 URL variant 分桶，primary degraded 不得污染 fallback URL。
+6. fallback 成功必须保留 payload_trusted、detail_fetch_variant、detail_fetch_url_used 和 payload hash provenance。
+7. 新部署必须使用 detail_endpoint_fallback_hotfix root，不得继续写旧 SKHYUSDT evidence root。
+```
+
+Stage 1.5G 衔接：
+
+```text
+SKHYUSDT old root 已完成 stage1_5g_depth_evidence_quarantined_pass。
+allowed_next_action = write_stage1_5h_design_only。
+clean_depth_evidence_pass = false。
+execution_feasibility_claim_allowed = false。
+```
