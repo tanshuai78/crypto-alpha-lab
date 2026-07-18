@@ -2092,6 +2092,79 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
     assert detail_calls["count"] == 0
 
 
+def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "6cbb1b11a9c843949624cf2eacaac8b4",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract (2026-07-20)",
+                    "releaseDate": 1784277011242,
+                }]
+            }]
+        }
+    }
+    exchange_info = {
+        "symbols": [{
+            "symbol": "SPCXUSD1",
+            "contractType": "TRADIFI_PERPETUAL",
+            "status": "TRADING",
+            "quoteAsset": "USD1",
+            "marginAsset": "USD1",
+            "onboardDate": 1784538000000,
+        }]
+    }
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        if "klines" in url:
+            return {"ok": True, "payload": [], "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    detail_calls = {"count": 0}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        raise AssertionError("title contract symbol path must not fetch detail")
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    parsed = [r for r in events if r.get("source_article_id") == "6cbb1b11a9c843949624cf2eacaac8b4"]
+    assert len(parsed) == 1
+    assert parsed[0]["symbols"] == ["SPCXUSD1"] or parsed[0]["symbols"] == ("SPCXUSD1",)
+    assert parsed[0]["symbol_parse_status"] == "parsed"
+    assert parsed[0]["symbol_extraction_source"] == "title_contract_symbol"
+    assert parsed[0]["symbol_validation_status"] == "validated"
+    assert parsed[0]["symbol_parse_failed_reason"] is None
+    assert parsed[0].get("terminal_failure_type") is None
+    assert parsed[0]["detail_fetch_attempted"] is False
+    assert parsed[0]["detail_fetch_status"] == "not_needed"
+    assert parsed[0]["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 1784538000000
+    assert detail_calls["count"] == 0
+
+
 def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_fetch(tmp_path):
     list_payload = {
         "data": {
@@ -2155,6 +2228,77 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
     assert s["detail_pending_retry_count"] == 0
     assert s["candidate_validation_pending_count"] == 0
     assert s["pre_launch_validation_deferred_count"] >= 1
+
+
+def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_terminal_fail(tmp_path):
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": "6cbb1b11a9c843949624cf2eacaac8b4",
+                    "title": "Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract (2026-07-20)",
+                    "releaseDate": 1784277011242,
+                }]
+            }]
+        }
+    }
+    exchange_info = {
+        "symbols": [{
+            "symbol": "SPCXUSD1",
+            "contractType": "TRADIFI_PERPETUAL",
+            "status": "PENDING_TRADING",
+            "quoteAsset": "USD1",
+            "marginAsset": "USD1",
+            "onboardDate": 1784538000000,
+        }]
+    }
+
+    detail_calls = {"count": 0}
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        raise AssertionError(url)
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        raise AssertionError("pending title contract symbol path must not fetch detail")
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(row.get("source_article_id") == "6cbb1b11a9c843949624cf2eacaac8b4" for row in events)
+    assert detail_calls["count"] == 0
+    s = json.loads(summary.read_text())
+    assert s["candidate_validation_pending_count"] == 0
+    assert s["pre_launch_validation_deferred_count"] >= 1
+
+    state = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())
+    row = state["articles"]["6cbb1b11a9c843949624cf2eacaac8b4"]
+    assert row["candidate_symbols"] == ["SPCXUSD1"]
+    assert row["symbol_validation_status"] == "pending_pre_trading"
+    assert row.get("terminal_failure_type") is None
+    assert row["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 1784538000000
 
 
 def test_title_contract_candidate_pending_survives_process_restart_without_detail_fetch(tmp_path):

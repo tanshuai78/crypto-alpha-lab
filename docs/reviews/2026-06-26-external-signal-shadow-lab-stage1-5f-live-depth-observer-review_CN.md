@@ -1108,3 +1108,73 @@ live_fallback_url_success_validated = false
 3. 本次 probe 不构成 Stage 1.5G formal 12h live depth evidence，也不允许 paper/live/execution/alpha 解释。
 4. 下一次真实 futures_contract_launch 仍需观察 1.5D detail_fetch_status、symbol_parse_status、1.5F events_accepted、depth_snapshots 和 request_manifest depth rows。
 ```
+
+### 12.12 2026-07-18 Stage 1.5D TRADIFI_PERPETUAL false negative hotfix
+
+触发事件：
+
+```text
+source_article_id = 6cbb1b11a9c843949624cf2eacaac8b4
+title = Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract (2026-07-20)
+source_published_at_ms = 1784277011242
+stage1_5d_detected_at_ms = 1784301104843
+launch_time_utc = 2026-07-20 09:00:00 UTC
+```
+
+现场现象：
+
+```text
+stage1_5d_list_payload_contains_article = true
+stage1_5d_event_type = futures_contract_launch
+stage1_5d_title_candidate_symbol = SPCXUSD1
+stage1_5d_written_event_symbols = []
+symbol_parse_status = terminal_failed
+symbol_parse_failed_reason = exchange_info_disallowed_contract_type
+terminal_failure_type = candidate_validation_rejected
+stage1_5f_events_accepted = 0
+```
+
+根因：
+
+```text
+exchangeInfo 返回：
+  symbol = SPCXUSD1
+  status = PENDING_TRADING
+  contractType = TRADIFI_PERPETUAL
+  quoteAsset = USD1
+  marginAsset = USD1
+  onboardDate = 1784538000000
+
+旧配置：
+  EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL",)
+
+结果：
+  TRADIFI_PERPETUAL 被错误视为 disallowed contract type。
+  1.5D 把有效 Binance Futures launch prelaunch row 误写成 terminal_failed。
+```
+
+修复内容：
+
+```text
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL", "TRADIFI_PERPETUAL")
+```
+
+回归测试覆盖：
+
+```text
+1. TRADIFI_PERPETUAL + USD1 + TRADING + title_contract_symbol
+   => emit parsed SPCXUSD1 event-symbol, no detail fetch required.
+
+2. TRADIFI_PERPETUAL + USD1 + PENDING_TRADING + title_contract_symbol
+   => keep pending_pre_trading, no terminal_failed, no detail fetch required.
+```
+
+边界说明：
+
+```text
+1. 本次问题是 1.5D exchangeInfo validation false negative，不是 Binance list coverage 问题，也不是 1.5F depth observer 问题。
+2. 修复只扩展 Binance futures perpetual contractType 白名单；仍要求公告标题被识别为 futures_contract_launch，且 quoteAsset/marginAsset 属于允许集合。
+3. SPCXUSD1 公告发布时间早于当前重启后 watermark，不能手工改写为 clean formal post-watermark evidence。
+4. SPCXUSD1 可作为 recovery/probe/regression candidate；正式 1.5F evidence 仍需等待 watermark 之后的新 futures launch event。
+5. paper/live/execution/alpha flags 继续保持 false。
+```

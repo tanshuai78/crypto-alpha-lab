@@ -1611,8 +1611,9 @@ EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS = ("USDT", "USDC", "U", 
 EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS = ("USDT", "USDC", "U", "USD1")
 # Public Binance USD-M futures quote assets allowed for event-symbol validation.
 
-EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL",)
-# Only perpetual futures launch events are valid for Stage 1.5D/1.5F handoff.
+EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL", "TRADIFI_PERPETUAL")
+# Perpetual futures launch events are valid for Stage 1.5D/1.5F handoff.
+# Binance uses TRADIFI_PERPETUAL for USD1/TradFi futures launch contracts.
 
 EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES = ("TRADING", "PENDING_TRADING", "PRE_TRADING")
 # Statuses that may keep a candidate in validation/pending state.
