@@ -414,7 +414,7 @@ cat "$STAGE1_5F_OUT/watermark.json"
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json"
 ```
 
-bootstrap 只建立新旧边界，不对 bootstrap 前 rows 产生正式 live depth evidence。
+bootstrap 只建立启动时的新旧边界，不对 bootstrap 前 rows 产生正式 live depth evidence。1.5F 运行后，watermark 会随 accepted events 继续前推；对 delayed launch contract-symbol，后续 eligibility 必须同时审计 launch/onboard time evidence。
 
 ### 7.6 启动新 Stage 1.5F observer
 
@@ -601,6 +601,108 @@ exchangeInfo rows 不对应单个 event-symbol，不要求 event_symbol_id。
 announcement_detail_deferred rows 是 1.5D scheduler diagnostic，不应被 1.5F/1.5G depth request health 当成 depth_snapshot。
 ```
 
+### 8.5 Stage 1.5F delayed-launch watermark 专项检查
+
+用于确认 delayed launch 事件不会因为 `detected_at_ms` 早于运行中的 watermark 而被误判为 `pre_watermark`。以 SPCXUSD1 为例：
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export ARTICLE_ID="6cbb1b11a9c843949624cf2eacaac8b4"
+export SYMBOL="SPCXUSD1"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+
+python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+article_id = os.environ["ARTICLE_ID"]
+symbol = os.environ["SYMBOL"]
+d_root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
+f_root = Path(os.environ["STAGE1_5F_OUT"])
+
+def utc(ms):
+    if ms is None:
+        return None
+    return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).isoformat()
+
+print("STAGE1_5D_EVENTS_OUT", d_root)
+print("STAGE1_5F_OUT", f_root)
+
+w_path = f_root / "watermark.json"
+if w_path.exists():
+    w = json.loads(w_path.read_text())
+    print("\n=== 1.5F watermark ===")
+    print("max_seen_detected_at_ms", w.get("max_seen_detected_at_ms"))
+    print("max_seen_detected_utc", utc(w.get("max_seen_detected_at_ms")))
+    print("seen_source_article_contains_symbol_article", article_id in (w.get("seen_source_article_ids") or []))
+
+s_path = d_root / "detail_retry_scheduler_state.json"
+print("\n=== 1.5D scheduler ===")
+print("scheduler_exists", s_path.exists())
+if s_path.exists():
+    s = json.loads(s_path.read_text())
+    row = (s.get("articles") or {}).get(article_id)
+    print("article_in_scheduler", row is not None)
+    if row:
+        print(json.dumps({
+            "title": row.get("title"),
+            "event_type": row.get("event_type"),
+            "candidate_symbols": row.get("candidate_symbols"),
+            "symbol_validation_status": row.get("symbol_validation_status"),
+            "terminal_failure_type": row.get("terminal_failure_type"),
+            "first_detected_at_ms": row.get("first_detected_at_ms"),
+            "first_detected_utc": utc(row.get("first_detected_at_ms")),
+            "symbol_effective_launch_times_ms": row.get("symbol_effective_launch_times_ms"),
+            "symbol_effective_launch_times_utc": {
+                k: utc(v) for k, v in (row.get("symbol_effective_launch_times_ms") or {}).items()
+            },
+            "symbol_onboard_times_ms": row.get("symbol_onboard_times_ms"),
+            "symbol_onboard_times_utc": {
+                k: utc(v) for k, v in (row.get("symbol_onboard_times_ms") or {}).items()
+            },
+        }, indent=2, ensure_ascii=False))
+
+print("\n=== 1.5D event rows ===")
+events_found = 0
+for p in sorted((d_root / "events").glob("*.jsonl")):
+    for line_no, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
+        if article_id in line or symbol in line:
+            events_found += 1
+            print(p, line_no, line[:1500])
+print("events_found", events_found)
+PY
+```
+
+判定标准：
+
+```text
+上线前正常 pending:
+  article_in_scheduler = true
+  candidate_symbols contains SYMBOL
+  symbol_validation_status = pending_pre_trading
+  terminal_failure_type = null
+  symbol_effective_launch_times_ms[SYMBOL] 晚于 watermark
+  events_found = 0
+
+上线后正常 handoff:
+  1.5D events 中出现 symbols=[SYMBOL] + symbol_parse_status=parsed
+  1.5F events_accepted 中出现 SYMBOL
+  observation_age_basis = symbol_effective_launch_time 或 symbol_onboard_time
+  announcement_time_capture_evidence_allowed = false 可接受
+  launch_time_depth_evidence_allowed = true
+  live_depth_evidence_basis = launch_time_only
+
+异常:
+  terminal_failure_type = candidate_validation_rejected
+  symbol_parse_failed_reason = exchange_info_disallowed_contract_type
+  events_rejected 中 reason = pre_watermark 且 symbol_effective_launch_times_ms[SYMBOL] 晚于 watermark
+```
+
 ## 9. Raw Payload 与 Events 检查
 
 ### 9.1 查看 1.5F watermark 时间
@@ -731,7 +833,7 @@ events 中 detected_utc 晚于 1.5F watermark utc_time = 1.5F 理论上应接受
 detail_fetch_status=budget_starved 或 terminal_failure_type=detail_never_attempted_budget_starved = collection/scheduler failure，不是公告无 symbol 证据。
 detail_fetch_status=max_age_exceeded + detail_fetch_attempted=false 不应在新 root 中再次出现。
 validation=pending_exchangeinfo_missing = 候选 symbol 还未出现在 exchangeInfo，不能写入 parsed event。
-validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确拒绝，例如非 PERPETUAL 或资产不在 allowlist。
+validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确拒绝，例如非允许 contractType 或资产不在 allowlist。
 ```
 
 ## 10. 首次输出判读模板
@@ -858,7 +960,7 @@ OUT_ROOT 为空导致 summary 写到 /binance_futures_launch_smoke_summary.json
 ```text
 1. detail_contract_symbol 候选必须精确匹配 exchangeInfo symbol。
 2. exchangeInfo 只有 BTCUUSDT 时，候选 BTCU 不得被伪验证为 BTCUUSDT，应保持 pending_exchangeinfo_missing。
-3. exchangeInfo 中 BTCU/ETHU 为 PERPETUAL + TRADING + quoteAsset=U + marginAsset=U 时，emit symbols=["BTCU","ETHU"]。
+3. exchangeInfo 中 BTCU/ETHU 为允许 contractType，例如 PERPETUAL/TRADIFI_PERPETUAL，且 TRADING + quoteAsset=U + marginAsset=U 时，emit symbols=["BTCU","ETHU"]。
 4. rejected candidate 必须写 terminal diagnostic event，不能静默留在 retry state。
 5. 1.5F depth request 必须使用 raw symbol=BTCU/ETHU。
 ```
@@ -1177,4 +1279,78 @@ EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES = ("PERPETUAL", "TRADIFI_PERPET
 3. SPCXUSD1 公告发布时间早于当前重启后 watermark，不能手工改写为 clean formal post-watermark evidence。
 4. SPCXUSD1 可作为 recovery/probe/regression candidate；正式 1.5F evidence 仍需等待 watermark 之后的新 futures launch event。
 5. paper/live/execution/alpha flags 继续保持 false。
+```
+
+### 12.13 2026-07-18 Stage 1.5F delayed-launch watermark hotfix
+
+触发原因：
+
+```text
+SPCXUSD1 在 1.5D hotfix 后进入 pending_pre_trading：
+  source_article_id = 6cbb1b11a9c843949624cf2eacaac8b4
+  first_detected_at_ms = 1784370927741
+  first_detected_utc = 2026-07-18T10:35:27.741Z
+  symbol_effective_launch_times_ms[SPCXUSD1] = 1784538000000
+  symbol_effective_launch_time_utc = 2026-07-20T09:00:00Z
+
+当前 1.5F watermark：
+  max_seen_detected_at_ms = 1784370927741
+  seen_source_article_contains_spcx = false
+```
+
+风险：
+
+```text
+bootstrap watermark 是启动边界，不是冻结边界。
+1.5F accepted 新 event 后会继续前推 watermark。
+如果 SPCXUSD1 在 launch 前仍 pending，而另一个 event 先被 1.5F accepted，watermark 可能前推到晚于 SPCXUSD1 first_detected_at_ms。
+旧 1.5F 逻辑只看 detected_at_ms，会在 SPCXUSD1 launch 后将其误判为 pre_watermark。
+```
+
+修复内容：
+
+```text
+1. 普通事件仍使用 event_is_post_watermark(row, watermark)。
+2. delayed launch contract-symbol 新增 launch-time-only 通道：
+   - event_type = futures_contract_launch
+   - source_article_id/event_id/stable_key 未被 watermark seen
+   - symbol_extraction_source in {title_contract_symbol, detail_contract_symbol}
+   - symbol_validation_status = validated
+   - symbol_effective_launch_times_ms 或 symbol_onboard_times_ms 中存在该 symbol
+   - launch/onboard time > watermark.max_seen_detected_at_ms
+3. 满足上述条件时，即使 detected_at_ms < running watermark，也允许进入 1.5F eligibility。
+4. accepted 后 watermark 不回退 max_seen_detected_at_ms；重复处理由 observer_state.jsonl 的 event-symbol state 防止。
+```
+
+证据边界：
+
+```text
+announcement_time_capture_evidence_allowed = false
+launch_time_depth_evidence_allowed = true
+live_depth_evidence_basis = launch_time_only
+```
+
+回归测试覆盖：
+
+```text
+1. delayed launch event: detected_at_ms < running watermark, launch_time > watermark, identity unseen
+   => eligible / pending-by-future-launch / accepted-after-launch。
+
+2. delayed launch event identity already seen by watermark
+   => rejected pre_watermark。
+
+3. detected_at_ms < watermark 且无 per-symbol launch/onboard metadata
+   => rejected pre_watermark。
+
+4. accepted older delayed-launch event 不得回退 max_seen_detected_at_ms；event-symbol 去重必须依赖 observer_state.jsonl。
+```
+
+边界说明：
+
+```text
+1. 本次是 1.5F eligibility/watermark 小修，不改变 1.5D parser 或 scheduler。
+2. 该修复不把 delayed launch recovery 样本升级为 clean announcement-capture evidence。
+3. 该修复只降低 delayed launch 盘口采集被 running watermark 挤掉的风险。
+4. paper/live/execution/alpha flags 继续保持 false。
+5. 部署后建议新建 1.5D/1.5F root，避免旧 root 混用旧 eligibility 口径。
 ```

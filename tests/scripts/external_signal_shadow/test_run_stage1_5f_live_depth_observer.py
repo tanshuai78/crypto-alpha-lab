@@ -595,6 +595,115 @@ def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_la
     assert "ethusd1-event" in w_final["seen_event_ids"]
 
 
+def test_runner_accepts_delayed_launch_when_detected_time_is_before_running_watermark(tmp_path, monkeypatch):
+    import time
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({"symbols": [{"symbol": "SPCXUSD1"}]}, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
+
+    detected_at_ms = 1784370927741
+    watermark_time = detected_at_ms + 60 * 60 * 1000
+    launch_time_ms = 1784538000000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "spcxusd1-event",
+            "event_type": "futures_contract_launch",
+            "source_article_id": "6cbb1b11a9c843949624cf2eacaac8b4",
+            "detected_at_ms": detected_at_ms,
+            "symbols": ["SPCXUSD1"],
+            "symbol_extraction_source": "title_contract_symbol",
+            "symbol_validation_status": "validated",
+            "symbol_effective_launch_times_ms": {"SPCXUSD1": launch_time_ms},
+            "symbol_onboard_times_ms": {"SPCXUSD1": launch_time_ms},
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": ["newer-event"],
+            "seen_source_article_ids": ["newer-article"],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    def run_poll(fake_now_ms: int):
+        monkeypatch.setattr(time, "time", lambda: fake_now_ms / 1000.0)
+        args = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        orig_argv = sys.argv
+        try:
+            sys.argv = args
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+        finally:
+            sys.argv = orig_argv
+
+    run_poll(launch_time_ms - 5 * 60_000)
+
+    assert list((output_root / "events_accepted").glob("**/*.jsonl")) == []
+    assert list((output_root / "events_rejected").glob("**/*.jsonl")) == []
+
+    run_poll(launch_time_ms)
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    accepted_rows = []
+    with open(accepted_files[0], "r") as f:
+        for line in f:
+            if line.strip():
+                accepted_rows.append(json.loads(line))
+
+    assert accepted_rows[0]["symbol"] == "SPCXUSD1"
+    assert accepted_rows[0]["observation_age_basis"] == "symbol_effective_launch_time"
+    assert accepted_rows[0]["announcement_time_capture_evidence_allowed"] is False
+    assert accepted_rows[0]["launch_time_depth_evidence_allowed"] is True
+    assert accepted_rows[0]["live_depth_evidence_basis"] == "launch_time_only"
+
+    with open(output_root / "watermark.json", "r") as f:
+        w_final = json.load(f)
+    assert w_final["max_seen_detected_at_ms"] == watermark_time
+    assert "newer-event" in w_final["seen_event_ids"]
+    assert "newer-article" in w_final["seen_source_article_ids"]
+
+
 def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics(tmp_path, monkeypatch):
     import time
 

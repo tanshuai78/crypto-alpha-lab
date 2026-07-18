@@ -6,6 +6,7 @@ import os
 from configs import base
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
     event_is_post_watermark,
+    get_stable_event_key,
 )
 
 
@@ -65,6 +66,33 @@ def _get_symbol_time(row: dict, field: str, symbol: str) -> int | None:
         return None
     sym = symbol.strip().upper()
     return _valid_ms(data.get(sym) or data.get(symbol))
+
+
+def _event_identity_seen_by_watermark(row: dict, watermark) -> bool:
+    event_id = row.get("event_id")
+    source_article_id = row.get("source_article_id")
+    stable_key = get_stable_event_key(row)
+
+    if event_id and event_id in watermark.seen_event_ids:
+        return True
+    if source_article_id and source_article_id in watermark.seen_source_article_ids:
+        return True
+    return stable_key in watermark.seen_stable_event_keys
+
+
+def delayed_launch_event_symbol_is_post_watermark(row: dict, symbol: str, watermark) -> bool:
+    if _event_identity_seen_by_watermark(row, watermark):
+        return False
+
+    if row.get("symbol_extraction_source") not in {"title_contract_symbol", "detail_contract_symbol"}:
+        return False
+    if row.get("symbol_validation_status") != "validated":
+        return False
+
+    launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
+    if launch_time_ms is None:
+        launch_time_ms = _get_symbol_time(row, "symbol_onboard_times_ms", symbol)
+    return launch_time_ms is not None and launch_time_ms > watermark.max_seen_detected_at_ms
 
 
 def resolve_observation_age_base_ms(row: dict, symbol: str) -> tuple[int | None, str]:
@@ -144,7 +172,9 @@ def classify_event_symbol_eligibility_with_diagnostics(
     if event_type != "futures_contract_launch":
         return "rejected", "wrong_event_type", {}
 
-    if not event_is_post_watermark(row, watermark):
+    if not event_is_post_watermark(row, watermark) and not delayed_launch_event_symbol_is_post_watermark(
+        row, symbol, watermark
+    ):
         return "rejected", "pre_watermark", {}
 
     observation_age_base_ms, observation_age_basis = resolve_observation_age_base_ms(row, symbol)

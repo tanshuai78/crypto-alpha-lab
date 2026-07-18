@@ -196,6 +196,79 @@ def test_pre_watermark_rejection_reason_is_ignored_not_failure():
     assert reason == "pre_watermark"
 
 
+def test_delayed_launch_event_with_launch_time_after_watermark_bypasses_detected_pre_watermark():
+    now_ms = 1_000_000_000
+    launch_ms = now_ms - 5 * 60 * 1000
+    event = {
+        "event_id": "spcx-event",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "6cbb1b11a9c843949624cf2eacaac8b4",
+        "detected_at_ms": 100_000,
+        "symbols": ["SPCXUSD1"],
+        "symbol_extraction_source": "title_contract_symbol",
+        "symbol_validation_status": "validated",
+        "symbol_effective_launch_times_ms": {"SPCXUSD1": launch_ms},
+        "symbol_onboard_times_ms": {"SPCXUSD1": launch_ms},
+    }
+    w = Watermark(1, now_ms - 60 * 60 * 1000, [], [], [], now_ms)
+    exinfo = {"available": True, "symbols": {"SPCXUSD1"}}
+
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        event, "SPCXUSD1", now_ms, w, exinfo, {}
+    )
+
+    assert status == "eligible"
+    assert reason == "ok"
+    assert diag["observation_age_basis"] == "symbol_effective_launch_time"
+
+
+def test_delayed_launch_event_seen_by_watermark_still_rejected_as_pre_watermark():
+    now_ms = 1_000_000_000
+    launch_ms = now_ms - 5 * 60 * 1000
+    event = {
+        "event_id": "spcx-event",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "6cbb1b11a9c843949624cf2eacaac8b4",
+        "detected_at_ms": 100_000,
+        "symbols": ["SPCXUSD1"],
+        "symbol_extraction_source": "title_contract_symbol",
+        "symbol_validation_status": "validated",
+        "symbol_effective_launch_times_ms": {"SPCXUSD1": launch_ms},
+    }
+    w = Watermark(
+        1,
+        now_ms - 60 * 60 * 1000,
+        [],
+        ["6cbb1b11a9c843949624cf2eacaac8b4"],
+        [],
+        now_ms,
+    )
+    exinfo = {"available": True, "symbols": {"SPCXUSD1"}}
+
+    status, reason = classify_event_symbol_eligibility(event, "SPCXUSD1", now_ms, w, exinfo, {})
+
+    assert status == "rejected"
+    assert reason == "pre_watermark"
+
+
+def test_detected_pre_watermark_without_per_symbol_launch_time_remains_rejected():
+    event = {
+        "event_id": "old-event",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 100_000,
+        "symbols": ["ABCUSDT"],
+        "symbol_extraction_source": "title_contract_symbol",
+        "symbol_validation_status": "validated",
+    }
+    w = Watermark(1, 200_000, [], [], [], 200_000)
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}}
+
+    status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 210_000, w, exinfo, {})
+
+    assert status == "rejected"
+    assert reason == "pre_watermark"
+
+
 def test_stage1_5f_loader_accepts_legacy_1_5d_event_rows_without_symbol_extraction_diagnostics(tmp_path):
     events = tmp_path / "events.jsonl"
     events.write_text(json.dumps({
