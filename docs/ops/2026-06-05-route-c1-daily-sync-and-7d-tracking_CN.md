@@ -1,23 +1,25 @@
 # Route C1 每日同步与 7d Overlap 跟踪清单
 
-> 最后更新：2026-06-05
+> 最后更新：2026-07-18
 
 > 入口文档：`docs/ops/2026-06-05-ops-index_CN.md`
 
-**适用场景：** Route C1 已经达到 `route_c1_overlap_ready_for_orderbook_aware`，但 live overlap 只有约 `72h`，还没有达到 `7d / 168h` 的 live smoke 启动门槛。
+**适用场景：** Route C1 已经达到 `route_c1_overlap_ready_for_orderbook_aware`，并且 live overlap 已超过 `7d / 168h`；但 `7d live smoke` 结论仍为 `route_c1_baseline_match_failed`，不允许推广为 live filter。
 
 **当前状态定义：**
 
 ```text
-input ready, time not ready
+input ready, live smoke baseline not ready
 ```
 
 也就是说：
 
-- liquidation 1m 输入已就绪；
+- liquidation raw 输入已就绪；
+- liquidation 1m 输入改为本地从 raw 派生；
 - live 1m price 输入已就绪；
 - orderbook-aware 输入门槛已就绪；
-- 但 overlap 时间长度还不足以做正式 `7d live smoke`。
+- 但 `baseline_match_rate` 未达到正式门槛，不能声明 Route C1 可用。
+- 服务器端 `run_trend_liq_*` cron 已停用，避免小内存服务器因全量聚合触发 OOM。
 
 ---
 
@@ -25,27 +27,28 @@ input ready, time not ready
 
 这份清单只做一件事：
 
-> 每天把服务器上的最新 liquidation / orderbook 同步回本地，重建 live price 数据，重跑 overlap audit，并判断是否已经接近或达到 `168h` 的启动门槛。
+> 按需把服务器上的最新 raw liquidation / orderbook 同步回本地，在本地派生 1m/5m/hourly 数据，重建 live price 数据，重跑 overlap audit 或 live smoke。
 
 当前阶段**不做**：
 
 - 不调 Route C1 阈值；
 - 不改 proxy 结论；
-- 不提前运行 `30d forward`；
+- 不在 `7d live smoke` 未通过时宣布 `30d forward` 结论；
 - 不因为输入 ready 就宣布 live filter 可用。
 
 ---
 
 ## 2. 每日执行顺序
 
-每天按下面顺序执行：
+按需复核时按下面顺序执行：
 
-1. 从服务器同步 liquidation 文件到 `data/route_c1_live/`
+1. 从服务器同步 raw liquidation 文件到 `data/route_c1_live/`
 2. 从服务器同步 orderbook 文件到 `my-bitcoin-project/data/historical_orderbook/`
-3. 基于最新 liquidation 1m 重建 live 1m price 数据集
-4. 重跑 overlap audit
-5. 记录关键字段
-6. 判断是否达到 `7d / 168h` 门槛
+3. 在本地从 raw 派生 `1m/5m/hourly`
+4. 基于最新 liquidation 1m 重建 live 1m price 数据集
+5. 重跑 overlap audit 或 live smoke
+6. 记录关键字段
+7. 判断是否仍为 `route_c1_baseline_match_failed`
 
 ---
 
@@ -67,6 +70,8 @@ data/route_c1_live/
 
 - `data/route_c1_live/trend_regime_force_orders_raw.jsonl`
 - `data/route_c1_live/trend_regime_liquidation_1m.jsonl`
+- `data/route_c1_live/trend_regime_liquidation_5m.jsonl`
+- `data/route_c1_live/trend_regime_liquidation_hourly.jsonl`
 - `data/route_c1_live/route_c1_live_price_1m_dataset.jsonl`
 - `reports/route_c1/route_c1_data_overlap_audit_summary.json`
 
@@ -94,15 +99,13 @@ SERVER=root@47.82.4.85
 
 ### 4.1 同步 liquidation 数据
 
+服务器端不再定时生成 `trend_regime_liquidation_1m/5m/hourly`。这里只同步 raw archive，派生文件在本地生成。
+
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 mkdir -p data/route_c1_live reports/route_c1
 
 rsync -avzP $SERVER:/root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl ./data/route_c1_live/
-rsync -avzP $SERVER:/root/crypto-alpha-lab/data/trend_regime_liquidation_1m.jsonl ./data/route_c1_live/
-rsync -avzP $SERVER:/root/crypto-alpha-lab/data/trend_regime_liquidation_5m.jsonl ./data/route_c1_live/
-rsync -avzP $SERVER:/root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl ./data/route_c1_live/
-rsync -avzP $SERVER:/root/crypto-alpha-lab/data/trend_regime_liquidation_health.json ./data/route_c1_live/
 ```
 
 ### 4.2 同步 orderbook 数据
@@ -145,7 +148,53 @@ rsync -avzP \
 
 ---
 
-## 5. 重建 live 1m price 数据集
+## 5. 本地派生 liquidation 1m/5m/hourly
+
+每次同步完 raw liquidation 之后，在本地 `crypto-alpha-lab` 执行。不要在小内存服务器上定时全量聚合。
+
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+
+END_MS=$(python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+)
+START_MS=$((END_MS - 35*24*60*60*1000))
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 1m \
+  --fill-empty-buckets \
+  --start-ms "$START_MS" \
+  --end-ms "$END_MS" \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/route_c1_live/trend_regime_liquidation_1m.jsonl
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 5m \
+  --fill-empty-buckets \
+  --start-ms "$START_MS" \
+  --end-ms "$END_MS" \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/route_c1_live/trend_regime_liquidation_5m.jsonl
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 1h \
+  --output data/route_c1_live/trend_regime_liquidation_hourly.jsonl
+```
+
+说明：
+
+- `35d` 覆盖当前 Route C1 复核窗口，避免服务器 OOM，同时保留足够的 live smoke/forward 观察空间。
+- 如果只做最近 7 天复核，可以把 `35*24*60*60*1000` 改为 `10*24*60*60*1000`。
+- 如果要做更长窗口，优先在本地 Mac 上调大窗口，不要恢复服务器 cron。
+
+---
+
+## 6. 重建 live 1m price 数据集
 
 每次同步完 liquidation 之后，在 `crypto-alpha-lab` 本地执行：
 
@@ -166,7 +215,7 @@ PYTHONPATH=src uv run python scripts/build_liquidation_shock_event_dataset.py \
 
 ---
 
-## 6. 重跑 overlap audit
+## 7. 重跑 overlap audit
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
@@ -188,11 +237,11 @@ cat /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/reports/route_c1/route_c1_d
 
 ---
 
-## 7. 每天要看哪些字段
+## 8. 每次要看哪些字段
 
-每天只重点看这几个字段：
+每次复核只重点看这几个字段：
 
-### 7.1 输入存在性
+### 8.1 输入存在性
 
 必须都为 `true`：
 
@@ -200,7 +249,7 @@ cat /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/reports/route_c1/route_c1_d
 - `price_input_exists`
 - `orderbook_dir_exists`
 
-### 7.2 覆盖质量
+### 8.2 覆盖质量
 
 理想目标：
 
@@ -214,7 +263,7 @@ cat /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/reports/route_c1/route_c1_d
 1.0 / 1.0 / 1.0
 ```
 
-### 7.3 关键状态字段
+### 8.3 关键状态字段
 
 - `ready_for_price_only`
 - `ready_for_orderbook_aware`
@@ -228,7 +277,7 @@ ready_for_orderbook_aware = true
 decision = route_c1_overlap_ready_for_orderbook_aware
 ```
 
-### 7.4 核心进度字段
+### 8.4 核心进度字段
 
 最重要的是：
 
@@ -246,7 +295,10 @@ overlap_hours_by_symbol
 
 ---
 
-## 8. 何时可以进入 7d Live Smoke
+## 9. 何时可以进入 7d Live Smoke
+
+> [!NOTE]
+> 这一节保留为历史门槛说明。当前本地 overlap 已超过 `168h`，并且已经运行过 `7d live smoke`；最新短板不是 overlap 时长，而是 `baseline_match_rate < 0.70`。
 
 ### 启动条件
 
@@ -287,7 +339,7 @@ overlap_hours_by_symbol
 
 ---
 
-## 9. 每日记录模板
+## 10. 记录模板
 
 建议每天手动记录一次，保持最小观察表。
 
@@ -337,7 +389,7 @@ jq '{
 
 ---
 
-## 10. 异常分支处理
+## 11. 异常分支处理
 
 ### 情况 A：`liquidation_input_exists = false`
 
@@ -345,8 +397,9 @@ jq '{
 
 动作：
 
-1. 重新同步 `data/route_c1_live/trend_regime_liquidation_1m.jsonl`
-2. 如果服务器没有该文件，就先同步 raw，再重新聚合
+1. 重新同步 `data/route_c1_live/trend_regime_force_orders_raw.jsonl`
+2. 在本地重跑第 5 节的 `aggregate_trend_regime_liquidations.py`
+3. 不要恢复服务器端 `run_trend_liq_*` cron
 
 ### 情况 B：`price_input_exists = false`
 
@@ -377,34 +430,37 @@ jq '{
 
 ---
 
-## 11. 当前阶段禁止事项
+## 12. 当前阶段禁止事项
 
 当前阶段不要做：
 
 - 不要继续调 `Route C1` 阈值
 - 不要提前宣布 live filter 可用
-- 不要把 `~72h overlap` 当成 `7d live smoke` 已完成
-- 不要跳过 `7d` 直接推进 `30d forward`
+- 不要把 `overlap ready` 当成 `7d live smoke` 已通过
+- 不要在 `baseline_match_rate < 0.70` 时推进正式 `30d forward` 结论
 - 不要因为某一天数据漂亮就重写结论
+- 不要在服务器上恢复 `run_trend_liq_hourly.sh` 定时任务
 
 ---
 
-## 12. 当前阶段的正确口径
+## 13. 当前阶段的正确口径
 
 当前正确表述应是：
 
 > Route C1 的历史 `price-only proxy` 仍然是 promising；  
 > live overlap 已经推进到 `route_c1_overlap_ready_for_orderbook_aware`；  
 > 当前输入门槛已经满足；  
-> 但时间长度仍不足以做 7d 结论，下一步应继续累计 overlap，直到 `BTC/ETH/SOL` 接近 `168h`。
+> 但 `7d live smoke` 仍为 `route_c1_baseline_match_failed`，不能推广为 live filter；
+> 后续如需复核，应同步 raw 到本地后重新派生，不在服务器上定时全量聚合。
 
 ---
 
-## 13. 一句话操作版
+## 14. 一句话操作版
 
-每天只做这四件事：
+后续复核只做这五件事：
 
-1. 同步 liquidation
+1. 同步 raw liquidation
 2. 同步 orderbook
-3. 重建 live price 1m
-4. 重跑 overlap audit，看 `BTC/ETH/SOL` 是否接近 `168h`
+3. 本地派生 liquidation 1m/5m/hourly
+4. 重建 live price 1m
+5. 重跑 overlap audit 或 live smoke

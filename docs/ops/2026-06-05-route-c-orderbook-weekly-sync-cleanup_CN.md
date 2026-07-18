@@ -397,9 +397,9 @@ du -sh "$REMOTE_DIR"
 Route C C1 仍然需要同时保留：
 
 - `/root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl`
-- `/root/crypto-alpha-lab/data/trend_regime_liquidation_1m.jsonl`
-- `/root/crypto-alpha-lab/data/trend_regime_liquidation_5m.jsonl`
 - `/root/my-bitcoin-project/data/historical_orderbook/*.jsonl` 或 `.jsonl.gz`
+
+`trend_regime_liquidation_1m.jsonl`、`trend_regime_liquidation_5m.jsonl`、`trend_regime_liquidation_hourly.jsonl` 后续在本地 Mac 从 raw 派生，不再要求服务器通过 cron 定时生成。
 
 第一版 Route C 不急着增加更多数据源。
 
@@ -409,6 +409,7 @@ Route C C1 仍然需要同时保留：
 - orderbook collector 连续；
 - 两者有至少 7 天时间重叠；
 - 本地 archive 可校验、可复现。
+- 本地派生过程可复现，不依赖服务器全量聚合 cron。
 
 ---
 
@@ -422,7 +423,7 @@ Route C C1 仍然需要同时保留：
 | **Live Smoke 7d** | live liquidation 连续采集满 7 天后 | `review_route_c1_price_only.py --run-mode live_smoke_7d` | `live_smoke_promising_continue_to_30d` |
 | **Forward 30d** | live liquidation 连续采集满 30 天后 | `review_route_c1_price_only.py --run-mode forward_30d` | `forward_provisional_pass` 或 `forward_failed_stop_route_c` |
 
-当前状态：**Proxy Snapshot 已通过**（`proxy_promising_wait_for_live_overlap`），等待 7 天 live overlap。
+当前状态：**Proxy Snapshot 已通过**（`proxy_promising_wait_for_live_overlap`），live overlap 已超过 7 天；但最新 `7d live smoke` 为 `route_c1_baseline_match_failed`，不能推广为 live filter。
 
 ### 12.2 Live Smoke 7d 触发条件检查
 
@@ -515,7 +516,7 @@ live smoke 7d 通过后，等待满 30 天运行：
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 PYTHONPATH=src uv run python scripts/review_route_c1_price_only.py \
   --run-mode forward_30d \
-  --dataset data/trend_regime_liquidation_1m.jsonl \
+  --dataset data/route_c1_live/route_c1_live_price_1m_dataset.jsonl \
   --symbols BTCUSDT ETHUSDT SOLUSDT \
   --output reports/route_c1/route_c1_forward_30d_summary.json \
   --review-output docs/reviews/$(date +%Y-%m-%d)-route-c1-forward-30d-review.md
@@ -536,7 +537,7 @@ ssh root@iZt4nd2xclaurycevfhphnZ
 docker ps -a | grep forceorder
 docker logs --tail 30 trend-forceorder
 wc -l /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl 2>/dev/null || echo "raw=0"
-wc -l /root/crypto-alpha-lab/data/trend_regime_liquidation_1m.jsonl 2>/dev/null || echo "1m=0"
+crontab -l | grep -E 'run_trend_liq|aggregate_trend_regime_liquidations' || echo "trend_liq_cron_disabled"
 ```
 
 本地查看最新 proxy 审计结果：

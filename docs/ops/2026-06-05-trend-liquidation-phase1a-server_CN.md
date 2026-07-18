@@ -355,11 +355,18 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 
 ### 定期派生 Crontab 配置 (Cron-based Derivation Schedule)
 
+> [!CAUTION]
+> **2026-07-18 当前状态：服务器端 `run_trend_liq_*` 定时派生已停用。**
+>
+> Jul 16 的 OOM 日志确认，`run_trend_liq_hourly.sh` 中的 `aggregate_trend_regime_liquidations.py --bucket 1h` 曾被 kernel OOM killer 杀掉。该脚本会全量读取 `trend_regime_force_orders_raw.jsonl`，不适合在约 `1.6GB` 内存的小服务器上长期定时运行。
+>
+> 当前推荐：服务器只保留 `trend-forceorder` raw 采集；`1m/5m/hourly` 派生在本地 Mac 同步 raw 后按需执行。除非 `aggregate_trend_regime_liquidations.py` 已改为增量/窗口化，否则不要恢复下面的 cron 派生任务。
+
 在服务器上配置 crontab 定期执行派生脚本。
 > [!WARNING]
 > 对于 `1m` 和 `5m` 颗粒度，由于使用了 `--fill-empty-buckets` 填充所有无交易时段的空桶，高频写入会占用一定的存储空间与 IOPS。更关键的是，`scripts/aggregate_trend_regime_liquidations.py` 当前会全量读取 `trend_regime_force_orders_raw.jsonl` 后再聚合；随着 raw archive 增长，调度频率过高会导致 CPU / 内存压力显著上升。
 
-推荐的 crontab 调度配置：
+历史 crontab 调度配置（当前不再推荐直接启用）：
 ```cron
 # 每 5 分钟串行执行 1m + 5m 聚合。
 # 使用 flock 防止跨分钟重叠；使用 nice 降低对 sshd 和采集进程的资源争抢。
@@ -432,9 +439,9 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
    crontab -l
    ```
 
-### 实际部署文件（2026-06-15 当前落地版本） (Actual Deployed Files)
+### 实际部署文件（2026-06-15 历史落地版本） (Actual Deployed Files)
 
-当前服务器上实际生效的安全版调度，不再直接把复杂命令写进 `crontab`，而是通过以下 3 个脚本承载：
+2026-06-15 曾经落地的安全版调度，不再直接把复杂命令写进 `crontab`，而是通过以下 3 个脚本承载：
 
 1. `/root/crypto-alpha-lab/scripts/run_trend_liq_derive.sh`
    - 串行执行 `1m` 与 `5m` 聚合。
@@ -444,7 +451,7 @@ tail -5 /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl | python
 3. `/root/crypto-alpha-lab/scripts/run_trend_liq_health.sh`
    - 运行 `scripts/check_liquidation_collector_health.py` 并输出健康摘要。
 
-对应的 `crontab` 入口是：
+对应的历史 `crontab` 入口是：
 
 ```cron
 SHELL=/bin/bash
@@ -455,7 +462,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */30 * * * * flock -n /tmp/trend_liq_derive.lock /root/crypto-alpha-lab/scripts/run_trend_liq_health.sh > /root/crypto-alpha-lab/data/trend_regime_liquidation_health.json 2>> /root/crypto-alpha-lab/logs/trend_liq_health.log
 ```
 
-验收命令：
+历史验收命令：
 
 ```bash
 crontab -l
@@ -463,6 +470,114 @@ crontab -l | grep -E 'flock|run_trend_liq'
 ```
 
 只有当输出中能看到 `flock` 和三个 `run_trend_liq_*` 脚本时，才说明旧版 `*/1` / `*/15` 任务已被成功替换。
+
+### 实际部署状态（2026-07-18 当前） (Current Deployed State)
+
+当前服务器上已移除 `run_trend_liq_*` cron，避免全量聚合任务再次触发 OOM。
+
+当前推荐的 `crontab` 输出应只保留环境行：
+
+```cron
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+停用命令：
+
+```bash
+crontab -l > /root/crontab.backup.$(date +%Y%m%d-%H%M%S)
+crontab -l | grep -v 'run_trend_liq_' | crontab -
+crontab -l | nl -ba
+```
+
+服务器端仍应保留：
+
+1. `trend-forceorder`：持续采集 `data/trend_regime_force_orders_raw.jsonl`。
+2. `trend-rows` / `trend-watchlist`：如仍需要实时观察，可继续运行。
+3. `my-collector`：在 `my-bitcoin-project` 中持续采集 orderbook。
+
+本地按需派生命令：
+
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+
+rsync -avzP \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl \
+  data/route_c1_live/
+
+END_MS=$(python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+)
+START_MS=$((END_MS - 35*24*60*60*1000))
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 1m \
+  --fill-empty-buckets \
+  --start-ms "$START_MS" \
+  --end-ms "$END_MS" \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/route_c1_live/trend_regime_liquidation_1m.jsonl
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 5m \
+  --fill-empty-buckets \
+  --start-ms "$START_MS" \
+  --end-ms "$END_MS" \
+  --symbols BTC/USDT ETH/USDT SOL/USDT XRP/USDT DOGE/USDT \
+  --output data/route_c1_live/trend_regime_liquidation_5m.jsonl
+
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/route_c1_live/trend_regime_force_orders_raw.jsonl \
+  --bucket 1h \
+  --output data/route_c1_live/trend_regime_liquidation_hourly.jsonl
+```
+
+验收命令：
+
+```bash
+crontab -l | grep -E 'run_trend_liq|aggregate_trend_regime_liquidations|check_liquidation' || echo "trend_liq_cron_disabled"
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+wc -l /root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl
+```
+
+预期：
+
+1. `trend_liq_cron_disabled` 出现。
+2. `trend-forceorder` 仍在运行。
+3. raw 文件行数继续增长。
+
+### 2026-07-18 事故记录：cron hourly 聚合触发 OOM (Incident Note)
+
+现象：
+
+1. 服务器曾因内存 OOM 卡死并导致数据采集中断。
+2. Docker 容器检查显示 `trend-forceorder`、`trend-rows`、`trend-watchlist`、`crypto-watchlist` 均为 `OOMKilled=false`。
+3. kernel 日志显示被杀目标为 `cron.service` 下的 `python3`。
+
+关键证据：
+
+```text
+oom-kill: ... task_memcg=/system.slice/cron.service,task=python3
+Out of memory: Killed process ... (python3) ... anon-rss:879760kB
+run_trend_liq_hourly.sh: line 8: ... Killed PYTHONPATH=. nice -n 10 python3 scripts/aggregate_trend_regime_liquidations.py --input data/trend_regime_force_orders_raw.jsonl --bucket 1h --output data/trend_regime_liquidation_hourly.jsonl
+```
+
+结论：
+
+1. 直接 OOM 目标是 `run_trend_liq_hourly.sh` 的全量 `1h` 聚合。
+2. 根因不是 Docker 容器 OOM，也不是磁盘满。
+3. `flock` 能防止并发堆积，但不能降低单次全量聚合的内存峰值。
+4. 只要 raw archive 继续增长，服务器端 `1m/5m/hourly/health` 全量扫描都有长期复发风险。
+
+本次处理：
+
+1. 备份 crontab。
+2. 移除所有 `run_trend_liq_*` cron。
+3. 将后续派生职责迁移到本地 Mac。
 
 ### 2026-06-15 事故记录：CPU 99% / SSH 断开 (Incident Note)
 
@@ -496,7 +611,10 @@ crontab -l | grep -E 'flock|run_trend_liq'
 1. 将 `trend_regime_force_orders_raw.jsonl` 改为更积极的日切或周切归档，避免 active raw 文件无限增长。
 2. 将 `aggregate_trend_regime_liquidations.py` 改为增量聚合，只处理“上次聚合后新增的 raw 事件”，不要每次全量读取整个 archive。
 
-### 切换后 10 分钟巡检 (10-Minute Post-Switch Checklist)
+### 历史脚本式 cron 切换后 10 分钟巡检 (Historical 10-Minute Post-Switch Checklist)
+
+> [!NOTE]
+> 本节用于复盘 2026-06-15 的脚本式 cron 切换流程。2026-07-18 之后，当前推荐状态是停用 `run_trend_liq_*` cron；不要用本节作为恢复服务器端定时派生的操作清单。
 
 切换完成后的前 10 分钟，不要只看 `crontab -l`。必须同时检查“旧进程是否退干净、CPU 是否回落、派生文件是否继续更新”。
 
@@ -584,7 +702,10 @@ dmesg -T | grep -i -E 'killed process|out of memory|oom'
 
 切换后不应继续新增由聚合脚本引发的 OOM 记录。
 
-### 失败回滚方法 (Rollback Procedure)
+### 历史失败回滚方法 (Historical Rollback Procedure)
+
+> [!CAUTION]
+> 当前不要回滚到包含 `run_trend_liq_hourly.sh` 的旧 cron。Jul 16 已确认该 hourly 全量聚合会触发 OOM。本节只用于理解历史切换流程，不作为当前恢复方案。
 
 如果新 cron 安装失败、脚本路径写错，或者切换后 10 分钟内系统状态更差，按以下顺序回滚：
 
@@ -670,7 +791,7 @@ python scripts/collect_trend_regime_force_orders.py \
 推荐节奏：
 
 1. 每 4 小时：服务器先产出摘要，本地回拉摘要文件。
-2. 每 24 小时：回拉完整 `trend_regime_watch_events.jsonl`，并按需抽样回拉 `trend_regime_phase1a_rows.jsonl`；同时回拉 `trend_regime_liquidation_hourly.jsonl` 供本地回放。
+2. 每 24 小时：回拉完整 `trend_regime_watch_events.jsonl`，并按需抽样回拉 `trend_regime_phase1a_rows.jsonl`；同时回拉 `trend_regime_force_orders_raw.jsonl`，在本地派生 `trend_regime_liquidation_hourly.jsonl` 供回放。
 3. 异常时：立即回拉三份原始文件全量（见下方）。
 
 ### 服务器端摘要命令（建议 crontab 每 4 小时执行）
@@ -739,10 +860,20 @@ rsync -avzP \
   root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_cache.json \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
 
-# 3) 小时级清算代理（供本地回放使用）
+# 3) 原始强平归档（本地派生小时级清算代理）
 rsync -avzP \
-  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_liquidation_hourly.jsonl \
+  root@47.82.4.85:/root/crypto-alpha-lab/data/trend_regime_force_orders_raw.jsonl \
   /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/data/trend_regime/
+```
+
+本地派生小时级清算代理：
+
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+PYTHONPATH=src uv run python scripts/aggregate_trend_regime_liquidations.py \
+  --input data/trend_regime/trend_regime_force_orders_raw.jsonl \
+  --bucket 1h \
+  --output data/trend_regime/trend_regime_liquidation_hourly.jsonl
 ```
 
 ### 异常时回拉（立即执行）
@@ -858,6 +989,6 @@ docker rm trend-rows trend-forceorder trend-watchlist
 1. 先启动 `trend-rows`，确认 rows 文件正常增长。
 2. 再启动 `trend-forceorder`（附 `--raw-output`），确认 cache 与 raw JSONL 文件正常落盘。
 3. 最后启动 `trend-watchlist`，确认 heartbeat 与 reject 统计持续输出。
-4. 采集至少 1 小时后，运行 `aggregate_trend_regime_liquidations.py` 生成小时级清算代理文件。
+4. 采集至少 1 小时后，先回拉 raw，再在本地运行 `aggregate_trend_regime_liquidations.py` 生成小时级清算代理文件。
 5. 回拉数据后，执行本地 `replay_trend_regime_shadow.py`（附 `--liquidation-hourly-jsonl`），确认 `liquidation_coverage_ratio` 不全为 0。
 6. 连续观察 24h 后，再进入下一轮 review 与参数决策。

@@ -1045,3 +1045,66 @@ allowed_next_action = write_stage1_5h_design_only。
 clean_depth_evidence_pass = false。
 execution_feasibility_claim_allowed = false。
 ```
+
+### 12.11 2026-07-12 Stage 1.5D -> 1.5F fallback success probe
+
+验证目的：
+用受控 probe 验证“detail payload 成功解析后，1.5D 能写出 futures launch event，1.5F 能在 15min age gate 内接收该 event 并开始 depth observation”。该 probe 用于降低已知代码路径漏抓风险，不等价于真实 Binance detail endpoint 已完全恢复。
+
+Probe root：
+
+```text
+stage1_5d_probe_root = data/external_signal_shadow/stage1_5d_probe/fallback_success_20260712T085203Z
+stage1_5f_probe_root = data/external_signal_shadow/stage1_5f_probe/fallback_success_20260712T085203Z
+```
+
+关键结果：
+
+```text
+stage1_5d_event_emitted = true
+source_article_id = probe-detail-fallback-success
+symbol = SKHYUSDT
+detail_fetch_status = success
+symbol_parse_status = parsed
+detail_payload_trusted = true
+detail_fetch_variant = primary
+
+event_age_ms_at_1_5f_accept = 688
+max_event_age_ms = 900000
+stage1_5f_decision = stage1_5f_observer_event_observation_in_progress
+post_watermark_events_accepted = 1
+active_observation_count = 1
+total_snapshots_collected = 2
+request_success_rate = 1.0
+total_requests_made = 3
+rejected_event_count = 0
+```
+
+1.5F safety flags remained false：
+
+```text
+execution_feasibility_claim_allowed = false
+trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
+alpha_interpretation_allowed = false
+```
+
+判定：
+
+```text
+stage1_5d_to_1_5f_probe_status = passed
+known_code_path_miss_risk = reduced
+formal_12h_live_evidence_created = false
+live_fallback_url_success_validated = false
+```
+
+边界说明：
+
+```text
+1. 本次 probe 验证的是 controlled detailPayload 成功路径和 1.5F age-gate/acceptance/depth snapshot 链路。
+2. d0833e4ae9b542be90dbf3fe1c960c53 的 primary/detail fallback live URL 仍返回 HTTP 202 + empty body，不能用该 URL 证明 live fallback detail fetch 已恢复。
+3. 本次 probe 不构成 Stage 1.5G formal 12h live depth evidence，也不允许 paper/live/execution/alpha 解释。
+4. 下一次真实 futures_contract_launch 仍需观察 1.5D detail_fetch_status、symbol_parse_status、1.5F events_accepted、depth_snapshots 和 request_manifest depth rows。
+```
