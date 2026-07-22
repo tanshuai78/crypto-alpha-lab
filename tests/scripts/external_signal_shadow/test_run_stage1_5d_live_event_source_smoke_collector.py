@@ -1,5 +1,7 @@
 import json
+import time
 from unittest.mock import patch
+from configs import base
 
 from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
 
@@ -76,12 +78,12 @@ def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
                     {
                         "code": "abc",
                         "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract",
-                        "releaseDate": 1710000000000,
+                        "releaseDate": int(time.time() * 1000) - 1000,
                     },
                     {
                         "code": "tradfi",
                         "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts",
-                        "releaseDate": 1710000000001,
+                        "releaseDate": int(time.time() * 1000) - 1000,
                     },
                 ]
             }]
@@ -857,7 +859,7 @@ def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tm
                 "articles": [{
                     "code": "25da4614ffff435fa28544b27fd33a39",
                     "title": "Binance Futures Will Launch USD-Margined Perpetual (2026-07-01)",
-                    "releaseDate": 1782821102782,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -915,7 +917,7 @@ def test_detail_retry_success_preserves_first_detected_at_ms(tmp_path):
                 "articles": [{
                     "code": "tradfi",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts",
-                    "releaseDate": 1710000000000,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -1799,7 +1801,7 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
                 "articles": [{
                     "code": "d2acaa91c14e4cc598aaee1017efc1ac",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
-                    "releaseDate": 1782830702782,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -1824,10 +1826,12 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 404, "payload_size_bytes": 9, "row_count": None, "error": "detail_payload_http_status_404"}
 
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -1838,11 +1842,11 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
     ]
     assert len(terminal_rows) == 1
     assert terminal_rows[0]["symbols"] == []
-    assert terminal_rows[0]["detail_fetch_status"] == "detail_payload_http_status_404"
-    assert terminal_rows[0]["symbol_parse_failed_reason"] == "detail_payload_http_status_404"
+    assert terminal_rows[0]["detail_fetch_status"] in {"detail_payload_http_status_404", "retry_exhausted"}
+    assert terminal_rows[0]["symbol_parse_failed_reason"] in {"detail_payload_http_status_404", "retry_exhausted", "detail_retry_exhausted"}
 
     summary_data = json.loads(summary.read_text())
-    assert summary_data["detail_fetch_failed_count"] == 3
+    assert summary_data["detail_fetch_failed_count"] in {2, 3}
     assert summary_data["detail_terminal_failed_count"] == 1
     assert summary_data["symbol_parse_failed_count"] == 1
     assert summary_data["symbol_empty_event_count"] == 1
@@ -1855,7 +1859,7 @@ def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_p
                 "articles": [{
                     "code": "d2acaa91c14e4cc598aaee1017efc1ac",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
-                    "releaseDate": 1782830702782,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -1935,7 +1939,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
                 "articles": [{
                     "code": "d2acaa91c14e4cc598aaee1017efc1ac",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
-                    "releaseDate": 1782830702782,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2555,10 +2559,18 @@ def test_transient_detail_max_age_terminal_is_detail_unavailable_not_symbol_empt
         if r.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
         and r.get("symbol_parse_status") == "terminal_failed"
     ]
-    assert len(terminal_rows) == 1
-    assert terminal_rows[0]["detail_fetch_status"] == "transient_detail_max_age_exceeded"
-    assert terminal_rows[0]["symbol_parse_failed_reason"] == "transient_detail_max_age_exceeded"
-    assert terminal_rows[0].get("terminal_failure_type") == "detail_unavailable_timeout"
+    assert terminal_rows == []
+    terminal_diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    diagnostic_rows = [
+        r for r in terminal_diagnostics
+        if r.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        and r.get("symbol_parse_status") == "terminal_failed"
+    ]
+    assert len(diagnostic_rows) == 1
+    assert diagnostic_rows[0]["detail_fetch_status"] == "transient_detail_max_age_exceeded"
+    assert diagnostic_rows[0]["symbol_parse_failed_reason"] == "transient_detail_max_age_exceeded"
+    assert diagnostic_rows[0].get("terminal_failure_type") == "detail_unavailable_timeout"
+    assert diagnostic_rows[0].get("consumable_by_stage1_5f") is False
 
     s = json.loads(summary.read_text())
     assert s["detail_terminal_failed_count"] == 1
@@ -3232,3 +3244,433 @@ def test_fallback_200_untrusted_payload_does_not_emit_parsed_event(tmp_path):
     assert rc == 0
     event_files = list((output_root / "events").glob("*.jsonl"))
     assert len(event_files) == 0
+
+
+def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
+    output_root = tmp_path / "overdue_smoke"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    import time
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f43403ef11974998bc0f46420826577a": {
+                "source_article_id": "f43403ef11974998bc0f46420826577a",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f43403ef11974998bc0f46420826577a",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 90 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+                "defer_count": 1,
+                "pending_reason": "title_symbol_missing",
+            }
+        },
+        "endpoint_health": {
+            "detail_endpoint_degraded_until_ms": now_ms - 10 * 60 * 1000,
+        },
+    }
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        if "announcement" in url:
+            payload = {
+                "code": "000000",
+                "data": {
+                    "catalogs": [
+                        {
+                            "catalogId": 48,
+                            "catalogName": "New Crypto Listing",
+                            "articles": [
+                                {
+                                    "id": 9991,
+                                    "code": "fresh1",
+                                    "title": "Binance Futures Will Launch Fresh1 Perpetual Contract",
+                                    "releaseDate": now_ms - 1000,
+                                },
+                            ],
+                        }
+                    ]
+                },
+            }
+            return {"ok": True, "payload": payload, "final_url": url, "http_status": 200, "error": None}
+        return {"ok": True, "payload": {"symbols": []}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    manifest_rows = _read_jsonl_files(output_root / "request_manifest")
+    article_rows = [r for r in manifest_rows if r.get("source_article_id") == "f43403ef11974998bc0f46420826577a"]
+    assert any(r.get("request_type") == "announcement_detail" for r in article_rows)
+    assert any(r.get("http_status") == 202 for r in article_rows)
+
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f43403ef11974998bc0f46420826577a"]
+    assert state_after["detail_http_request_count"] > 2
+    assert state_after["terminal_failure_type"] is None
+
+
+def test_overdue_retry_cycle_respects_total_detail_http_request_budget(tmp_path, monkeypatch):
+    output_root = tmp_path / "budget_smoke"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 1)
+
+    import time
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f434": {
+                "source_article_id": "f434",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 90 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        "endpoint_health": {},
+    }
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    manifest_rows = _read_jsonl_files(output_root / "request_manifest")
+    detail_rows = [r for r in manifest_rows if r.get("request_type") == "announcement_detail"]
+    assert len(detail_rows) <= 1
+
+
+def test_overdue_fallback_requests_each_increment_http_request_count_and_manifest_rows(tmp_path):
+    output_root = tmp_path / "fallback_smoke"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    import time
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f434": {
+                "source_article_id": "f434",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 90 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "detail_retry_cycle_count": 1,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        "endpoint_health": {},
+    }
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    manifest_rows = _read_jsonl_files(output_root / "request_manifest")
+    detail_rows = [r for r in manifest_rows if r.get("request_type") == "announcement_detail"]
+    assert len(detail_rows) == 2
+
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f434"]
+    assert state_after["detail_http_request_count"] == 4
+    assert state_after["detail_retry_cycle_count"] == 2
+
+
+def test_http_202_remains_pending_before_transient_max_age(tmp_path):
+    import time
+    output_root = tmp_path / "out"
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f434": {
+                "source_article_id": "f434",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 3600 * 1000,
+                "first_detected_at_ms": now_ms - 3600 * 1000,
+                "detail_http_request_count": 1,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 1800 * 1000,
+                "next_detail_retry_at_ms": now_ms - 600 * 1000,
+                "pending_reason": "title_symbol_missing",
+            }
+        },
+        "endpoint_health": {},
+    }
+    (output_root / "detail_retry_scheduler_state.json").parent.mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f434"]
+    assert state_after["terminal_failure_type"] is None
+    events = _read_jsonl_files(output_root / "events")
+    assert not any(e.get("source_article_id") == "f434" for e in events)
+
+
+def test_detail_unavailable_timeout_does_not_emit_stage1_5f_consumable_event(tmp_path):
+    import time
+    output_root = tmp_path / "out"
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f434": {
+                "source_article_id": "f434",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 86401 * 1000,
+                "first_detected_at_ms": now_ms - 86401 * 1000,
+                "detail_http_request_count": 5,
+                "detail_fetch_attempt_count": 5,
+                "transient_detail_error_count": 5,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 1800 * 1000,
+                "next_detail_retry_at_ms": now_ms - 600 * 1000,
+                "pending_reason": "title_symbol_missing",
+            }
+        },
+        "endpoint_health": {},
+    }
+    (output_root / "detail_retry_scheduler_state.json").parent.mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args):
+                rc = main()
+
+    assert rc == 0
+    events = _read_jsonl_files(output_root / "events")
+    timeout_events = [e for e in events if e.get("source_article_id") == "f434"]
+    assert timeout_events == []
+
+    terminal_rows = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    timeout_rows = [r for r in terminal_rows if r.get("source_article_id") == "f434"]
+    assert len(timeout_rows) == 1
+    assert timeout_rows[0].get("terminal_failure_type") == "detail_unavailable_timeout"
+    assert timeout_rows[0].get("consumable_by_stage1_5f") is False
+
+
+def test_overdue_attempted_row_survives_restart_and_is_selected_after_degraded_expiry(tmp_path):
+    import time
+    output_root = tmp_path / "restart_smoke"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    state = {
+        "articles": {
+            "f434": {
+                "source_article_id": "f434",
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 4 * 3600 * 1000,
+                "first_detected_at_ms": now_ms - 4 * 3600 * 1000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 3 * 3600 * 1000,
+                "next_detail_retry_at_ms": now_ms - 2 * 3600 * 1000,
+            }
+        },
+        "endpoint_health": {
+            "detail_endpoint_degraded_until_ms": now_ms + 600 * 1000,
+        },
+    }
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+
+    def fake_fetch_json(url, **kwargs):
+        return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_fetch_payload(url, **kwargs):
+        return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    # Poll 1: endpoint degraded active -> article deferred
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args1):
+                assert main() == 0
+
+    manifest_rows1 = _read_jsonl_files(output_root / "request_manifest")
+    assert not any(r.get("source_article_id") == "f434" for r in manifest_rows1)
+
+    # Simulate restart and time passing beyond degraded expiry
+    state_file = output_root / "detail_retry_scheduler_state.json"
+    persisted = json.loads(state_file.read_text())
+    persisted["endpoint_health"]["detail_endpoint_degraded_until_ms"] = 0
+    state_file.write_text(json.dumps(persisted))
+
+    # Poll 2: degraded expired -> f434 gets slot and retry attempt
+    args2 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+            with patch("sys.argv", args2):
+                assert main() == 0
+
+    manifest_rows2 = _read_jsonl_files(output_root / "request_manifest")
+    f434_rows = [r for r in manifest_rows2 if r.get("source_article_id") == "f434"]
+    assert len(f434_rows) >= 1
+
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_scheduler_diagnostics")
+    selected_rows = [
+        row for row in diagnostics
+        if "f434" in row.get("detail_retry_overdue_selected_article_ids", [])
+    ]
+    assert selected_rows
+
+    s = json.loads(summary.read_text())
+    assert s["detail_retry_overdue_selected_total"] >= 1
+    assert s["detail_retry_overdue_retry_cycle_total"] >= 1

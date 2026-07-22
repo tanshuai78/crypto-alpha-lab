@@ -38,6 +38,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_summary imp
     build_smoke_summary,
 )
 from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+    ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES,
     select_detail_retry_attempts,
     compute_detail_transient_backoff_ms,
     serialize_retry_articles,
@@ -46,6 +47,7 @@ from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import
     classify_never_attempted_defer_state,
     update_detail_endpoint_health,
     update_detail_endpoint_health_by_variant,
+    summarize_detail_retry_overdue_state,
 )
 
 
@@ -226,13 +228,93 @@ TRANSIENT_DETAIL_HTTP_STATUSES = {202, 408, 425, 429, 500, 502, 503, 504}
 def is_transient_detail_fetch_error(fetch_res: dict) -> bool:
     error = fetch_res.get("error") or ""
     status = fetch_res.get("http_status")
-    if error == "empty_detail_payload":
+    if error in {"empty_detail_payload", "fixture_missing"}:
         return True
     if status in TRANSIENT_DETAIL_HTTP_STATUSES:
         return True
     if error.startswith("detail_payload_http_status_5"):
         return True
     return False
+
+
+def is_overdue_retryable_failure_class(state: dict) -> bool:
+    return (
+        state.get("detail_retryable") is not False
+        and state.get("last_detail_failure_class") in ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES
+    )
+
+
+def build_detail_retry_scheduler_diagnostic_row(
+    *,
+    detail_retry_state: dict[str, dict],
+    attempt_codes: list[str],
+    now_ms: int,
+    endpoint_degraded_until_ms: int,
+    detail_budget_per_poll: int,
+    min_never_attempted_slots_per_poll: int,
+    overdue_attempted_min_interval_ms: int,
+    max_article_ids: int = 20,
+) -> dict:
+    selected = set(attempt_codes)
+    selected_overdue = []
+    deferred_reason_counts: dict[str, int] = {}
+    deferred_count = 0
+    never_attempted_exists = any(
+        int((state.get("detail_http_request_count") if state.get("detail_http_request_count") is not None else state.get("detail_fetch_attempt_count", 0)) or 0) <= 0
+        and not state.get("terminal_state")
+        for state in detail_retry_state.values()
+    )
+
+    def add_defer(reason: str) -> None:
+        nonlocal deferred_count
+        deferred_count += 1
+        deferred_reason_counts[reason] = deferred_reason_counts.get(reason, 0) + 1
+
+    for code, state in detail_retry_state.items():
+        if state.get("terminal_state"):
+            continue
+        http_count = int(state.get("detail_http_request_count") or 0)
+        fetch_count = int(state.get("detail_fetch_attempt_count") or 0)
+        next_retry = int(state.get("next_detail_retry_at_ms") or 0)
+        if http_count <= 0:
+            continue
+        if next_retry <= 0:
+            add_defer("missing_next_retry_at")
+            continue
+        if now_ms < next_retry:
+            continue
+
+        if code in selected:
+            selected_overdue.append(code)
+            continue
+
+        if now_ms < endpoint_degraded_until_ms:
+            add_defer("endpoint_degraded_active")
+        elif not is_overdue_retryable_failure_class(state):
+            add_defer("state_not_retryable")
+        elif now_ms < int(state.get("last_retry_at_ms") or 0) + overdue_attempted_min_interval_ms:
+            add_defer("minimum_interval_not_elapsed")
+        elif detail_budget_per_poll <= 0:
+            add_defer("http_request_budget_exhausted")
+        elif never_attempted_exists and detail_budget_per_poll <= min_never_attempted_slots_per_poll:
+            add_defer("never_attempted_slot_protection")
+        else:
+            add_defer("logical_retry_budget_exhausted")
+
+        if http_count == 0 and fetch_count > 0:
+            deferred_reason_counts["attempt_manifest_mismatch"] = (
+                deferred_reason_counts.get("attempt_manifest_mismatch", 0) + 1
+            )
+
+    return {
+        "timestamp_ms": now_ms,
+        "audit_metadata_version": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 1),
+        "detail_retry_overdue_selected_count": len(selected_overdue),
+        "detail_retry_overdue_deferred_count": deferred_count,
+        "detail_retry_overdue_deferred_reason_counts": deferred_reason_counts,
+        "detail_retry_overdue_selected_article_ids": selected_overdue[:max_article_ids],
+        "detail_retry_overdue_selected_article_ids_truncated": len(selected_overdue) > max_article_ids,
+    }
 
 
 def classify_detail_attempt_result(fetch_res: dict) -> str:
@@ -402,6 +484,8 @@ def main():
             "symbol_onboard_times_ms": article.get("symbol_onboard_times_ms", {}),
             "symbol_effective_launch_times_ms": article.get("symbol_effective_launch_times_ms", {}),
             "launch_time_source": article.get("launch_time_source"),
+            "last_detail_failure_class": article.get("last_detail_failure_class"),
+            "detail_retryable": article.get("detail_retryable"),
         }
 
     detail_fetch_attempted_count = 0
@@ -431,6 +515,9 @@ def main():
     detail_endpoint_degraded_active = 0
     detail_degraded_recent_retry_count = 0
     detail_success_symbols_empty_count = 0
+    detail_retry_overdue_selected_total = 0
+    detail_retry_overdue_deferred_total = 0
+    detail_retry_overdue_retry_cycle_total = 0
 
 
     candidate_validation_pending_count = 0
@@ -678,7 +765,7 @@ def main():
                                 "detail_fetch_attempt_count": persisted.get("detail_fetch_attempt_count", 0),
                                 "transient_detail_error_count": persisted.get("transient_detail_error_count", 0),
                                 "non_transient_detail_error_count": persisted.get("non_transient_detail_error_count", 0),
-                                "retry_count": persisted.get("non_transient_detail_error_count", 0),
+                                "retry_count": persisted.get("retry_count", persisted.get("detail_fetch_attempt_count", 0)),
                                 "last_retry_at_ms": persisted.get("last_retry_at_ms", 0),
                                 "next_detail_retry_at_ms": persisted.get("next_detail_retry_at_ms", 0),
                                 "first_deferred_at_ms": persisted.get("first_deferred_at_ms"),
@@ -712,7 +799,7 @@ def main():
                                 "detail_fetch_attempt_count": persisted.get("detail_fetch_attempt_count", 0),
                                 "transient_detail_error_count": persisted.get("transient_detail_error_count", 0),
                                 "non_transient_detail_error_count": persisted.get("non_transient_detail_error_count", 0),
-                                "retry_count": persisted.get("non_transient_detail_error_count", 0),
+                                "retry_count": persisted.get("retry_count", persisted.get("detail_fetch_attempt_count", 0)),
                                 "last_retry_at_ms": persisted.get("last_retry_at_ms", 0),
                                 "next_detail_retry_at_ms": persisted.get("next_detail_retry_at_ms", 0),
                                 "first_deferred_at_ms": persisted.get("first_deferred_at_ms"),
@@ -722,6 +809,8 @@ def main():
                                 "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"],
                                 "symbol_extraction_source": persisted.get("symbol_extraction_source", "none"),
                                 "pending_reason": persisted.get("pending_reason", "title_symbol_missing"),
+                                "last_detail_failure_class": persisted.get("last_detail_failure_class"),
+                                "detail_retryable": persisted.get("detail_retryable"),
                             }
 
 
@@ -754,6 +843,9 @@ def main():
                 degraded_recent_retry_max_cycles=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_RETRY_MAX_CYCLES,
                 max_first_attempt_delay_polls=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_POLLS,
                 max_first_attempt_delay_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MAX_FIRST_ATTEMPT_DELAY_MS,
+                overdue_attempted_retry_budget_per_poll=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_ATTEMPTED_RETRY_BUDGET_PER_POLL,
+                overdue_attempted_min_interval_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_ATTEMPTED_MIN_INTERVAL_SEC * 1000,
+                min_never_attempted_slots_per_poll=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MIN_NEVER_ATTEMPTED_SLOTS_PER_POLL,
             )
             if now_ms < endpoint_degraded_until_ms:
                 detail_degraded_recent_retry_count += sum(
@@ -762,6 +854,23 @@ def main():
                     if int(detail_retry_state.get(code, {}).get("detail_http_request_count") or 0) > 0
                     and int(detail_retry_state.get(code, {}).get("transient_detail_error_count") or 0) > 0
                 )
+            scheduler_diag = build_detail_retry_scheduler_diagnostic_row(
+                detail_retry_state=detail_retry_state,
+                attempt_codes=attempt_codes,
+                now_ms=now_ms,
+                endpoint_degraded_until_ms=endpoint_degraded_until_ms,
+                detail_budget_per_poll=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL,
+                min_never_attempted_slots_per_poll=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MIN_NEVER_ATTEMPTED_SLOTS_PER_POLL,
+                overdue_attempted_min_interval_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_ATTEMPTED_MIN_INTERVAL_SEC * 1000,
+            )
+            if (
+                scheduler_diag["detail_retry_overdue_selected_count"] > 0
+                or scheduler_diag["detail_retry_overdue_deferred_count"] > 0
+            ):
+                append_jsonl(stream_paths["detail_retry_scheduler_diagnostics"], scheduler_diag)
+                detail_retry_overdue_selected_total += scheduler_diag["detail_retry_overdue_selected_count"]
+                detail_retry_overdue_deferred_total += scheduler_diag["detail_retry_overdue_deferred_count"]
+                detail_retry_overdue_retry_cycle_total += scheduler_diag["detail_retry_overdue_selected_count"]
 
             # Pass 1: Expiry, validation, and scheduling checks
             to_fetch_codes = []
@@ -840,7 +949,12 @@ def main():
                     norm_event["launch_time_source"] = state.get("launch_time_source")
 
                     event_id = norm_event["event_id"]
-                    if event_id not in seen_event_ids:
+                    if terminal_fail_type == "detail_unavailable_timeout":
+                        terminal_diag = dict(norm_event)
+                        terminal_diag["consumable_by_stage1_5f"] = False
+                        terminal_diag["diagnostic_stream"] = "detail_retry_terminal_diagnostics"
+                        append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], terminal_diag)
+                    elif event_id not in seen_event_ids:
                         seen_event_ids.add(event_id)
                         append_jsonl(stream_paths["events"], norm_event)
                         events_detected.append(norm_event)
@@ -848,10 +962,15 @@ def main():
                     detail_retry_state.pop(code, None)
                     continue
 
-                # 2. Check max retries exhausted
+                # 2. Check max retries exhausted or non-retryable hard failure
                 max_retries_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
+                is_non_retryable = (
+                    state.get("detail_retryable") is False
+                    and int(state.get("detail_fetch_attempt_count") or 0) > 0
+                    and int(state.get("retry_count") or 0) > 0
+                )
                 if (
-                    state["retry_count"] >= max_retries_limit
+                    (state["retry_count"] >= max_retries_limit or is_non_retryable)
                     and "candidate_symbols" not in state
                     and state.get("transient_detail_error_count", 0) == 0
                 ):
@@ -1610,10 +1729,21 @@ def main():
                     if err_reason == "empty_detail_payload":
                         chk_res["error"] = "empty_detail_payload"
 
+                    status = chk_res.get("http_status")
+                    if status == 202:
+                        attempt_res_class = "http_202_empty"
+                    elif status == 200 and chk_res.get("payload_size_bytes") == 0:
+                        attempt_res_class = "http_200_empty_untrusted_payload"
+                    elif status:
+                        attempt_res_class = f"http_{status}"
+                    else:
+                        attempt_res_class = "network_or_fixture_error"
                     if is_transient_detail_fetch_error(chk_res):
                         state["transient_detail_error_count"] = state.get("transient_detail_error_count", 0) + 1
                         state["retry_count"] = int(state.get("retry_count") or 0) + 1
                         state["last_retry_at_ms"] = now_ms
+                        state["last_detail_failure_class"] = attempt_res_class
+                        state["detail_retryable"] = True
                         state["next_detail_retry_at_ms"] = now_ms + compute_detail_transient_backoff_ms(
                             state["transient_detail_error_count"],
                             base_sec=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC,
@@ -1623,6 +1753,9 @@ def main():
                     else:
                         state["non_transient_detail_error_count"] = state.get("non_transient_detail_error_count", 0) + 1
                         state["retry_count"] = state["non_transient_detail_error_count"]
+                        state["last_detail_failure_class"] = f"http_{chk_res.get('http_status')}" if chk_res.get("http_status") else "non_transient_error"
+                        state["detail_retryable"] = False
+
 
                         max_retries_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
                         if state["retry_count"] >= max_retries_limit:
@@ -1813,6 +1946,14 @@ def main():
         if int(state.get("detail_http_request_count") or 0) != detail_manifest_counts_by_article.get(code, 0)
     )
 
+    summary_now_ms = int(time.time() * 1000)
+    overdue_diag = summarize_detail_retry_overdue_state(
+        detail_retry_state,
+        now_ms=summary_now_ms,
+        warn_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_WARN_SEC * 1000,
+        hard_warn_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_HARD_WARN_SEC * 1000,
+    )
+
     summary = build_smoke_summary(
         upstream_evidence=evidence_res,
         heartbeats=heartbeats,
@@ -1826,6 +1967,17 @@ def main():
             "symbol_parsed_event_count": symbol_parsed_event_count,
             "symbol_parse_failed_count": symbol_parse_failed_count,
             "deduped_new_event_count": len(events_detected),
+            "detail_retry_overdue_pending_count": overdue_diag["detail_retry_overdue_pending_count"],
+            "detail_retry_overdue_attempted_count": overdue_diag["detail_retry_overdue_attempted_count"],
+            "detail_retry_overdue_never_attempted_count": overdue_diag["detail_retry_overdue_never_attempted_count"],
+            "detail_retry_due_timestamp_missing_count": overdue_diag["detail_retry_due_timestamp_missing_count"],
+            "detail_attempt_manifest_mismatch_count": detail_fetch_attempt_manifest_mismatch_count,
+            "detail_retry_oldest_overdue_ms": overdue_diag["detail_retry_oldest_overdue_ms"],
+            "detail_retry_overdue_warn_active": overdue_diag["detail_retry_overdue_warn_active"],
+            "detail_retry_overdue_hard_warn_active": overdue_diag["detail_retry_overdue_hard_warn_active"],
+            "detail_retry_overdue_selected_total": detail_retry_overdue_selected_total,
+            "detail_retry_overdue_deferred_total": detail_retry_overdue_deferred_total,
+            "detail_retry_overdue_retry_cycle_total": detail_retry_overdue_retry_cycle_total,
             "detail_fetch_attempted_count": detail_fetch_attempted_count,
             "detail_fetch_success_count": detail_fetch_success_count,
             "detail_fetch_failed_count": detail_fetch_failed_count,

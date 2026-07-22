@@ -157,3 +157,63 @@ def test_summary_includes_detail_fallback_counters():
     assert summary["detail_fetch_fallback_success_count"] == 7
     assert summary["detail_fetch_attempt_manifest_mismatch_count"] == 0
 
+
+def test_summary_includes_detail_retry_overdue_diagnostics():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={
+            "detail_retry_overdue_pending_count": 1,
+            "detail_retry_overdue_attempted_count": 1,
+            "detail_retry_overdue_never_attempted_count": 0,
+            "detail_retry_due_timestamp_missing_count": 0,
+            "detail_attempt_manifest_mismatch_count": 0,
+            "detail_retry_oldest_overdue_ms": 70 * 60 * 1000,
+            "detail_retry_overdue_warn_active": True,
+            "detail_retry_overdue_hard_warn_active": False,
+            "detail_retry_overdue_selected_total": 1,
+            "detail_retry_overdue_deferred_total": 2,
+            "detail_retry_overdue_retry_cycle_total": 1,
+        },
+    )
+    assert summary["detail_retry_overdue_pending_count"] == 1
+    assert summary["detail_retry_overdue_attempted_count"] == 1
+    assert summary["detail_retry_overdue_never_attempted_count"] == 0
+    assert summary["detail_retry_due_timestamp_missing_count"] == 0
+    assert summary["detail_attempt_manifest_mismatch_count"] == 0
+    assert summary["detail_retry_oldest_overdue_ms"] == 70 * 60 * 1000
+    assert summary["detail_retry_overdue_warn_active"] is True
+    assert summary["detail_retry_overdue_hard_warn_active"] is False
+    assert summary["detail_retry_overdue_selected_total"] == 1
+    assert summary["detail_retry_overdue_deferred_total"] == 2
+    assert summary["detail_retry_overdue_retry_cycle_total"] == 1
+
+
+def test_overdue_pending_summary_is_current_gauge_not_cumulative_counter():
+    summary1 = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={"detail_retry_overdue_pending_count": 1},
+    )
+    summary2 = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={"detail_retry_overdue_pending_count": 1},
+    )
+    assert summary1["detail_retry_overdue_pending_count"] == 1
+    assert summary2["detail_retry_overdue_pending_count"] == 1

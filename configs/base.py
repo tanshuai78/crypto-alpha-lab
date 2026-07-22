@@ -1601,6 +1601,22 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL = 4
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FALLBACK_MAX_URLS_PER_ARTICLE = 2
 # Maximum detail URL variants attempted for one article in one logical retry cycle.
 
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_ATTEMPTED_RETRY_BUDGET_PER_POLL = 1
+# Bounded fairness slot for already-attempted transient rows whose next_detail_retry_at_ms is overdue.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_ATTEMPTED_MIN_INTERVAL_SEC = 10 * 60
+# Minimum interval between retry cycles for an overdue attempted transient article.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_MIN_NEVER_ATTEMPTED_SLOTS_PER_POLL = 1
+# The overdue attempted reserved slot must never consume the final first-attempt slot.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_WARN_SEC = 30 * 60
+# Summary warning threshold for overdue pending detail retries.
+
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_HARD_WARN_SEC = 2 * 60 * 60
+# Summary hard warning threshold for severely overdue pending detail retries.
+
+
 
 
 

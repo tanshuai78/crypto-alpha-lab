@@ -327,26 +327,26 @@ tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/
 tmux kill-session -t stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
 
 # 停止旧 1.5D collector。
 tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
 
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep || true
 ```
 
 如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程，避免多个进程同时采集或写入不同证据 root。
 
-### 7.4 启动 Stage 1.5D detail endpoint fallback hotfix collector
+### 7.4 启动 Stage 1.5D detail retry overdue starvation hotfix collector
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_detail_endpoint_fallback_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_detail_retry_overdue_starvation_hotfix"
 
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
   echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
@@ -354,7 +354,7 @@ if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
 fi
 mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -385,9 +385,9 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
     data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
 fi
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
 STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_detail_endpoint_fallback_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_detail_retry_overdue_starvation_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
@@ -422,8 +422,8 @@ bootstrap 只建立启动时的新旧边界，不对 bootstrap 前 rows 产生�
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
@@ -432,7 +432,7 @@ if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
   exit 1
 fi
 
-tmux new -d -s stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix "
+tmux new -d -s stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -454,8 +454,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
 
 date -u
 tmux ls
@@ -480,8 +480,8 @@ find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/n
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -510,11 +510,11 @@ tail -n 3 "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
 tail -n 3 "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
 ```
 
-### 8.3 Stage 1.5D scheduler/fallback 专项检查
+### 8.3 Stage 1.5D scheduler/overdue retry 专项检查
 
 ```bash
 cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null | python -m json.tool | grep -E \
-"detail_budget_deferred_count|detail_budget_starved_count|detail_never_attempted_expired_count|detail_first_attempt_sla_breach_count|detail_scheduler_pending_count|detail_scheduler_backoff_count|detail_endpoint_degraded|detail_degraded_recent_retry_count|detail_fetch_fallback_attempt_count|detail_fetch_fallback_success_count|detail_fetch_attempt_manifest_mismatch_count" || true
+"detail_budget_deferred_count|detail_budget_starved_count|detail_never_attempted_expired_count|detail_first_attempt_sla_breach_count|detail_scheduler_pending_count|detail_scheduler_backoff_count|detail_endpoint_degraded|detail_degraded_recent_retry_count|detail_fetch_fallback_attempt_count|detail_fetch_fallback_success_count|detail_fetch_attempt_manifest_mismatch_count|detail_retry_overdue_pending_count|detail_retry_overdue_attempted_count|detail_retry_due_timestamp_missing_count|detail_attempt_manifest_mismatch_count|detail_retry_oldest_overdue_ms|detail_retry_overdue_warn_active|detail_retry_overdue_hard_warn_active|detail_retry_overdue_selected_total|detail_retry_overdue_deferred_total|detail_retry_overdue_retry_cycle_total" || true
 
 python - <<'PY'
 import json
@@ -543,6 +543,9 @@ if state_path.exists():
             "title": (row.get("title") or "")[:120],
         })
 PY
+
+find "$STAGE1_5D_EVENTS_OUT/detail_retry_scheduler_diagnostics" -type f 2>/dev/null | sort | tail -n 5 | xargs tail -n 20 2>/dev/null || true
+find "$STAGE1_5D_EVENTS_OUT/detail_retry_terminal_diagnostics" -type f 2>/dev/null | sort | tail -n 5 | xargs tail -n 20 2>/dev/null || true
 ```
 
 判定标准：
@@ -552,6 +555,8 @@ PY
 正常: summary 可读 detail_fetch_fallback_attempt_count / detail_fetch_fallback_success_count。
 正常: endpoint_health_by_variant 可区分 primary 和 fallback URL variant。
 正常: 新 no-symbol futures article 有 announcement_detail request row，或仍处于 scheduler pending/backoff/deferred。
+正常: overdue selected/deferred totals 可读；若有 deferred，diagnostics 中必须出现原因。
+正常: detail_unavailable_timeout 只出现在 detail_retry_terminal_diagnostics，且 consumable_by_stage1_5f=false。
 异常: detail_fetch_attempt_manifest_mismatch_count > 0。
 异常: fallback 请求数量突破 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL。
 异常: 429/5xx/timeout/url_validation_failed 后立即 fallback。
@@ -611,8 +616,8 @@ source .venv/bin/activate
 
 export ARTICLE_ID="6cbb1b11a9c843949624cf2eacaac8b4"
 export SYMBOL="SPCXUSD1"
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
 
 python - <<'PY'
 import json
@@ -908,6 +913,50 @@ live_trading_allowed = false
 4. 不能直接实现 Stage 1.5H simulator。
 5. 不能声明 execution feasibility，更不能进入 paper/live。
 ```
+
+### 11.1 SPCXUSD1 Stage 1.5G clean evidence 主结论（2026-07-22）
+
+SPCXUSD1 已完成一轮 12h Stage 1.5F observation，并在 2026-07-22 Stage 1.5G review 中得到 clean pass：
+
+```text
+stage1_5g_review_summary = data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json
+stage1_5g_review_markdown = docs/reviews/2026-07-22-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md
+
+decision = stage1_5g_depth_evidence_clean_pass
+allowed_next_action = write_stage1_5h_design_or_shadow_simulator_design
+clean_depth_evidence_pass = true
+quarantined_depth_evidence_pass = false
+quarantine_candidate = false
+formal_announcement_and_launch_count = 1
+invalid_book_row_count = 0
+book_availability_ratio = 0.9986111111111111
+depth_quality_clean_mode_available = true
+depth_quality_quarantined_mode_available = false
+blockers = []
+```
+
+本结论取代前期关于 SPCXUSD1 只能作为 recovery/probe/regression candidate 的临时判断。当前应把 SPCXUSD1 作为 Stage 1.5G clean evidence 主样本只读保留。
+
+这证明：
+
+```text
+1. Stage 1.5D delayed-launch / pending_pre_trading handoff 路径可工作。
+2. Stage 1.5F 能在合约上线后完成 12h live public depth observation。
+3. Stage 1.5G quarantine-aware reviewer 对该样本给出 clean pass，不需要 quarantine。
+4. 1.5D -> 1.5F -> 1.5G 的 formal announcement_and_launch_time depth evidence 链路跑通。
+```
+
+这仍不证明：
+
+```text
+alpha；
+execution feasibility；
+maker-first fill rate；
+entry/exit rule；
+paper/live trading readiness。
+```
+
+允许的下一步是编写 Stage 1.5H clean-input design / shadow simulator design plan；不允许直接接入 paper/live 或声明执行可行性。
 
 后续新 root 完成 12h observation 后，再运行 Stage 1.5G：
 
@@ -1353,4 +1402,42 @@ live_depth_evidence_basis = launch_time_only
 3. 该修复只降低 delayed launch 盘口采集被 running watermark 挤掉的风险。
 4. paper/live/execution/alpha flags 继续保持 false。
 5. 部署后建议新建 1.5D/1.5F root，避免旧 root 混用旧 eligibility 口径。
+```
+
+---
+
+## 16. 2026-07-21 f434 Multiple TradFi Missed-Event Diagnostic & Stage 1.5D Overdue Starvation Hotfix
+
+### 16.1 事件诊断纪录
+
+```text
+2026-07-21 f434 Multiple TradFi missed-event diagnostic:
+  article list capture succeeded
+  detail endpoint returned repeated 202 empty
+  candidate_symbols remained null
+  next_detail_retry overdue ~= 19.7h
+  endpoint degraded window expired ~= 10.8h
+  1.5D event not emitted
+  1.5F accepted/rejected absent
+  result = missed formal 1.5F evidence
+  required action = Stage 1.5D detail retry overdue starvation hotfix
+```
+
+### 16.2 证据边界
+
+```text
+This missed event must not be manually backfilled into formal Stage 1.5F evidence.
+It may only be used as regression/recovery validation for the overdue starvation hotfix.
+```
+
+### 16.3 部署后检查点
+
+```text
+1. New 1.5D root heartbeat grows (suffix = _7d_detail_retry_overdue_starvation_hotfix).
+2. New 1.5F root heartbeat grows (suffix = _7d_detail_retry_overdue_starvation_hotfix).
+3. Root suffix matches overdue hotfix.
+4. detail_retry_overdue_pending_count is present in summary.
+5. pending articles with next_detail_retry_at_ms <= now appear in manifest retries or explicit overdue diagnostics.
+6. 1.5F continues using the new root and accepts only emitted event rows.
+7. old root remains read-only.
 ```

@@ -34,6 +34,8 @@ def build_stream_paths(output_root: str | Path, timestamp_ms: int) -> dict[str, 
         "raw_payloads": build_daily_path(root_path, "raw_payloads", timestamp_ms),
         "heartbeats": build_daily_path(root_path, "heartbeats", timestamp_ms),
         "request_manifest": build_daily_path(root_path, "request_manifest", timestamp_ms),
+        "detail_retry_scheduler_diagnostics": build_daily_path(root_path, "detail_retry_scheduler_diagnostics", timestamp_ms),
+        "detail_retry_terminal_diagnostics": build_daily_path(root_path, "detail_retry_terminal_diagnostics", timestamp_ms),
         "summary": root_path / "binance_futures_launch_smoke_summary.json",
     }
 
@@ -87,4 +89,3 @@ def write_detail_payload(root: str | Path, timestamp_ms: int, source_article_id:
         "payload_size_bytes": len(encoded_bytes),
         "payload_sha256": sha256_hash,
     }
-

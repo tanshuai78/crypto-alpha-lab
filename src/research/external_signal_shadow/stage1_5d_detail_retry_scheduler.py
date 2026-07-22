@@ -5,6 +5,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DETAIL_RETRY_SCHEDULER_STATE_FILENAME = "detail_retry_scheduler_state.json"
+ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES = {
+    "http_202_empty",
+    "http_200_empty_untrusted_payload",
+}
 
 
 def compute_detail_transient_backoff_ms(
@@ -29,6 +33,9 @@ def select_detail_retry_attempts(
     degraded_recent_retry_max_cycles: int | None = None,
     max_first_attempt_delay_polls: int | None = None,
     max_first_attempt_delay_ms: int | None = None,
+    overdue_attempted_retry_budget_per_poll: int = 0,
+    overdue_attempted_min_interval_ms: int | None = None,
+    min_never_attempted_slots_per_poll: int = 1,
 ) -> list[str]:
     if detail_budget_per_poll <= 0:
         return []
@@ -37,8 +44,6 @@ def select_detail_retry_attempts(
     attempted = []
     for code, state in detail_retry_state.items():
         if state.get("terminal_state"):
-            continue
-        if now_ms < int(state.get("next_detail_retry_at_ms") or 0):
             continue
         attempt_count = state.get("detail_http_request_count")
         if attempt_count is None:
@@ -62,15 +67,16 @@ def select_detail_retry_attempts(
         )
     )
 
-    selected_never = never_attempted[:detail_budget_per_poll]
-    remaining_budget = detail_budget_per_poll - len(selected_never)
-
     if now_ms < endpoint_degraded_until_ms:
+        selected_never = never_attempted[:detail_budget_per_poll]
+        remaining_budget = detail_budget_per_poll - len(selected_never)
         if remaining_budget <= 0 or degraded_recent_retry_budget_per_poll <= 0:
             selected_attempted = []
         else:
             eligible_recent = []
             for code, state in attempted:
+                if now_ms < int(state.get("next_detail_retry_at_ms") or 0):
+                    continue
                 first_detected_at_ms = int(state.get("first_detected_at_ms") or 0)
                 if degraded_recent_article_window_ms is not None:
                     if now_ms - first_detected_at_ms > degraded_recent_article_window_ms:
@@ -94,19 +100,94 @@ def select_detail_retry_attempts(
                 )
             )
             selected_attempted = eligible_recent[:min(remaining_budget, degraded_recent_retry_budget_per_poll)]
+        ordered = selected_never + selected_attempted
     else:
-        attempted.sort(
-            key=lambda item: (
-                int(item[1].get("last_retry_at_ms") or 0),
-                int(item[1].get("transient_detail_error_count") or 0),
-                int(item[1].get("first_detected_at_ms") or 0),
-                item[0],
+        # Endpoint degraded is not active
+        selected_overdue = []
+        if overdue_attempted_retry_budget_per_poll > 0:
+            overdue_slots = min(
+                overdue_attempted_retry_budget_per_poll,
+                max(0, detail_budget_per_poll - (min_never_attempted_slots_per_poll if never_attempted else 0)),
             )
-        )
-        selected_attempted = attempted[:remaining_budget]
+            if overdue_slots > 0:
+                eligible_overdue = []
+                for code, state in attempted:
+                    next_retry = int(state.get("next_detail_retry_at_ms") or 0)
+                    if next_retry <= 0:
+                        continue
+                    last_retry = int(state.get("last_retry_at_ms") or 0)
+                    min_interval = overdue_attempted_min_interval_ms or 0
+                    effective_due = max(next_retry, last_retry + min_interval)
+                    if now_ms < effective_due:
+                        continue
 
-    ordered = selected_never + selected_attempted
-    return [code for code, _ in ordered]
+                    if not _is_overdue_detail_retryable(state):
+                        continue
+
+                    eligible_overdue.append((code, state))
+
+                eligible_overdue.sort(
+                    key=lambda item: (
+                        int(item[1].get("next_detail_retry_at_ms") or 0),
+                        int(item[1].get("last_retry_at_ms") or 0),
+                        -int(item[1].get("transient_detail_error_count") or 0),
+                        int(item[1].get("first_detected_at_ms") or 0),
+                        item[0],
+                    )
+                )
+                selected_overdue = eligible_overdue[:overdue_slots]
+
+        selected_never = never_attempted[: detail_budget_per_poll - len(selected_overdue)]
+        overdue_codes = {code for code, _ in selected_overdue}
+
+        remaining_budget = detail_budget_per_poll - len(selected_never) - len(selected_overdue)
+        remaining_attempted = []
+        if remaining_budget > 0:
+            eligible_attempted = []
+            for code, state in attempted:
+                if code in overdue_codes:
+                    continue
+                next_retry = int(state.get("next_detail_retry_at_ms") or 0)
+                if next_retry <= 0 or now_ms < next_retry:
+                    continue
+
+                is_retryable = state.get("detail_retryable")
+                if is_retryable is False:
+                    continue
+                if is_retryable is None and not _is_overdue_detail_retryable(state):
+                    continue
+
+                eligible_attempted.append((code, state))
+
+            eligible_attempted.sort(
+                key=lambda item: (
+                    int(item[1].get("last_retry_at_ms") or 0),
+                    int(item[1].get("transient_detail_error_count") or 0),
+                    int(item[1].get("first_detected_at_ms") or 0),
+                    item[0],
+                )
+            )
+            remaining_attempted = eligible_attempted[:remaining_budget]
+
+
+        ordered = selected_never + selected_overdue + remaining_attempted
+
+    seen = set()
+    result = []
+    for code, _ in ordered:
+        if code not in seen:
+            seen.add(code)
+            result.append(code)
+    return result[:detail_budget_per_poll]
+
+
+def _is_overdue_detail_retryable(state: dict) -> bool:
+    if state.get("terminal_state"):
+        return False
+    if state.get("detail_retryable") is False:
+        return False
+    return state.get("last_detail_failure_class") in ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES
+
 
 
 
@@ -209,6 +290,8 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "symbol_onboard_times_ms": state.get("symbol_onboard_times_ms"),
             "symbol_effective_launch_times_ms": state.get("symbol_effective_launch_times_ms"),
             "launch_time_source": state.get("launch_time_source"),
+            "last_detail_failure_class": state.get("last_detail_failure_class"),
+            "detail_retryable": state.get("detail_retryable"),
         }
     return serialized
 
@@ -317,3 +400,61 @@ def update_detail_endpoint_health_by_variant(
 
     health["by_variant"][variant] = var_health
     return health
+
+
+def summarize_detail_retry_overdue_state(
+    detail_retry_state: dict[str, dict],
+    *,
+    now_ms: int,
+    warn_ms: int,
+    hard_warn_ms: int,
+    max_articles: int = 10,
+) -> dict:
+    overdue = []
+    due_timestamp_missing_count = 0
+    attempt_manifest_mismatch_count = 0
+    for code, state in detail_retry_state.items():
+        if state.get("terminal_state"):
+            continue
+        next_retry = int(state.get("next_detail_retry_at_ms") or 0)
+        http_count = int(state.get("detail_http_request_count") or 0)
+        fetch_count = int(state.get("detail_fetch_attempt_count") or 0)
+        if next_retry <= 0:
+            if http_count > 0:
+                due_timestamp_missing_count += 1
+            if http_count == 0 and fetch_count > 0:
+                attempt_manifest_mismatch_count += 1
+            continue
+        if now_ms < next_retry:
+            continue
+        overdue_ms = now_ms - next_retry
+        attempt_manifest_mismatch = http_count == 0 and fetch_count > 0
+        row = {
+            "source_article_id": code,
+            "title": state.get("title"),
+            "overdue_ms": overdue_ms,
+            "attempted": http_count > 0,
+            "detail_http_request_count": http_count,
+            "detail_fetch_attempt_count": fetch_count,
+            "detail_attempt_manifest_mismatch": attempt_manifest_mismatch,
+            "transient_detail_error_count": int(state.get("transient_detail_error_count") or 0),
+            "next_detail_retry_at_ms": next_retry,
+            "pending_reason": state.get("pending_reason"),
+            "candidate_symbols": state.get("candidate_symbols"),
+        }
+        overdue.append(row)
+
+    overdue.sort(key=lambda r: (-r["overdue_ms"], r["source_article_id"]))
+    oldest = overdue[0]["overdue_ms"] if overdue else 0
+    return {
+        "detail_retry_overdue_pending_count": len(overdue),
+        "detail_retry_overdue_attempted_count": sum(1 for r in overdue if r["attempted"]),
+        "detail_retry_overdue_never_attempted_count": sum(1 for r in overdue if not r["attempted"]),
+        "detail_retry_due_timestamp_missing_count": due_timestamp_missing_count,
+        "detail_attempt_manifest_mismatch_count": attempt_manifest_mismatch_count + sum(1 for r in overdue if r["detail_attempt_manifest_mismatch"]),
+        "legacy_attempt_count_fallback_used": False,
+        "detail_retry_oldest_overdue_ms": oldest,
+        "detail_retry_overdue_warn_active": oldest >= warn_ms if oldest else False,
+        "detail_retry_overdue_hard_warn_active": oldest >= hard_warn_ms if oldest else False,
+        "detail_retry_overdue_articles": overdue[:max_articles],
+    }

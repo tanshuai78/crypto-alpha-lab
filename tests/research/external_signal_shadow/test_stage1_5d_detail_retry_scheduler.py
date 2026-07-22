@@ -6,6 +6,7 @@ from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import
     load_detail_retry_scheduler_state,
     write_detail_retry_scheduler_state,
     update_detail_endpoint_health,
+    summarize_detail_retry_overdue_state,
 )
 from pathlib import Path
 
@@ -466,3 +467,444 @@ def test_serialize_retry_articles_fills_http_request_and_retry_cycle_counts():
     serialized = serialize_retry_articles({"a": {"source_article_id": "a"}})
     assert serialized["a"]["detail_http_request_count"] == 0
     assert serialized["a"]["detail_retry_cycle_count"] == 0
+
+
+def test_overdue_attempted_transient_selected_after_endpoint_degraded_expires():
+    now_ms = 10_000_000
+    article = {
+        "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+        "detail_http_request_count": 2,
+        "detail_fetch_attempt_count": 2,
+        "detail_retry_cycle_count": 1,
+        "transient_detail_error_count": 1,
+        "last_detail_failure_class": "http_202_empty",
+        "detail_retryable": True,
+        "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+        "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+        "defer_count": 1,
+        "pending_reason": "title_symbol_missing",
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state={"f434": article},
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == ["f434"]
+
+
+def test_overdue_attempted_transient_gets_bounded_slot_even_with_never_attempted_backlog():
+    now_ms = 10_000_000
+    state = {
+        "fresh1": {
+            "first_detected_at_ms": now_ms - 3 * 60 * 1000,
+            "detail_http_request_count": 0,
+            "detail_fetch_attempt_count": 0,
+            "next_detail_retry_at_ms": 0,
+        },
+        "fresh2": {
+            "first_detected_at_ms": now_ms - 4 * 60 * 1000,
+            "detail_http_request_count": 0,
+            "detail_fetch_attempt_count": 0,
+            "next_detail_retry_at_ms": 0,
+        },
+        "fresh3": {
+            "first_detected_at_ms": now_ms - 5 * 60 * 1000,
+            "detail_http_request_count": 0,
+            "detail_fetch_attempt_count": 0,
+            "next_detail_retry_at_ms": 0,
+        },
+        "f434": {
+            "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+            "detail_http_request_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retry_cycle_count": 1,
+            "transient_detail_error_count": 1,
+            "last_detail_failure_class": "http_202_empty",
+            "detail_retryable": True,
+            "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+            "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            "defer_count": 1,
+            "pending_reason": "title_symbol_missing",
+        },
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state=state,
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert "f434" in selected
+    assert len(selected) <= 3
+    assert len(selected) == len(set(selected))
+
+
+def test_overdue_slot_is_within_total_budget_not_additive():
+    now_ms = 10_000_000
+    state = {
+        f"fresh{i}": {
+            "first_detected_at_ms": now_ms - i * 60_000,
+            "detail_http_request_count": 0,
+            "detail_fetch_attempt_count": 0,
+            "next_detail_retry_at_ms": 0,
+        }
+        for i in range(1, 5)
+    }
+    state["f434"] = {
+        "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+        "detail_http_request_count": 2,
+        "detail_fetch_attempt_count": 2,
+        "detail_retry_cycle_count": 1,
+        "transient_detail_error_count": 1,
+        "last_detail_failure_class": "http_202_empty",
+        "detail_retryable": True,
+        "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+        "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state=state,
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert len(selected) <= 3
+
+
+def test_overdue_reserved_slot_never_consumes_last_first_attempt_slot():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "fresh": {
+                "first_detected_at_ms": now_ms - 60_000,
+                "detail_http_request_count": 0,
+                "detail_fetch_attempt_count": 0,
+                "next_detail_retry_at_ms": 0,
+            },
+            "f434": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            },
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == ["fresh"]
+
+
+def test_overdue_attempted_respects_minimum_retry_interval():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "f434": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 5 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms + 10 * 60 * 1000,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == []
+
+
+def test_attempted_state_with_missing_next_retry_is_diagnosed_not_selected():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "bad": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": 0,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == []
+
+
+def test_title_symbol_missing_alone_does_not_make_hard_failure_retryable():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "hard": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "pending_reason": "title_symbol_missing",
+                "last_detail_failure_class": "http_404",
+                "detail_retryable": False,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == []
+
+
+def test_missing_failure_class_does_not_make_title_symbol_missing_retryable():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "ambiguous": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "pending_reason": "title_symbol_missing",
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == []
+
+
+def test_http_500_transient_row_does_not_consume_overdue_reserved_slot_with_first_attempt_backlog():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "fresh": {
+                "first_detected_at_ms": now_ms - 5 * 60 * 1000,
+                "detail_http_request_count": 0,
+            },
+            "server_error": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_500",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == ["fresh"]
+
+
+def test_http_202_empty_attempted_row_is_retryable():
+    now_ms = 10_000_000
+    selected = select_detail_retry_attempts(
+        detail_retry_state={
+            "f434": {
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "detail_http_request_count": 2,
+                "transient_detail_error_count": 1,
+                "last_detail_failure_class": "http_202_empty",
+                "detail_retryable": True,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+            }
+        },
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms - 10 * 60 * 1000,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == ["f434"]
+
+
+def test_overdue_attempted_transient_not_selected_when_degraded_active_and_not_recent_allowed():
+    now_ms = 10_000_000
+    article = {
+        "first_detected_at_ms": now_ms - 10 * 60 * 60 * 1000,
+        "detail_http_request_count": 2,
+        "detail_fetch_attempt_count": 2,
+        "detail_retry_cycle_count": 10,
+        "transient_detail_error_count": 8,
+        "last_detail_failure_class": "http_202_empty",
+        "detail_retryable": True,
+        "last_retry_at_ms": now_ms - 4 * 60 * 60 * 1000,
+        "next_detail_retry_at_ms": now_ms - 3 * 60 * 60 * 1000,
+    }
+
+    selected = select_detail_retry_attempts(
+        detail_retry_state={"old": article},
+        now_ms=now_ms,
+        detail_budget_per_poll=3,
+        endpoint_degraded_until_ms=now_ms + 10 * 60 * 1000,
+        degraded_recent_article_window_ms=3 * 60 * 60 * 1000,
+        degraded_recent_retry_interval_ms=10 * 60 * 1000,
+        degraded_recent_retry_budget_per_poll=1,
+        degraded_recent_retry_max_cycles=6,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=10 * 60 * 1000,
+        min_never_attempted_slots_per_poll=1,
+    )
+
+    assert selected == []
+
+
+def test_summarize_detail_retry_overdue_state_reports_attempted_overdue_rows():
+    now_ms = 10_000_000
+    result = summarize_detail_retry_overdue_state(
+        {
+            "f434": {
+                "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                "terminal_state": False,
+            },
+            "future": {
+                "detail_http_request_count": 1,
+                "next_detail_retry_at_ms": now_ms + 10_000,
+                "terminal_state": False,
+            },
+        },
+        now_ms=now_ms,
+        warn_ms=30 * 60 * 1000,
+        hard_warn_ms=2 * 60 * 60 * 1000,
+    )
+
+    assert result["detail_retry_overdue_pending_count"] == 1
+    assert result["detail_retry_overdue_attempted_count"] == 1
+    assert result["detail_retry_oldest_overdue_ms"] == 70 * 60 * 1000
+    assert result["detail_retry_overdue_warn_active"] is True
+    assert result["detail_retry_overdue_hard_warn_active"] is False
+    assert result["detail_retry_overdue_articles"][0]["source_article_id"] == "f434"
+
+
+def test_summarize_overdue_skips_attempted_row_with_zero_next_retry():
+    now_ms = 10_000_000
+    result = summarize_detail_retry_overdue_state(
+        {
+            "attempted_missing_next": {
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "next_detail_retry_at_ms": 0,
+                "terminal_state": False,
+            }
+        },
+        now_ms=now_ms,
+        warn_ms=30 * 60 * 1000,
+        hard_warn_ms=2 * 60 * 60 * 1000,
+    )
+
+    assert result["detail_retry_overdue_attempted_count"] == 0
+    assert result["detail_retry_due_timestamp_missing_count"] == 1
+
+
+def test_overdue_diagnostics_do_not_hide_http_attempt_counter_mismatch():
+    now_ms = 10_000_000
+    result = summarize_detail_retry_overdue_state(
+        {
+            "legacy_mismatch": {
+                "detail_http_request_count": 0,
+                "detail_fetch_attempt_count": 2,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+                "terminal_state": False,
+            }
+        },
+        now_ms=now_ms,
+        warn_ms=30 * 60 * 1000,
+        hard_warn_ms=2 * 60 * 60 * 1000,
+    )
+
+    assert result["detail_retry_overdue_attempted_count"] == 0
+    assert result["detail_retry_overdue_attempted_count"] == 0
+    assert result["detail_attempt_manifest_mismatch_count"] == 1
+    assert result["legacy_attempt_count_fallback_used"] is False
+
+
+def test_overdue_attempted_queue_has_bounded_round_robin_service():
+    now_ms = 10_000_000
+    state = {
+        f"article_{i}": {
+            "source_article_id": f"article_{i}",
+            "first_detected_at_ms": now_ms - (100 + i) * 60_000,
+            "detail_http_request_count": 2,
+            "transient_detail_error_count": 1,
+            "last_detail_failure_class": "http_202_empty",
+            "detail_retryable": True,
+            "last_retry_at_ms": now_ms - (80 + i) * 60_000,
+            "next_detail_retry_at_ms": now_ms - (70 + i) * 60_000,
+        }
+        for i in range(3)
+    }
+
+    selected_set = set()
+    for poll in range(3):
+        current_now = now_ms + poll * 15 * 60_000
+        selected = select_detail_retry_attempts(
+            detail_retry_state=state,
+            now_ms=current_now,
+            detail_budget_per_poll=1,
+            endpoint_degraded_until_ms=0,
+            overdue_attempted_retry_budget_per_poll=1,
+            overdue_attempted_min_interval_ms=10 * 60_000,
+            min_never_attempted_slots_per_poll=0,
+        )
+        for code in selected:
+            selected_set.add(code)
+            state[code]["last_retry_at_ms"] = current_now
+            state[code]["next_detail_retry_at_ms"] = current_now + 60 * 60_000
+
+    assert selected_set == {"article_0", "article_1", "article_2"}

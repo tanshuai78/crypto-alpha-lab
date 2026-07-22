@@ -135,6 +135,17 @@ def build_smoke_summary(
         "detail_fetch_attempt_manifest_mismatch_count": counters.get(
             "detail_fetch_attempt_manifest_mismatch_count", 0
         ),
+        "detail_retry_overdue_pending_count": counters.get("detail_retry_overdue_pending_count", 0),
+        "detail_retry_overdue_attempted_count": counters.get("detail_retry_overdue_attempted_count", 0),
+        "detail_retry_overdue_never_attempted_count": counters.get("detail_retry_overdue_never_attempted_count", 0),
+        "detail_retry_due_timestamp_missing_count": counters.get("detail_retry_due_timestamp_missing_count", 0),
+        "detail_attempt_manifest_mismatch_count": counters.get("detail_attempt_manifest_mismatch_count", 0),
+        "detail_retry_oldest_overdue_ms": counters.get("detail_retry_oldest_overdue_ms", 0),
+        "detail_retry_overdue_warn_active": counters.get("detail_retry_overdue_warn_active", False),
+        "detail_retry_overdue_hard_warn_active": counters.get("detail_retry_overdue_hard_warn_active", False),
+        "detail_retry_overdue_selected_total": counters.get("detail_retry_overdue_selected_total", 0),
+        "detail_retry_overdue_deferred_total": counters.get("detail_retry_overdue_deferred_total", 0),
+        "detail_retry_overdue_retry_cycle_total": counters.get("detail_retry_overdue_retry_cycle_total", 0),
         "paper_trading_allowed": False,
         "live_trading_allowed": False,
         "execution_engine_allowed": False,
