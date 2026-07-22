@@ -28,12 +28,12 @@
 Stage 1.6A  Futures Delisting Notice
 Stage 1.6B  ETF / Institutional Flow Regime Diagnostic（快速证伪线）
 Stage 1.6C  Prediction Market Probability Shift
-Stage 1.6D  Scheduled Token Unlock / Emission
-Stage 1.6E  Margin / Borrow Enablement
-Stage 1.6F  Stablecoin / Exchange Flow Shock
-Stage 1.6G  Sentiment / Narrative Attention Spike
-Stage 1.6H  Spot Pair Addition After-First-Hour
-Stage 1.6I  Governance / Protocol / Tokenomics Events
+Stage 1.6D  Scheduled Unlock / Emission Source-Version Diagnostic（audit-first reserve）
+Stage 1.6E  Margin / Borrow Enablement Auxiliary Diagnostic（delayed）
+Stage 1.6F  Daily Exchange Flow Regime Diagnostic
+Stage 1.6G  Sentiment / Narrative Regime Journal（F&G + Google Trends only）
+Stage 1.6H  Listing Event Optional Observation / Discipline Track
+Stage 1.6I  Governance / Tokenomics Fundamental Reading Track
 ```
 
 ### Risk-veto 旁路线
@@ -152,12 +152,12 @@ alpha_interpretation_allowed = false
 | 1 | `futures_delisting_notice` | 中高 | 高 | 中 | 高 | 强制减仓流、流动性撤退、settlement timetable 压力 | futures-only source/schema/effective-time design |
 | 2 | `ETF / institutional flow regime diagnostic` | 高 | 中高 | 低 | 高 | BTC/ETH 日频 risk appetite regime label | source/available-time quick screen + regime diagnostic |
 | 3 | `prediction_market_probability_shift` | 中高 | 中高 | 中 | 中高 | 宏观/监管概率重定价 | source/schema/settlement audit |
-| 4 | `scheduled_token_unlock / emission` | 中 | 中低 | 中高 | 高 | 供给 overhang、提前定价 | calendar source/version audit |
-| 5 | `margin / borrow enablement` | 中 | 中高 | 中高 | 中 | shortability / leverage access shock | 单一产品族 source audit |
-| 6 | `stablecoin / exchange flow shock` | 中 | 中 | 高 | 中高 | 潜在购买力/卖压、流量状态 | address-label audit |
-| 7 | `sentiment / narrative attention spike` | 中 | 低中 | 高 | 中 | attention drift / volatility regime | source selection + bot/noise audit |
-| 8 | `spot pair addition after first hour` | 中低 | 高 | 中 | 中低 | 流动性迁移、attention drift | event-type split source audit |
-| 9 | `governance / protocol / tokenomics` | 低中 | 中 | 高 | 中高 | 供给/现金流/协议价值变化 | semantic/status source audit |
+| 4 | `scheduled_unlock / emission source-version diagnostic` | 中低 | 中低 | 中高 | 中 | point-in-time calendar 可验证性、recipient/onchain supply overhang 诊断 | source/version/available-time/recipient-contract audit |
+| 5 | `margin / borrow enablement auxiliary diagnostic` | 低中 | 中高 | 中高 | 中 | leverage shock veto、funding/OI regime 诊断 | 仅在 Extreme Funding 稳定运行后做 base_borrow_enablement schema audit |
+| 6 | `daily exchange flow regime diagnostic` | 中 | 中低 | 中高 | 中 | BTC exchange net position、日频资金状态 regime label | BTC exchange net position source/label audit |
+| 7 | `sentiment / narrative regime journal` | 低中 | 中 | 低 | 高 | F&G vol regime、自我情绪校准、Google Trends 叙事冷热标签 | F&G + Google Trends low-cost journal design |
+| 8 | `listing event optional observation / discipline track` | 低 | 高 | 低中 | 低中 | first_hour_no_trade discipline、少量 basis/volume split 观察 | optional listing classification / discipline checklist |
+| 9 | `governance / tokenomics fundamental reading track` | 低 | 中 | 低 | 中 | 协议机制理解、治理风险认知、token value-capture 背景 | quarterly blue-chip protocol governance reading |
 | R | `security / exploit / depeg` | 不按方向 alpha 排名 | 中 | 高 | 风险规避高 | risk veto / contagion diagnostic | confirmed incident source audit |
 
 说明：
@@ -598,13 +598,47 @@ settlement rule 无法稳定审计；
 
 # 第二梯队：机制较强，但 source audit 是主要风险
 
-## 7. Stage 1.6D：Scheduled Token Unlock / Emission
+## 7. Stage 1.6D：Scheduled Unlock / Emission Source-Version Diagnostic
 
 ### 7.1 排名理由
 
-Token unlock 对个人投资者的时间尺度友好，通常提前排期，不需要低延迟。但它最大的风险不是执行，而是 hindsight bias（事后偏差）：今天看到的历史 calendar 可能已经被修改，不能证明当时市场可见相同内容。
+Token unlock / emission 对个人投资者的时间尺度友好，通常提前排期，不需要低延迟。但它不应被理解为“解锁前做空”的 alpha 路线。
 
-### 7.2 Alpha 机制
+本路线当前定位调整为：
+
+```text
+route_type = audit_first_reserve
+primary_goal = source_version_available_time_recipient_contract_audit
+secondary_goal = supply_overhang_regime_diagnostic
+directional_short_alpha_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
+```
+
+调整理由：
+
+```text
+unlocked tokens != tokens sold
+scheduled unlock is widely known and often priced before the visible event window
+recipient behavior is heterogeneous and cannot be inferred from calendar size alone
+calendar history may be revised, delayed, cancelled, or backfilled
+small-cap unlocks that show visible impact are often not executable after realistic liquidity/friction checks
+```
+
+因此，Stage 1.6D 的第一目标不是证明“解锁会跌”，而是先证明：
+
+```text
+1. 当时市场是否真的能看到这条 unlock/emission 信息；
+2. 这条信息在历史中是否可 point-in-time 复现；
+3. 解锁接收方和链上合约是否可审计；
+4. 解锁后是否真的产生 transfer_to_exchange / sell-pressure proxy；
+5. 该 supply overhang 是否能作为其他策略的 regime filter。
+```
+
+如果上述 source audit 失败，本路线应立即停止，不进入 replay。
+
+### 7.2 机制假设与不可成立的原始路线
 
 ```text
 供给增加；
@@ -618,6 +652,28 @@ Token unlock 对个人投资者的时间尺度友好，通常提前排期，不�
 
 ```text
 unlocked != immediately sold
+unlock calendar visible today != unlock calendar visible at historical decision time
+calendar-only replay != valid alpha evidence
+directional_short_on_unlock_day = forbidden
+```
+
+原始路线不成立：
+
+```text
+解锁日前一周做空；
+解锁当天或解锁后固定窗口平仓；
+使用今天看到的 TokenUnlocks / Cryptorank / Messari 历史 calendar 直接回测；
+混合 VC / team / ecosystem / farmer emission 事件；
+把少数小市值低流动性 token 的下跌当成事件家族证据。
+```
+
+原因：
+
+```text
+VC/team 可以提前 OTC、hedge、延期或分散卖出；
+项目方可以用延期、回购、销毁、做市激励对抗空头；
+真实冲击大的 token 往往 liquidity/depth 太差，close-price replay 不可执行；
+历史 calendar 缺少版本记录时，回测 anchor 可能是事后修订时间。
 ```
 
 ### 7.3 第一阶段只做 source audit
@@ -628,8 +684,34 @@ source_published_at_ms 是否存在；
 unlock amount 是否可能事后修订；
 available_at_ms 是否可保守构建；
 recipient_type 是否可靠；
+vesting_contract_address 是否可链上验证；
+recipient_address / beneficiary_address 是否可审计；
+unlock_cancelled_or_delayed 是否有 revision trail；
 多来源是否一致；
 是否可保存原始页面或 API payload hash。
+```
+
+第一阶段允许：
+
+```text
+point_in_time_calendar_audit；
+source_version_history_audit；
+available_at_ms_policy_design；
+vesting_contract_address_verification；
+recipient_type_classification；
+onchain_transfer_to_exchange_diagnostic_design；
+supply_overhang_regime_label_design。
+```
+
+第一阶段禁止：
+
+```text
+pre_unlock_short_replay；
+unlock_day_short_signal；
+calendar_only_backtest；
+CT_tweet_driven_target_selection；
+small_cap_altcoin_replay；
+paper_trading / live_trading / execution_engine。
 ```
 
 ### 7.4 关键强度指标
@@ -640,38 +722,179 @@ unlock_total_supply_pct
 unlock_to_30d_volume_ratio
 unlock_to_depth_ratio
 recipient_type
+recipient_type_confidence
+vesting_contract_address_verified
+vesting_contract_address_coverage_ratio
+transfer_to_exchange_amount
+transfer_to_exchange_ratio
+recipient_to_exchange_latency_ms
+source_version_history_available
+calendar_revision_count
+calendar_revision_status
 schedule_confidence
 hindsight_risk_level
 ```
 
-### 7.5 Replay 窗口
+### 7.5 Replay 前置条件与窗口
 
 ```text
-T-14d -> T-7d
-T-7d -> T-1d
-T-1d -> T+1d
-T+1d -> T+7d
+replay_allowed only if source audit passed
+point_in_time_calendar_verified = true
+available_at_ms_policy_defined = true
+recipient_type_classification_available = true
+vesting_contract_address_coverage_ratio >= 0.80
+valid_audited_event_count >= 30
+calendar_revision_trail_preserved = true
 ```
 
-### 7.6 Kill criteria
+通过前置条件后，replay 也只能做 diagnostic，不做交易信号：
 
 ```text
-历史 schedule 无版本；
+T-14d -> T-7d：提前定价诊断
+T-7d -> T-1d：pre-event supply overhang / liquidity diagnostic
+T-1d -> T+1d：event-window chain transfer / exchange inflow diagnostic
+T+1d -> T+7d：post-event absorption / reversal diagnostic
+```
+
+Replay 输出必须同时对比：
+
+```text
+BTC/ETH regime baseline
+price_momentum baseline
+liquidity_bucket baseline
+market_cap_bucket baseline
+recipient_type bucket
+```
+
+禁止把 replay 正收益解释为 execution feasibility 或独立 alpha。
+
+### 7.6 第一版范围
+
+```text
+scope = audit_only_until_source_version_passes
+preferred_assets = high_liquidity_major_ecosystem_tokens_only
+min_float_market_cap_usd = 200_000_000
+small_cap_altcoin_replay_allowed = false
+recipient_type_mixing_allowed = false
+directional_price_claim_allowed = false
+```
+
+不建议第一版写成 “BTC/ETH ecosystem only” 的原因：
+
+```text
+BTC 没有传统 token unlock；
+ETH staking/emission 和 VC/team unlock 不是同一机制；
+过窄范围可能样本不足，过宽范围又会混入低质量山寨事件。
+```
+
+更稳妥的第一版是：
+
+```text
+只筛选高流动性、vesting contract 可验证、recipient_type 可分类、calendar point-in-time 可复现的事件。
+```
+
+### 7.7 Kill criteria
+
+```text
+主数据源没有 point-in-time 历史版本；
 available_at_ms 只能使用今天看到的页面倒推；
 第三方数据大量修订且无审计轨迹；
-解锁结果完全被 price momentum 或 liquidity bucket 解释；
-结果只由少数低流动性 token 贡献。
+vesting_contract_address_coverage_ratio < 0.80；
+recipient_type_unknown_ratio > 0.30；
+valid_audited_event_count < 30；
+无法区分 team / VC / ecosystem / farmer emission；
+无法审计 transfer_to_exchange 行为；
+解锁结果完全被 BTC/ETH regime、price momentum、liquidity bucket 或 market_cap bucket 解释；
+结果只由少数低流动性 token 贡献；
+需要参考 CT/KOL 解锁预警才能找到目标。
+```
+
+### 7.8 客观结论
+
+```text
+stage1_6d_status = conditional_research_candidate
+priority = behind_stage1_6a_and_stage1_6b
+budget = small_timeboxed_source_audit_only
+expected_value = medium_if_source_audit_passes_else_zero
+independent_alpha_expectation = low
+regime_filter_value = possible_but_unproven
+```
+
+具体建议：
+
+```text
+先投入 2-3 天做 source/version/available-time audit；
+如果 calendar point-in-time 无法复现，立即停止；
+如果 audit 通过，再写 Stage 1.6D design；
+不得直接进入 price replay；
+不得把 unlock calendar 当成做空清单。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6d-scheduled-unlock-source-version-recipient-contract-audit-design_CN.md
 ```
 
 ---
 
-## 8. Stage 1.6E：Margin / Borrow Enablement
+## 8. Stage 1.6E：Margin / Borrow Enablement Auxiliary Diagnostic
 
 ### 8.1 排名理由
 
-这类事件的理论机制强，而且可以复用交易所官方公告，但产品字段分散、方向不稳定、真实借币库存不可见，因此排在 unlock 之后。
+这类事件可以复用交易所官方公告，数据可获得性高，但不适合作为独立 alpha 路线。它的真实价值只在于辅助已有策略识别 leverage access shock，尤其是给 `Extreme Funding` 策略提供 veto / regime filter。
 
-### 8.2 第一版只选一个产品族
+当前定位：
+
+```text
+route_type = delayed_auxiliary_diagnostic
+independent_alpha_expectation = very_low
+primary_value = extreme_funding_leverage_shock_veto
+secondary_value = OI_funding_spread_volume_regime_diagnostic
+actual_borrow_short_execution_allowed = false
+directional_trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
+```
+
+调整理由：
+
+```text
+margin / borrow enablement is a two-sided access shock, not a one-direction signal
+base asset borrow enabled may increase shortability
+quote asset borrow enabled may increase leverage-long access
+margin pair addition does not imply borrow inventory availability
+borrow inventory / utilization / historical borrow rate are not publicly auditable
+first-hour reaction belongs to latency competition and remains blocked by first_hour_no_trade_veto
+```
+
+因此，如果 `Extreme Funding` 策略没有稳定运行，1.6E 暂时没有足够研究价值；它不应抢占 1.6A、1.6B 或 Stage 1.5 live evidence 的资源。
+
+### 8.2 不成立的原始路线
+
+禁止把 1.6E 理解为：
+
+```text
+新增 margin / borrow -> 立刻买入；
+base borrow enabled -> 立刻做空；
+quote borrow enabled -> 立刻做多；
+公告后首小时追单；
+用合约做空替代真实 borrow 并声称验证了 borrow alpha；
+把所有 margin / borrow / leverage 公告混合 replay。
+```
+
+原因：
+
+```text
+机构和 API 用户在公告后首分钟内完成主要反应；
+散户可见窗口通常已经是二阶残余；
+真实 borrow availability 不可见，历史 replay 会系统性低估借币成本；
+borrow rate 可能在有价值事件中快速跳升，最需要做空时反而最借不到；
+不同产品类型的方向机制相反，混合后统计结论不可解释。
+```
+
+### 8.3 第一版只选一个产品族
 
 建议优先：
 
@@ -687,7 +910,17 @@ Binance futures leverage_enablement only
 
 禁止把 margin、borrow、collateral 和 futures leverage 混成一个 event type。
 
-### 8.3 可能的结构变化
+第一版只有在下列条件满足时才启动：
+
+```text
+extreme_funding_strategy_active = true
+event_type_classification_schema_reviewed = true
+base_quote_borrow_side_separable = true
+effective_time_policy_defined = true
+diagnostic_only = true
+```
+
+### 8.4 可能的结构变化
 
 ```text
 base asset borrow enabled -> shortability shock
@@ -696,7 +929,9 @@ both sides enabled -> volatility/liquidity diagnostic
 leverage increase -> OI/liquidation-risk diagnostic
 ```
 
-### 8.4 第一版不得假设
+这些结构变化只能作为 diagnostic，不允许直接转成方向信号。
+
+### 8.5 第一版不得假设
 
 ```text
 borrow enabled 就一定有库存；
@@ -706,34 +941,184 @@ VIP borrow rate 可获得；
 方向一定是下跌或上涨。
 ```
 
-### 8.5 Kill criteria
+还必须明确：
+
+```text
+borrow_inventory_visible = false
+historical_borrow_utilization_available = false
+borrow_rate_replay_trusted = false unless source_audit_proves_otherwise
+actual_borrow_execution_claim_allowed = false
+```
+
+### 8.6 允许的诊断输出
+
+```text
+T+4h OI change
+T+12h OI change
+T+24h OI change
+T+4h funding_rate change
+T+12h funding_rate change
+T+24h funding_rate change
+spread_bps change
+volume change
+depth change
+leverage_shock_veto_candidate
+funding_persistence_degradation_candidate
+```
+
+窗口从 `T+4h` 起步，原因是：
+
+```text
+首小时属于速度竞争区；
+T+1h~T+4h 仍可能是做市商库存重定价；
+本项目第一版不研究首小时执行；
+1.6E 的目标是 regime diagnostic，不是公告瞬时交易。
+```
+
+### 8.7 必要 schema 字段
+
+```text
+event_type
+affected_asset
+affected_quote
+borrow_side
+margin_mode
+effective_time_ms
+available_at_ms
+source_article_id
+source_detail_url_normalized
+announcement_language
+raw_payload_hash
+classification_confidence
+manual_review_required
+```
+
+`event_type` 第一版只允许：
+
+```text
+base_borrow_enablement
+```
+
+其他类型必须记录但不进入 replay：
+
+```text
+margin_pair_addition
+quote_borrow_enablement
+leverage_adjustment
+cross_margin_support
+isolated_margin_support
+borrow_suspension
+margin_delisting
+```
+
+### 8.8 Kill criteria
 
 ```text
 product_scope 无法稳定解析；
 base/quote borrow side 无法区分；
 effective_time 缺失；
-方向在不同事件中完全不稳定；
+event_type_classification_accuracy < 0.90；
+base_borrow_enablement top_liquidity_assets 历史样本 < 15；
+T+4h / T+12h OI 或 funding 变化不优于 baseline；
+结果完全被 BTC regime、spot volume 或 market-wide volatility baseline 解释；
 只有真实 borrow inventory 才能成立；
-4h/12h/24h 结构变化不优于普通 volume/OI baseline。
+方向在不同事件中完全不稳定；
+任何结论需要假设散户可以稳定借到币。
+```
+
+### 8.9 客观结论
+
+```text
+stage1_6e_status = delayed_auxiliary_diagnostic
+priority = after_extreme_funding_strategy_has_stable_observation
+independent_alpha_expectation = very_low
+strategy_support_value = possible
+first_action = margin_borrow_event_type_schema_design
+implementation_allowed = false
+```
+
+具体建议：
+
+```text
+不要现在投入大工程；
+等 Extreme Funding 重新进入稳定观察或有足够 funding/OI 数据后再启动；
+第一份设计只写 base_borrow_enablement schema / source audit；
+不得写 borrow execution plan；
+不得写 directional replay plan。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6e-margin-borrow-enablement-schema-source-audit-design_CN.md
 ```
 
 ---
 
-## 9. Stage 1.6F：Stablecoin / Exchange Flow Shock
+## 9. Stage 1.6F：Daily Exchange Flow Regime Diagnostic
 
 ### 9.1 研究价值
 
-链上流向可能代表：
+链上资金流数据的信息上限高，但个人投资者能可靠触达的上限很低。本路线不应被理解为“USDT 流入交易所就买 BTC”或“BTC 流入交易所就卖”的实时信号，而应降级为日频资金状态诊断。
+
+当前定位：
 
 ```text
-stablecoin 流入交易所 -> 潜在购买力；
-BTC/ETH/token 流入交易所 -> 潜在卖压；
-多交易所同步流向 -> 更高可信度的资金状态变化。
+route_type = daily_regime_diagnostic
+primary_goal = BTC_exchange_net_position_daily_source_audit
+secondary_goal = USDT_USDC_aggregate_exchange_inflow_zscore_after_source_audit
+frequency = daily
+directional_trade_signal_allowed = false
+real_time_whale_alert_trigger_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
 ```
 
-这条线的信息上限高，但地址标签质量是核心风险。
+调整理由：
 
-### 9.2 第一阶段必须解决
+```text
+stablecoin exchange inflow != confirmed buy demand
+BTC exchange outflow != guaranteed bullish holding signal
+onchain raw transfers are true, but address labels and intent interpretation can be wrong
+public data has 30-120min delay, so real-time following is stale for personal investors
+single whale transfers and internal exchange movements can dominate short-window z-scores
+multi-chain stablecoin flow requires address-label and available_at_ms policy that is hard to audit
+```
+
+因此，1.6F 的第一目标不是预测方向，而是回答：
+
+```text
+BTC 交易所净仓量持续下降/上升时，
+是否能作为 T+14d / T+30d 的 supply regime label；
+这个 label 是否能帮助 long-horizon basis / funding 策略过滤风险。
+```
+
+### 9.2 不成立的原始路线
+
+禁止把 1.6F 理解为：
+
+```text
+USDT / USDC 流入交易所 -> 立刻做多 BTC；
+BTC 流入交易所 -> 立刻做空 BTC；
+BTC 流出交易所 -> 立刻做多 BTC；
+Whale Alert 推送 -> 立即操作；
+追踪单一 smart money / whale address；
+用单链 USDT 流量代表全市场购买力；
+用平台今日标签直接回测历史并声称 point-in-time 有效。
+```
+
+原因：
+
+```text
+交易所入金可能是补保证金、内部归集、跨所转账、OTC 结算或量化 margin 管理；
+最大机构买盘可能通过 OTC 完成，不经过可见稳定币入金路径；
+地址标签会滞后、误标、回填和修订；
+FTX 等极端事件说明 exchange outflow 可能是 solvency risk，不是利好；
+实时链上推送会制造 FOMO，但散户看到时通常已经是旧数据。
+```
+
+### 9.3 第一阶段必须解决
 
 ```text
 热钱包、冷钱包、内部转账如何区分；
@@ -744,111 +1129,367 @@ block_time 与 indexer_seen_time 哪个作为 available_at_ms；
 历史地址标签是否可复现。
 ```
 
-### 9.3 第一版范围
-
-建议只做：
+第一阶段必须显式输出：
 
 ```text
-USDT/USDC aggregate exchange inflow shock
-BTC/ETH aggregate exchange inflow shock
+address_label_source
+address_label_revision_risk
+point_in_time_label_available
+internal_transfer_filter_available
+exchange_solvency_risk_flag_policy
+available_at_ms_policy
+data_missing_ratio
+single_whale_dominance_ratio
 ```
 
-不要第一版就扩展到所有 token 和所有链。
-
-### 9.4 Kill criteria
+如果无法审计 point-in-time 标签，第一版仍可继续做 degraded research，但必须写明：
 
 ```text
-address-label source 不可审计；
-内部转账无法稳定排除；
-历史 flow 无法复现；
-flow shock 不优于 volume/price baseline；
-结果只来自单笔 whale deposit；
-需要昂贵 vendor 才能维持最小历史覆盖。
+label_quality_assumption = accept_platform_labels
+evidence_level = degraded_public_api_regime_diagnostic
+directional_claim_allowed = false
+```
+
+### 9.4 第一版范围
+
+优先只做：
+
+```text
+BTC_exchange_net_position_daily
+```
+
+原因：
+
+```text
+BTC exchange address labels are usually more stable than multi-chain stablecoin labels
+BTC exchange net position is a medium-term supply metric, not a real-time trigger
+single-chain / multi-chain USDT coverage risk can be deferred
+engineering scope is smaller and failure exits cleaner
+```
+
+第二步才允许评估：
+
+```text
+USDT_USDC_aggregate_exchange_inflow_zscore_daily
+```
+
+但前提是：
+
+```text
+multi_chain_available_at_ms_policy_defined = true
+address_label_revision_risk_reported = true
+internal_transfer_filter_available = true
+coverage_limitation_documented = true
+```
+
+### 9.5 Replay / diagnostic 窗口
+
+```text
+frequency = daily
+available_at_ms = platform_published_at_ms + 2h_buffer
+windows = T+7d / T+14d / T+30d
+T+1d / T+3d short_window_allowed = false
+```
+
+输出只能是 regime diagnostic：
+
+```text
+exchange_supply_regime_label
+stablecoin_liquidity_regime_label
+realized_vol_distribution
+return_distribution_vs_baseline
+funding_or_basis_filter_candidate
+```
+
+必须对比：
+
+```text
+BTC price momentum baseline
+BTC realized volatility baseline
+market-wide risk regime baseline
+ETF flow regime baseline
+```
+
+### 9.6 明确禁止
+
+```text
+real_time_whale_alert_trigger
+single_whale_address_tracking
+smart_money_address_following
+directional_trade_signal
+treating_inflow_as_confirmed_buy_demand
+treating_outflow_as_confirmed_holding
+paper_trading / live_trading / execution_engine
+```
+
+### 9.7 Kill criteria
+
+```text
+historical_missing_ratio > 0.20；
+address_label_revision_known_bad_ratio > 0.15；
+内部转账无法稳定排除且显著影响主指标；
+BTC_exchange_net_position 被 BTC price momentum 完全解释；
+T+14d / T+30d distribution 无显著差异；
+结果由单笔 whale transfer 主导；
+无法定义保守 available_at_ms；
+必须依赖昂贵 vendor 或自建多链地址标签系统才能成立；
+研究结果诱导 real-time whale alert 操作。
+```
+
+### 9.8 客观结论
+
+```text
+stage1_6f_status = conditional_high_information_ceiling_regime_diagnostic
+priority = after_stage1_6a_and_stage1_6b_source_audit
+first_action = BTC_exchange_net_position_daily_source_label_audit
+information_ceiling = high
+personal_investor_reachable_ceiling = low_to_medium
+implementation_allowed = false
+```
+
+具体建议：
+
+```text
+第一步只做 BTC exchange net position 日频 source audit；
+不要先做多链 stablecoin flow；
+不要订阅 Whale Alert 作为研究触发器；
+如果 BTC exchange net position 对 T+14d / T+30d 没有增量，停止；
+只有低成本版本有效后，才考虑 USDT/USDC aggregate flow。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6f-btc-exchange-net-position-daily-source-label-audit-design_CN.md
 ```
 
 ---
 
 # 第三梯队：信息上限高，但噪声、语义或样本效率较差
 
-## 10. Stage 1.6G：Sentiment / Narrative Attention Spike
+## 10. Stage 1.6G：Sentiment / Narrative Regime Journal
 
 ### 10.1 为什么不应过早投入
 
-情绪和叙事看起来最接近“热点 alpha”，但实际最容易出现：
+完整版情绪路线看起来最接近“热点 alpha”，但实际是散户最容易被对手盘设计收割的路线。`Social Volume spike -> buy` 和 `Fear & Greed < 20 -> buy` 都不能作为方向交易信号。
+
+当前定位：
 
 ```text
-bot/spam 污染；
-ticker 歧义；
-帖子删除或编辑；
-历史 API 覆盖不足；
-供应商分数不可解释；
-meme 极端事件主导收益；
-价格和成交量已经包含同样信息。
+route_type = low_cost_regime_journal
+primary_goal = Fear_and_Greed_volatility_regime_diagnostic
+secondary_goal = Google_Trends_narrative_rotation_label
+asset_scope = BTC_ETH_only
+directional_trade_signal_allowed = false
+social_volume_direct_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
 ```
 
-如果 source audit 不强，后续所有统计都可能是伪信号。
-
-### 10.2 第一版建议
-
-不要同时接 X、Reddit、Telegram、Discord 和 TikTok。先选择一个可保存历史、可定义 available_at_ms、可估计独立作者数的平台或 vendor。
-
-建议研究对象：
+调整理由：
 
 ```text
-mention_count_zscore spike
-sentiment extreme
-narrative attention rotation
-cross-platform confirmation（仅在单源通过后）
+Social Volume is often price-driven, not price-leading
+sentiment spike can be manufactured by KOL / bot / incentive campaigns
+Fear & Greed includes price / volatility / momentum components and is naturally lagged
+altcoin ticker mapping and bot filtering are not reliable enough for first-version replay
+Twitter/X algorithm changes create structural breaks in historical social time series
+researcher is also part of the emotional crowd being studied
 ```
 
-### 10.3 必须加入
+因此，Stage 1.6G 的第一版不是情绪交易，也不是 social alpha，而是：
 
 ```text
-unique_author_count
-bot_suspected_ratio
-source_confidence
-ticker_ambiguity_status
-narrative_tag
-raw_payload_hash
+用 Fear & Greed 记录 BTC/ETH 情绪极值；
+用 Google Trends 记录叙事冷热；
+验证这些低成本指标是否对 realized vol、MAE、OI/volume regime 有辅助解释力；
+同时把它作为个人研究者的情绪校准日志。
 ```
 
-### 10.4 Alpha 验证必须击败
+### 10.2 不成立的原始路线
+
+禁止把 1.6G 理解为：
 
 ```text
-price momentum baseline
-volume spike baseline
-same-symbol random baseline
-BTC regime baseline
+Social Volume spike -> 立刻买入；
+Fear & Greed < 20 -> 立刻抄底；
+Fear & Greed > 85 -> 立刻做空；
+LunarCrush trending asset -> 买入；
+Santiment social metric -> 方向信号；
+情绪 spike 后反向做空；
+KOL / Telegram / Discord 热度 -> 交易触发器。
 ```
 
-如果不能击败 price/volume baseline，就没有必要继续扩大平台数量。
-
-### 10.5 Kill criteria
+原因：
 
 ```text
-bot_suspected_ratio 无法估计；
-symbol mapping pass rate < 95%；
-历史数据大量缺失或不可复现；
-事件数虽多但独立作者极少；
-收益由少数 meme 币贡献；
-跨平台确认没有增量。
+情绪 spike 可能只是价格上涨后的反应；
+真实领先叙事、价格滞后情绪、操纵情绪在实时中很难区分；
+Social Volume 的有效反应窗口通常在量化/机器人区域；
+山寨币情绪 spike 常伴随低流动性与做庄出货；
+反向做空情绪 spike 也可能成为对手盘设计的一部分；
+F&G 极度恐惧在 LUNA / FTX 类事件中可能持续数周，不是自动底部。
+```
+
+### 10.3 第一版范围
+
+```text
+allowed_sources:
+  Fear_and_Greed_Index（daily, alternative.me）
+  Google_Trends（weekly, narrative keyword relative interest）
+
+forbidden_sources_first_version:
+  LunarCrush_Social_Volume
+  Santiment_social_metrics
+  X/Twitter raw posts
+  Reddit / Telegram / Discord / TikTok
+  KOL ranking / trending asset lists
+```
+
+第一版研究对象：
+
+```text
+F&G < 15 / F&G > 85 extreme zones
+F&G extreme duration_days
+BTC_ETH_realized_vol_T+7d / T+14d
+existing_strategy_MAE_under_FG_extreme
+Google_Trends narrative_rotation_label
+Google_Trends weekly trend change
+OI / volume change for representative BTC/ETH-related assets
+```
+
+### 10.4 允许的诊断输出
+
+```text
+volatility_regime_label
+narrative_rotation_label
+MAE_risk_context
+position_sizing_context_for_existing_strategies
+combined_regime_context_with_1_6B_and_1_6F
+researcher_emotion_journal_reference
+```
+
+这些输出只能作为 regime/context，不允许转成买卖建议。
+
+### 10.5 必须对比的 baseline
+
+```text
+BTC price momentum baseline
+BTC realized volatility baseline
+same-calendar-date random baseline
+ETF flow regime baseline
+exchange flow regime baseline
+existing_strategy_MAE_baseline
+```
+
+如果 F&G / Google Trends 不能提供增量解释，不扩大到社交平台。
+
+### 10.6 研究纪律规则
+
+```text
+no_same_day_trade_due_to_FG = true
+no_same_week_trade_due_to_Google_Trends = true
+no_push_notification_source = true
+no_trending_asset_page = true
+output_has_no_buy_sell_column = true
+researcher_action_log_required = true
+```
+
+如果出现“因为 F&G 或 Trends 数据直接下单”的记录，本路线必须重置为 observation-only journal，不再做 alpha 解释。
+
+### 10.7 Kill criteria
+
+```text
+F&G 极值后 T+7d / T+14d realized vol 分布无统计差异；
+F&G 对 existing_strategy_MAE 无增量；
+Google Trends narrative_rotation_label 与 OI / volume change 的 partial correlation < 0.10；
+结论完全被 BTC price momentum 或 realized volatility baseline 解释；
+必须接入 LunarCrush / Santiment 才能成立；
+需要 altcoin sentiment tracking 才能看到效果；
+研究者因 F&G / Trends 直接下单；
+研究输出开始包含 buy/sell 建议。
+```
+
+### 10.8 客观结论
+
+```text
+stage1_6g_status = low_cost_parallel_regime_journal
+full_social_volume_route_status = killed
+priority = parallel_low_cost_maintenance
+first_action = Fear_and_Greed_Google_Trends_journal_design
+independent_alpha_expectation = very_low
+self_calibration_value = high
+implementation_allowed = false
+```
+
+具体建议：
+
+```text
+保留 F&G 每日记录；
+保留 Google Trends 周频叙事热度记录；
+不注册或接入 LunarCrush / Santiment；
+不追踪 altcoin social spike；
+不写 sentiment trade signal；
+把第一版产物定义成 CSV + 统计摘要 + 情绪校准日志。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6g-fear-greed-google-trends-regime-journal-design_CN.md
 ```
 
 ---
 
-## 11. Stage 1.6H：Spot Pair Addition After-First-Hour
+## 11. Stage 1.6H：Listing Event Optional Observation / Discipline Track
 
 ### 11.1 当前定位
 
-Listing family 已由 Stage 1.5 的 `futures_contract_launch` 主线部分覆盖。新路线不应重复建设 futures listing，而应只考虑：
+Listing family 已由 Stage 1.5 的 `futures_contract_launch` 主线覆盖。1.6H 不应重复建设 listing alpha，也不应主动推进为新 alpha 研究线。
+
+当前定位：
 
 ```text
-spot_listing
-spot_pair_addition
-margin_pair_addition
+stage1_6h_status = optional_observation_track
+active_research_allowed = false
+independent_alpha_expectation = near_zero
+primary_value = execution_discipline_training
+secondary_value = listing_type_classification_reference
+directional_trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
 ```
 
-### 11.2 为什么优先级较低
+调整理由：
+
+```text
+first-hour listing reaction is dominated by market makers, bots, and latency competition
+cross-exchange announcement positioning is usually arbitraged before retail can act
+new token first listing and Launchpad / Launchpool have severe sell-pressure and FOMO traps
+after constraints, remaining valid subtypes have very small sample counts and low strategy contribution
+Stage 1.5 already covers futures_contract_launch, so 1.6H would duplicate listing-family effort
+```
+
+因此，1.6H 的主要用途不是找 alpha，而是把“上新冲动”转化为执行纪律训练。
+
+### 11.2 不成立的原始路线
+
+禁止把 1.6H 理解为：
+
+```text
+开盘第一秒买入；
+首小时内抢交易；
+公告后去其他交易所提前买入；
+Binance 上线后卖出套利；
+Launchpad / Launchpool 上线后接盘；
+新币首发 after-first-hour 做方向；
+小市值 listing 追涨；
+根据 CT/KOL listing 热度选币。
+```
+
+原因：
 
 ```text
 首小时机器人竞争最强；
@@ -856,17 +1497,41 @@ margin_pair_addition
 公告可能提前泄露；
 不同 listing 类型机制差异巨大；
 新币营销和做市安排容易主导结果。
+开盘价往往由做市商和项目方库存安排主导；
+跨所溢价通常在公告后 5-30 分钟被套利消除；
+Launchpad / Launchpool 可能形成集中配额卖压；
+小市值 listing 的 close-price replay 无法代表真实 500 USDT execution。
 ```
 
-个人投资者只保留：
+### 11.3 仅保留的观察范围
+
+只有两个极窄子类允许作为 optional observation：
 
 ```text
-after-first-hour attention drift
-新增 quote pair 后的流动性迁移
-已有 futures 市场时的 spot listing 二阶反应
+already_has_futures_spot_addition
+  condition: mature_asset_and_market_cap_gt_1B
+  output: basis_convergence_diagnostic
+  window: T+1h -> T+4h
+
+new_quote_pair_for_major_asset
+  examples: BTC/USDC, ETH/USDC
+  output: volume_split_and_spread_diagnostic
+  window: T+1h -> T+24h
 ```
 
-### 11.3 Hard veto
+这些观察只能服务于：
+
+```text
+listing_type_classification_reference
+depth_stabilization_observation
+basis_convergence_context
+volume_split_context
+first_hour_no_trade_discipline_log
+```
+
+不能服务于方向交易。
+
+### 11.4 Hard veto
 
 ```text
 first_hour_no_trade_veto
@@ -875,81 +1540,251 @@ trading_start_time_missing_veto
 available_at_veto
 asset_quality_veto
 liquidity_depth_veto
+launchpad_launchpool_veto
+new_token_first_listing_veto
+market_cap_below_200m_veto
+cross_exchange_announcement_arbitrage_veto
 ```
 
-### 11.4 Kill criteria
+### 11.5 研究纪律规则
 
 ```text
-T+1h 后无稳定结构；
+48h_cooling_period_after_listing_announcement = true
+no_exception_to_first_hour_no_trade_veto = true
+launchpad_launchpool_marked_as_forbidden_zone = true
+new_token_first_listing_marked_as_forbidden_zone = true
+output_has_no_buy_sell_column = true
+listing_impulse_journal_required = true
+```
+
+看到任何新币上线公告后的默认动作：
+
+```text
+do_not_trade
+classify_listing_type
+record_why_first_hour_is_forbidden
+wait_48h_before_any_research_note
+```
+
+### 11.6 Kill criteria
+
+```text
+已有 futures 的 spot 新增事件（市值 > $1B）2 年内 < 10 个；
+T+1h -> T+4h basis convergence 无统计规律；
+主流 quote pair volume split 方差过大；
+必须混入 Launchpad / Launchpool / new_token_first_listing 才有结果；
 表现完全由开盘跳空贡献；
-不同 listing family 必须混合后才有结果；
-收益集中在单一 meme/launchpad 样本；
-live depth 无法支持 500 USDT proxy。
+live depth 无法支持 500 USDT proxy；
+任何人为“这次例外”破坏 first_hour_no_trade_veto；
+研究输出开始包含 buy/sell 建议。
+```
+
+### 11.7 客观结论
+
+```text
+stage1_6h_status = optional_observation_track
+active_research_priority = none
+recommended_action = keep_as_discipline_checklist_not_alpha_route
+independent_alpha_expectation = near_zero
+implementation_allowed = false
+```
+
+具体建议：
+
+```text
+不主动写 1.6H implementation plan；
+不与 1.6A / 1.6B / 1.6F 抢资源；
+如果未来确实要写，只写 listing observation + discipline design；
+把每次 listing FOMO 转化为 first_hour_no_trade 纪律记录。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6h-listing-event-optional-observation-and-discipline-design_CN.md
 ```
 
 ---
 
-## 12. Stage 1.6I：Governance / Protocol / Tokenomics Events
+## 12. Stage 1.6I：Governance / Tokenomics Fundamental Reading Track
 
-### 12.1 研究价值
+### 12.1 当前定位
 
-这类事件可能改变：
+Governance / protocol / tokenomics 事件不适合作为主动量化 alpha 路线。它的价值主要是长期理解协议经济机制、治理风险和 token value-capture，而不是从 `vote_passed` 或 `proposal_executed` 里生成交易信号。
 
 ```text
-token cash-flow/value-capture 预期；
-emission 与未来供应；
-treasury sell pressure；
-staking 解锁和流通供应；
-协议升级、TVL 和开发者活动；
-治理失败或攻击风险。
+stage1_6i_status = downgraded_fundamental_context_track
+active_quant_research_allowed = false
+event_replay_allowed = false
+independent_alpha_expectation = near_zero
+primary_value = protocol_mechanism_understanding
+secondary_value = governance_risk_awareness
+directional_trade_signal_allowed = false
+paper_trading_allowed = false
+live_trading_allowed = false
+execution_engine_allowed = false
 ```
 
-它适合日频或多日研究，但语义复杂、事件低频、协议差异大。
-
-### 12.2 第一版范围
-
-只选一个 subtype，例如：
+调整理由：
 
 ```text
-fee_switch_passed
-或
-emission_reduction_executed
+governance information is layered, and retail usually sees the last layer
+proposal_passed is often sell-the-fact, not a fresh buy signal
+proposal semantics require protocol-specific manual reading
+same event type can have opposite effects under different protocol states
+effective value change may already be reflected in ETH beta, sector basket, or options IV
+valid event count after filtering is too small for robust replay
+manual review cost per event is the highest among Stage 1.6 routes
+governance attacks can invert "proposal passed" into catastrophic risk
 ```
 
-不要把 proposal draft、投票通过和链上执行混成同一事件。
-
-### 12.3 必须区分的锚点
+因此，1.6I 的合理用途是：
 
 ```text
-available_at_ms
+每季度阅读 1-2 个主流协议治理论坛；
+记录 tokenomics / fee switch / emission / treasury / risk parameter 变化；
+积累 protocol value-capture 和 governance attack 的判断框架；
+作为未来基本面背景，不作为可交易事件源。
+```
+
+### 12.2 不成立的原始路线
+
+禁止把 1.6I 理解为：
+
+```text
+proposal_passed -> buy
+governance_active -> bullish
+fee_switch_passed -> immediate long
+buyback_burn_execution -> repeated alpha
+protocol_upgrade_confirmed -> automatic bullish
+automated_LLM_governance_signal
+small_DAO_governance_replay
+post_vote_entry
+paper_trading / live_trading / execution_engine
+```
+
+原因：
+
+```text
+核心开发者、whale voter 和活跃社区通常在散户前数周看到信息；
+提案通过时，不确定性已经大幅消除，容易出现获利了结；
+protocol value != token value；
+治理通过 != 链上安全执行；
+buyback / burn 第 N 次执行通常已被第一次公告定价；
+治理攻击、恶意升级、timelock 出货窗口是真实尾部风险。
+```
+
+### 12.3 允许的背景阅读范围
+
+```text
+ETH ecosystem major upgrades
+blue_chip_DeFi_protocols_only
+  examples: Uniswap, Aave, Compound, MakerDAO, Curve
+
+manual_notes_only:
+  fee_switch_discussion
+  buyback_burn_design
+  emission_change
+  treasury_allocation
+  risk_parameter_change
+  major_protocol_upgrade
+  governance_attack_case_review
+```
+
+阅读频率：
+
+```text
+frequency = quarterly
+budget = 2_to_4_hours_per_quarter
+protocol_count = 1_to_2_per_quarter
+output = qualitative_notes_only
+```
+
+### 12.4 如果未来强行做最小量化版
+
+不建议当前启动。但如果未来资源充足，只允许极窄版本：
+
+```text
+scope = ETH_ecosystem_plus_blue_chip_DeFi_only
+event_type = fee_switch | buyback_burn | major_protocol_upgrade
+minimum_sample_per_type = 10
+valid_event_count >= 20
+manual_semantic_review_required = true
+research_window = forum_post_date -> vote_end_date
+no_post_vote_entry = true
+small_DAO_excluded = true
+market_cap_below_500m_excluded = true
+```
+
+必须区分时间锚点：
+
+```text
+forum_post_available_at_ms
+proposal_published_at_ms
 vote_start_ms
 vote_end_ms
+timelock_start_ms
 execution_time_ms
 ```
 
-### 12.4 Kill criteria
+但这只能是 diagnostic，不允许输出交易信号。
+
+### 12.5 Kill criteria
 
 ```text
-proposal status 无法追踪；
-execution_time 不明确；
-语义分类准确率不足；
-样本数太少；
-结果由单一协议贡献；
-不优于 sector basket baseline。
+manual_semantic_review_cost_per_event > 1h；
+valid_event_count < 20；
+sample_per_event_type < 10；
+proposal direction cannot be classified with confidence；
+result explained by ETH beta / sector basket / options IV；
+requires small DAO events to show effect；
+governance_attack_risk cannot be screened；
+any output says vote_passed_buy；
+researcher treats forum reading as investment conviction。
+```
+
+### 12.6 客观结论
+
+```text
+stage1_6i_status = downgraded_fundamental_context_track
+active_research_priority = none
+recommended_action = quarterly_reading_not_quant_replay
+independent_alpha_expectation = near_zero
+fundamental_context_value = medium
+implementation_allowed = false
+```
+
+具体建议：
+
+```text
+不写 1.6I implementation plan；
+不做治理事件 replay；
+不把 governance forum 阅读包装成 alpha research；
+每季度选择 1-2 个主流协议，写 tokenomics / governance risk 读书笔记；
+如果未来重启量化评估，必须先写单独 design 并通过 review。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6i-governance-tokenomics-quarterly-fundamental-reading-guide_CN.md
 ```
 
 ---
 
 # 风险旁路线：不以方向性收益为第一目标
 
-## 13. Stage 1.6R：Security Incident / Exploit / Depeg
+## 13. Stage 1.6R：Confirmed Security Incident Risk-Veto / Contagion Diagnostic
 
 ### 13.1 正确定位
 
 ```text
-primary_use = risk veto / contagion diagnostic / avoid-list
-secondary_use = low-frequency post-incident research
-not_primary_use = first-reaction short / catching falling knives
+route_type = capital_preservation_side_route
+primary_use = confirmed incident risk veto / contagion diagnostic / avoid-list
+secondary_use = spread-depth recovery and avoidance-window research
+not_primary_use = first-reaction short / catching falling knives / exploit momentum trade
+independent_alpha_expectation = near_zero
+implementation_allowed = false
 ```
 
 事件包括：
@@ -964,6 +1799,16 @@ exchange/custodian incident
 governance attack
 ```
 
+本路线的核心判断：
+
+```text
+risk_veto_route_success != alpha_success
+directional_replay_failed does not invalidate risk_veto_value
+primary_success_metric = confirmed_status + affected_assets + avoidance_window + false_alarm_rate
+```
+
+含义：即使 exploit / depeg / chain halt 事件不适合方向性交易，只要能稳定识别需要回避的资产、链、交易所、抵押品和时间窗口，`Stage 1.6R` 就有独立的风控价值。
+
 ### 13.2 为什么不放入 Alpha 主队列
 
 ```text
@@ -974,16 +1819,68 @@ false alarm 和损失金额修订频繁；
 尾部风险高，不符合资本保全优先。
 ```
 
-### 13.3 第一版输出
+更直接地说：事故发生后追空通常不是 alpha，而是在信息不完整、盘口断裂、资金费率畸变、交易所风控和协议救援反弹之间赌博。攻击者、巨鲸或救援方可能已经完成对冲，后手散户追空经常变成他们的退出流动性。
+
+### 13.3 第一版允许范围
+
+允许：
+
+```text
+confirmed_incident_source_audit
+affected_assets_mapping
+venue_chain_protocol_exposure_check
+risk_veto_flag
+contagion_scope_map
+spread_depth_recovery_time_distribution
+false_alarm_tracking
+post_incident_research_log
+```
+
+禁止：
+
+```text
+first_reaction_short
+catching_falling_knife
+exploit_directional_trade_signal
+depeg_momentum_trade
+unconfirmed_rumor_trigger
+whale_alert_only_trigger
+paper_trading
+live_trading
+execution_engine
+```
+
+### 13.4 触发条件
+
+```text
+official_protocol_or_exchange_confirmation = true
+or credible_incident_aggregator_confirmation = true
+or stablecoin_depeg_abs_pct >= 2.0 and sustained_minutes >= 120
+or spread_multiple_vs_baseline >= 5.0 with multi_venue_confirmation
+or tvl_drawdown_with_official_confirmation = true
+```
+
+单一大额链上转账、单条社媒传闻、单个 Whale Alert、单一 DEX 价格偏离只能进入 watchlist，不能触发正式 risk veto。
+
+### 13.5 第一版输出
 
 ```text
 confirmed_status
+confirmed_at_ms
+incident_type
 severity
-contagion_scope
-affected_assets
 source_confidence
+affected_assets
+affected_chains
+affected_venues
+affected_protocols
+contagion_scope
 avoidance_window
 risk_veto_active
+false_alarm_status
+spread_peak_bps
+depth_collapse_ratio
+recovery_time_minutes
 ```
 
 不得输出：
@@ -993,11 +1890,72 @@ short instruction
 buy-the-dip instruction
 position size
 execution feasibility
+entry/exit path
+PnL expectation
 ```
 
-### 13.4 Kill / downgrade criteria
+### 13.6 执行纪律 SOP
 
-如果第一波反应全部在秒级完成，或 source false-alarm rate 过高，则保留为 veto，不再研究方向性 alpha。
+触发后第一反应必须是 safe no-op，而不是交易：
+
+```text
+cooling_period_minutes = 60
+new_position_allowed = false
+directional_trade_allowed = false
+only_current_exposure_check_allowed = true
+protective_deleveraging_review_allowed = true
+```
+
+SOP：
+
+```text
+1. 进入 60 分钟 no-new-position cooling period；
+2. 检查当前持仓、挂单、抵押品、相关链、相关交易所和相关协议暴露；
+3. 如果已有直接暴露，允许进入保护性降风险 review；
+4. 如果没有暴露，不允许因为事件本身新开方向仓；
+5. 记录 confirmed_at_ms、affected_assets、spread/depth、恢复时间和 false_alarm_status。
+```
+
+### 13.7 Kill / downgrade criteria
+
+```text
+source_false_alarm_rate > 0.50；
+affected_assets cannot be mapped；
+confirmed_status cannot be established；
+event source only provides rumors；
+incident trigger encourages short/long output；
+exposure mapping cannot be audited；
+reviewer tries to use single extreme incident as profit proof。
+```
+
+如果第一波反应全部在秒级完成，或 source false-alarm rate 过高，则保留为人工 watchlist / veto context，不再研究方向性 alpha。
+
+### 13.8 客观结论
+
+```text
+stage1_6r_status = retained_as_risk_veto_side_route
+active_alpha_priority = none
+capital_preservation_value = high
+recommended_action = write_confirmed_incident_risk_veto_source_audit_design
+directional_replay_allowed = false
+paper_live_allowed = false
+```
+
+具体建议：
+
+```text
+不写 exploit short strategy；
+不写 depeg momentum strategy；
+不把事故后暴跌包装成可执行 alpha；
+先写 confirmed incident source / schema / confirmation-time / affected-asset mapping design；
+后续只验证 risk-veto 是否能减少暴露和误报，不验证追空收益。
+```
+
+第一份文档建议：
+
+```text
+2026-07-xx-external-signal-shadow-lab-stage1-6r-confirmed-security-incident-risk-veto-source-audit-design_CN.md
+```
 
 ---
 
@@ -1208,22 +2166,22 @@ Stage 1.6C
   Prediction Market Probability Shift Source / Schema / Settlement Audit
 
 Stage 1.6D
-  Token Unlock Calendar Source / Version / Available-Time Audit
+  Scheduled Unlock Source / Version / Available-Time / Recipient-Contract Audit
 
 Stage 1.6E
-  Margin Base-Asset Borrow Enablement Source Audit
+  Margin / Borrow Enablement Auxiliary Diagnostic Schema Source Audit
 
 Stage 1.6F
-  Stablecoin / Exchange Flow Address-Label Source Audit
+  BTC Exchange Net Position Daily Source / Label Audit
 
 Stage 1.6G
-  Sentiment / Narrative Source Selection And Bot/Noise Audit
+  Fear & Greed / Google Trends Regime Journal Design
 
 Stage 1.6H
-  Spot Pair Addition After-First-Hour Source Audit
+  Listing Event Optional Observation / Discipline Design
 
 Stage 1.6I
-  Governance / Tokenomics Single-Subtype Source Audit
+  Governance / Tokenomics Quarterly Fundamental Reading Guide
 
 Stage 1.6R
   Security Incident Confirmed-Event Risk-Veto Source Audit
