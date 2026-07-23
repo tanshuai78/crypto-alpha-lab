@@ -43,9 +43,9 @@ class EventSymbolState:
     event_id: str = ""
     symbol: str = ""
     detected_at_ms: int = 0
-    observation_started_at_ms: int = 0
-    observation_window_end_ms: int = 0
-    status: str = "active"  # active, completed, expired, failed
+    observation_started_at_ms: int | None = None
+    observation_window_end_ms: int | None = None
+    status: str = "active"  # active, completed, expired, failed, pending_*
     depth_snapshot_count: int = 0
     last_snapshot_ms: int = 0
     max_gap_ms: int = 0
@@ -53,12 +53,108 @@ class EventSymbolState:
     max_gap_pass: bool = False
     research_result_valid: bool = False
 
+    # Launch Gate & Anchor Fields (Schema Version 2)
+    observer_state_schema_version: int = 2
+    observation_anchor_ms: int | None = None
+    observation_anchor_basis: str = ""
+    observation_anchor_confidence: str = ""
+    observation_anchor_candidates: dict | None = None
+    observation_anchor_disagreement_max_ms: int = 0
+    observation_anchor_conflict_active: bool = False
+    observation_admitted_at_ms: int | None = None
+    observation_window_start_ms: int | None = None
+    first_depth_request_at_ms: int | None = None
+    first_depth_request_latency_ms: int | None = None
+    first_healthy_snapshot_at_ms: int | None = None
+    first_valid_book_latency_ms: int | None = None
+    market_valid_book_latency_after_first_request_ms: int | None = None
+    evidence_start_class: str = ""
+    source_article_id: str = ""
+    stable_event_symbol_key: str = ""
+    stable_event_key: str = ""
+    latest_event_payload_hash: str = ""
+    acceptance_id: str = ""
+    acceptance_state: str = ""
+    first_seen_at_ms: int | None = None
+    announcement_capture_time_ms: int | None = None
+    next_admission_check_at_ms: int | None = None
+    next_anchor_resolution_at_ms: int | None = None
+    last_anchor_resolution_at_ms: int | None = None
+    anchor_resolution_started_at_ms: int | None = None
+    anchor_resolution_deadline_ms: int | None = None
+    last_anchor_resolution_sources: list[str] | None = None
+    bootstrap_watermark_max_seen_detected_at_ms: int | None = None
+    admission_watermark_at_first_seen_ms: int | None = None
+    announcement_capture_post_bootstrap_watermark: bool | None = None
+    launch_anchor_post_bootstrap_watermark: bool | None = None
+    capacity_defer_count: int = 0
+    anchor_resolution_attempt_count: int = 0
+    pending_terminal_reason: str = ""
+    expected_snapshot_count: int = 0
+    unique_snapshot_bucket_count: int = 0
+    duplicate_snapshot_row_count: int = 0
+    out_of_window_snapshot_row_count: int = 0
+    missing_snapshot_bucket_count: int = 0
+    pre_start_expected_snapshot_count: int = 0
+    pre_start_missing_snapshot_count: int = 0
+    coverage_ratio: float = 0.0
+    clean_start_sla_pass: bool = False
+    clean_evidence_start_allowed: bool = False
+    attempted_snapshot_count: int = 0
+    successful_http_snapshot_count: int = 0
+    valid_book_snapshot_count: int = 0
+    empty_book_snapshot_count: int = 0
+    invalid_book_snapshot_count: int = 0
+
+    def __post_init__(self):
+        if self.observation_anchor_candidates is None:
+            object.__setattr__(self, "observation_anchor_candidates", {})
+        if self.last_anchor_resolution_sources is None:
+            object.__setattr__(self, "last_anchor_resolution_sources", [])
+
+        nullable_ts_fields = (
+            "observation_anchor_ms",
+            "first_depth_request_at_ms",
+            "first_healthy_snapshot_at_ms",
+            "first_seen_at_ms",
+            "announcement_capture_time_ms",
+            "next_admission_check_at_ms",
+            "next_anchor_resolution_at_ms",
+            "last_anchor_resolution_at_ms",
+            "anchor_resolution_started_at_ms",
+            "anchor_resolution_deadline_ms",
+            "bootstrap_watermark_max_seen_detected_at_ms",
+            "admission_watermark_at_first_seen_ms",
+        )
+        for field in nullable_ts_fields:
+            if getattr(self, field) == 0:
+                object.__setattr__(self, field, None)
+
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict):
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        clean_data = dict(data)
+        nullable_ts_fields = (
+            "observation_anchor_ms",
+            "first_depth_request_at_ms",
+            "first_healthy_snapshot_at_ms",
+            "first_seen_at_ms",
+            "announcement_capture_time_ms",
+            "next_admission_check_at_ms",
+            "next_anchor_resolution_at_ms",
+            "last_anchor_resolution_at_ms",
+            "anchor_resolution_started_at_ms",
+            "anchor_resolution_deadline_ms",
+            "bootstrap_watermark_max_seen_detected_at_ms",
+            "admission_watermark_at_first_seen_ms",
+        )
+        for field in nullable_ts_fields:
+            if clean_data.get(field) == 0:
+                clean_data[field] = None
+        return cls(**{k: v for k, v in clean_data.items() if k in cls.__dataclass_fields__})
+
 
 
 @dataclass(frozen=True)
@@ -151,6 +247,15 @@ class LiveDepthObserverSummary:
     max_consecutive_network_errors_seen: int
     last_heartbeat_at_ms: int
     heartbeat_count: int
+    pending_launch_observation_count: int = 0
+    pending_launch_time_in_future_count: int = 0
+    pending_launch_anchor_missing_count: int = 0
+    pending_anchor_conflict_count: int = 0
+    pending_observation_capacity_count: int = 0
+    active_expected_snapshot_count: int = 0
+    active_unique_snapshot_bucket_count: int = 0
+    active_missing_snapshot_bucket_count: int = 0
+    active_out_of_window_snapshot_row_count: int = 0
     # L0/L1 Risk & Compliance controls hard-gates:
     execution_feasibility_claim_allowed: bool = False
     trade_signal_allowed: bool = False

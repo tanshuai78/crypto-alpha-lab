@@ -139,20 +139,29 @@ def fetch_public_json(url: str, live_public_readonly: bool = False) -> dict:
 
 
 def parse_exchangeinfo_symbols(payload: dict) -> set:
-    symbols = set()
-    if not payload or "symbols" not in payload:
-        return symbols
-    for s in payload["symbols"]:
-        if "symbol" in s:
-            symbols.add(s["symbol"])
+    symbols, _ = parse_exchangeinfo_symbols_and_rows(payload)
     return symbols
+
+
+def parse_exchangeinfo_symbols_and_rows(payload: dict) -> tuple[set, dict]:
+    symbols = set()
+    symbol_rows = {}
+    if not payload or "symbols" not in payload:
+        return symbols, symbol_rows
+    for s in payload["symbols"]:
+        if isinstance(s, dict) and "symbol" in s:
+            sym = s["symbol"]
+            symbols.add(sym)
+            symbol_rows[sym] = dict(s)
+    return symbols, symbol_rows
 
 
 def refresh_exchangeinfo_cache(
     now_ms: int,
     previous_cache: dict | None,
     live_public_readonly: bool = False,
-    mock_exchangeinfo_payload: dict | None = None
+    mock_exchangeinfo_payload: dict | None = None,
+    raw_payload_root: str | None = None,
 ) -> dict:
     if previous_cache:
         last_refreshed = previous_cache.get("last_refreshed_ms", 0)
@@ -163,13 +172,20 @@ def refresh_exchangeinfo_cache(
             return cache_hit
 
     old_symbols = previous_cache.get("symbols", set()) if previous_cache else set()
+    old_rows = previous_cache.get("symbol_rows", {}) if previous_cache else {}
 
     if mock_exchangeinfo_payload is not None:
-        symbols = parse_exchangeinfo_symbols(mock_exchangeinfo_payload)
+        symbols, symbol_rows = parse_exchangeinfo_symbols_and_rows(mock_exchangeinfo_payload)
+        payload_bytes = json.dumps(mock_exchangeinfo_payload, sort_keys=True).encode("utf-8")
+        payload_sha256 = _sha256_bytes(payload_bytes)
         return {
             "last_refreshed_ms": now_ms,
+            "fetched_at_ms": now_ms,
             "symbols": symbols,
+            "symbol_rows": symbol_rows,
             "available": True,
+            "payload_sha256": payload_sha256,
+            "raw_payload_path": "mock_exchangeinfo.jsonl",
             "manifest_row": None,
         }
 
@@ -177,19 +193,29 @@ def refresh_exchangeinfo_cache(
     try:
         res = fetch_public_json(url, live_public_readonly=live_public_readonly)
         if res["ok"]:
-            symbols = parse_exchangeinfo_symbols(res["data"])
+            symbols, symbol_rows = parse_exchangeinfo_symbols_and_rows(res["data"])
+            manifest = res.get("manifest_row") or {}
+            payload_sha256 = manifest.get("response_payload_hash") or ""
             return {
                 "last_refreshed_ms": now_ms,
+                "fetched_at_ms": manifest.get("fetched_at_ms", now_ms),
                 "symbols": symbols,
+                "symbol_rows": symbol_rows,
                 "available": True,
-                "manifest_row": res["manifest_row"],
+                "payload_sha256": payload_sha256,
+                "raw_payload_path": "",
+                "manifest_row": manifest,
             }
         else:
             logger.warning(f"Failed to refresh exchangeInfo: {res.get('error')}")
             return {
                 "last_refreshed_ms": previous_cache.get("last_refreshed_ms", 0) if previous_cache else 0,
+                "fetched_at_ms": previous_cache.get("fetched_at_ms", 0) if previous_cache else 0,
                 "symbols": old_symbols,
+                "symbol_rows": old_rows,
                 "available": False,
+                "payload_sha256": previous_cache.get("payload_sha256", "") if previous_cache else "",
+                "raw_payload_path": previous_cache.get("raw_payload_path", "") if previous_cache else "",
                 "manifest_row": res.get("manifest_row"),
             }
     except Exception as e:
@@ -198,10 +224,15 @@ def refresh_exchangeinfo_cache(
         logger.error(f"Error during exchangeInfo refresh: {e}")
         return {
             "last_refreshed_ms": previous_cache.get("last_refreshed_ms", 0) if previous_cache else 0,
+            "fetched_at_ms": previous_cache.get("fetched_at_ms", 0) if previous_cache else 0,
             "symbols": old_symbols,
+            "symbol_rows": old_rows,
             "available": False,
+            "payload_sha256": previous_cache.get("payload_sha256", "") if previous_cache else "",
+            "raw_payload_path": previous_cache.get("raw_payload_path", "") if previous_cache else "",
             "manifest_row": None,
         }
+
 
 
 def fetch_depth_snapshot(symbol: str, live_public_readonly: bool = False) -> dict:

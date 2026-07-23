@@ -96,6 +96,69 @@ def enrich_depth_request_manifest_row(
     return row
 
 
+def build_accepted_row_from_state(state, watermark, now_ms: int) -> dict:
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_live_depth_evidence_basis,
+    )
+
+    basis_diag = classify_live_depth_evidence_basis(state.to_dict(), watermark)
+    accepted_at_ms = state.observation_admitted_at_ms or now_ms
+    return {
+        "event_symbol_id": state.event_symbol_id,
+        "symbol": state.symbol,
+        "event_id": state.event_id,
+        "detected_at_ms": state.detected_at_ms,
+        "accepted_at_ms": accepted_at_ms,
+        "acceptance_id": state.acceptance_id,
+        "evidence_start_class": state.evidence_start_class,
+        "observation_anchor_ms": state.observation_anchor_ms,
+        "observation_anchor_basis": state.observation_anchor_basis,
+        "observation_anchor_confidence": state.observation_anchor_confidence,
+        "observation_window_start_ms": state.observation_window_start_ms,
+        "observation_window_end_ms": state.observation_window_end_ms,
+        "bootstrap_watermark_max_seen_detected_at_ms": state.bootstrap_watermark_max_seen_detected_at_ms,
+        "admission_watermark_at_first_seen_ms": state.admission_watermark_at_first_seen_ms,
+        "announcement_capture_post_bootstrap_watermark": state.announcement_capture_post_bootstrap_watermark,
+        "launch_anchor_post_bootstrap_watermark": state.launch_anchor_post_bootstrap_watermark,
+        **basis_diag,
+    }
+
+
+def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, now_ms: int) -> list[dict]:
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        make_acceptance_id,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+
+    existing_rows = load_all_jsonl_from_subdirs(output_root, "events_accepted")
+    existing_acceptance_ids = {row.get("acceptance_id") for row in existing_rows if row.get("acceptance_id")}
+    existing_event_symbol_ids = {row.get("event_symbol_id") for row in existing_rows if row.get("event_symbol_id")}
+    backfilled = []
+
+    for state in states.values():
+        if state.status != "active":
+            continue
+        acceptance_id = state.acceptance_id or make_acceptance_id(state)
+        if acceptance_id in existing_acceptance_ids or state.event_symbol_id in existing_event_symbol_ids:
+            continue
+        if not state.observation_anchor_ms:
+            continue
+        d = state.to_dict()
+        d["acceptance_id"] = acceptance_id
+        state_with_id = state.__class__.from_dict(d)
+        row = build_accepted_row_from_state(state_with_id, watermark, now_ms)
+        accepted_path = build_daily_path(output_root, "events_accepted", row["accepted_at_ms"])
+        append_jsonl(accepted_path, row)
+        existing_acceptance_ids.add(acceptance_id)
+        existing_event_symbol_ids.add(state.event_symbol_id)
+        backfilled.append(row)
+
+    return backfilled
+
+
 def main():
     args = parse_args()
     output_root = args.output_root
@@ -297,6 +360,7 @@ def main():
     state_file = os.path.join(output_root, "observer_state.jsonl")
     compact_observer_state_jsonl(state_file)
     states = load_latest_state_by_event_symbol_id(state_file)
+    reconcile_missing_accepted_rows(output_root, states, watermark, now_ms=int(time.time() * 1000))
 
     # 6. Load daily rotated stream history
     request_manifest_rows = load_all_jsonl_from_subdirs(output_root, "request_manifest")
@@ -360,26 +424,37 @@ def main():
         exchangeinfo_state = {
             "available": exchangeinfo_cache.get("available", False),
             "symbols": exchangeinfo_cache.get("symbols", set()),
+            "symbol_rows": exchangeinfo_cache.get("symbol_rows", {}),
+            "payload_sha256": exchangeinfo_cache.get("payload_sha256", ""),
+            "raw_payload_path": exchangeinfo_cache.get("raw_payload_path", ""),
+            "fetched_at_ms": exchangeinfo_cache.get("fetched_at_ms", 0),
         }
 
-        # 6.2 Load Stage 1.5D events and classify event-symbols
+        # 6.2 Load Stage 1.5D events and process pending/new event-symbols
         events = load_all_events(args.fixture_events_jsonl, args.stage1_5d_events_glob)
         logger.info(f"Loaded {len(events)} events. events={events}")
 
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+            EventSymbolState,
+        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_budget import (
             can_start_new_observation,
             classify_budget_status,
             estimate_requests_per_min,
         )
+
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
             classify_event_symbol_eligibility_with_diagnostics,
             classify_live_depth_evidence_basis,
             flatten_event_symbols,
             make_event_symbol_id,
+            make_stable_event_symbol_key,
+            re_resolve_pending_anchor,
         )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+            create_pending_observation_state,
             finalize_observation_if_due,
-            start_observation,
+            promote_pending_to_active_observation,
         )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
             append_jsonl,
@@ -397,7 +472,6 @@ def main():
         active_states = [s for s in states.values() if s.status == "active"]
         active_count = len(active_states)
 
-
         estimated_req_rate = estimate_requests_per_min(
             active_count,
             1,
@@ -407,6 +481,51 @@ def main():
         budget_status = classify_budget_status(active_count, estimated_req_rate)
         budget_state = {"budget_exceeded": budget_status == "rate_limit_budget_exceeded"}
 
+        # 6.2.1 Re-evaluate existing pending states
+        for pending_id, pending_state in list(states.items()):
+            if not pending_state.status.startswith("pending_"):
+                continue
+
+            if (pending_state.next_anchor_resolution_at_ms is not None and now_ms >= pending_state.next_anchor_resolution_at_ms) or (
+                pending_state.next_admission_check_at_ms is not None and now_ms >= pending_state.next_admission_check_at_ms
+            ):
+                updated_pending = re_resolve_pending_anchor(pending_state, events, exchangeinfo_state, now_ms)
+                if updated_pending.status in ("pending_ready_for_admission", "eligible_clean_start", "eligible_recovery_only") or (
+                    updated_pending.observation_anchor_ms is not None and now_ms >= updated_pending.observation_anchor_ms
+                ):
+                    new_est_rate = estimate_requests_per_min(active_count + 1, 1, base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC, 0.2)
+                    if can_start_new_observation(active_count, new_est_rate):
+                        ev_start_class = updated_pending.evidence_start_class or ("clean_start" if updated_pending.observation_anchor_ms and now_ms - updated_pending.observation_anchor_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS else "recovery_start")
+                        promoted_state = promote_pending_to_active_observation(updated_pending, now_ms, evidence_start_class=ev_start_class)
+                        states[pending_id] = promoted_state
+                        active_states.append(promoted_state)
+                        active_count += 1
+                        post_watermark_accepted += 1
+                        append_jsonl(state_file, promoted_state.to_dict())
+
+                        target_event = {}
+                        for ev in events:
+                            if promoted_state.symbol in ev.get("symbols", []) or promoted_state.event_id == ev.get("event_id"):
+                                target_event = ev
+                                break
+                        accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
+                        append_jsonl(accepted_path, build_accepted_row_from_state(promoted_state, watermark, now_ms))
+
+                        if target_event:
+                            watermark = update_watermark_with_event(watermark, target_event)
+                            write_watermark_atomic(watermark_path, watermark)
+
+
+                    else:
+                        d = updated_pending.to_dict()
+                        d["capacity_defer_count"] = updated_pending.capacity_defer_count + 1
+                        states[pending_id] = EventSymbolState.from_dict(d)
+                        append_jsonl(state_file, d)
+                else:
+                    states[pending_id] = updated_pending
+                    append_jsonl(state_file, updated_pending.to_dict())
+
+        # 6.2.2 Classify new incoming events
         for event in events:
             for flat_event in flatten_event_symbols(event):
                 symbol = flat_event["symbol"]
@@ -414,6 +533,9 @@ def main():
 
                 if event_symbol_id in states:
                     continue
+
+                flat_event["event_symbol_id"] = event_symbol_id
+                flat_event["stable_event_symbol_key"] = make_stable_event_symbol_key(flat_event, symbol)
 
                 status, reason, eligibility_diag = classify_event_symbol_eligibility_with_diagnostics(
                     row=flat_event,
@@ -426,7 +548,23 @@ def main():
                 logger.info(f"Classified event {event_symbol_id} ({symbol}): status={status}, reason={reason}")
 
                 if status == "pending":
-                    # Do not write accepted/rejected, do not update watermark
+                    pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
+                    states[event_symbol_id] = pending_state
+                    append_jsonl(state_file, pending_state.to_dict())
+
+                    pending_path = build_daily_path(output_root, "events_pending", now_ms)
+                    append_jsonl(pending_path, {
+                        "event_symbol_id": event_symbol_id,
+                        "stable_event_symbol_key": flat_event["stable_event_symbol_key"],
+                        "symbol": symbol,
+                        "status": pending_state.status,
+                        "pending_reason": reason,
+                        "observation_anchor_ms": pending_state.observation_anchor_ms,
+                        "observation_anchor_basis": pending_state.observation_anchor_basis,
+                        "first_seen_at_ms": pending_state.first_seen_at_ms,
+                        "next_admission_check_at_ms": pending_state.next_admission_check_at_ms,
+                        "anchor_resolution_deadline_ms": pending_state.anchor_resolution_deadline_ms,
+                    })
                     continue
 
                 if status == "eligible":
@@ -437,8 +575,13 @@ def main():
                         0.2
                     )
                     if can_start_new_observation(active_count, new_est_rate):
-                        flat_event["event_symbol_id"] = event_symbol_id
-                        new_state = start_observation(flat_event, now_ms)
+                        ev_start_class = eligibility_diag.get("evidence_start_class", "clean_start")
+                        pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
+                        new_state = promote_pending_to_active_observation(
+                            pending_state,
+                            now_ms,
+                            evidence_start_class=ev_start_class,
+                        )
 
                         states[event_symbol_id] = new_state
                         active_states.append(new_state)
@@ -447,17 +590,9 @@ def main():
 
                         append_jsonl(state_file, new_state.to_dict())
 
-                        basis_diag = classify_live_depth_evidence_basis(flat_event, watermark)
                         accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
-                        append_jsonl(accepted_path, {
-                            "event_symbol_id": event_symbol_id,
-                            "symbol": symbol,
-                            "event_id": flat_event.get("event_id"),
-                            "detected_at_ms": flat_event.get("detected_at_ms"),
-                            "accepted_at_ms": now_ms,
-                            **eligibility_diag,
-                            **basis_diag,
-                        })
+                        accepted_row = {**eligibility_diag, **build_accepted_row_from_state(new_state, watermark, now_ms)}
+                        append_jsonl(accepted_path, accepted_row)
                         watermark = update_watermark_with_event(watermark, flat_event)
                         write_watermark_atomic(watermark_path, watermark)
                     else:
@@ -480,6 +615,7 @@ def main():
                             **basis_diag,
                         })
 
+
         # 6.3 Fetch public depth for active observations
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_client import (
             fetch_depth_snapshot,
@@ -488,6 +624,7 @@ def main():
             parse_depth_payload,
         )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+            record_depth_request,
             record_depth_snapshot,
         )
 
@@ -495,7 +632,11 @@ def main():
             symbol = state.symbol
             payload = None
 
+            state = record_depth_request(state, now_ms)
+            states[state.event_symbol_id] = state
+
             if args.mock_response_dir:
+
                 try:
                     payload = get_mock_json_response(args.mock_response_dir, f"depth_{symbol}")
                 except Exception:
@@ -631,6 +772,7 @@ def main():
             failed_states=failed_states,
             request_manifest_rows=request_manifest_rows,
             heartbeat_rows=heartbeat_rows,
+            pending_states=[s for s in states.values() if s.status.startswith("pending_")],
         )
         write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
 

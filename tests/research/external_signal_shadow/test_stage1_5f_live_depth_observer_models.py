@@ -106,3 +106,42 @@ def test_summary_defaults_never_allow_paper_live_execution_or_alpha():
     assert not summary.execution_engine_allowed
     assert not summary.alpha_interpretation_allowed
     assert not summary.research_result_valid
+
+
+def test_event_symbol_state_uses_nullable_launch_anchor_fields():
+    state = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="e1",
+        symbol="ABCUSDT",
+        detected_at_ms=1_000,
+        status="pending_launch_anchor_missing",
+        observation_anchor_ms=None,
+        observation_started_at_ms=None,
+        first_depth_request_at_ms=None,
+        first_healthy_snapshot_at_ms=None,
+        observer_state_schema_version=2,
+    )
+
+    row = state.to_dict()
+    assert row["observation_anchor_ms"] is None
+    assert row["observation_started_at_ms"] is None
+    assert row["first_depth_request_at_ms"] is None
+    assert row["observer_state_schema_version"] == 2
+
+
+def test_legacy_zero_timestamps_migrate_to_none_for_new_semantic_fields():
+    row = {
+        "event_symbol_id": "es1",
+        "event_id": "e1",
+        "symbol": "ABCUSDT",
+        "status": "pending_launch_anchor_missing",
+        "observation_anchor_ms": 0,
+        "first_depth_request_at_ms": 0,
+        "first_healthy_snapshot_at_ms": 0,
+    }
+
+    state = EventSymbolState.from_dict(row)
+
+    assert state.observation_anchor_ms is None
+    assert state.first_depth_request_at_ms is None
+    assert state.first_healthy_snapshot_at_ms is None

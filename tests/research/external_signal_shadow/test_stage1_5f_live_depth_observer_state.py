@@ -1,14 +1,18 @@
 import json
 import os
 
+from configs import base
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
     DepthSnapshot,
     EventSymbolState,
 )
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
     compact_observer_state_jsonl,
+    compute_snapshot_time_coverage,
+    create_pending_observation_state,
     finalize_observation_if_due,
     load_latest_state_by_event_symbol_id,
+    promote_pending_to_active_observation,
 )
 
 
@@ -232,3 +236,130 @@ def test_state_compaction_writes_backup_before_replace(tmp_path):
     bak_files = [f for f in files if f.endswith(".bak")]
     assert len(bak_files) == 1
     assert "observer_state" in bak_files[0]
+
+
+def test_create_pending_launch_state_survives_state_reload(tmp_path):
+    state_file = tmp_path / "observer_state.jsonl"
+    event = {
+        "event_symbol_id": "es1",
+        "event_id": "e1",
+        "source_article_id": "article1",
+        "stable_event_symbol_key": "futures_contract_launch|article1|ABCUSDT",
+        "symbol": "ABCUSDT",
+        "detected_at_ms": 1_000,
+    }
+    diag = {
+        "observation_anchor_ms": 10_000,
+        "observation_anchor_basis": "symbol_effective_launch_time",
+        "observation_anchor_confidence": "high",
+        "next_admission_check_at_ms": 10_000,
+        "bootstrap_watermark_max_seen_detected_at_ms": 500,
+        "announcement_capture_post_bootstrap_watermark": True,
+        "launch_anchor_post_bootstrap_watermark": True,
+    }
+
+    state = create_pending_observation_state(event, "pending_launch_time_in_future", diag, now_ms=2_000)
+    state_file.write_text(json.dumps(state.to_dict()) + "\n")
+
+    loaded = load_latest_state_by_event_symbol_id(str(state_file))["es1"]
+    assert loaded.status == "pending_launch_time_in_future"
+    assert loaded.observation_anchor_ms == 10_000
+
+
+def test_promote_pending_to_active_sets_window_from_anchor_not_now():
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="e1",
+        symbol="ABCUSDT",
+        detected_at_ms=1_000,
+        status="pending_launch_time_in_future",
+        observation_anchor_ms=10_000,
+        observation_anchor_basis="symbol_effective_launch_time",
+        observation_anchor_confidence="high",
+        observation_anchor_candidates={"symbol_effective_launch_time": 10_000},
+        announcement_capture_post_bootstrap_watermark=True,
+        launch_anchor_post_bootstrap_watermark=True,
+    )
+
+    active = promote_pending_to_active_observation(pending, now_ms=10_500, evidence_start_class="clean_start")
+
+    assert active.status == "active"
+    assert active.observation_started_at_ms == 10_500
+    assert active.observation_window_start_ms == 10_000
+    assert active.observation_window_end_ms == 10_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS
+    assert active.first_depth_request_at_ms is None
+    assert active.acceptance_id
+
+
+def test_finalize_preserves_launch_anchor_and_request_metrics():
+    anchor_ms = 10_000
+    end_ms = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS
+    state = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="e1",
+        symbol="ABCUSDT",
+        detected_at_ms=1_000,
+        status="active",
+        observation_started_at_ms=anchor_ms + 500,
+        observation_anchor_ms=anchor_ms,
+        observation_anchor_basis="symbol_effective_launch_time",
+        observation_anchor_confidence="high",
+        observation_window_start_ms=anchor_ms,
+        observation_window_end_ms=end_ms,
+        first_depth_request_at_ms=anchor_ms + 500,
+        first_depth_request_latency_ms=500,
+        acceptance_id="acceptance-1",
+        evidence_start_class="clean_start",
+    )
+    snapshots = [
+        DepthSnapshot(
+            event_symbol_id="es1",
+            symbol="ABCUSDT",
+            fetched_at_ms=anchor_ms + i * base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC * 1000,
+            exchange_time_ms=anchor_ms,
+            best_bid=100.0,
+            best_ask=101.0,
+            spread_bps=100.0,
+            depth_status="healthy",
+        )
+        for i in range(720)
+    ]
+
+    final = finalize_observation_if_due(state, end_ms + 1, snapshots)
+
+    assert final.status == "completed"
+    assert final.observation_anchor_ms == anchor_ms
+    assert final.observation_anchor_basis == "symbol_effective_launch_time"
+    assert final.observation_window_start_ms == anchor_ms
+    assert final.first_depth_request_at_ms == anchor_ms + 500
+    assert final.first_depth_request_latency_ms == 500
+    assert final.acceptance_id == "acceptance-1"
+    assert final.expected_snapshot_count == 720
+    assert final.unique_snapshot_bucket_count == 720
+    assert final.missing_snapshot_bucket_count == 0
+
+
+def test_snapshot_at_exact_window_end_does_not_create_extra_bucket():
+    anchor_ms = 10_000
+    state = EventSymbolState(
+        event_symbol_id="es1",
+        symbol="ABCUSDT",
+        status="active",
+        observation_anchor_ms=anchor_ms,
+        observation_window_start_ms=anchor_ms,
+        observation_window_end_ms=anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS,
+    )
+    snapshots = [
+        DepthSnapshot(
+            event_symbol_id="es1",
+            symbol="ABCUSDT",
+            fetched_at_ms=anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS,
+            depth_status="healthy",
+        )
+    ]
+
+    cov = compute_snapshot_time_coverage(state, snapshots)
+
+    assert cov["expected_snapshot_count"] == 720
+    assert cov["unique_snapshot_bucket_count"] == 0
+    assert cov["out_of_window_snapshot_row_count"] == 1

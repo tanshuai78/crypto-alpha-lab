@@ -158,8 +158,10 @@ def test_runner_mock_response_dir_keeps_network_disabled(tmp_path):
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
+            "symbol_effective_launch_times_ms": {"ABCUSDT": event_time},
             "source_name": "s1",
             "title": "t2"
+
         }) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
@@ -476,7 +478,8 @@ def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_pat
                 accepted_rows.append(json.loads(line))
     assert len(accepted_rows) == 1
     assert accepted_rows[0]["symbol"] == "ETHUSD1"
-    assert accepted_rows[0]["observation_age_basis"] == "symbol_effective_launch_time"
+    assert accepted_rows[0]["observation_anchor_basis"] == "symbol_effective_launch_time"
+
 
     # Assert no ETHUSD1 rejected
     rejected_files = list((output_root / "events_rejected").glob("**/*.jsonl"))
@@ -790,10 +793,11 @@ def test_runner_accepts_delayed_launch_when_detected_time_is_before_running_wate
                 accepted_rows.append(json.loads(line))
 
     assert accepted_rows[0]["symbol"] == "SPCXUSD1"
-    assert accepted_rows[0]["observation_age_basis"] == "symbol_effective_launch_time"
+    assert accepted_rows[0]["observation_anchor_basis"] == "symbol_effective_launch_time"
     assert accepted_rows[0]["announcement_time_capture_evidence_allowed"] is False
     assert accepted_rows[0]["launch_time_depth_evidence_allowed"] is True
     assert accepted_rows[0]["live_depth_evidence_basis"] == "launch_time_only"
+
 
     with open(output_root / "watermark.json", "r") as f:
         w_final = json.load(f)
@@ -895,9 +899,9 @@ def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics
     assert len(rejected_rows) == 1
     row = rejected_rows[0]
     assert row["symbol"] == "ETHUSD1"
-    assert row["rejection_reason"] == "age_exceeded"
+    assert row["rejection_reason"] == "rejected_launch_anchor_age_exceeded"
     assert row["observation_age_base_ms"] == launch_time_ms
-    assert row["observation_age_basis"] == "symbol_effective_launch_time"
+    assert row["observation_anchor_basis"] == "symbol_effective_launch_time"
     assert row["event_age_ms"] == 15 * 60 * 1000 + 1_000
     assert row["max_event_age_ms"] == 15 * 60 * 1000
     assert row["watermark_max_seen_detected_at_ms"] == watermark_time
@@ -1018,8 +1022,10 @@ def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_pa
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
+            "symbol_effective_launch_times_ms": {"ABCUSDT": event_time},
             "source_name": "s1",
             "title": "t2"
+
         }) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
@@ -1134,8 +1140,10 @@ def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
+            "symbol_effective_launch_times_ms": {"ABCUSDT": event_time},
             "source_name": "s1",
             "title": "t2"
+
         }) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
@@ -1257,8 +1265,10 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
+            "symbol_effective_launch_times_ms": {"ABCUSDT": event_time},
             "source_name": "s1",
             "title": "t2"
+
         }) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
@@ -1443,3 +1453,145 @@ def test_exchangeinfo_manifest_row_is_not_depth_symbol_specific(monkeypatch, tmp
     assert exinfo_row.get("event_symbol_id") is None
     assert exinfo_row.get("symbol") is None
     assert exinfo_row.get("request_type") is None
+
+
+def test_runner_can_accept_with_exchangeinfo_onboard_anchor_when_event_launch_time_missing(tmp_path, monkeypatch):
+    import time
+
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    now_ms = 1784644200000
+    launch_time_ms = now_ms - 30_000
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({
+            "symbols": [{
+                "symbol": "XYZUSDT",
+                "status": "TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": launch_time_ms,
+            }]
+        }, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": now_ms}, f)
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "exchangeinfo-anchor-event",
+            "event_type": "futures_contract_launch",
+            "source_article_id": "article-exinfo-anchor",
+            "detected_at_ms": now_ms - 60_000,
+            "symbols": ["XYZUSDT"],
+            "symbol_extraction_source": "bapi_article_body",
+            "symbol_validation_status": "validated_by_exchangeinfo",
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": now_ms - 120_000,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": now_ms - 120_000,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    monkeypatch.setattr(time, "time", lambda: now_ms / 1000.0)
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    row = json.loads(accepted_files[0].read_text().strip())
+    assert row["symbol"] == "XYZUSDT"
+    assert row["observation_anchor_ms"] == launch_time_ms
+    assert row["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
+    assert row["observation_anchor_confidence"] == "medium"
+
+
+def test_reconcile_missing_accepted_row_backfills_active_state_once(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        reconcile_missing_accepted_rows,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+        Watermark,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    state = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="ABCUSDT",
+        detected_at_ms=10_000,
+        status="active",
+        observation_anchor_ms=20_000,
+        observation_anchor_basis="symbol_effective_launch_time",
+        observation_anchor_confidence="high",
+        observation_window_start_ms=20_000,
+        observation_window_end_ms=20_000 + 12 * 60 * 60 * 1000,
+        observation_admitted_at_ms=20_100,
+        acceptance_id="acceptance-1",
+        evidence_start_class="clean_start",
+        source_article_id="article1",
+        stable_event_key="stable1",
+        bootstrap_watermark_max_seen_detected_at_ms=5_000,
+        admission_watermark_at_first_seen_ms=15_000,
+        announcement_capture_post_bootstrap_watermark=True,
+        launch_anchor_post_bootstrap_watermark=True,
+    )
+    watermark = Watermark(1, 5_000, [], [], [], 5_000)
+
+    rows = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_200)
+    rows_again = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_300)
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    accepted_rows = [json.loads(line) for line in accepted_files[0].read_text().splitlines() if line.strip()]
+    assert len(accepted_rows) == 1
+    assert rows[0]["acceptance_id"] == "acceptance-1"
+    assert accepted_rows[0]["observation_anchor_ms"] == 20_000
+    assert accepted_rows[0]["live_depth_evidence_basis"] == "announcement_and_launch_time"
+    assert rows_again == []

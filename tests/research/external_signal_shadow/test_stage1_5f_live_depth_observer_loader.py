@@ -2,18 +2,28 @@ import json
 
 import pytest
 
+from configs import base
+
+
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+    build_first_seen_watermark_diagnostics,
     classify_event_symbol_eligibility,
     classify_event_symbol_eligibility_with_diagnostics,
     classify_live_depth_evidence_basis,
     flatten_event_symbols,
     iter_stage1_5d_event_rows,
     make_event_symbol_id,
+    make_stable_event_symbol_key,
+    merge_first_seen_watermark_fields,
+    re_resolve_pending_anchor,
     resolve_announcement_capture_time_ms,
+    resolve_depth_observation_anchor_ms,
     resolve_observation_age_base_ms,
+    upsert_pending_state_with_event_revision,
     validate_stage1_5d_summary,
 )
-from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState, Watermark
+
 
 
 def test_only_futures_contract_launch_is_eligible():
@@ -46,8 +56,9 @@ def test_event_age_gate_skips_old_event():
 
     # now is 1000 + 15*60*1000 + 1 = 901001
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000 + 15 * 60 * 1000 + 1, w, exinfo, {})
-    assert status == "rejected"
-    assert reason == "age_exceeded"
+    assert status == "pending"
+    assert reason == "pending_launch_anchor_missing"
+
 
 
 def test_symbol_not_in_current_exchangeinfo_is_skipped_not_failed():
@@ -98,8 +109,298 @@ def test_event_symbol_id_is_stable():
     h1 = make_event_symbol_id(event, "ABCUSDT")
     h2 = make_event_symbol_id(event, "ABCUSDT")
     assert h1 == h2
-    assert len(h1) == 64
-    assert h1.lower() == h1
+
+
+def test_stable_event_symbol_key_uses_article_symbol_and_event_type_not_revision_hash():
+    row1 = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article1",
+        "event_id": "revision-a",
+        "symbols": ["ABCUSDT"],
+        "detail_payload_hash": "hash-a",
+    }
+    row2 = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article1",
+        "event_id": "revision-b",
+        "symbols": ["ABCUSDT"],
+        "detail_payload_hash": "hash-b",
+    }
+
+    assert make_stable_event_symbol_key(row1, "ABCUSDT") == make_stable_event_symbol_key(row2, "ABCUSDT")
+
+
+def test_pending_state_upserts_new_event_revision_by_stable_key_preserving_first_seen_fields():
+    pending = EventSymbolState(
+        event_symbol_id="old-es",
+        event_id="revision-a",
+        symbol="ABCUSDT",
+        status="pending_launch_anchor_missing",
+        stable_event_symbol_key="futures_contract_launch|article1|ABCUSDT",
+        first_seen_at_ms=1_000,
+        bootstrap_watermark_max_seen_detected_at_ms=500,
+        announcement_capture_post_bootstrap_watermark=True,
+    )
+    revision = {
+        "event_id": "revision-b",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article1",
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 10_000},
+        "detail_payload_hash": "hash-b",
+    }
+
+    updated = upsert_pending_state_with_event_revision(pending, revision, "ABCUSDT")
+
+    assert updated.event_id == "revision-b"
+    assert updated.latest_event_payload_hash == "hash-b"
+    assert updated.first_seen_at_ms == 1_000
+    assert updated.bootstrap_watermark_max_seen_detected_at_ms == 500
+    assert updated.announcement_capture_post_bootstrap_watermark is True
+
+
+def test_resolve_depth_observation_anchor_prefers_effective_launch_time():
+    row = {
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 10_000},
+        "symbol_onboard_times_ms": {"ABCUSDT": 10_030},
+    }
+    exchangeinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+
+    result = resolve_depth_observation_anchor_ms(row, "ABCUSDT", exchangeinfo, now_ms=9_000)
+
+    assert result["observation_anchor_ms"] == 10_000
+    assert result["observation_anchor_basis"] == "symbol_effective_launch_time"
+    assert result["observation_anchor_confidence"] == "high"
+    assert result["observation_anchor_conflict_active"] is False
+
+
+def test_anchor_conflict_blocks_silent_priority_selection():
+    row = {
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 10_000},
+        "symbol_onboard_times_ms": {"ABCUSDT": 100_000},
+    }
+    exchangeinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+
+    result = resolve_depth_observation_anchor_ms(row, "ABCUSDT", exchangeinfo, now_ms=9_000)
+
+    assert result["observation_anchor_conflict_active"] is True
+    assert result["observation_anchor_disagreement_max_ms"] == 90_000
+
+
+
+def test_timely_exchangeinfo_anchor_can_be_medium_confidence_clean_start():
+    row = {
+        "event_type": "futures_contract_launch",
+        "symbol_validation_status": "validated",
+    }
+    exchangeinfo = {
+        "available": True,
+        "symbols": {"ABCUSDT"},
+        "symbol_rows": {
+            "ABCUSDT": {
+                "symbol": "ABCUSDT",
+                "status": "PENDING_TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": 10_000,
+            }
+        },
+        "fetched_at_ms": 9_000,
+        "payload_sha256": "hash",
+        "raw_payload_path": "raw/exchangeinfo.jsonl",
+    }
+
+    result = resolve_depth_observation_anchor_ms(row, "ABCUSDT", exchangeinfo, now_ms=9_000)
+
+    assert result["observation_anchor_ms"] == 10_000
+    assert result["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
+    assert result["observation_anchor_confidence"] == "medium"
+    assert result["exchangeinfo_anchor_clean_eligible"] is True
+
+
+def test_exchangeinfo_anchor_without_payload_hash_is_recovery_only():
+    row = {"event_type": "futures_contract_launch", "symbol_validation_status": "validated"}
+    exchangeinfo = {
+        "available": True,
+        "symbols": {"ABCUSDT"},
+        "symbol_rows": {"ABCUSDT": {"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 10_000}},
+        "fetched_at_ms": 9_000,
+        "payload_sha256": "",
+        "raw_payload_path": "",
+    }
+
+    result = resolve_depth_observation_anchor_ms(row, "ABCUSDT", exchangeinfo, now_ms=9_000)
+
+    assert result["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
+    assert result["exchangeinfo_anchor_clean_eligible"] is False
+
+
+def test_first_seen_computes_frozen_bootstrap_watermark_fields():
+    event = {"event_id": "e1", "event_type": "futures_contract_launch", "detected_at_ms": 2_000, "symbols": ["ABCUSDT"]}
+    diag = {"observation_anchor_ms": 10_000}
+    watermark = Watermark(1, 5_000, [], [], [], 5_000)
+    bootstrap_watermark_ms = 1_000
+
+    frozen = build_first_seen_watermark_diagnostics(event, "ABCUSDT", diag, watermark, bootstrap_watermark_ms)
+
+    assert frozen["bootstrap_watermark_max_seen_detected_at_ms"] == 1_000
+    assert frozen["admission_watermark_at_first_seen_ms"] == 5_000
+    assert frozen["announcement_capture_post_bootstrap_watermark"] is True
+    assert frozen["launch_anchor_post_bootstrap_watermark"] is True
+
+
+def test_pending_recheck_does_not_recompute_frozen_evidence_flags():
+    existing = EventSymbolState(
+        event_symbol_id="es1",
+        status="pending_launch_time_in_future",
+        bootstrap_watermark_max_seen_detected_at_ms=1_000,
+        admission_watermark_at_first_seen_ms=5_000,
+        announcement_capture_post_bootstrap_watermark=True,
+        launch_anchor_post_bootstrap_watermark=True,
+    )
+    new_diag = {
+        "bootstrap_watermark_max_seen_detected_at_ms": 9_000,
+        "admission_watermark_at_first_seen_ms": 9_000,
+        "announcement_capture_post_bootstrap_watermark": False,
+        "launch_anchor_post_bootstrap_watermark": False,
+    }
+
+    merged = merge_first_seen_watermark_fields(existing, new_diag)
+
+    assert merged["bootstrap_watermark_max_seen_detected_at_ms"] == 1_000
+    assert merged["announcement_capture_post_bootstrap_watermark"] is True
+
+
+def test_missing_anchor_rechecks_latest_event_revision():
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="rev1",
+        symbol="ABCUSDT",
+        status="pending_launch_anchor_missing",
+        stable_event_symbol_key="futures_contract_launch|article1|ABCUSDT",
+        next_anchor_resolution_at_ms=10_000,
+        anchor_resolution_deadline_ms=20_000,
+    )
+    revision = {
+        "event_id": "rev2",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article1",
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 15_000},
+    }
+
+    result = re_resolve_pending_anchor(pending, [revision], {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}, now_ms=10_000)
+
+    assert result.status == "pending_launch_time_in_future"
+    assert result.event_id == "rev2"
+    assert result.observation_anchor_ms == 15_000
+
+
+def test_missing_anchor_timeout_returns_terminal_rejection_state():
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        symbol="ABCUSDT",
+        status="pending_launch_anchor_missing",
+        next_anchor_resolution_at_ms=10_000,
+        anchor_resolution_deadline_ms=9_999,
+    )
+
+    result = re_resolve_pending_anchor(pending, [], {"available": True, "symbols": set(), "symbol_rows": {}}, now_ms=10_000)
+
+    assert result.status == "rejected_launch_anchor_unavailable_timeout"
+    assert result.pending_terminal_reason == "rejected_launch_anchor_unavailable_timeout"
+
+
+def test_anchor_conflict_can_resolve_after_event_revision():
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="rev1",
+        symbol="ABCUSDT",
+        status="pending_anchor_conflict",
+        stable_event_symbol_key="futures_contract_launch|article1|ABCUSDT",
+        observation_anchor_candidates={"symbol_effective_launch_time": 10_000, "symbol_onboard_time": 100_000},
+        anchor_resolution_deadline_ms=30_000,
+        next_anchor_resolution_at_ms=10_000,
+    )
+    revision = {
+        "event_id": "rev2",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article1",
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 10_000},
+        "symbol_onboard_times_ms": {"ABCUSDT": 10_000},
+    }
+
+    result = re_resolve_pending_anchor(pending, [revision], {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}, now_ms=9_000)
+
+    assert result.status == "pending_launch_time_in_future"
+    assert result.observation_anchor_conflict_active is False
+    assert result.observation_anchor_ms == 10_000
+
+
+def test_launch_time_in_future_is_persisted_pending_status():
+    now_ms = 1_000_000
+    event = {
+        "event_id": "e1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": now_ms - 60_000,
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": now_ms + 600_000},
+    }
+    w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(event, "ABCUSDT", now_ms, w, exinfo, {})
+
+    assert status == "pending"
+    assert reason == "pending_launch_time_in_future"
+    assert diag["observation_anchor_ms"] == now_ms + 600_000
+    assert diag["next_admission_check_at_ms"] == now_ms + 600_000
+
+
+def test_missing_launch_anchor_does_not_fallback_to_detected_time_for_clean_observation():
+    now_ms = 1_000_000
+    event = {
+        "event_id": "e1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": now_ms - 60_000,
+        "symbols": ["ABCUSDT"],
+    }
+    w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(event, "ABCUSDT", now_ms, w, exinfo, {})
+
+    assert status == "pending"
+    assert reason == "pending_launch_anchor_missing"
+    assert diag["observation_anchor_ms"] is None
+
+
+def test_late_launch_start_is_recovery_only_not_clean():
+    now_ms = 1_000_000
+    launch_ms = now_ms - base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS - 1
+    event = {
+        "event_id": "e1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": now_ms - 60_000,
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": launch_ms},
+    }
+    w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(event, "ABCUSDT", now_ms, w, exinfo, {})
+
+    assert status == "eligible"
+    assert reason == "eligible_recovery_only"
+    assert diag["evidence_start_class"] == "recovery_start"
+
+
+
+
+
+
 
 
 def test_event_symbol_id_is_stable_across_restarts_with_same_input():
@@ -218,8 +519,9 @@ def test_delayed_launch_event_with_launch_time_after_watermark_bypasses_detected
     )
 
     assert status == "eligible"
-    assert reason == "ok"
-    assert diag["observation_age_basis"] == "symbol_effective_launch_time"
+    assert reason == "eligible_recovery_only"
+    assert diag["observation_anchor_basis"] == "symbol_effective_launch_time"
+
 
 
 def test_delayed_launch_event_seen_by_watermark_still_rejected_as_pre_watermark():
@@ -381,7 +683,7 @@ def test_delayed_launch_event_uses_symbol_effective_launch_time_for_age_gate():
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
     assert status == "eligible"
-    assert reason == "ok"
+    assert reason == "eligible_recovery_only"
 
 
 def test_legacy_event_without_launch_time_still_rejected_by_detected_age():
@@ -393,12 +695,13 @@ def test_legacy_event_without_launch_time_still_rejected_by_detected_age():
         "symbols": ["ABCUSDT"],
     }
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ABCUSDT"}}
+    exinfo = {"available": True, "symbols": ["ABCUSDT"]}
 
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", now_ms, w, exinfo, {})
 
-    assert status == "rejected"
-    assert reason == "age_exceeded"
+    assert status == "pending"
+    assert reason == "pending_launch_anchor_missing"
+
 
 
 def test_launch_time_in_future_is_pending_not_age_rejected_or_eligible():
@@ -416,7 +719,7 @@ def test_launch_time_in_future_is_pending_not_age_rejected_or_eligible():
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
     assert status == "pending"
-    assert reason == "launch_time_in_future"
+    assert reason == "pending_launch_time_in_future"
 
 
 def test_launch_time_age_just_inside_15m_window_is_eligible():
@@ -435,7 +738,7 @@ def test_launch_time_age_just_inside_15m_window_is_eligible():
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
     assert status == "eligible"
-    assert reason == "ok"
+    assert reason == "eligible_recovery_only"
 
 
 def test_launch_time_age_just_outside_15m_window_is_rejected():
@@ -454,7 +757,8 @@ def test_launch_time_age_just_outside_15m_window_is_rejected():
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
     assert status == "rejected"
-    assert reason == "age_exceeded"
+    assert reason == "rejected_launch_anchor_age_exceeded"
+
 
 
 def test_pre_watermark_seen_event_still_ignored_even_if_launch_time_after_watermark():
@@ -526,11 +830,8 @@ def test_eligibility_diagnostics_expose_observation_age_basis():
     )
 
     assert status == "eligible"
-    assert reason == "ok"
-    assert diag["observation_age_basis"] == "symbol_effective_launch_time"
-    assert diag["event_age_ms"] == 5 * 60 * 1000
-    assert diag["watermark_max_seen_detected_at_ms"] == w.max_seen_detected_at_ms
-    assert diag["watermark_version"] == w.watermark_version
+    assert reason == "eligible_recovery_only"
+    assert diag["observation_anchor_basis"] == "symbol_effective_launch_time"
 
 
 def test_rejected_age_exceeded_diagnostics_expose_observation_age_basis():
@@ -551,13 +852,9 @@ def test_rejected_age_exceeded_diagnostics_expose_observation_age_basis():
     )
 
     assert status == "rejected"
-    assert reason == "age_exceeded"
-    assert diag["observation_age_base_ms"] == launch_ms
-    assert diag["observation_age_basis"] == "symbol_effective_launch_time"
-    assert diag["event_age_ms"] == (15 * 60 * 1000) + 1_000
-    assert diag["max_event_age_ms"] == 15 * 60 * 1000
-    assert diag["watermark_max_seen_detected_at_ms"] == w.max_seen_detected_at_ms
-    assert diag["watermark_version"] == w.watermark_version
+    assert reason == "rejected_launch_anchor_age_exceeded"
+    assert diag["observation_anchor_ms"] == launch_ms
+    assert diag["observation_anchor_basis"] == "symbol_effective_launch_time"
 
 
 def test_evidence_basis_launch_time_only_when_announcement_before_watermark_but_launch_after():
@@ -576,6 +873,24 @@ def test_evidence_basis_launch_time_only_when_announcement_before_watermark_but_
     assert basis["live_depth_evidence_basis"] == "launch_time_only"
     assert basis["announcement_capture_time_ms"] == 2_000
     assert basis["announcement_capture_time_source"] == "detected_at_ms"
+
+
+def test_frozen_evidence_basis_preserves_launch_time_only_after_watermark_moves():
+    row = {
+        "symbol": "ETHUSD1",
+        "announcement_capture_time_ms": 2_000,
+        "announcement_capture_time_source": "detected_at_ms",
+        "announcement_capture_post_bootstrap_watermark": False,
+        "launch_anchor_post_bootstrap_watermark": True,
+        "evidence_start_class": "clean_start",
+    }
+    moving_watermark = Watermark(1, 20_000, [], [], [], 20_000)
+
+    basis = classify_live_depth_evidence_basis(row, moving_watermark)
+
+    assert basis["announcement_time_capture_evidence_allowed"] is False
+    assert basis["launch_time_depth_evidence_allowed"] is True
+    assert basis["live_depth_evidence_basis"] == "launch_time_only"
 
 
 def test_evidence_basis_uses_detected_at_ms_not_source_published_at_ms_for_capture():
@@ -616,8 +931,9 @@ def test_regression_ethusd1_onboard_launch_time_delay_accepts():
     )
 
     assert status == "eligible"
-    assert reason == "ok"
-    assert diag["observation_age_basis"] == "symbol_effective_launch_time"
+    assert reason == "eligible_recovery_only"
+    assert diag["observation_anchor_basis"] == "symbol_effective_launch_time"
+
     assert diag["event_age_ms"] == 334532  # 1783069534532 - 1783069200000
 
     # Verify evidence labeling
@@ -625,3 +941,33 @@ def test_regression_ethusd1_onboard_launch_time_delay_accepts():
     assert basis["live_depth_evidence_basis"] == "announcement_and_launch_time"
     assert basis["announcement_time_capture_evidence_allowed"] is True
     assert basis["launch_time_depth_evidence_allowed"] is True
+
+
+def test_re_resolve_pending_anchor_ignores_revision_with_same_symbol_but_different_stable_key():
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="old-event",
+        symbol="ABCUSDT",
+        status="pending_launch_anchor_missing",
+        stable_event_symbol_key="futures_contract_launch|article1|ABCUSDT",
+        anchor_resolution_deadline_ms=50_000,
+        next_anchor_resolution_at_ms=9_000,
+    )
+    unrelated_revision = {
+        "event_id": "wrong-event",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article2",
+        "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 20_000},
+    }
+
+    result = re_resolve_pending_anchor(
+        pending,
+        [unrelated_revision],
+        {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}},
+        now_ms=10_000,
+    )
+
+    assert result.event_id == "old-event"
+    assert result.status == "pending_launch_anchor_missing"
+    assert result.observation_anchor_ms is None

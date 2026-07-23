@@ -52,6 +52,33 @@ def make_event_symbol_id(event_row: dict, symbol: str) -> str:
     return hashlib.sha256(raw_symbol_id_str.encode("utf-8")).hexdigest()
 
 
+def make_stable_event_symbol_key(row: dict, symbol: str) -> str:
+    source_article_id = str(row.get("source_article_id") or "")
+    event_type = str(row.get("event_type") or "")
+    sym = symbol.strip().upper()
+    if source_article_id:
+        return f"{event_type}|{source_article_id}|{sym}"
+    return f"{event_type}|{get_stable_event_key(row)}|{sym}"
+
+
+def upsert_pending_state_with_event_revision(pending_state, event_row: dict, symbol: str):
+    if not getattr(pending_state, "status", "").startswith("pending_"):
+        return pending_state
+
+    event_id = event_row.get("event_id") or pending_state.event_id
+    latest_payload_hash = (
+        event_row.get("detail_payload_hash")
+        or event_row.get("payload_hash")
+        or getattr(pending_state, "latest_event_payload_hash", "")
+    )
+
+    d = pending_state.to_dict()
+    d["event_id"] = event_id
+    d["latest_event_payload_hash"] = latest_payload_hash
+    return pending_state.__class__.from_dict(d)
+
+
+
 def _valid_ms(value) -> int | None:
     try:
         ms = int(value)
@@ -66,6 +93,199 @@ def _get_symbol_time(row: dict, field: str, symbol: str) -> int | None:
         return None
     sym = symbol.strip().upper()
     return _valid_ms(data.get(sym) or data.get(symbol))
+
+
+def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_state: dict, now_ms: int) -> dict:
+    sym = symbol.strip().upper()
+    candidates = {}
+
+    eff_launch = _get_symbol_time(row, "symbol_effective_launch_times_ms", sym)
+    if eff_launch:
+        candidates["symbol_effective_launch_time"] = eff_launch
+
+    onboard_t = _get_symbol_time(row, "symbol_onboard_times_ms", sym)
+    if onboard_t:
+        candidates["symbol_onboard_time"] = onboard_t
+
+    ex_rows = exchangeinfo_state.get("symbol_rows", {}) if isinstance(exchangeinfo_state, dict) else {}
+    ex_row = ex_rows.get(sym) or ex_rows.get(symbol) or {}
+    ex_status = str(ex_row.get("status") or "")
+    ex_contract_type = str(ex_row.get("contractType") or "")
+    ex_quote_asset = str(ex_row.get("quoteAsset") or "")
+    ex_margin_asset = str(ex_row.get("marginAsset") or "")
+    ex_onboard = _valid_ms(ex_row.get("onboardDate"))
+    quote_margin_match = (
+        ex_quote_asset in {"USDT", "USDC", "USD1", "BUSD"}
+        and ex_margin_asset == ex_quote_asset
+        and sym.endswith(ex_quote_asset)
+    )
+    perpetual_contract = ex_contract_type == "PERPETUAL" or ex_contract_type.endswith("_PERPETUAL")
+    if ex_status in ("PENDING_TRADING", "TRADING") and perpetual_contract and quote_margin_match and ex_onboard:
+        candidates["exchangeinfo_current_onboard_time"] = ex_onboard
+
+    non_empty_values = [v for v in candidates.values() if v is not None]
+    disagreement_max_ms = 0
+    conflict_active = False
+    if len(non_empty_values) > 1:
+        disagreement_max_ms = max(non_empty_values) - min(non_empty_values)
+        if disagreement_max_ms > base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_DISAGREEMENT_MS:
+            conflict_active = True
+
+    observation_anchor_ms = None
+    observation_anchor_basis = ""
+    observation_anchor_confidence = ""
+    exchangeinfo_clean_eligible = False
+
+    ex_payload_sha = str(exchangeinfo_state.get("payload_sha256") or "") if isinstance(exchangeinfo_state, dict) else ""
+
+    if "symbol_effective_launch_time" in candidates:
+        observation_anchor_ms = candidates["symbol_effective_launch_time"]
+        observation_anchor_basis = "symbol_effective_launch_time"
+        observation_anchor_confidence = "high"
+    elif "symbol_onboard_time" in candidates:
+        observation_anchor_ms = candidates["symbol_onboard_time"]
+        observation_anchor_basis = "symbol_onboard_time"
+        observation_anchor_confidence = "high"
+    elif "exchangeinfo_current_onboard_time" in candidates:
+        observation_anchor_ms = candidates["exchangeinfo_current_onboard_time"]
+        observation_anchor_basis = "exchangeinfo_current_onboard_time"
+        observation_anchor_confidence = "medium"
+        if ex_payload_sha:
+            exchangeinfo_clean_eligible = True
+
+    ex_evidence = {
+        "payload_sha256": ex_payload_sha,
+        "raw_payload_path": str(exchangeinfo_state.get("raw_payload_path") or "") if isinstance(exchangeinfo_state, dict) else "",
+        "fetched_at_ms": exchangeinfo_state.get("fetched_at_ms", 0) if isinstance(exchangeinfo_state, dict) else 0,
+    }
+
+    return {
+        "observation_anchor_ms": observation_anchor_ms,
+        "observation_anchor_basis": observation_anchor_basis,
+        "observation_anchor_confidence": observation_anchor_confidence,
+        "observation_anchor_candidates": candidates,
+        "observation_anchor_disagreement_max_ms": disagreement_max_ms,
+        "observation_anchor_conflict_active": conflict_active,
+        "exchangeinfo_anchor_clean_eligible": exchangeinfo_clean_eligible,
+        "exchangeinfo_anchor_evidence": ex_evidence,
+    }
+
+
+def build_first_seen_watermark_diagnostics(
+    event_row: dict,
+    symbol: str,
+    diagnostics: dict,
+    watermark,
+    bootstrap_watermark_max_seen_detected_at_ms: int | None = None
+) -> dict:
+    res = resolve_announcement_capture_time_ms(event_row)
+    ann_time = res[0] if isinstance(res, tuple) else res
+    boot_wm = bootstrap_watermark_max_seen_detected_at_ms
+    if boot_wm is None:
+        boot_wm = watermark.max_seen_detected_at_ms if hasattr(watermark, "max_seen_detected_at_ms") else 0
+
+    curr_wm = watermark.max_seen_detected_at_ms if hasattr(watermark, "max_seen_detected_at_ms") else 0
+
+    ann_post_boot = bool(ann_time > boot_wm) if ann_time else True
+    anchor_ms = diagnostics.get("observation_anchor_ms")
+    anchor_post_boot = bool(anchor_ms > boot_wm) if anchor_ms else True
+
+    return {
+        "bootstrap_watermark_max_seen_detected_at_ms": boot_wm,
+        "admission_watermark_at_first_seen_ms": curr_wm,
+        "announcement_capture_post_bootstrap_watermark": ann_post_boot,
+        "launch_anchor_post_bootstrap_watermark": anchor_post_boot,
+    }
+
+
+
+def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchangeinfo_state: dict, now_ms: int):
+    if not getattr(pending_state, "status", "").startswith("pending_"):
+        return pending_state
+
+    deadline = pending_state.anchor_resolution_deadline_ms
+    if deadline is not None and now_ms >= deadline:
+        status = "rejected_launch_anchor_unavailable_timeout"
+        if pending_state.status == "pending_anchor_conflict":
+            status = "rejected_anchor_conflict_unresolved_timeout"
+        d = pending_state.to_dict()
+        d["status"] = status
+        d["pending_terminal_reason"] = status
+        return pending_state.__class__.from_dict(d)
+
+    target_row = {}
+    for rev in event_revisions:
+        rev_stable_key = make_stable_event_symbol_key(rev, pending_state.symbol)
+        stable_key_matches = (
+            pending_state.stable_event_symbol_key
+            and rev_stable_key == pending_state.stable_event_symbol_key
+        )
+        legacy_symbol_match = (
+            not pending_state.stable_event_symbol_key
+            and pending_state.symbol in rev.get("symbols", [])
+        )
+        if stable_key_matches or legacy_symbol_match:
+            target_row = rev
+
+    anchor_diag = resolve_depth_observation_anchor_ms(target_row, pending_state.symbol, exchangeinfo_state, now_ms)
+    anchor_ms = anchor_diag.get("observation_anchor_ms")
+    conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
+
+    d = pending_state.to_dict()
+    if target_row:
+        if target_row.get("event_id"):
+            d["event_id"] = target_row["event_id"]
+        if target_row.get("detail_payload_hash") or target_row.get("payload_hash"):
+            d["latest_event_payload_hash"] = target_row.get("detail_payload_hash") or target_row.get("payload_hash")
+
+    d["anchor_resolution_attempt_count"] = pending_state.anchor_resolution_attempt_count + 1
+    d["last_anchor_resolution_at_ms"] = now_ms
+
+    d["observation_anchor_candidates"] = anchor_diag.get("observation_anchor_candidates", {})
+    d["observation_anchor_disagreement_max_ms"] = anchor_diag.get("observation_anchor_disagreement_max_ms", 0)
+    d["observation_anchor_conflict_active"] = conflict_active
+
+    retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
+    d["next_anchor_resolution_at_ms"] = now_ms + retry_interval_ms
+
+    if conflict_active:
+        d["status"] = "pending_anchor_conflict"
+        d["observation_anchor_ms"] = None
+    elif anchor_ms is None:
+        d["status"] = "pending_launch_anchor_missing"
+        d["observation_anchor_ms"] = None
+    else:
+        d["observation_anchor_ms"] = anchor_ms
+        d["observation_anchor_basis"] = anchor_diag.get("observation_anchor_basis", "")
+        d["observation_anchor_confidence"] = anchor_diag.get("observation_anchor_confidence", "")
+        if now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
+            d["status"] = "pending_launch_time_in_future"
+            d["next_admission_check_at_ms"] = anchor_ms
+        else:
+            d["status"] = "pending_ready_for_admission"
+            d["next_admission_check_at_ms"] = now_ms
+
+    return pending_state.__class__.from_dict(d)
+
+
+def merge_first_seen_watermark_fields(existing_state, new_diagnostics: dict) -> dict:
+
+    frozen_keys = (
+        "bootstrap_watermark_max_seen_detected_at_ms",
+        "admission_watermark_at_first_seen_ms",
+        "announcement_capture_post_bootstrap_watermark",
+        "launch_anchor_post_bootstrap_watermark",
+    )
+    result = dict(new_diagnostics)
+    for k in frozen_keys:
+        val = getattr(existing_state, k, None)
+        if val is None and isinstance(existing_state, dict):
+            val = existing_state.get(k)
+        if val is not None:
+            result[k] = val
+    return result
+
+
 
 
 def _event_identity_seen_by_watermark(row: dict, watermark) -> bool:
@@ -172,43 +392,66 @@ def classify_event_symbol_eligibility_with_diagnostics(
     if event_type != "futures_contract_launch":
         return "rejected", "wrong_event_type", {}
 
+    if not symbol:
+        return "rejected", "symbol_missing", {}
+
     if not event_is_post_watermark(row, watermark) and not delayed_launch_event_symbol_is_post_watermark(
         row, symbol, watermark
     ):
         return "rejected", "pre_watermark", {}
 
-    observation_age_base_ms, observation_age_basis = resolve_observation_age_base_ms(row, symbol)
-    diag = _build_eligibility_diagnostics(
-        row=row,
-        now_ms=now_ms,
-        watermark=watermark,
-        observation_age_base_ms=observation_age_base_ms,
-        observation_age_basis=observation_age_basis,
-    )
-    if observation_age_base_ms is None:
-        return "rejected", "detected_at_ms_missing", diag
-
-    clock_skew_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_TIME_CLOCK_SKEW_TOLERANCE_MS
-    if observation_age_base_ms > now_ms + clock_skew_ms:
-        return "pending", "launch_time_in_future", diag
-
-    if diag["event_age_ms"] > diag["max_event_age_ms"]:
-        return "rejected", "age_exceeded", diag
-
-    if not symbol:
-        return "rejected", "symbol_missing", diag
-
     if not exchangeinfo_state or not exchangeinfo_state.get("available", False):
-        return "pending", "exchangeinfo_unavailable", diag
+        return "pending", "exchangeinfo_unavailable", {}
 
     symbols_in_exchange = exchangeinfo_state.get("symbols", set())
     if symbol not in symbols_in_exchange:
-        return "rejected", "symbol_not_in_exchangeinfo", diag
+        return "rejected", "symbol_not_in_exchangeinfo", {}
 
     if budget_state and budget_state.get("budget_exceeded", False):
-        return "rejected", "budget_exceeded", diag
+        return "rejected", "budget_exceeded", {}
 
-    return "eligible", "ok", diag
+    anchor_diag = resolve_depth_observation_anchor_ms(row, symbol, exchangeinfo_state, now_ms)
+    anchor_ms = anchor_diag.get("observation_anchor_ms")
+    conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
+
+    diag = dict(anchor_diag)
+    diag["announcement_capture_time_ms"], diag["announcement_capture_time_source"] = resolve_announcement_capture_time_ms(row)
+    diag["observation_age_base_ms"] = anchor_ms
+    diag["event_age_ms"] = (now_ms - anchor_ms) if anchor_ms is not None else None
+    diag["max_event_age_ms"] = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+    diag["watermark_max_seen_detected_at_ms"] = getattr(watermark, "max_seen_detected_at_ms", 0)
+    diag["watermark_version"] = getattr(watermark, "watermark_version", 1)
+    diag.update(build_first_seen_watermark_diagnostics(row, symbol, diag, watermark))
+
+
+
+    if conflict_active:
+        return "pending", "pending_anchor_conflict", diag
+
+
+    if anchor_ms is None:
+        diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        return "pending", "pending_launch_anchor_missing", diag
+
+    if now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
+        diag["next_admission_check_at_ms"] = anchor_ms
+        return "pending", "pending_launch_time_in_future", diag
+
+    delay_ms = now_ms - anchor_ms
+    clean_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS
+    recovery_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+
+    if delay_ms <= clean_delay_max:
+        diag["evidence_start_class"] = "clean_start"
+        diag["live_depth_evidence_basis"] = "announcement_and_launch_time"
+        return "eligible", "eligible_clean_start", diag
+    elif delay_ms <= recovery_delay_max:
+        diag["evidence_start_class"] = "recovery_start"
+        diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        return "eligible", "eligible_recovery_only", diag
+    else:
+        diag["evidence_start_class"] = "expired"
+        return "rejected", "rejected_launch_anchor_age_exceeded", diag
 
 
 def classify_event_symbol_eligibility(
@@ -226,6 +469,27 @@ def classify_event_symbol_eligibility(
 
 
 def classify_live_depth_evidence_basis(row: dict, watermark) -> dict:
+    if "announcement_capture_post_bootstrap_watermark" in row and row["announcement_capture_post_bootstrap_watermark"] is not None:
+        ann_post = bool(row["announcement_capture_post_bootstrap_watermark"])
+        launch_post = bool(row.get("launch_anchor_post_bootstrap_watermark", False))
+        evidence_start_class = row.get("evidence_start_class", "")
+        if evidence_start_class == "recovery_start":
+            basis = "recovery_validation_only"
+        elif ann_post and launch_post:
+            basis = "announcement_and_launch_time"
+        elif launch_post:
+            basis = "launch_time_only"
+        else:
+            basis = "recovery_validation_only"
+
+        return {
+            "announcement_capture_time_ms": row.get("announcement_capture_time_ms"),
+            "announcement_capture_time_source": row.get("announcement_capture_time_source", ""),
+            "announcement_time_capture_evidence_allowed": ann_post,
+            "launch_time_depth_evidence_allowed": launch_post,
+            "live_depth_evidence_basis": basis,
+        }
+
     announcement_capture_time_ms, announcement_capture_time_source = resolve_announcement_capture_time_ms(row)
     observation_age_base_ms, observation_age_basis = resolve_observation_age_base_ms(
         row, row.get("symbol") or (row.get("symbols") or [""])[0]
@@ -253,6 +517,7 @@ def classify_live_depth_evidence_basis(row: dict, watermark) -> dict:
             else "recovery_validation_only"
         ),
     }
+
 
 
 def validate_stage1_5d_summary(summary_path: str) -> None:

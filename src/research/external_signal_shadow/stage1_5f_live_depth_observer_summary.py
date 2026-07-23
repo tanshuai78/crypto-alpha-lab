@@ -59,8 +59,10 @@ def build_live_depth_observer_summary(
     failed_states: list,
     request_manifest_rows: list,
     heartbeat_rows: list,
+    pending_states: list | None = None,
 ) -> LiveDepthObserverSummary:
 
+    pending_states = pending_states or []
     active_count = len(active_states)
     completed_count = len(completed_states)
     expired_count = len(expired_states)
@@ -96,6 +98,27 @@ def build_live_depth_observer_summary(
     total_snapshots = sum(
         (s.depth_snapshot_count if hasattr(s, "depth_snapshot_count") else s.get("depth_snapshot_count", 0))
         for s in active_states + completed_states + expired_states + failed_states
+    )
+    pending_launch_count = len([s for s in pending_states if getattr(s, "status", "").startswith("pending_")])
+    pending_future_count = len([s for s in pending_states if getattr(s, "status", "") == "pending_launch_time_in_future"])
+    pending_missing_count = len([s for s in pending_states if getattr(s, "status", "") == "pending_launch_anchor_missing"])
+    pending_conflict_count = len([s for s in pending_states if getattr(s, "status", "") == "pending_anchor_conflict"])
+    pending_capacity_count = len([s for s in pending_states if getattr(s, "status", "") == "pending_observation_capacity"])
+    active_expected_snapshot_count = sum(
+        (s.expected_snapshot_count if hasattr(s, "expected_snapshot_count") else s.get("expected_snapshot_count", 0))
+        for s in active_states
+    )
+    active_unique_bucket_count = sum(
+        (s.unique_snapshot_bucket_count if hasattr(s, "unique_snapshot_bucket_count") else s.get("unique_snapshot_bucket_count", 0))
+        for s in active_states
+    )
+    active_missing_bucket_count = sum(
+        (s.missing_snapshot_bucket_count if hasattr(s, "missing_snapshot_bucket_count") else s.get("missing_snapshot_bucket_count", 0))
+        for s in active_states
+    )
+    active_out_of_window_count = sum(
+        (s.out_of_window_snapshot_row_count if hasattr(s, "out_of_window_snapshot_row_count") else s.get("out_of_window_snapshot_row_count", 0))
+        for s in active_states
     )
 
     final_decision = derive_stage1_5f_decision(
@@ -154,6 +177,15 @@ def build_live_depth_observer_summary(
         max_consecutive_network_errors_seen=max_consec_seen,
         last_heartbeat_at_ms=last_hb_at,
         heartbeat_count=heartbeat_count,
+        pending_launch_observation_count=pending_launch_count,
+        pending_launch_time_in_future_count=pending_future_count,
+        pending_launch_anchor_missing_count=pending_missing_count,
+        pending_anchor_conflict_count=pending_conflict_count,
+        pending_observation_capacity_count=pending_capacity_count,
+        active_expected_snapshot_count=active_expected_snapshot_count,
+        active_unique_snapshot_bucket_count=active_unique_bucket_count,
+        active_missing_snapshot_bucket_count=active_missing_bucket_count,
+        active_out_of_window_snapshot_row_count=active_out_of_window_count,
         execution_feasibility_claim_allowed=False,
         trade_signal_allowed=False,
         paper_trading_allowed=False,
