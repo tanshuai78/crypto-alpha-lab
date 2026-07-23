@@ -1,0 +1,11 @@
+{
+  "data_quality": "manually_constructed_minimal_fixture",
+  "source_basis": "2026-07-22 BAPI discovery evidence; symbol list and title copied from observed response",
+  "code": "000000",
+  "data": {
+    "code": "f43403ef11974998bc0f46420826577a",
+    "id": 280581,
+    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+    "body": "{\"node\":\"root\",\"child\":[{\"node\":\"text\",\"text\":\"Binance Futures will launch SHAZUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 13:30 (UTC), SOFIUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 13:45 (UTC), PANWUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 14:00 (UTC), and PENGUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 14:15 (UTC).\"}]}"
+  }
+}

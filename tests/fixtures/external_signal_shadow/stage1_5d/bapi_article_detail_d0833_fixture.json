@@ -1,0 +1,11 @@
+{
+  "data_quality": "manually_constructed_minimal_fixture",
+  "source_basis": "2026-07-22 BAPI discovery evidence; symbol list and title copied from observed response",
+  "code": "000000",
+  "data": {
+    "code": "d0833e4ae9b542be90dbf3fe1c960c53",
+    "id": 280582,
+    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-14)",
+    "body": "{\"node\":\"root\",\"child\":[{\"node\":\"text\",\"text\":\"Binance Futures will launch GEVUSDT, VRTUSDT, SNOWUSDT, and APPUSDT USDⓈ-Margined Perpetual Contracts.\"}]}"
+  }
+}

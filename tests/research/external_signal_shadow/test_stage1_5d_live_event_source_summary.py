@@ -217,3 +217,47 @@ def test_overdue_pending_summary_is_current_gauge_not_cumulative_counter():
     )
     assert summary1["detail_retry_overdue_pending_count"] == 1
     assert summary2["detail_retry_overdue_pending_count"] == 1
+
+
+def test_summary_includes_bapi_detail_source_metrics():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={
+            "bapi_detail_request_count": 1,
+            "bapi_detail_success_count": 1,
+            "bapi_detail_trusted_payload_count": 1,
+            "bapi_symbol_parse_success_count": 1,
+            "bapi_symbol_validation_success_count": 1,
+        },
+    )
+    assert summary["bapi_detail_request_count"] == 1
+    assert summary["bapi_detail_success_count"] == 1
+    assert summary["bapi_detail_trusted_payload_count"] == 1
+    assert summary["bapi_symbol_parse_success_count"] == 1
+    assert summary["bapi_symbol_validation_success_count"] == 1
+
+
+def test_summary_includes_detail_source_health_metrics():
+    summary = build_smoke_summary(
+        upstream_evidence={"upstream_evidence_valid": True, "blockers": []},
+        heartbeats=[{"poll_success": True}],
+        events=[],
+        request_manifest=[],
+        fixture_run=True,
+        debug_short_run=True,
+        observation_hours=0.0,
+        counters={
+            "bapi_detail_source_degraded": False,
+            "support_detail_source_degraded": True,
+            "all_detail_sources_degraded": False,
+        },
+    )
+    assert summary["bapi_detail_source_degraded"] is False
+    assert summary["support_detail_source_degraded"] is True
+    assert summary["all_detail_sources_degraded"] is False

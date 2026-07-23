@@ -327,12 +327,20 @@ tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/
 tmux kill-session -t stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
 
 # 停止旧 1.5D collector。
 tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+
+# 兜底：按当前 tmux 中真实 session 名停止所有 1.5D/1.5F 会话。
+for s in $(tmux ls 2>/dev/null | awk -F: '/stage1_5d|stage1_5f/ {print $1}'); do
+  echo "killing $s"
+  tmux kill-session -t "$s"
+done
 
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep || true
 ```

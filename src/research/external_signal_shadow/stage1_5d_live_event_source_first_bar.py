@@ -10,9 +10,14 @@ def check_first_bar_for_event(
         bars = bars_by_symbol.get(symbol, [])
         for bar in bars:
             bar_start = bar.get("bar_start_ms")
-            if bar_start is not None and bar_start >= detected_at_ms:
-                if found_start_ms is None or bar_start < found_start_ms:
-                    found_start_ms = bar_start
+            try:
+                bar_start_val = int(bar_start)
+            except (TypeError, ValueError):
+                continue
+            if bar_start_val >= detected_at_ms:
+                if found_start_ms is None or bar_start_val < found_start_ms:
+                    found_start_ms = bar_start_val
+
 
     if found_start_ms is not None:
         updated["first_futures_bar_status"] = "found"

@@ -10,7 +10,12 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_client impo
     validate_announcement_detail_url,
     validate_url_allowlist,
     build_announcement_detail_fallback_urls,
+    build_bapi_article_detail_url,
+    validate_bapi_article_detail_url,
+    fetch_public_bapi_article_detail,
+    validate_bapi_article_detail_payload,
 )
+
 
 
 def test_host_allowlist_accepts_exact_and_subdomain():
@@ -241,3 +246,175 @@ def test_build_announcement_detail_fallback_urls_with_detail_primary():
     assert len(urls) == len(set(urls))
     for url in urls:
         validate_announcement_detail_url(url)
+
+
+def test_build_bapi_article_detail_url_requires_32_hex_code():
+    with pytest.raises(ValueError, match="bapi_article_code_invalid"):
+        build_bapi_article_detail_url("not-valid")
+
+
+def test_build_bapi_article_detail_url_uses_query_param():
+    url = build_bapi_article_detail_url("f43403ef11974998bc0f46420826577a")
+    assert url == (
+        "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query"
+        "?articleCode=f43403ef11974998bc0f46420826577a"
+    )
+
+
+def test_validate_bapi_article_detail_url_rejects_support_path():
+    with pytest.raises(ValueError, match="bapi_detail_path_not_allowed"):
+        validate_bapi_article_detail_url("https://www.binance.com/en/support/announcement/abc")
+
+
+def test_validate_bapi_article_detail_url_requires_exact_www_binance_host():
+    code = "f43403ef11974998bc0f46420826577a"
+    path = "/bapi/composite/v1/public/cms/article/detail/query"
+    with pytest.raises(ValueError):
+        validate_bapi_article_detail_url(f"https://evil.binance.com{path}?articleCode={code}")
+
+
+def test_validate_bapi_article_detail_url_rejects_userinfo_port_fragment_and_extra_query():
+    code = "f43403ef11974998bc0f46420826577a"
+    path = "/bapi/composite/v1/public/cms/article/detail/query"
+    bad_urls = [
+        f"https://user@www.binance.com{path}?articleCode={code}",
+        f"https://www.binance.com:444{path}?articleCode={code}",
+        f"https://www.binance.com{path}?articleCode={code}#frag",
+        f"https://www.binance.com{path}?articleCode={code}&x=1",
+    ]
+    for url in bad_urls:
+        with pytest.raises(ValueError):
+            validate_bapi_article_detail_url(url)
+
+
+def test_fetch_public_bapi_article_detail_requires_live_flag():
+    with patch("urllib.request.urlopen") as urlopen:
+        with pytest.raises(PermissionError):
+            fetch_public_bapi_article_detail(
+                "f43403ef11974998bc0f46420826577a",
+                live_public_readonly=False,
+            )
+        urlopen.assert_not_called()
+
+
+def test_fetch_public_bapi_article_detail_does_not_send_private_headers():
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self):
+            return "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=f43403ef11974998bc0f46420826577a"
+        def read(self, n=-1):
+            return b'{"code":"000000","data":{"code":"f43403ef11974998bc0f46420826577a","title":"x","body":"{}"}}'
+
+    def fake_urlopen(req, timeout):
+        captured.update(dict(req.header_items()))
+        return FakeResponse()
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        fetch_public_bapi_article_detail(
+            "f43403ef11974998bc0f46420826577a",
+            live_public_readonly=True,
+        )
+
+    lowered = {k.lower(): v for k, v in captured.items()}
+    assert "authorization" not in lowered
+    assert "cookie" not in lowered
+    assert "x-mbx-apikey" not in lowered
+
+
+def test_bapi_response_read_is_bounded():
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self):
+            return "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=f43403ef11974998bc0f46420826577a"
+        def read(self, n=-1):
+            assert n == 101
+            return b'{"code":"000000"}'
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_RESPONSE_BYTES", 100):
+        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            fetch_public_bapi_article_detail(
+                "f43403ef11974998bc0f46420826577a",
+                live_public_readonly=True,
+            )
+
+
+def test_bapi_response_above_max_bytes_is_rejected():
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self):
+            return "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=f43403ef11974998bc0f46420826577a"
+        def read(self, n=-1):
+            return b"x" * n
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_RESPONSE_BYTES", 100):
+        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            result = fetch_public_bapi_article_detail(
+                "f43403ef11974998bc0f46420826577a",
+                live_public_readonly=True,
+            )
+    assert result["ok"] is False
+    assert result["error"] == "bapi_response_too_large"
+
+
+def _trusted_payload(article_code="f43403ef11974998bc0f46420826577a", title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)"):
+    return {
+        "code": "000000",
+        "data": {
+            "code": article_code,
+            "id": 280581,
+            "title": title,
+            "body": '{"node":"root","child":[{"node":"text","text":"Binance Futures will launch SHAZUSDT Perpetual Contracts"}]}',
+        },
+    }
+
+
+def test_validate_bapi_payload_accepts_identity_and_title_match():
+    result = validate_bapi_article_detail_payload(
+        _trusted_payload(),
+        requested_article_code="f43403ef11974998bc0f46420826577a",
+        catalog_title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+    )
+    assert result["payload_trusted"] is True
+    assert result["data"]["code"] == "f43403ef11974998bc0f46420826577a"
+
+
+def test_validate_bapi_payload_rejects_identity_mismatch():
+    payload = _trusted_payload(article_code="d0833e4ae9b542be90dbf3fe1c960c53")
+    result = validate_bapi_article_detail_payload(
+        payload,
+        requested_article_code="f43403ef11974998bc0f46420826577a",
+        catalog_title=payload["data"]["title"],
+    )
+    assert result["payload_trusted"] is False
+    assert result["error"] == "bapi_article_identity_mismatch"
+
+
+def test_validate_bapi_payload_rejects_title_mismatch():
+    result = validate_bapi_article_detail_payload(
+        _trusted_payload(title="Unrelated announcement"),
+        requested_article_code="f43403ef11974998bc0f46420826577a",
+        catalog_title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+    )
+    assert result["payload_trusted"] is False
+    assert result["error"] == "bapi_article_title_mismatch"
+    assert result["fallback_to_support_detail"] is True
+
+
+def test_validate_bapi_payload_rejects_html_shell_or_login_body():
+    payload = _trusted_payload()
+    payload["data"]["body"] = "<html><title>Just a moment...</title></html>"
+    result = validate_bapi_article_detail_payload(
+        payload,
+        requested_article_code="f43403ef11974998bc0f46420826577a",
+        catalog_title=payload["data"]["title"],
+    )
+    assert result["payload_trusted"] is False
+    assert result["error"] in {"bapi_waf_or_login_shell", "bapi_body_schema_drift"}

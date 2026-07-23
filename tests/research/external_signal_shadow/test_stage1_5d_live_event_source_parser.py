@@ -8,7 +8,9 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_parser impo
     normalize_live_event,
     parse_binance_announcement_payload,
     extract_symbol_candidates_from_detail_payload,
+    extract_symbol_candidates_from_bapi_article_payload,
 )
+
 
 
 def test_extract_symbols_from_binance_futures_launch_title():
@@ -395,3 +397,169 @@ def test_title_candidate_rejects_date_and_generic_words():
     )
     title = "Binance Futures Will Launch USDⓈ-Margined Perpetual Contract (2026-07-03)"
     assert extract_contract_symbol_candidates_from_title(title, max_symbols=30) == []
+
+
+def test_bapi_body_json_tree_text_extraction_records_context():
+    payload = {
+        "code": "000000",
+        "data": {
+            "code": "f43403ef11974998bc0f46420826577a",
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+            "body": '{"node":"root","child":[{"node":"text","text":"Binance Futures will launch SHAZUSDT and SOFIUSDT USDⓈ-Margined Perpetual Contracts."}]}',
+        },
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["SHAZUSDT", "SOFIUSDT"]
+    assert result["symbol_extraction_source"] == "bapi_article_body"
+    assert result["evidence_source"] == "official_article_body_confirmed"
+    assert result["detail_transport"] == "bapi_article_detail_query"
+    assert result["content_provenance"] == "binance_official_announcement"
+    assert result["source_transport"] == "binance_first_party_public_web_bapi_undocumented"
+    assert result["candidate_provenance"][0]["body_node_path"]
+    assert result["candidate_provenance"][0]["event_phrase_match"] is True
+    assert "extracted_text" in result
+
+
+def test_raw_unparsed_bapi_body_string_is_not_parsed():
+    payload = {
+        "code": "000000",
+        "data": {
+            "code": "f43403ef11974998bc0f46420826577a",
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+            "body": "SHAZUSDT SOFIUSDT appears but this is not recognized JSON tree",
+        },
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == []
+    assert result["symbol_parse_status"] == "not_attempted"
+    assert result["symbol_parse_failed_reason"] == "bapi_body_schema_drift"
+
+
+def test_unrelated_valid_symbol_in_bapi_disclaimer_is_ignored():
+    payload = {
+        "code": "000000",
+        "data": {
+            "code": "f43403ef11974998bc0f46420826577a",
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+            "body": '{"node":"root","child":[{"node":"text","text":"Risk warning: BTCUSDT may be volatile."}]}',
+        },
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == []
+
+
+def test_bapi_body_reuses_existing_launch_time_parser():
+    payload = {
+        "code": "000000",
+        "data": {
+            "code": "f43403ef11974998bc0f46420826577a",
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+            "body": '{"node":"root","child":[{"node":"text","text":"Binance Futures will launch SHAZUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 13:30 (UTC)."}]}',
+        },
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["SHAZUSDT"]
+    assert result["symbol_launch_times_ms"]["SHAZUSDT"] == 1784640600000
+
+
+def test_single_large_node_does_not_capture_disclaimer_symbol():
+    payload = {
+        "code": "000000",
+        "data": {
+            "code": "f43403ef11974998bc0f46420826577a",
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
+            "body": '{"node":"root","child":[{"node":"text","text":"Binance Futures will launch SHAZUSDT USDⓈ-Margined Perpetual Contract at 2026-07-21 13:30 (UTC). Risk warning: BTCUSDT may be volatile."}]}',
+        },
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["SHAZUSDT"]
+
+
+def test_bapi_json_depth_limit_is_enforced(monkeypatch):
+    nested = {"text": "Binance Futures will launch ABCUSDT Perpetual Contract."}
+    for _ in range(5):
+        nested = {"child": nested}
+    payload = {"code": "000000", "data": {"body": nested}}
+
+    monkeypatch.setattr(
+        "configs.base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_JSON_DEPTH", 3
+    )
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+
+    assert result["symbols"] == []
+    assert result["symbol_parse_failed_reason"] == "bapi_body_json_depth_exceeded"
+
+
+def test_bapi_json_node_count_limit_is_enforced(monkeypatch):
+    payload = {
+        "code": "000000",
+        "data": {
+            "body": [
+                {"text": f"Binance Futures will launch A{i}USDT Perpetual Contract."}
+                for i in range(5)
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        "configs.base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_NODE_COUNT", 3
+    )
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+
+    assert result["symbols"] == []
+    assert result["symbol_parse_failed_reason"] == "bapi_body_json_node_count_exceeded"
+
+
+def test_bapi_extracted_text_limit_is_enforced(monkeypatch):
+    payload = {
+        "code": "000000",
+        "data": {
+            "body": {
+                "text": "Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC)."
+            }
+        },
+    }
+
+    monkeypatch.setattr(
+        "configs.base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_EXTRACTED_TEXT_CHARS",
+        20,
+    )
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+
+    assert result["symbols"] == []
+    assert result["symbol_parse_failed_reason"] == "bapi_body_extracted_text_too_large"
+
+
+def test_bapi_f434_fixture_extracts_expected_symbols():
+    import json
+    from pathlib import Path
+    payload = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_f434_fixture.json").read_text())
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["SHAZUSDT", "SOFIUSDT", "PANWUSDT", "PENGUSDT"]
+    assert set(result["symbol_launch_times_ms"]) == {"SHAZUSDT", "SOFIUSDT", "PANWUSDT", "PENGUSDT"}
+
+
+def test_bapi_d0833_fixture_extracts_expected_symbols():
+    import json
+    from pathlib import Path
+    payload = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_d0833_fixture.json").read_text())
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["GEVUSDT", "VRTUSDT", "SNOWUSDT", "APPUSDT"]
+
+
+def test_bapi_6cbb_fixture_extracts_spcxusd1():
+    import json
+    from pathlib import Path
+    payload = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_6cbb_fixture.json").read_text())
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"] == ["SPCXUSD1"]
+
+
+def test_minimized_schedule_fixture_preserves_expected_schedule_structure():
+    import json
+    from pathlib import Path
+    payload = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_f434_real_frozen_fixture.json").read_text())
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, max_symbols=30)
+    assert result["symbols"]
+    assert result["extracted_text"]
+    assert "UTC" in result["extracted_text"]

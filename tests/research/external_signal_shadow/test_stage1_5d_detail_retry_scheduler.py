@@ -6,8 +6,12 @@ from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import
     load_detail_retry_scheduler_state,
     write_detail_retry_scheduler_state,
     update_detail_endpoint_health,
+    update_detail_endpoint_health_by_source,
+    is_detail_source_degraded,
+    classify_detail_source_failure,
     summarize_detail_retry_overdue_state,
 )
+
 from pathlib import Path
 
 
@@ -908,3 +912,73 @@ def test_overdue_attempted_queue_has_bounded_round_robin_service():
             state[code]["next_detail_retry_at_ms"] = current_now + 60 * 60_000
 
     assert selected_set == {"article_0", "article_1", "article_2"}
+
+
+def test_support_202_degraded_state_does_not_suppress_bapi_detail():
+    now = 100_000
+    health = update_detail_endpoint_health_by_source(
+        {},
+        now_ms=now,
+        source="support_article_detail",
+        result_code="http_202_empty",
+        degraded_rate_threshold=0.8,
+        degraded_min_sample=1,
+        degraded_backoff_sec=900,
+    )
+    assert is_detail_source_degraded(health, "support_article_detail", now + 1) is True
+    assert is_detail_source_degraded(health, "bapi_article_detail_query", now + 1) is False
+
+
+def test_bapi_degraded_state_does_not_disable_support_fallback():
+    now = 100_000
+    health = update_detail_endpoint_health_by_source(
+        {},
+        now_ms=now,
+        source="bapi_article_detail_query",
+        result_code="http_503",
+        degraded_rate_threshold=0.8,
+        degraded_min_sample=1,
+        degraded_backoff_sec=900,
+    )
+    assert is_detail_source_degraded(health, "bapi_article_detail_query", now + 1) is True
+    assert is_detail_source_degraded(health, "support_article_detail", now + 1) is False
+
+
+def test_legacy_global_degraded_state_is_support_only_not_bapi():
+    now = 100_000
+    legacy_health = {"detail_endpoint_degraded_until_ms": now + 60_000}
+
+    assert is_detail_source_degraded(legacy_health, "bapi_article_detail_query", now) is False
+    assert is_detail_source_degraded(legacy_health, "support_article_detail", now) is True
+
+
+def test_bapi_illegal_parameter_is_article_specific_terminal_not_support_terminal():
+    state = classify_detail_source_failure(
+        source="bapi_article_detail_query",
+        http_status=400,
+        error="bapi_api_code_non_000000",
+    )
+    assert state["retryable"] is False
+    assert state["terminal_reason"]
+    assert state["support_fallback_allowed"] is True
+
+
+def test_bapi_429_is_transient_and_updates_bapi_breaker_only():
+    state = classify_detail_source_failure(
+        source="bapi_article_detail_query",
+        http_status=429,
+        error="bapi_http_non_200",
+    )
+    assert state["retryable"] is True
+    assert state["breaker_source"] == "bapi_article_detail_query"
+
+
+def test_bapi_identity_mismatch_is_integrity_failure_with_support_fallback():
+    state = classify_detail_source_failure(
+        source="bapi_article_detail_query",
+        http_status=200,
+        error="bapi_article_identity_mismatch",
+    )
+    assert state["retryable"] is False
+    assert state["integrity_alert"] is True
+    assert state["support_fallback_allowed"] is True

@@ -3,6 +3,8 @@ import json
 import re
 from datetime import datetime, timezone
 
+from configs import base
+
 
 
 def classify_event_type(title: str) -> str:
@@ -534,4 +536,200 @@ def extract_symbol_candidates_from_title(title: str, max_symbols: int) -> dict:
         "quote_derivation_source": None,
         "symbol_validation_status": None,
         "symbol_launch_times_ms": {},
+    }
+
+
+def extract_symbol_candidates_from_bapi_article_payload(
+    payload: dict,
+    max_symbols: int = 30,
+    title: str | None = None,
+) -> dict:
+    if not isinstance(payload, dict):
+        return {
+            "symbols": [],
+            "symbol_extraction_source": "none",
+            "symbol_parse_status": "not_attempted",
+            "symbol_parse_failed_reason": "bapi_body_schema_drift",
+            "extracted_text": "",
+            "symbol_launch_times_ms": {},
+        }
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {
+            "symbols": [],
+            "symbol_extraction_source": "none",
+            "symbol_parse_status": "not_attempted",
+            "symbol_parse_failed_reason": "bapi_body_schema_drift",
+            "extracted_text": "",
+            "symbol_launch_times_ms": {},
+        }
+
+    body = data.get("body") or data.get("contentJson")
+    if not body:
+        return {
+            "symbols": [],
+            "symbol_extraction_source": "none",
+            "symbol_parse_status": "not_attempted",
+            "symbol_parse_failed_reason": "bapi_body_missing",
+            "extracted_text": "",
+            "symbol_launch_times_ms": {},
+        }
+
+    tree = None
+    if isinstance(body, dict) or isinstance(body, list):
+        tree = body
+    elif isinstance(body, str):
+        body_str = body.strip()
+        if body_str.startswith("{") or body_str.startswith("["):
+            try:
+                tree = json.loads(body_str)
+            except Exception:
+                tree = None
+
+    max_json_depth = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_JSON_DEPTH", 32)
+    max_node_count = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_NODE_COUNT", 50_000)
+    max_extracted_text_chars = getattr(
+        base, "EXTERNAL_SIGNAL_STAGE1_5D_BAPI_DETAIL_MAX_EXTRACTED_TEXT_CHARS", 300_000
+    )
+
+    if tree is None and isinstance(body, str) and re.search(r"<[a-zA-Z]+[^>]*>", body):
+        cleaned_text = re.sub(r"<[^>]+>", " ", body)
+        if len(cleaned_text) > max_extracted_text_chars:
+            return {
+                "symbols": [],
+                "symbol_extraction_source": "none",
+                "symbol_parse_status": "not_attempted",
+                "symbol_parse_failed_reason": "bapi_body_extracted_text_too_large",
+                "extracted_text": "",
+                "symbol_launch_times_ms": {},
+            }
+        text_nodes = [{"path": "body_html", "text": cleaned_text}]
+    elif tree is not None:
+        text_nodes = []
+        node_count = 0
+        extracted_chars = 0
+        stack = [(tree, "root", 1)]
+        while stack:
+            obj, path, depth = stack.pop()
+            node_count += 1
+            if depth > max_json_depth:
+                return {
+                    "symbols": [],
+                    "symbol_extraction_source": "none",
+                    "symbol_parse_status": "not_attempted",
+                    "symbol_parse_failed_reason": "bapi_body_json_depth_exceeded",
+                    "extracted_text": "",
+                    "symbol_launch_times_ms": {},
+                }
+            if node_count > max_node_count:
+                return {
+                    "symbols": [],
+                    "symbol_extraction_source": "none",
+                    "symbol_parse_status": "not_attempted",
+                    "symbol_parse_failed_reason": "bapi_body_json_node_count_exceeded",
+                    "extracted_text": "",
+                    "symbol_launch_times_ms": {},
+                }
+            if isinstance(obj, dict):
+                for text_key in ("text", "content"):
+                    text_value = obj.get(text_key)
+                    if isinstance(text_value, str):
+                        extracted_chars += len(text_value)
+                        if extracted_chars > max_extracted_text_chars:
+                            return {
+                                "symbols": [],
+                                "symbol_extraction_source": "none",
+                                "symbol_parse_status": "not_attempted",
+                                "symbol_parse_failed_reason": "bapi_body_extracted_text_too_large",
+                                "extracted_text": "",
+                                "symbol_launch_times_ms": {},
+                            }
+                        text_nodes.append({"path": f"{path}.{text_key}", "text": text_value})
+                for k, v in reversed(list(obj.items())):
+                    if k not in ("text", "content"):
+                        stack.append((v, f"{path}.{k}", depth + 1))
+            elif isinstance(obj, list):
+                for idx in range(len(obj) - 1, -1, -1):
+                    stack.append((obj[idx], f"{path}[{idx}]", depth + 1))
+    else:
+        return {
+            "symbols": [],
+            "symbol_extraction_source": "none",
+            "symbol_parse_status": "not_attempted",
+            "symbol_parse_failed_reason": "bapi_body_schema_drift",
+            "extracted_text": "",
+            "symbol_launch_times_ms": {},
+        }
+
+
+    full_extracted_text = "\n".join(node["text"] for node in text_nodes)
+
+    extracted_symbols = []
+    candidate_provenance = []
+    seen_symbols = set()
+
+    for node in text_nodes:
+        if len(extracted_symbols) >= max_symbols:
+            break
+
+        node_text = node["text"]
+        segments = re.split(r"(?<=[.!?\n])\s+", node_text)
+
+        for segment in segments:
+            if len(extracted_symbols) >= max_symbols:
+                break
+
+            if re.search(r"risk warning|disclaimer|footer|related articles", segment, re.IGNORECASE):
+                continue
+
+            if not re.search(r"launch|will\s+launch|perpetual\s+contracts?|usdⓈ-margined|usd-margined|usds-margined", segment, re.IGNORECASE):
+                continue
+
+            matches = re.findall(r"\b([A-Z0-9]{2,30}USDT|[A-Z0-9]{2,30}USDC|[A-Z0-9]{2,30}USD1)\b", segment)
+            for m in matches:
+                if len(extracted_symbols) >= max_symbols:
+                    break
+                if m not in seen_symbols:
+                    seen_symbols.add(m)
+                    extracted_symbols.append(m)
+                    candidate_provenance.append({
+                        "symbol": m,
+                        "body_node_path": node["path"],
+                        "event_phrase_match": True,
+                        "local_text_span": segment[:200],
+                        "segment_start": 0,
+                        "segment_end": len(segment),
+                        "event_phrase_distance": 0,
+                        "parser_context": "bapi_text_node",
+                        "section_classification": "launch_announcement_body",
+                    })
+
+
+    if not extracted_symbols:
+        return {
+            "symbols": [],
+            "symbol_extraction_source": "none",
+            "symbol_derivation_method": None,
+            "quote_derivation_source": None,
+            "symbol_validation_status": None,
+            "extracted_text": full_extracted_text,
+            "symbol_launch_times_ms": {},
+        }
+
+    launch_times = extract_symbol_launch_times_ms(full_extracted_text, extracted_symbols)
+
+    return {
+        "symbols": extracted_symbols,
+        "symbol_extraction_source": "bapi_article_body",
+        "evidence_source": "official_article_body_confirmed",
+        "detail_transport": "bapi_article_detail_query",
+        "content_provenance": "binance_official_announcement",
+        "source_transport": "binance_first_party_public_web_bapi_undocumented",
+        "symbol_derivation_method": "none",
+        "quote_derivation_source": None,
+        "symbol_validation_status": "validated_by_exact_text",
+        "extracted_text": full_extracted_text,
+        "symbol_launch_times_ms": launch_times,
+        "candidate_provenance": candidate_provenance,
     }

@@ -483,6 +483,104 @@ def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_pat
     assert len(rejected_files) == 0
 
 
+def test_runner_accepts_post_watermark_bapi_confirmed_1_5d_event(tmp_path, monkeypatch):
+    import time
+    mock_dir = tmp_path / "mock_responses"
+    os.makedirs(mock_dir, exist_ok=True)
+    with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
+        json.dump({"symbols": [{"symbol": "XYZUSDT"}]}, f)
+    with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
+        json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
+
+    now_ms = 1784644200000
+    watermark_time = now_ms - 60 * 60 * 1000
+    detected_at_ms = now_ms - 60_000
+    launch_time_ms = now_ms - 30_000
+
+    event_file = tmp_path / "events.jsonl"
+    with open(event_file, "w") as f:
+        f.write(json.dumps({
+            "event_id": "bapi-post-watermark-event",
+            "event_type": "futures_contract_launch",
+            "source_article_id": "d0833b3a6eb64132a00c6d7a46abf434",
+            "detected_at_ms": detected_at_ms,
+            "symbols": ["XYZUSDT"],
+            "symbol_extraction_source": "bapi_article_body",
+            "symbol_validation_status": "validated_by_exchangeinfo",
+            "evidence_source": "official_article_body_confirmed",
+            "detail_transport": "bapi_article_detail_query",
+            "content_provenance": "binance_official_announcement",
+            "source_transport": "binance_first_party_public_web_bapi_undocumented",
+            "symbol_effective_launch_times_ms": {"XYZUSDT": launch_time_ms},
+            "symbol_onboard_times_ms": {"XYZUSDT": launch_time_ms},
+        }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    with open(summary_d, "w") as f:
+        json.dump({
+            "decision": "stage1_5d_event_detection_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    summary_e = tmp_path / "summary_e.json"
+    with open(summary_e, "w") as f:
+        json.dump({
+            "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }, f)
+
+    output_root = tmp_path / "output"
+    os.makedirs(output_root, exist_ok=True)
+    with open(output_root / "watermark.json", "w") as f:
+        json.dump({
+            "watermark_version": 1,
+            "max_seen_detected_at_ms": watermark_time,
+            "seen_event_ids": [],
+            "seen_source_article_ids": [],
+            "seen_stable_event_keys": [],
+            "updated_at_ms": watermark_time,
+        }, f)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    monkeypatch.setattr(time, "time", lambda: now_ms / 1000.0)
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert len(accepted_files) == 1
+    accepted_rows = [
+        json.loads(line)
+        for line in accepted_files[0].read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(accepted_rows) == 1
+    assert accepted_rows[0]["symbol"] == "XYZUSDT"
+    assert accepted_rows[0]["live_depth_evidence_basis"] == "announcement_and_launch_time"
+
+
 def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_later(tmp_path, monkeypatch):
     import time
     mock_dir = tmp_path / "mock_responses"

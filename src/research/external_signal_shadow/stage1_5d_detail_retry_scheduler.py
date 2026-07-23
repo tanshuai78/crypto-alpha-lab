@@ -458,3 +458,140 @@ def summarize_detail_retry_overdue_state(
         "detail_retry_overdue_hard_warn_active": oldest >= hard_warn_ms if oldest else False,
         "detail_retry_overdue_articles": overdue[:max_articles],
     }
+
+
+def update_detail_endpoint_health_by_source(
+    endpoint_health: dict,
+    *,
+    now_ms: int,
+    source: str,
+    result_code: str,
+    degraded_rate_threshold: float = 0.8,
+    degraded_min_sample: int = 1,
+    degraded_backoff_sec: int = 900,
+) -> dict:
+    health = dict(endpoint_health)
+    if "endpoint_health_by_source" not in health:
+        health["endpoint_health_by_source"] = {}
+
+    if source not in health["endpoint_health_by_source"]:
+        health["endpoint_health_by_source"][source] = {
+            "recent_detail_attempt_results": [],
+            "detail_endpoint_degraded_until_ms": 0,
+            "detail_endpoint_transient_error_rate": 0.0,
+        }
+
+    src_health = dict(health["endpoint_health_by_source"][source])
+    if "recent_detail_attempt_results" not in src_health:
+        src_health["recent_detail_attempt_results"] = []
+
+    src_health["recent_detail_attempt_results"].append(result_code)
+    max_samples = max(10, degraded_min_sample * 2)
+    src_health["recent_detail_attempt_results"] = src_health["recent_detail_attempt_results"][-max_samples:]
+
+    recent = src_health["recent_detail_attempt_results"]
+    if len(recent) >= degraded_min_sample:
+        transient_failures = sum(
+            1
+            for r in recent
+            if r in {"http_202_empty", "http_200_empty_untrusted_payload", "http_429", "http_5xx", "http_503", "network_error"}
+        )
+        error_rate = transient_failures / len(recent)
+        src_health["detail_endpoint_transient_error_rate"] = error_rate
+        if error_rate >= degraded_rate_threshold:
+            src_health["detail_endpoint_degraded_until_ms"] = now_ms + degraded_backoff_sec * 1000
+    else:
+        src_health["detail_endpoint_transient_error_rate"] = 0.0
+
+    health["endpoint_health_by_source"][source] = src_health
+
+    # Mirror in by_variant for backward compatibility
+    if "by_variant" not in health:
+        health["by_variant"] = {}
+    health["by_variant"][source] = src_health
+
+    return health
+
+
+def is_detail_source_degraded(endpoint_health: dict, source: str, now_ms: int) -> bool:
+    if not isinstance(endpoint_health, dict):
+        return False
+    by_source = endpoint_health.get("endpoint_health_by_source") or endpoint_health.get("by_variant") or {}
+    source_aliases = {
+        "support_article_detail": ("support_article_detail", "support_announcement_detail"),
+        "support_announcement_detail": ("support_article_detail", "support_announcement_detail"),
+    }
+    for candidate_source in source_aliases.get(source, (source,)):
+        if by_source and candidate_source in by_source:
+            src_data = by_source[candidate_source]
+            degraded_until = src_data.get("degraded_until_ms") or src_data.get("detail_endpoint_degraded_until_ms") or 0
+            return bool(degraded_until > now_ms)
+    if source == "bapi_article_detail_query":
+        return False
+    if source in ("support_article_detail", "support_announcement_detail"):
+        top_degraded = endpoint_health.get("detail_endpoint_degraded_until_ms") or 0
+        return bool(top_degraded > now_ms)
+    if by_source and source in by_source:
+        src_data = by_source[source]
+        degraded_until = src_data.get("degraded_until_ms") or src_data.get("detail_endpoint_degraded_until_ms") or 0
+        return bool(degraded_until > now_ms)
+    return False
+
+
+
+
+def summarize_detail_source_health(endpoint_health: dict, now_ms: int) -> dict:
+    bapi_degraded = is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", now_ms)
+    support_degraded = is_detail_source_degraded(endpoint_health, "support_article_detail", now_ms)
+    return {
+        "bapi_detail_source_degraded": bapi_degraded,
+        "support_detail_source_degraded": support_degraded,
+        "all_detail_sources_degraded": bapi_degraded and support_degraded,
+    }
+
+
+def classify_detail_source_failure(
+    source: str,
+    http_status: int | None = None,
+    error: str | None = None,
+) -> dict:
+    err_str = str(error or "")
+
+    if http_status in (400, 404) or err_str in ("bapi_api_code_non_000000", "bapi_article_illegal_parameter"):
+        return {
+            "retryable": False,
+            "terminal_reason": err_str or f"{source}_http_{http_status}",
+            "support_fallback_allowed": True,
+            "integrity_alert": False,
+            "breaker_source": None,
+        }
+
+    if err_str == "bapi_article_identity_mismatch":
+        return {
+            "retryable": False,
+            "terminal_reason": err_str,
+            "support_fallback_allowed": True,
+            "integrity_alert": True,
+            "breaker_source": None,
+        }
+
+    if (
+        http_status in (429, 500, 502, 503, 504)
+        or "timeout" in err_str.lower()
+        or err_str in ("bapi_http_non_200", "bapi_http_non_429", "http_503")
+    ):
+        return {
+            "retryable": True,
+            "terminal_reason": None,
+            "support_fallback_allowed": True,
+            "integrity_alert": False,
+            "breaker_source": source,
+        }
+
+    return {
+        "retryable": False,
+        "terminal_reason": err_str or "unknown_source_failure",
+        "support_fallback_allowed": True,
+        "integrity_alert": False,
+        "breaker_source": None,
+    }

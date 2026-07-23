@@ -1,0 +1,11 @@
+{
+  "data_quality": "manually_constructed_minimal_fixture",
+  "source_basis": "2026-07-22 BAPI discovery evidence; symbol list and title copied from observed response",
+  "code": "000000",
+  "data": {
+    "code": "6cbb96ec123456789012345678901234",
+    "id": 280583,
+    "title": "Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract",
+    "body": "{\"node\":\"root\",\"child\":[{\"node\":\"text\",\"text\":\"Binance Futures will launch SPCXUSD1 USDⓈ-Margined Perpetual Contract.\"}]}"
+  }
+}

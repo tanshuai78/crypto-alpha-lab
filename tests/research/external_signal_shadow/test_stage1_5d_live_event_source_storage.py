@@ -8,7 +8,9 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
     build_stream_paths,
     enforce_payload_budget,
     write_detail_payload,
+    write_detail_payload_append_only,
 )
+
 
 
 def test_build_daily_path_includes_utc_date(tmp_path):
@@ -74,3 +76,44 @@ def test_write_detail_payload_handles_bytes_payload(tmp_path):
     assert len(result["payload_sha256"]) == 64
 
 
+def test_write_detail_payload_append_only_includes_variant_timestamp_hash(tmp_path):
+    result1 = write_detail_payload_append_only(
+        root=tmp_path,
+        timestamp_ms=1710000000000,
+        source_article_id="f43403ef11974998bc0f46420826577a",
+        detail_fetch_variant="bapi_article_detail_query",
+        raw_bytes=b'{"data":{"body":"SHAZUSDT"}}',
+        parsed_payload={"data": {"body": "SHAZUSDT"}},
+        content_type="application/json",
+        http_status=200,
+    )
+    result2 = write_detail_payload_append_only(
+        root=tmp_path,
+        timestamp_ms=1710000060000,
+        source_article_id="f43403ef11974998bc0f46420826577a",
+        detail_fetch_variant="bapi_article_detail_query",
+        raw_bytes=b'{"data":{"body":"SOFIUSDT"}}',
+        parsed_payload={"data": {"body": "SOFIUSDT"}},
+        content_type="application/json",
+        http_status=200,
+    )
+    assert result1["payload_path"] != result2["payload_path"]
+    assert "f43403ef11974998bc0f46420826577a" in result1["payload_path"]
+    assert "bapi_article_detail_query" in result1["payload_path"]
+    assert (tmp_path / result1["payload_path"]).exists()
+    assert (tmp_path / result2["payload_path"]).exists()
+
+
+def test_write_detail_payload_append_only_rejects_bad_variant(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="detail_fetch_variant_invalid"):
+        write_detail_payload_append_only(
+            root=tmp_path,
+            timestamp_ms=1710000000000,
+            source_article_id="abc",
+            detail_fetch_variant="../bad",
+            raw_bytes=b'{"x":1}',
+            parsed_payload={"x": 1},
+            content_type="application/json",
+            http_status=200,
+        )

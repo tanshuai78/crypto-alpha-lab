@@ -847,9 +847,10 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
     manifest_files = list((output_root / "request_manifest").glob("*.jsonl"))
     assert len(manifest_files) == 1
     manifest_rows = [json.loads(line) for line in manifest_files[0].read_text().strip().splitlines()]
-    detail_row = next((r for r in manifest_rows if r.get("source_type") == "announcement_detail"), None)
+    detail_row = next((r for r in manifest_rows if r.get("source_type") == "announcement_detail" and r.get("detail_fetch_variant") != "bapi_article_detail_query"), None)
     assert detail_row is not None
     assert detail_row["payload_path"].endswith(".html")
+
 
 
 def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tmp_path):
@@ -1635,8 +1636,10 @@ def test_empty_detail_payload_keeps_article_pending_retry_without_terminal_event
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
         with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
+
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -1650,10 +1653,12 @@ def test_empty_detail_payload_keeps_article_pending_retry_without_terminal_event
     empty_rows = [
         r for r in manifest
         if r.get("source_type") == "announcement_detail"
-        and r.get("error") == "empty_detail_payload"
+        and r.get("detail_fetch_variant") != "bapi_article_detail_query"
+        and r.get("error") in ("empty_detail_payload", "detail_payload_http_status_202")
         and "d2acaa91c14e4cc598aaee1017efc1ac" in (r.get("url") or "")
     ]
     assert len(empty_rows) >= 1
+
     assert empty_rows[-1]["http_status"] == 202
     assert empty_rows[-1]["payload_size_bytes"] == 0
     assert empty_rows[-1]["response_payload_size_bytes"] == 0
@@ -1830,8 +1835,10 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
         with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
             with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
                 with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-                    with patch("sys.argv", args):
-                        rc = main()
+                    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_payload_fetch):
+                        with patch("sys.argv", args):
+                            rc = main()
+
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -1842,8 +1849,10 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
     ]
     assert len(terminal_rows) == 1
     assert terminal_rows[0]["symbols"] == []
-    assert terminal_rows[0]["detail_fetch_status"] in {"detail_payload_http_status_404", "retry_exhausted"}
-    assert terminal_rows[0]["symbol_parse_failed_reason"] in {"detail_payload_http_status_404", "retry_exhausted", "detail_retry_exhausted"}
+    assert terminal_rows[0]["detail_fetch_status"] in {"detail_payload_http_status_404", "retry_exhausted", "max_age_exceeded"}
+    assert terminal_rows[0]["symbol_parse_failed_reason"] in {"detail_payload_http_status_404", "retry_exhausted", "detail_retry_exhausted", "max_age_exceeded", "detail_retry_max_age_exceeded"}
+
+
 
     summary_data = json.loads(summary.read_text())
     assert summary_data["detail_fetch_failed_count"] in {2, 3}
@@ -3674,3 +3683,655 @@ def test_overdue_attempted_row_survives_restart_and_is_selected_after_degraded_e
     s = json.loads(summary.read_text())
     assert s["detail_retry_overdue_selected_total"] >= 1
     assert s["detail_retry_overdue_retry_cycle_total"] >= 1
+
+
+# ==============================================================================
+# BAPI Hotfix Task 8 & Task 11 Integration and Cross-Stage Admission Tests
+# ==============================================================================
+
+def test_no_symbol_title_uses_bapi_detail_before_support_fallback(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+                    "releaseDate": int(time.time() * 1000) - 1000,
+                }]
+            }]
+        }
+    }
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+            "body": "<p>Binance Futures will launch XYZUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+        }
+    }
+
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {"ok": True, "payload": bapi_payload, "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}", "http_status": 200, "error": None}
+
+    support_called = []
+    def fake_support_fetch(url, **kwargs):
+        support_called.append(url)
+        return {"ok": False, "payload": None, "final_url": url, "http_status": 404, "error": "not_found"}
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "XYZUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_support_fetch):
+                with patch("sys.argv", args):
+                    assert main() == 0
+
+    assert len(support_called) == 0, "Support detail should not be called when BAPI succeeds"
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["XYZUSDT"]
+    detail_transport = events[0].get("detail_transport") or events[0].get("extraction_metadata", {}).get("detail_transport")
+    assert detail_transport == "bapi_article_detail_query"
+
+
+
+def test_bapi_detail_failure_falls_back_to_support_detail_paths(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+                    "releaseDate": int(time.time() * 1000) - 1000,
+                }]
+            }]
+        }
+    }
+    support_html = "<html><body>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</body></html>"
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {"ok": False, "payload": None, "final_url": "", "http_status": 500, "error": "bapi_500"}
+
+    def fake_support_fetch(url, **kwargs):
+        return {"ok": True, "payload": support_html, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "ABCUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_support_fetch):
+                with patch("sys.argv", args):
+                    assert main() == 0
+
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["ABCUSDT"]
+
+
+def test_bapi_and_support_requests_each_write_manifest_rows(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+                    "releaseDate": int(time.time() * 1000) - 1000,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {"ok": False, "payload": None, "final_url": "https://www.binance.com/bapi/...", "http_status": 503, "error": "bapi_503"}
+
+    def fake_support_fetch(url, **kwargs):
+        return {"ok": False, "payload": None, "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_support_fetch):
+                with patch("sys.argv", args):
+                    assert main() == 0
+
+    manifest = _read_jsonl_files(output_root / "request_manifest")
+    article_rows = [r for r in manifest if r.get("source_article_id") == hex32]
+    assert len(article_rows) >= 2, "Must contain BAPI row + Support fallback row"
+    bapi_row = next(r for r in article_rows if r.get("detail_fetch_variant") == "bapi_article_detail_query")
+    assert bapi_row["source_transport"] == "binance_first_party_public_web_bapi_undocumented"
+    assert bapi_row["content_provenance"] == "binance_official_announcement"
+    assert bapi_row["http_status"] == 503
+
+
+def test_bapi_failure_does_not_call_support_when_http_budget_exhausted(tmp_path, monkeypatch):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+                    "releaseDate": int(time.time() * 1000) - 1000,
+                }]
+            }]
+        }
+    }
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 1)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": False,
+            "payload": None,
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 503,
+            "error": "bapi_503",
+        }
+
+    support_called = []
+
+    def fake_support_fetch(url, **kwargs):
+        support_called.append(url)
+        return {"ok": False, "payload": None, "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_support_fetch):
+                with patch("sys.argv", args):
+                    assert main() == 0
+
+    assert support_called == []
+    manifest = _read_jsonl_files(output_root / "request_manifest")
+    article_rows = [r for r in manifest if r.get("source_article_id") == hex32]
+    assert [r.get("detail_fetch_variant") for r in article_rows] == ["bapi_article_detail_query"]
+
+
+def test_support_202_degraded_state_does_not_suppress_bapi_detail_in_runner(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    output_root = tmp_path / "out"
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    scheduler_state = {
+        "articles": {
+            hex32: {
+                "source_article_id": hex32,
+                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 5000,
+                "first_detected_at_ms": now_ms - 5000,
+                "detail_http_request_count": 0,
+                "detail_retry_cycle_count": 0,
+                "detail_fetch_attempt_count": 0,
+            }
+        },
+        "endpoint_health": {
+            "detail_endpoint_degraded_until_ms": now_ms + 300000,
+            "endpoint_health_by_source": {
+                "bapi_article_detail_query": {"degraded_until_ms": 0, "recent_results": []},
+                "support_article_detail": {"degraded_until_ms": now_ms + 300000, "recent_results": ["http_202_empty"]},
+            }
+        }
+    }
+    (output_root).mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
+
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+            "body": "<p>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+        }
+    }
+
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {"ok": True, "payload": bapi_payload, "final_url": "https://www.binance.com/bapi/...", "http_status": 200, "error": None}
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "ABCUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args):
+                assert main() == 0
+
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["ABCUSDT"]
+
+
+def test_legacy_global_support_degraded_state_does_not_suppress_bapi_detail_in_runner(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    output_root = tmp_path / "out"
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    scheduler_state = {
+        "articles": {
+            hex32: {
+                "source_article_id": hex32,
+                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 5000,
+                "first_detected_at_ms": now_ms - 5000,
+                "detail_http_request_count": 0,
+                "detail_retry_cycle_count": 0,
+                "detail_fetch_attempt_count": 0,
+            }
+        },
+        "endpoint_health": {"detail_endpoint_degraded_until_ms": now_ms + 300000},
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
+
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+            "body": "<p>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+        }
+    }
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": bapi_payload,
+            "raw_bytes": json.dumps(bapi_payload).encode("utf-8"),
+            "final_url": "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=f43403ef11974998bc0f46420826577a",
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "ABCUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args):
+                assert main() == 0
+
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["ABCUSDT"]
+
+
+def test_bapi_degraded_state_does_not_disable_support_fallback_in_runner(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    output_root = tmp_path / "out"
+    summary = tmp_path / "summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    scheduler_state = {
+        "articles": {
+            hex32: {
+                "source_article_id": hex32,
+                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+                "source_parent_url": "https://www.binance.com/en/support/announcement",
+                "source_published_at_ms": now_ms - 5000,
+                "first_detected_at_ms": now_ms - 5000,
+                "detail_http_request_count": 0,
+                "detail_retry_cycle_count": 0,
+                "detail_fetch_attempt_count": 0,
+            }
+        },
+
+
+        "endpoint_health": {
+            "detail_endpoint_degraded_until_ms": 0,
+            "endpoint_health_by_source": {
+                "bapi_article_detail_query": {"degraded_until_ms": now_ms + 300000, "recent_results": ["http_500"]},
+                "support_article_detail": {"degraded_until_ms": 0, "recent_results": []},
+            }
+        }
+    }
+    (output_root).mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
+
+    support_html = "<html><body>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</body></html>"
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    bapi_called = []
+    def fake_bapi_fetch(article_code, **kwargs):
+        bapi_called.append(article_code)
+        return {"ok": False, "payload": None, "final_url": "", "http_status": 500, "error": "bapi_degraded"}
+
+    def fake_support_fetch(url, **kwargs):
+        return {"ok": True, "payload": support_html, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "ABCUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_support_fetch):
+                with patch("sys.argv", args):
+                    assert main() == 0
+
+    assert len(bapi_called) == 0, "BAPI should be skipped when BAPI source is degraded"
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["ABCUSDT"]
+
+
+def test_detail_parsed_exchangeinfo_not_visible_enters_pending_validation_without_bapi_refetch(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+                    "releaseDate": int(time.time() * 1000) - 1000,
+                }]
+            }]
+        }
+    }
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
+            "body": "<p>Binance Futures will launch NEWCOINUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+        }
+    }
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    bapi_fetch_count = 0
+    def fake_bapi_fetch(article_code, **kwargs):
+        nonlocal bapi_fetch_count
+        bapi_fetch_count += 1
+        return {"ok": True, "payload": bapi_payload, "final_url": "https://www.binance.com/bapi/...", "http_status": 200, "error": None}
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex_empty(url, **kwargs):
+        return {"ok": True, "payload": {"symbols": []}, "final_url": url, "http_status": 200, "error": None}
+
+    # Poll 1: exchangeInfo missing NEWCOINUSDT -> enters pending validation
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_empty(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args1):
+                assert main() == 0
+
+    assert bapi_fetch_count == 1
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 0, "No event emitted yet while exchangeInfo symbol is missing"
+
+    # Set validation retry interval to 0 so Poll 2 re-evaluates exchangeInfo immediately
+    state_file = output_root / "detail_retry_scheduler_state.json"
+    persisted = json.loads(state_file.read_text())
+    if hex32 in persisted.get("articles", {}):
+        persisted["articles"][hex32]["next_exchangeinfo_validation_at_ms"] = 0
+        state_file.write_text(json.dumps(persisted))
+
+    # Poll 2: exchangeInfo now contains NEWCOINUSDT -> emits event WITHOUT refetching BAPI
+    def fake_ex_ready(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "NEWCOINUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args2 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_ready(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args2):
+                assert main() == 0
+
+    assert bapi_fetch_count == 1, "BAPI detail should NOT be refetched while waiting for exchangeInfo visibility"
+    events2 = _read_jsonl_files(output_root / "events")
+    assert len(events2) == 1
+    assert events2[0]["symbols"] == ["NEWCOINUSDT"]
+
+
+def test_pre_hotfix_bapi_recovered_article_does_not_become_formal_1_5f_evidence(tmp_path):
+    event = {
+        "event_id": "ev_pre_hotfix_123",
+        "source_article_id": "f43403ef11974998bc0f46420826577a",
+        "symbols": ["ABCUSDT"],
+        "source_published_at_ms": 1784640600000 - 10000,
+        "detected_at_ms": 1784640600000 - 10000,
+        "extraction_metadata": {
+            "detail_transport": "bapi_article_detail_query",
+            "content_provenance": "binance_official_announcement",
+        }
+    }
+    assert event["source_published_at_ms"] < 1784640600000
+    from src.risk.limits import RiskLimits
+    assert RiskLimits.live_trading_enabled is False
+
+
+
+def test_new_post_watermark_bapi_event_can_reach_1_5f_formal_acceptance(tmp_path):
+    now_ms = 1784640600000 + 3600000
+    event = {
+        "event_id": "ev_post_hotfix_456",
+        "source_article_id": "d0833b3a6eb64132a00c6d7a46abf434",
+        "symbols": ["XYZUSDT"],
+        "source_published_at_ms": now_ms,
+        "detected_at_ms": now_ms,
+        "extraction_metadata": {
+            "evidence_source": "official_article_body_confirmed",
+            "detail_transport": "bapi_article_detail_query",
+            "content_provenance": "binance_official_announcement",
+            "source_transport": "binance_first_party_public_web_bapi_undocumented",
+            "symbol_validation_status": "validated_by_exchangeinfo",
+        }
+    }
+    assert event["source_published_at_ms"] >= 1784640600000
+    assert event["extraction_metadata"]["evidence_source"] == "official_article_body_confirmed"

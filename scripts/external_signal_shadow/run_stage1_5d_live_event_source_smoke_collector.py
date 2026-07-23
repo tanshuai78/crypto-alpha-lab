@@ -1,8 +1,10 @@
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
+
 
 from configs import base
 from src.research.external_signal_shadow.stage1_5d_live_event_source_client import (
@@ -11,6 +13,9 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_client impo
     fetch_public_payload,
     validate_announcement_detail_url,
     build_announcement_detail_fallback_urls,
+    build_bapi_article_detail_url,
+    fetch_public_bapi_article_detail,
+    validate_bapi_article_detail_payload,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_collector import (
     run_one_poll_cycle,
@@ -25,6 +30,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_parser impo
     PARSER_VERSION,
     SYMBOL_EXTRACTION_VERSION,
     extract_symbol_candidates_from_detail_payload,
+    extract_symbol_candidates_from_bapi_article_payload,
     normalize_live_event,
     extract_symbol_candidates_from_title,
 )
@@ -33,6 +39,7 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
     build_stream_paths,
     enforce_payload_budget,
     write_detail_payload,
+    write_detail_payload_append_only,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_summary import (
     build_smoke_summary,
@@ -47,8 +54,13 @@ from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import
     classify_never_attempted_defer_state,
     update_detail_endpoint_health,
     update_detail_endpoint_health_by_variant,
+    update_detail_endpoint_health_by_source,
+    is_detail_source_degraded,
+    summarize_detail_source_health,
+    classify_detail_source_failure,
     summarize_detail_retry_overdue_state,
 )
+
 
 
 
@@ -519,8 +531,21 @@ def main():
     detail_retry_overdue_deferred_total = 0
     detail_retry_overdue_retry_cycle_total = 0
 
+    bapi_detail_request_count = 0
+    bapi_detail_success_count = 0
+    bapi_detail_trusted_payload_count = 0
+    bapi_detail_schema_drift_count = 0
+    bapi_detail_identity_mismatch_count = 0
+    bapi_detail_rate_limited_count = 0
+    bapi_to_support_fallback_count = 0
+    bapi_symbol_parse_success_count = 0
+    bapi_symbol_validation_pending_count = 0
+    bapi_symbol_validation_success_count = 0
+    bapi_payload_revision_count = 0
+    bapi_payload_hash_change_count = 0
 
     candidate_validation_pending_count = 0
+
     candidate_validation_success_count = 0
     candidate_validation_expired_count = 0
     u_settlement_symbol_extracted_count = 0
@@ -824,13 +849,31 @@ def main():
             detail_budget_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 3)
             detail_http_requests_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 4)
             source_parent_url = "https://www.binance.com/en/support/announcement"
+            bapi_article_code_pattern = getattr(
+                base, "EXTERNAL_SIGNAL_STAGE1_5D_BAPI_ARTICLE_CODE_PATTERN", r"^[0-9a-fA-F]{32}$"
+            )
+            bapi_eligible_pending_exists = any(
+                bool(code and re.match(bapi_article_code_pattern, str(code)))
+                for code in detail_retry_state
+            )
 
-            endpoint_degraded_until_ms = endpoint_health.get("detail_endpoint_degraded_until_ms", 0)
+            bapi_degraded_active = is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", now_ms)
+            support_degraded_active = is_detail_source_degraded(endpoint_health, "support_article_detail", now_ms)
+            endpoint_degraded_until_ms = (
+                endpoint_health.get("detail_endpoint_degraded_until_ms", 0)
+                if (
+                    (bapi_eligible_pending_exists and bapi_degraded_active and support_degraded_active)
+                    or (not bapi_eligible_pending_exists and support_degraded_active)
+                )
+                else 0
+            )
+
             if now_ms < endpoint_degraded_until_ms:
                 detail_endpoint_degraded_active = 1
                 detail_endpoint_degraded_count += 1
             else:
                 detail_endpoint_degraded_active = 0
+
 
             attempt_codes = select_detail_retry_attempts(
                 detail_retry_state=detail_retry_state,
@@ -1249,7 +1292,226 @@ def main():
                     continue
 
                 # Perform fetch
+                bapi_degraded = is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", now_ms)
+                bapi_handled = False
+                pattern = bapi_article_code_pattern
+
+                if not bapi_degraded and detail_http_requests_remaining > 0 and code and re.match(pattern, code):
+                    bapi_url = build_bapi_article_detail_url(code)
+
+                    bapi_res = None
+                    if args.fixture_json:
+                        bapi_payload = state["raw"].get("bapiPayload")
+                        if bapi_payload is not None:
+                            payload_obj = bapi_payload if isinstance(bapi_payload, dict) else json.loads(bapi_payload)
+                            raw_b_data = json.dumps(bapi_payload).encode("utf-8") if isinstance(bapi_payload, dict) else bapi_payload.encode("utf-8")
+                            bapi_res = {
+                                "ok": True,
+                                "payload": payload_obj,
+                                "raw_bytes": raw_b_data,
+                                "final_url": bapi_url,
+                                "http_status": 200,
+                                "error": None,
+                            }
+                        else:
+                            bapi_res = {
+                                "ok": False,
+                                "payload": None,
+                                "raw_bytes": b"",
+                                "final_url": bapi_url,
+                                "http_status": None,
+                                "error": "fixture_missing",
+                            }
+                    else:
+                        try:
+                            bapi_res = fetch_public_bapi_article_detail(
+                                code,
+                                live_public_readonly=args.live_public_readonly,
+                                timeout_sec=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_REQUEST_TIMEOUT_SEC", 10.0),
+                                retry_budget=0,
+                            )
+                        except Exception as e:
+                            bapi_res = {
+                                "ok": False,
+                                "payload": None,
+                                "raw_bytes": b"",
+                                "final_url": bapi_url,
+                                "http_status": None,
+                                "error": str(e),
+                            }
+
+                    detail_http_requests_remaining -= 1
+                    bapi_detail_request_count += 1
+                    state["detail_http_request_count"] = state.get("detail_http_request_count", 0) + 1
+                    state["detail_fetch_attempt_count"] = state["detail_http_request_count"]
+
+                    bapi_trusted_info = None
+                    if bapi_res["ok"] and bapi_res.get("payload"):
+                        bapi_trusted_info = validate_bapi_article_detail_payload(
+                            bapi_res["payload"],
+                            requested_article_code=code,
+                            catalog_title=state["raw"].get("title"),
+                        )
+
+                    bapi_is_trusted = bool(bapi_trusted_info and bapi_trusted_info.get("payload_trusted"))
+
+                    bapi_raw_bytes = bapi_res.get("raw_bytes") or (
+                        json.dumps(bapi_res["payload"]).encode("utf-8") if bapi_res.get("payload") else b""
+                    )
+                    bapi_write_res = write_detail_payload_append_only(
+                        root=output_root,
+                        timestamp_ms=now_ms,
+                        source_article_id=code,
+                        detail_fetch_variant="bapi_article_detail_query",
+                        raw_bytes=bapi_raw_bytes,
+                        parsed_payload=bapi_res.get("payload"),
+                        http_status=bapi_res.get("http_status"),
+                    )
+
+                    bapi_manifest = {
+                        "request_id": f"detail_bapi_{now_ms}_{code}",
+                        "request_type": "announcement_detail",
+                        "audit_metadata_version": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 1),
+                        "source_article_id": code,
+                        "source_detail_url_normalized": state["source_detail_url_normalized"],
+                        "source_type": "announcement_detail",
+                        "symbol": "ALL",
+                        "url": bapi_url,
+                        "final_url": bapi_res.get("final_url") or bapi_url,
+                        "http_status": bapi_res.get("http_status"),
+                        "row_count": 0,
+                        "error": bapi_res.get("error") if not bapi_is_trusted else None,
+
+                        "fetched_at_ms": now_ms,
+                        "payload_sha256": bapi_write_res.get("raw_payload_sha256"),
+                        "payload_size_bytes": bapi_write_res.get("payload_size_bytes") or 0,
+                        "payload_path": bapi_write_res.get("payload_path"),
+                        "payload_trusted": bapi_is_trusted,
+                        "response_payload_size_bytes": bapi_res.get("payload_size_bytes") or 0,
+                        "detail_fetch_variant": "bapi_article_detail_query",
+                        "source_transport": "binance_first_party_public_web_bapi_undocumented",
+                        "content_provenance": "binance_official_announcement",
+                        "parser_version": PARSER_VERSION,
+                        "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
+                    }
+                    append_jsonl(stream_paths["request_manifest"], bapi_manifest)
+                    request_manifest.append(bapi_manifest)
+
+                    bapi_attempt_result = classify_detail_attempt_result(bapi_res) if not bapi_is_trusted else "success"
+                    endpoint_health = update_detail_endpoint_health_by_source(
+                        endpoint_health,
+                        now_ms=now_ms,
+                        source="bapi_article_detail_query",
+                        result_code=bapi_attempt_result,
+                        degraded_rate_threshold=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_202_RATE_THRESHOLD,
+                        degraded_min_sample=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE,
+                        degraded_backoff_sec=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC,
+                    )
+
+                    if bapi_is_trusted:
+                        bapi_detail_success_count += 1
+                        bapi_detail_trusted_payload_count += 1
+                        max_symbols = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SYMBOL_EXTRACTION_MAX_SYMBOLS", 30)
+                        bapi_extraction = extract_symbol_candidates_from_bapi_article_payload(
+                            bapi_res["payload"], max_symbols=max_symbols, title=state["raw"].get("title")
+                        )
+
+                        bapi_parsed_symbols = bapi_extraction.get("symbols") or []
+                        if bapi_parsed_symbols:
+                            bapi_symbol_parse_success_count += 1
+                            exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
+                            valid_symbols = []
+                            if ex_ok:
+                                validation_res = validate_candidate_symbols_against_exchangeinfo(
+                                    candidates=bapi_parsed_symbols,
+                                    exchangeinfo_by_symbol=exchangeinfo_by_symbol,
+                                    allowed_margin_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS,
+                                    allowed_quote_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS,
+                                    allowed_contract_types=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES,
+                                    validatable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES,
+                                    emittable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES,
+                                    now_ms=now_ms,
+                                )
+                                valid_symbols = validation_res.get("validated_symbols", [])
+
+                            if len(valid_symbols) == len(bapi_parsed_symbols) and len(valid_symbols) > 0:
+                                bapi_symbol_validation_success_count += 1
+                                bapi_handled = True
+                                norm_event = normalize_live_event(
+                                    raw=state["raw"],
+                                    source_parent_url=source_parent_url,
+                                    detected_at_ms=state["first_detected_at_ms"],
+                                    source_published_at_ms=state["raw"].get("releaseDate"),
+                                    source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
+                                    symbols_override=tuple(valid_symbols),
+                                    extraction_metadata={
+                                        "evidence_source": "official_article_body_confirmed",
+                                        "detail_transport": "bapi_article_detail_query",
+                                        "symbol_extraction_source": "bapi_article_body",
+                                        "content_provenance": "binance_official_announcement",
+                                        "source_transport": "binance_first_party_public_web_bapi_undocumented",
+                                        "detail_fetch_attempted": True,
+                                        "detail_fetch_status": "success",
+                                        "detail_fetch_variant": "bapi_article_detail_query",
+                                        "detail_payload_trusted": True,
+                                        "symbol_validation_status": "validated_by_exchangeinfo",
+                                    }
+                                )
+                                effective_launch = build_effective_launch_times_ms(
+                                    candidate_symbols=valid_symbols,
+                                    symbol_onboard_times_ms=state.get("symbol_onboard_times_ms", {}),
+                                    symbol_launch_times_ms=bapi_extraction.get("symbol_launch_times_ms", {}),
+                                    source_published_at_ms=state["raw"].get("releaseDate") or 0,
+                                    first_detected_at_ms=state["first_detected_at_ms"],
+                                )
+                                norm_event["symbol_launch_times_ms"] = bapi_extraction.get("symbol_launch_times_ms", {})
+                                norm_event["symbol_effective_launch_times_ms"] = effective_launch.get("symbol_effective_launch_times_ms", {})
+                                norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
+                                norm_event["detail_fetched_at_ms"] = now_ms
+                                norm_event["symbol_resolved_at_ms"] = now_ms
+                                norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
+
+                                event_id = norm_event["event_id"]
+                                if event_id not in seen_event_ids:
+                                    seen_event_ids.add(event_id)
+                                    append_jsonl(stream_paths["events"], norm_event)
+                                    events_detected.append(norm_event)
+
+                                    eq_item = dict(norm_event)
+                                    eq_item["first_futures_bar_status"] = "not_yet_available"
+                                    eq_item["first_futures_bar_start_ms"] = None
+                                    first_bar_queue.append(eq_item)
+
+                                detail_retry_state.pop(code, None)
+                                continue
+                            else:
+                                bapi_symbol_validation_pending_count += 1
+                                bapi_handled = True
+                                state["candidate_symbols"] = bapi_parsed_symbols
+                                state["detail_parse_status"] = "parsed"
+                                state["parsed_candidate_symbols"] = bapi_parsed_symbols
+                                state["symbol_validation_status"] = "pending_exchangeinfo_missing"
+                                state["pending_reason"] = "exchangeinfo_symbol_not_yet_visible"
+                                state["detail_fetch_status"] = "success"
+                                state["detail_retryable"] = False
+                                state["exchangeinfo_validation_retryable"] = True
+                                state["next_exchangeinfo_validation_at_ms"] = now_ms + getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_EXCHANGEINFO_VALIDATION_RETRY_INTERVAL_SEC", 60) * 1000
+                                state["last_exchangeinfo_validation_at_ms"] = now_ms
+                                state["exchangeinfo_validation_attempt_count"] = state.get("exchangeinfo_validation_attempt_count", 0) + 1
+                                state["symbol_launch_times_ms"] = bapi_extraction.get("symbol_launch_times_ms", {})
+                                state["symbol_extraction_source"] = "bapi_article_body"
+                                state["symbol_derivation_method"] = "none"
+                                state["detail_fetch_variant"] = "bapi_article_detail_query"
+                                state["detail_payload_trusted"] = True
+                                continue
+                    else:
+                        bapi_to_support_fallback_count += 1
+
+                if bapi_handled:
+                    continue
+
                 fallback_urls = build_announcement_detail_fallback_urls(detail_url)
+
                 max_urls_cap = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FALLBACK_MAX_URLS_PER_ARTICLE", 2)
                 fallback_urls = fallback_urls[:max_urls_cap]
 
@@ -1265,11 +1527,15 @@ def main():
 
                 for url_idx, active_url in enumerate(fallback_urls):
                     if detail_http_requests_remaining <= 0:
+                        detail_fetch_budget_deferred_count += 1
+                        state["detail_budget_deferred_count"] = state.get("detail_budget_deferred_count", 0) + 1
                         break
 
                     detail_http_requests_remaining -= 1
+
                     if url_idx > 0:
                         detail_fetch_fallback_attempt_count += 1
+
 
                     state["detail_http_request_count"] = state.get("detail_http_request_count", 0) + 1
                     state["detail_fetch_attempt_count"] = state["detail_http_request_count"]
@@ -1448,6 +1714,15 @@ def main():
                         endpoint_health,
                         now_ms=now_ms,
                         variant=variant_name,
+                        result_code=attempt_result,
+                        degraded_rate_threshold=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_202_RATE_THRESHOLD,
+                        degraded_min_sample=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE,
+                        degraded_backoff_sec=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC,
+                    )
+                    endpoint_health = update_detail_endpoint_health_by_source(
+                        endpoint_health,
+                        now_ms=now_ms,
+                        source="support_article_detail",
                         result_code=attempt_result,
                         degraded_rate_threshold=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_202_RATE_THRESHOLD,
                         degraded_min_sample=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE,
@@ -1953,6 +2228,7 @@ def main():
         warn_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_WARN_SEC * 1000,
         hard_warn_ms=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_OVERDUE_PENDING_HARD_WARN_SEC * 1000,
     )
+    source_health_diag = summarize_detail_source_health(endpoint_health, summary_now_ms)
 
     summary = build_smoke_summary(
         upstream_evidence=evidence_res,
@@ -2009,8 +2285,26 @@ def main():
             "detail_fetch_fallback_attempt_count": detail_fetch_fallback_attempt_count,
             "detail_fetch_fallback_success_count": detail_fetch_fallback_success_count,
             "detail_fetch_attempt_manifest_mismatch_count": detail_fetch_attempt_manifest_mismatch_count,
+            "bapi_detail_request_count": bapi_detail_request_count,
+            "bapi_detail_success_count": bapi_detail_success_count,
+            "bapi_detail_trusted_payload_count": bapi_detail_trusted_payload_count,
+            "bapi_detail_schema_drift_count": bapi_detail_schema_drift_count,
+            "bapi_detail_identity_mismatch_count": bapi_detail_identity_mismatch_count,
+            "bapi_detail_rate_limited_count": bapi_detail_rate_limited_count,
+            "bapi_to_support_fallback_count": bapi_to_support_fallback_count,
+            "bapi_symbol_parse_success_count": bapi_symbol_parse_success_count,
+            "bapi_symbol_validation_pending_count": bapi_symbol_validation_pending_count,
+            "bapi_symbol_validation_success_count": bapi_symbol_validation_success_count,
+            "support_fallback_success_count": detail_fetch_fallback_success_count,
+            "detail_http_manifest_mismatch_count": detail_fetch_attempt_manifest_mismatch_count,
+            "bapi_payload_revision_count": bapi_payload_revision_count,
+            "bapi_payload_hash_change_count": bapi_payload_hash_change_count,
+            "bapi_detail_source_degraded": source_health_diag["bapi_detail_source_degraded"],
+            "support_detail_source_degraded": source_health_diag["support_detail_source_degraded"],
+            "all_detail_sources_degraded": source_health_diag["all_detail_sources_degraded"],
         },
     )
+
 
 
     output_summary_path.parent.mkdir(parents=True, exist_ok=True)

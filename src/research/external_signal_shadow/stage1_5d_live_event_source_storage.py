@@ -89,3 +89,57 @@ def write_detail_payload(root: str | Path, timestamp_ms: int, source_article_id:
         "payload_size_bytes": len(encoded_bytes),
         "payload_sha256": sha256_hash,
     }
+
+
+def write_detail_payload_append_only(
+    root: str | Path,
+    timestamp_ms: int,
+    source_article_id: str,
+    detail_fetch_variant: str,
+    raw_bytes: bytes,
+    parsed_payload: object | None = None,
+    content_type: str | None = None,
+    http_status: int | None = None,
+) -> dict:
+    if not detail_fetch_variant or not all(c.isalnum() or c in ("-", "_") for c in detail_fetch_variant):
+        raise ValueError("detail_fetch_variant_invalid")
+
+    is_safe = bool(source_article_id) and all(c.isalnum() or c in ("-", "_") for c in source_article_id)
+    safe_id = source_article_id if is_safe else hashlib.sha256(source_article_id.encode("utf-8")).hexdigest()
+
+    raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+
+    suffix = "json"
+    if content_type and "html" in content_type.lower():
+        suffix = "html"
+    elif raw_bytes.strip().startswith(b"<") or b"<html>" in raw_bytes.lower():
+        suffix = "html"
+    elif not raw_bytes.strip().startswith(b"{") and not raw_bytes.strip().startswith(b"["):
+        suffix = "txt"
+
+    filename = f"{timestamp_ms}.{detail_fetch_variant}.{raw_sha256[:16]}.{suffix}"
+    dir_path = Path(root) / "raw_payloads" / "announcement_detail" / safe_id
+    dir_path.mkdir(parents=True, exist_ok=True)
+    target_path = dir_path / filename
+
+    if not target_path.exists():
+        temp_path = dir_path / f"{filename}.tmp.{timestamp_ms}"
+        with open(temp_path, "wb") as f:
+            f.write(raw_bytes)
+        temp_path.replace(target_path)
+
+    canonical_sha256 = None
+    if parsed_payload is not None:
+        try:
+            canonical_bytes = json.dumps(parsed_payload, sort_keys=True).encode("utf-8")
+            canonical_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
+        except Exception:
+            canonical_sha256 = None
+
+    rel_path = target_path.relative_to(Path(root))
+    return {
+        "payload_path": str(rel_path),
+        "payload_size_bytes": len(raw_bytes),
+        "raw_payload_sha256": raw_sha256,
+        "canonical_json_sha256": canonical_sha256,
+    }
