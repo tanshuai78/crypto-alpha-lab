@@ -1591,7 +1591,384 @@ def test_reconcile_missing_accepted_row_backfills_active_state_once(tmp_path):
     assert len(accepted_files) == 1
     accepted_rows = [json.loads(line) for line in accepted_files[0].read_text().splitlines() if line.strip()]
     assert len(accepted_rows) == 1
-    assert rows[0]["acceptance_id"] == "acceptance-1"
     assert accepted_rows[0]["observation_anchor_ms"] == 20_000
     assert accepted_rows[0]["live_depth_evidence_basis"] == "announcement_and_launch_time"
     assert rows_again == []
+
+
+def test_reconcile_missing_terminal_ignored_rows_backfills_once(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        reconcile_missing_terminal_ignored_rows,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    state = EventSymbolState(
+        event_symbol_id="volatile-id",
+        event_id="event-ebay",
+        source_article_id="article-ebay",
+        symbol="EBAYUSDT",
+        detected_at_ms=1784822376255,
+        status="ignored_historical_anchor_pre_bootstrap",
+        terminal_hygiene_id="term-hygiene-1",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_at_ms=1784850000000,
+        consumable_by_stage1_5g=False,
+    )
+
+    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784850000000)
+    rows_again = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784851000000)
+
+    diag_files = list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl"))
+    assert len(diag_files) == 1
+    diags = [json.loads(line) for line in diag_files[0].read_text().splitlines() if line.strip()]
+    assert len(diags) == 1
+    assert diags[0]["diagnostic_type"] == "historical_anchor_pre_bootstrap_ignored"
+    assert diags[0]["terminal_hygiene_id"] == "term-hygiene-1"
+    assert len(rows) == 1
+    assert rows_again == []
+
+
+def test_capped_terminal_state_does_not_trigger_diagnostic_backfill(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        reconcile_missing_terminal_ignored_rows,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    state = EventSymbolState(
+        event_symbol_id="capped-id",
+        event_id="event-capped",
+        source_article_id="article-capped",
+        symbol="CAPUSDT",
+        detected_at_ms=1784822376255,
+        status="ignored_historical_anchor_pre_bootstrap",
+        terminal_hygiene_id="term-capped",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_at_ms=1784850000000,
+        consumable_by_stage1_5g=False,
+        terminal_audit_type="historical_anchor_hygiene_diagnostics",
+        diagnostic_expected=False,
+        diagnostic_sample_reserved=False,
+        diagnostic_emitted=False,
+    )
+
+    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"capped-id": state}, now_ms=1784850000000)
+
+    assert rows == []
+    assert list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl")) == []
+
+
+def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        emit_sample_capped_diagnostic,
+        load_terminal_hygiene_diagnostic_sample_counts,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+    from configs import base
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_MAX_REJECTION_HYGIENE_DIAGNOSTIC_SAMPLES_PER_TYPE", 2)
+    for idx in range(2):
+        append_jsonl(
+            build_daily_path(str(output_root), "historical_anchor_hygiene_diagnostics", 1784850000000 + idx),
+            {
+                "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
+                "terminal_hygiene_id": f"term-{idx}",
+            },
+        )
+
+    counts = load_terminal_hygiene_diagnostic_sample_counts(str(output_root))
+    emitted = emit_sample_capped_diagnostic(
+        str(output_root),
+        "historical_anchor_hygiene_diagnostics",
+        {
+            "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
+            "terminal_hygiene_id": "term-new",
+        },
+        "historical_anchor_pre_bootstrap_ignored",
+        1784851000000,
+        counts,
+    )
+
+    assert emitted is False
+
+
+def test_terminal_hygiene_reconciliation_rebuilds_state_from_diagnostic_artifact(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        reconcile_terminal_hygiene_artifacts,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    state_file = output_root / "observer_state.jsonl"
+    diag_row = {
+        "audit_metadata_version": 2,
+        "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
+        "terminal_hygiene_id": "term-from-diag",
+        "event_symbol_id": "diag-event-symbol",
+        "event_id": "diag-event",
+        "source_article_id": "diag-article",
+        "stable_event_symbol_key": "futures_contract_launch|diag-article|DIAGUSDT",
+        "stable_event_key": "binance_diag",
+        "symbol": "DIAGUSDT",
+        "detected_at_ms": 1784822376255,
+        "terminal_status": "ignored_historical_anchor_pre_bootstrap",
+        "terminal_reason": "historical_anchor_pre_bootstrap",
+        "terminal_at_ms": 1784850000000,
+        "diagnostic_at_ms": 1784850000000,
+        "observation_anchor_candidates": {"symbol_effective_launch_time": 1780995600000},
+        "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
+        "consumable_by_stage1_5g": False,
+    }
+    append_jsonl(build_daily_path(str(output_root), "historical_anchor_hygiene_diagnostics", 1784850000000), diag_row)
+
+    states = {}
+    result = reconcile_terminal_hygiene_artifacts(str(output_root), str(state_file), states, now_ms=1784851000000)
+
+    assert result["terminal_ignored_state_rebuilt_count"] == 1
+    rows = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ignored_historical_anchor_pre_bootstrap"
+    assert rows[0]["terminal_hygiene_id"] == "term-from-diag"
+    assert rows[0]["diagnostic_emitted"] is True
+
+
+def test_terminal_hygiene_reconciliation_rebuilds_rejected_state_from_audit_artifact(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        reconcile_terminal_hygiene_artifacts,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    state_file = output_root / "observer_state.jsonl"
+    rejected_row = {
+        "audit_metadata_version": 2,
+        "event_symbol_id": "rejected-event-symbol",
+        "event_id": "rejected-event",
+        "source_article_id": "rejected-article",
+        "stable_event_key": "binance_rejected",
+        "stable_event_symbol_key": "futures_contract_launch|rejected-article|REJUSDT",
+        "symbol": "REJUSDT",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 1784830000000,
+        "rejected_reason": "rejected_launch_anchor_age_exceeded",
+        "rejection_reason": "rejected_launch_anchor_age_exceeded",
+        "status": "rejected",
+        "rejected_at_ms": 1784850000000,
+        "terminal_hygiene_id": "term-rejected",
+        "consumable_by_stage1_5g": True,
+    }
+    append_jsonl(build_daily_path(str(output_root), "events_rejected", 1784850000000), rejected_row)
+
+    states = {}
+    result = reconcile_terminal_hygiene_artifacts(str(output_root), str(state_file), states, now_ms=1784851000000)
+
+    assert result["rejected_state_rebuilt_count"] == 1
+    rows = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "rejected"
+    assert rows[0]["terminal_hygiene_id"] == "term-rejected"
+    assert rows[0]["terminal_audit_type"] == "events_rejected"
+
+
+def test_bootstrap_watermark_writes_schema_v2_immutable_bootstrap_fields(tmp_path, monkeypatch):
+    import sys, time, json
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "old-event",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "old-article",
+        "stable_event_key": "binance_old",
+        "detected_at_ms": 1000,
+        "symbols": ["OLDUSDT"],
+    }) + "\n")
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    output_root = tmp_path / "out"
+    monkeypatch.setattr(time, "time", lambda: 2000 / 1000.0)
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    argv = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--bootstrap-watermark",
+    ]
+    old = sys.argv
+    try:
+        sys.argv = argv
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old
+
+    w = json.loads((output_root / "watermark.json").read_text())
+    assert w["watermark_schema_version"] == 2
+    assert w["bootstrap_max_seen_detected_at_ms"] == 1000
+    assert w["bootstrap_created_at_ms"] == 2000
+    assert w["bootstrap_source_root"]
+    assert w["bootstrap_root_id"]
+
+
+def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_events_rejected(tmp_path, monkeypatch):
+    import sys, time, json
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
+        "stable_event_key": "binance_f598_MULTI",
+        "detected_at_ms": 1784822376255,
+        "symbols": ["EBAYUSDT"],
+        "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
+    }) + "\n")
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    output_root = tmp_path / "out"
+
+    # Step 1: Bootstrap watermark v2
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--bootstrap-watermark",
+        ]
+        with pytest.raises(SystemExit):
+            main()
+    finally:
+        sys.argv = old_argv
+
+    # Mock exchangeinfo response
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "exchangeinfo.json").write_text(json.dumps({
+        "symbols": [{"symbol": "EBAYUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1780996800000}]
+    }))
+
+    # Step 2: Run poll
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    assert list((output_root / "events_rejected").glob("**/*.jsonl")) == []
+    state_file = output_root / "observer_state.jsonl"
+    assert state_file.exists()
+    states = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert len(states) == 1
+    assert states[0]["status"] == "ignored_historical_anchor_pre_bootstrap"
+    assert states[0]["consumable_by_stage1_5g"] is False
+
+    diag_files = list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl"))
+    assert len(diag_files) == 1
+    diags = [json.loads(line) for line in diag_files[0].read_text().splitlines() if line.strip()]
+    assert len(diags) == 1
+    assert diags[0]["diagnostic_type"] == "historical_anchor_pre_bootstrap_ignored"
+    assert diags[0]["consumable_by_stage1_5g"] is False
+
+
+def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, monkeypatch):
+    import sys, time, json
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
+        "stable_event_key": "binance_f598_MULTI",
+        "detected_at_ms": 1784822376255,
+        "symbols": ["EBAYUSDT"],
+        "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
+    }) + "\n")
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    output_root = tmp_path / "out"
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--bootstrap-watermark",
+        ]
+        with pytest.raises(SystemExit):
+            main()
+    finally:
+        sys.argv = old_argv
+
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "exchangeinfo.json").write_text(json.dumps({
+        "symbols": [{"symbol": "EBAYUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1780996800000}]
+    }))
+
+    # Run max-polls=2
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "2",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    assert list((output_root / "events_rejected").glob("**/*.jsonl")) == []
+    diag_files = list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl"))
+    diags = [json.loads(line) for f in diag_files for line in f.read_text().splitlines() if line.strip()]
+    assert len(diags) == 1

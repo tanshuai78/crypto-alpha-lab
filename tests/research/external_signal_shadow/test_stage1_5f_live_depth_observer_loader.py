@@ -10,11 +10,15 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader im
     classify_event_symbol_eligibility,
     classify_event_symbol_eligibility_with_diagnostics,
     classify_live_depth_evidence_basis,
+    delayed_launch_event_symbol_is_post_bootstrap_watermark,
     flatten_event_symbols,
+    historical_anchor_classification_allowed,
     iter_stage1_5d_event_rows,
     make_event_symbol_id,
     make_stable_event_symbol_key,
     merge_first_seen_watermark_fields,
+    normalize_anchor_candidates,
+    normalize_event_symbol_identity,
     re_resolve_pending_anchor,
     resolve_announcement_capture_time_ms,
     resolve_depth_observation_anchor_ms,
@@ -971,3 +975,181 @@ def test_re_resolve_pending_anchor_ignores_revision_with_same_symbol_but_differe
     assert result.event_id == "old-event"
     assert result.status == "pending_launch_anchor_missing"
     assert result.observation_anchor_ms is None
+
+
+def test_historical_classification_requires_immutable_bootstrap_watermark():
+    assert historical_anchor_classification_allowed(Watermark(max_seen_detected_at_ms=1000)) is False
+    assert historical_anchor_classification_allowed(Watermark(
+        max_seen_detected_at_ms=2000,
+        watermark_schema_version=2,
+        bootstrap_max_seen_detected_at_ms=1000,
+        bootstrap_created_at_ms=900,
+    )) is True
+
+
+def test_invalid_zero_anchor_is_not_counted_as_historical_candidate():
+    candidates = normalize_anchor_candidates({
+        "symbol_effective_launch_time": 0,
+        "exchangeinfo_current_onboard_time": 1781170800000,
+    })
+    assert "symbol_effective_launch_time" not in candidates
+    assert candidates["exchangeinfo_current_onboard_time"] == 1781170800000
+
+
+def test_all_valid_anchors_pre_bootstrap_short_circuits_conflict():
+    watermark = Watermark(
+        watermark_schema_version=2,
+        bootstrap_max_seen_detected_at_ms=1784822376255,
+        bootstrap_created_at_ms=1784822584716,
+        max_seen_detected_at_ms=1784822376255,
+    )
+    row = {
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
+        "detected_at_ms": 1784822376255,
+        "symbol": "EBAYUSDT",
+        "symbols": ["EBAYUSDT"],
+        "stable_event_key": "binance_f598_MULTI",
+        "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
+    }
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": {"EBAYUSDT"},
+        "symbol_rows": {"EBAYUSDT": {"symbol": "EBAYUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1780996800000}},
+    }
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row=row,
+        symbol="EBAYUSDT",
+        now_ms=1784850000000,
+        watermark=watermark,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={},
+    )
+    assert status == "ignored"
+    assert reason == "ignored_historical_anchor_pre_bootstrap"
+    assert diag["terminal_status"] == "ignored_historical_anchor_pre_bootstrap"
+
+
+def test_missing_bootstrap_watermark_does_not_fall_through_to_conflict():
+    watermark = Watermark(max_seen_detected_at_ms=1784822376255)
+    row = {
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
+        "detected_at_ms": 1784822376255,
+        "symbol": "EBAYUSDT",
+        "symbols": ["EBAYUSDT"],
+        "stable_event_key": "binance_f598_MULTI",
+        "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
+    }
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": {"EBAYUSDT"},
+        "symbol_rows": {"EBAYUSDT": {"symbol": "EBAYUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1780996800000}},
+    }
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row=row,
+        symbol="EBAYUSDT",
+        now_ms=1784850000000,
+        watermark=watermark,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={},
+    )
+    assert status == "diagnostic_only"
+    assert reason == "historical_classification_bootstrap_watermark_missing"
+    assert diag["bootstrap_watermark_missing"] is True
+
+
+def test_delayed_launch_exception_uses_immutable_bootstrap_cutoff():
+    row = {
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 1784820000000,
+        "symbols": ["FUTUREUSDT"],
+        "symbol_extraction_source": "title_contract_symbol",
+        "symbol_validation_status": "validated",
+        "symbol_effective_launch_times_ms": {"FUTUREUSDT": 1784900000000},
+    }
+    assert delayed_launch_event_symbol_is_post_bootstrap_watermark(
+        row,
+        "FUTUREUSDT",
+        bootstrap_watermark_ms=1784810000000,
+    ) is True
+    assert delayed_launch_event_symbol_is_post_bootstrap_watermark(
+        row,
+        "FUTUREUSDT",
+        bootstrap_watermark_ms=1784910000000,
+    ) is False
+
+
+def test_one_post_bootstrap_anchor_prevents_historical_ignore():
+    watermark = Watermark(
+        watermark_schema_version=2,
+        bootstrap_max_seen_detected_at_ms=1784822376255,
+        bootstrap_created_at_ms=1784822584716,
+        bootstrap_root_id="root-id",
+        max_seen_detected_at_ms=1784822376255,
+    )
+    row = {
+        "event_id": "event-mixed",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article-mixed",
+        "detected_at_ms": 1784822376255,
+        "symbol": "MIXEDUSDT",
+        "symbols": ["MIXEDUSDT"],
+        "stable_event_key": "binance_mixed_MULTI",
+        "symbol_effective_launch_times_ms": {"MIXEDUSDT": 1780995600000},
+    }
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": {"MIXEDUSDT"},
+        "symbol_rows": {"MIXEDUSDT": {"symbol": "MIXEDUSDT", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1784825976255}},
+    }
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row=row,
+        symbol="MIXEDUSDT",
+        now_ms=1784823000000,
+        watermark=watermark,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={},
+    )
+    assert status != "ignored"
+    assert reason != "ignored_historical_anchor_pre_bootstrap"
+
+
+def test_malformed_production_fixture_routes_to_diagnostic_only(tmp_path):
+    fixture_path = "tests/fixtures/external_signal_shadow/stage1_5f/rejected_hygiene/malformed_historical_rejected_rows.jsonl"
+    with open(fixture_path, "r") as f:
+        row = json.loads(f.readline())
+
+    norm_id = normalize_event_symbol_identity(row, row.get("symbol", ""))
+    assert norm_id["identity_valid"] is False
+    assert "detected_at_ms_invalid_or_missing" in norm_id["identity_errors"]
+
+    w = Watermark(
+        watermark_schema_version=2,
+        bootstrap_max_seen_detected_at_ms=1784822376255,
+        bootstrap_created_at_ms=1784822584716,
+        max_seen_detected_at_ms=1784822376255,
+    )
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row=row,
+        symbol="GLWUSDT",
+        now_ms=1784850000000,
+        watermark=w,
+        exchangeinfo_state={"available": True, "symbols": {"GLWUSDT"}},
+        budget_state={},
+    )
+    assert status == "diagnostic_only"
+    assert reason == "malformed_source_identity"
+
+
+def test_missing_source_article_id_never_enters_normal_terminal_state():
+    row = {
+        "event_type": "futures_contract_launch",
+        "symbol": "GLWUSDT",
+        "detected_at_ms": 1784822376255,
+    }
+    norm_id = normalize_event_symbol_identity(row, "GLWUSDT")
+    assert norm_id["identity_valid"] is False
+    assert "source_article_id_and_event_id_both_missing" in norm_id["identity_errors"]

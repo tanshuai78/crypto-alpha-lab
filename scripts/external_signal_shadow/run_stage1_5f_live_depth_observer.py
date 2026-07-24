@@ -25,6 +25,32 @@ def parse_args():
     return parser.parse_args()
 
 
+def emit_sample_capped_diagnostic(output_root: str, subfolder: str, row: dict, diag_type: str, now_ms: int, counts_map: dict) -> bool:
+    max_cap = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_REJECTION_HYGIENE_DIAGNOSTIC_SAMPLES_PER_TYPE
+    curr = counts_map.get(diag_type, 0)
+    if curr >= max_cap:
+        return False
+    counts_map[diag_type] = curr + 1
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+    diag_path = build_daily_path(output_root, subfolder, now_ms)
+    append_jsonl(diag_path, row)
+    return True
+
+
+def load_terminal_hygiene_diagnostic_sample_counts(output_root: str) -> dict:
+    counts = {}
+    for stream_name in ("historical_anchor_hygiene_diagnostics", "rejection_hygiene_diagnostics"):
+        for row in load_all_jsonl_from_subdirs(output_root, stream_name):
+            dtype = row.get("diagnostic_type")
+            if not dtype:
+                continue
+            counts[dtype] = counts.get(dtype, 0) + 1
+    return counts
+
+
 def load_all_events(fixture_path: str, glob_pattern: str):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
         iter_stage1_5d_event_rows,
@@ -159,6 +185,150 @@ def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, n
     return backfilled
 
 
+def reconcile_missing_terminal_ignored_rows(output_root: str, states: dict, now_ms: int) -> list[dict]:
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        build_historical_anchor_hygiene_diagnostic,
+    )
+    existing_rows = load_all_jsonl_from_subdirs(output_root, "historical_anchor_hygiene_diagnostics")
+    existing_hygiene_ids = {r.get("terminal_hygiene_id") for r in existing_rows if r.get("terminal_hygiene_id")}
+    existing_event_symbol_ids = {r.get("event_symbol_id") for r in existing_rows if r.get("event_symbol_id")}
+
+    counts_map = {}
+    for r in existing_rows:
+        dtype = r.get("diagnostic_type", "historical_anchor_pre_bootstrap_ignored")
+        counts_map[dtype] = counts_map.get(dtype, 0) + 1
+
+    reconciled = []
+    for state in states.values():
+        if state.status != "ignored_historical_anchor_pre_bootstrap":
+            continue
+        if (
+            getattr(state, "terminal_audit_type", "") == "historical_anchor_hygiene_diagnostics"
+            and not getattr(state, "diagnostic_expected", False)
+            and not getattr(state, "diagnostic_emitted", False)
+        ):
+            continue
+        hygiene_id = getattr(state, "terminal_hygiene_id", "")
+        if (hygiene_id and hygiene_id in existing_hygiene_ids) or (state.event_symbol_id in existing_event_symbol_ids):
+            continue
+
+        diag_row = build_historical_anchor_hygiene_diagnostic(state, now_ms)
+        emitted = emit_sample_capped_diagnostic(
+            output_root,
+            "historical_anchor_hygiene_diagnostics",
+            diag_row,
+            "historical_anchor_pre_bootstrap_ignored",
+            now_ms,
+            counts_map,
+        )
+        if emitted:
+            if hygiene_id:
+                existing_hygiene_ids.add(hygiene_id)
+            existing_event_symbol_ids.add(state.event_symbol_id)
+            reconciled.append(diag_row)
+
+    return reconciled
+
+
+def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, states: dict, now_ms: int) -> dict:
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+    )
+
+    by_hygiene_id = {
+        s.terminal_hygiene_id: s
+        for s in states.values()
+        if getattr(s, "terminal_hygiene_id", "")
+    }
+    by_event_symbol_id = {
+        s.event_symbol_id: s
+        for s in states.values()
+        if getattr(s, "event_symbol_id", "")
+    }
+
+    rebuilt_ignored = 0
+    rebuilt_rejected = 0
+
+    diagnostic_rows = load_all_jsonl_from_subdirs(output_root, "historical_anchor_hygiene_diagnostics")
+    for row in diagnostic_rows:
+        if row.get("diagnostic_type") != "historical_anchor_pre_bootstrap_ignored":
+            continue
+        event_symbol_id = str(row.get("event_symbol_id") or "")
+        hygiene_id = str(row.get("terminal_hygiene_id") or "")
+        if (event_symbol_id and event_symbol_id in by_event_symbol_id) or (hygiene_id and hygiene_id in by_hygiene_id):
+            continue
+        if not event_symbol_id or not hygiene_id:
+            continue
+
+        state = EventSymbolState(
+            event_symbol_id=event_symbol_id,
+            event_id=str(row.get("event_id") or ""),
+            source_article_id=str(row.get("source_article_id") or ""),
+            stable_event_symbol_key=str(row.get("stable_event_symbol_key") or ""),
+            stable_event_key=str(row.get("stable_event_key") or ""),
+            symbol=str(row.get("symbol") or "").upper(),
+            detected_at_ms=int(row.get("detected_at_ms") or row.get("terminal_at_ms") or now_ms),
+            status="ignored_historical_anchor_pre_bootstrap",
+            terminal_hygiene_id=hygiene_id,
+            terminal_status="ignored_historical_anchor_pre_bootstrap",
+            terminal_reason=str(row.get("terminal_reason") or "historical_anchor_pre_bootstrap"),
+            terminal_at_ms=row.get("terminal_at_ms") or row.get("diagnostic_at_ms") or now_ms,
+            consumable_by_stage1_5g=False,
+            observation_anchor_candidates=row.get("observation_anchor_candidates") or {},
+            bootstrap_watermark_max_seen_detected_at_ms=row.get("bootstrap_watermark_max_seen_detected_at_ms"),
+            terminal_audit_type="historical_anchor_hygiene_diagnostics",
+            terminal_audit_row=row,
+            diagnostic_expected=True,
+            diagnostic_sample_reserved=True,
+            diagnostic_emitted=True,
+        )
+        states[event_symbol_id] = state
+        by_event_symbol_id[event_symbol_id] = state
+        by_hygiene_id[hygiene_id] = state
+        append_jsonl(state_file, state.to_dict())
+        rebuilt_ignored += 1
+
+    rejected_rows = load_all_jsonl_from_subdirs(output_root, "events_rejected")
+    for row in rejected_rows:
+        event_symbol_id = str(row.get("event_symbol_id") or "")
+        hygiene_id = str(row.get("terminal_hygiene_id") or "")
+        if (event_symbol_id and event_symbol_id in by_event_symbol_id) or (hygiene_id and hygiene_id in by_hygiene_id):
+            continue
+        if not event_symbol_id or not hygiene_id:
+            continue
+
+        state = EventSymbolState(
+            event_symbol_id=event_symbol_id,
+            event_id=str(row.get("event_id") or ""),
+            source_article_id=str(row.get("source_article_id") or ""),
+            stable_event_symbol_key=str(row.get("stable_event_symbol_key") or ""),
+            stable_event_key=str(row.get("stable_event_key") or ""),
+            symbol=str(row.get("symbol") or "").upper(),
+            detected_at_ms=int(row.get("detected_at_ms") or row.get("rejected_at_ms") or now_ms),
+            status="rejected",
+            terminal_hygiene_id=hygiene_id,
+            terminal_status="rejected",
+            terminal_reason=str(row.get("rejected_reason") or row.get("rejection_reason") or ""),
+            terminal_at_ms=row.get("rejected_at_ms") or now_ms,
+            consumable_by_stage1_5g=True,
+            terminal_audit_type="events_rejected",
+            terminal_audit_row=row,
+        )
+        states[event_symbol_id] = state
+        by_event_symbol_id[event_symbol_id] = state
+        by_hygiene_id[hygiene_id] = state
+        append_jsonl(state_file, state.to_dict())
+        rebuilt_rejected += 1
+
+    return {
+        "terminal_ignored_state_rebuilt_count": rebuilt_ignored,
+        "rejected_state_rebuilt_count": rebuilt_rejected,
+    }
+
+
 def main():
     args = parse_args()
     output_root = args.output_root
@@ -173,7 +343,12 @@ def main():
             bootstrap_watermark_from_stage1_5d_events,
             write_watermark_atomic,
         )
-        watermark = bootstrap_watermark_from_stage1_5d_events(events)
+        watermark = bootstrap_watermark_from_stage1_5d_events(
+            events,
+            source_root=args.stage1_5d_events_glob or args.fixture_events_jsonl or "",
+            output_root=output_root,
+            now_ms=int(time.time() * 1000),
+        )
         write_watermark_atomic(os.path.join(output_root, "watermark.json"), watermark)
 
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
@@ -354,13 +529,34 @@ def main():
 
     # 5. Load/compact/resume observer state
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        build_historical_anchor_hygiene_diagnostic,
+        build_rejected_event_symbol_row,
+        build_terminal_ignored_state,
         compact_observer_state_jsonl,
         load_latest_state_by_event_symbol_id,
+        make_terminal_hygiene_id,
     )
     state_file = os.path.join(output_root, "observer_state.jsonl")
     compact_observer_state_jsonl(state_file)
     states = load_latest_state_by_event_symbol_id(state_file)
+    reconcile_terminal_hygiene_artifacts(output_root, state_file, states, now_ms=int(time.time() * 1000))
     reconcile_missing_accepted_rows(output_root, states, watermark, now_ms=int(time.time() * 1000))
+    reconcile_missing_terminal_ignored_rows(output_root, states, now_ms=int(time.time() * 1000))
+
+    terminal_states_by_stable_event_symbol_key = {
+        s.stable_event_symbol_key: s
+        for s in states.values()
+        if s.stable_event_symbol_key and s.status in ("ignored_historical_anchor_pre_bootstrap", "rejected")
+    }
+    terminal_states_by_terminal_hygiene_id = {
+        s.terminal_hygiene_id: s
+        for s in states.values()
+        if getattr(s, "terminal_hygiene_id", "")
+    }
+    historical_diagnostic_samples_by_type = load_terminal_hygiene_diagnostic_sample_counts(output_root)
+    historical_anchor_newly_ignored_this_poll = 0
+    bootstrap_watermark_missing_diagnostic_count = 0
+    malformed_terminal_diagnostic_count = 0
 
     # 6. Load daily rotated stream history
     request_manifest_rows = load_all_jsonl_from_subdirs(output_root, "request_manifest")
@@ -530,12 +726,33 @@ def main():
             for flat_event in flatten_event_symbols(event):
                 symbol = flat_event["symbol"]
                 event_symbol_id = make_event_symbol_id(flat_event, symbol)
+                stable_key = make_stable_event_symbol_key(flat_event, symbol)
+                flat_event["event_symbol_id"] = event_symbol_id
+                flat_event["stable_event_symbol_key"] = stable_key
 
                 if event_symbol_id in states:
+                    existing_state = states[event_symbol_id]
+                    if existing_state.status == "ignored_historical_anchor_pre_bootstrap":
+                        new_hash = flat_event.get("detail_payload_hash") or flat_event.get("payload_hash") or ""
+                        if new_hash and getattr(existing_state, "source_event_payload_hash", "") and new_hash != existing_state.source_event_payload_hash:
+                            d = existing_state.to_dict()
+                            d["terminal_ignored_revision_seen_count"] = existing_state.terminal_ignored_revision_seen_count + 1
+                            d["latest_event_payload_hash"] = new_hash
+                            updated = EventSymbolState.from_dict(d)
+                            states[event_symbol_id] = updated
+                            append_jsonl(state_file, updated.to_dict())
                     continue
 
-                flat_event["event_symbol_id"] = event_symbol_id
-                flat_event["stable_event_symbol_key"] = make_stable_event_symbol_key(flat_event, symbol)
+                if stable_key in terminal_states_by_stable_event_symbol_key:
+                    existing_terminal = terminal_states_by_stable_event_symbol_key[stable_key]
+                    d = existing_terminal.to_dict()
+                    d["duplicate_suppressed_count"] = getattr(existing_terminal, "duplicate_suppressed_count", 0) + 1
+                    d["last_duplicate_seen_at_ms"] = now_ms
+                    updated = EventSymbolState.from_dict(d)
+                    states[existing_terminal.event_symbol_id] = updated
+                    terminal_states_by_stable_event_symbol_key[stable_key] = updated
+                    append_jsonl(state_file, updated.to_dict())
+                    continue
 
                 status, reason, eligibility_diag = classify_event_symbol_eligibility_with_diagnostics(
                     row=flat_event,
@@ -546,6 +763,76 @@ def main():
                     budget_state=budget_state,
                 )
                 logger.info(f"Classified event {event_symbol_id} ({symbol}): status={status}, reason={reason}")
+
+                if status == "ignored" and reason == "ignored_historical_anchor_pre_bootstrap":
+                    boot_root_id = getattr(watermark, "bootstrap_root_id", "")
+                    eligibility_diag["bootstrap_root_id"] = boot_root_id
+                    terminal_state = build_terminal_ignored_state(flat_event, reason, "ignored_historical_anchor_pre_bootstrap", now_ms, eligibility_diag)
+                    diag_row = build_historical_anchor_hygiene_diagnostic(terminal_state, now_ms)
+                    diag_emitted = emit_sample_capped_diagnostic(
+                        output_root,
+                        "historical_anchor_hygiene_diagnostics",
+                        diag_row,
+                        "historical_anchor_pre_bootstrap_ignored",
+                        now_ms,
+                        historical_diagnostic_samples_by_type,
+                    )
+                    d = terminal_state.to_dict()
+                    d["diagnostic_expected"] = bool(diag_emitted)
+                    d["diagnostic_sample_reserved"] = bool(diag_emitted)
+                    d["diagnostic_emitted"] = bool(diag_emitted)
+                    d["terminal_audit_type"] = "historical_anchor_hygiene_diagnostics"
+                    if diag_emitted:
+                        d["terminal_audit_row"] = diag_row
+                    terminal_state = EventSymbolState.from_dict(d)
+                    states[event_symbol_id] = terminal_state
+                    terminal_states_by_stable_event_symbol_key[terminal_state.stable_event_symbol_key] = terminal_state
+                    if terminal_state.terminal_hygiene_id:
+                        terminal_states_by_terminal_hygiene_id[terminal_state.terminal_hygiene_id] = terminal_state
+
+                    append_jsonl(state_file, terminal_state.to_dict())
+                    historical_anchor_newly_ignored_this_poll += 1
+                    continue
+
+                if status == "diagnostic_only":
+                    logger.info(f"Diagnostic-only event {event_symbol_id} ({symbol}): reason={reason}")
+                    if reason == "historical_classification_bootstrap_watermark_missing":
+                        bootstrap_watermark_missing_diagnostic_count += 1
+                        emit_sample_capped_diagnostic(
+                            output_root,
+                            "rejection_hygiene_diagnostics",
+                            {
+                                "audit_metadata_version": 2,
+                                "diagnostic_type": "bootstrap_watermark_missing",
+                                "event_symbol_id": event_symbol_id,
+                                "symbol": symbol,
+                                "reason": reason,
+                                "diagnostic_at_ms": now_ms,
+                                **eligibility_diag,
+                            },
+                            "bootstrap_watermark_missing",
+                            now_ms,
+                            historical_diagnostic_samples_by_type,
+                        )
+                    elif reason == "malformed_source_identity":
+                        malformed_terminal_diagnostic_count += 1
+                        emit_sample_capped_diagnostic(
+                            output_root,
+                            "rejection_hygiene_diagnostics",
+                            {
+                                "audit_metadata_version": 2,
+                                "diagnostic_type": "malformed_source_identity",
+                                "event_symbol_id": event_symbol_id,
+                                "symbol": symbol,
+                                "reason": reason,
+                                "diagnostic_at_ms": now_ms,
+                                **eligibility_diag,
+                            },
+                            "malformed_source_identity",
+                            now_ms,
+                            historical_diagnostic_samples_by_type,
+                        )
+                    continue
 
                 if status == "pending":
                     pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
@@ -604,16 +891,44 @@ def main():
                         pre_watermark_ignored += 1
                     else:
                         basis_diag = classify_live_depth_evidence_basis(flat_event, watermark)
+                        boot_root_id = getattr(watermark, "bootstrap_root_id", "")
+                        term_hygiene_id = make_terminal_hygiene_id(flat_event["stable_event_symbol_key"], "rejected", "post_bootstrap_rejected", boot_root_id)
+                        rejected_row = build_rejected_event_symbol_row(
+                            flat_event=flat_event,
+                            terminal_hygiene_id=term_hygiene_id,
+                            rejected_reason=reason,
+                            now_ms=now_ms,
+                            watermark_max_seen_detected_at_ms=watermark.max_seen_detected_at_ms,
+                            watermark_version=watermark.watermark_version,
+                            eligibility_diag=eligibility_diag,
+                            basis_diag=basis_diag,
+                        )
                         rejected_path = build_daily_path(output_root, "events_rejected", now_ms)
-                        append_jsonl(rejected_path, {
-                            "event_symbol_id": event_symbol_id,
-                            "symbol": symbol,
-                            "rejection_reason": reason,
-                            "depth_observation_started": False,
-                            "rejected_at_ms": now_ms,
-                            **eligibility_diag,
-                            **basis_diag,
-                        })
+                        append_jsonl(rejected_path, rejected_row)
+
+                        rejected_state = EventSymbolState(
+                            event_symbol_id=event_symbol_id,
+                            event_id=str(flat_event.get("event_id") or ""),
+                            symbol=symbol,
+                            detected_at_ms=int(flat_event.get("detected_at_ms") or now_ms),
+                            status="rejected",
+                            terminal_hygiene_id=term_hygiene_id,
+                            terminal_status="rejected",
+                            terminal_reason=reason,
+                            terminal_at_ms=now_ms,
+                            consumable_by_stage1_5g=True,
+                            source_article_id=str(flat_event.get("source_article_id") or ""),
+                            stable_event_symbol_key=flat_event["stable_event_symbol_key"],
+                            stable_event_key=str(flat_event.get("stable_event_key") or ""),
+                            terminal_audit_type="events_rejected",
+                            terminal_audit_row=rejected_row,
+                        )
+                        states[event_symbol_id] = rejected_state
+                        terminal_states_by_stable_event_symbol_key[flat_event["stable_event_symbol_key"]] = rejected_state
+                        if term_hygiene_id:
+                            terminal_states_by_terminal_hygiene_id[term_hygiene_id] = rejected_state
+                        append_jsonl(state_file, rejected_state.to_dict())
+                    continue
 
 
         # 6.3 Fetch public depth for active observations
@@ -773,6 +1088,10 @@ def main():
             request_manifest_rows=request_manifest_rows,
             heartbeat_rows=heartbeat_rows,
             pending_states=[s for s in states.values() if s.status.startswith("pending_")],
+            terminal_states=[s for s in states.values() if s.status in ("ignored_historical_anchor_pre_bootstrap", "rejected")],
+            historical_anchor_newly_ignored_this_poll=historical_anchor_newly_ignored_this_poll,
+            bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,
+            malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
         )
         write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
 

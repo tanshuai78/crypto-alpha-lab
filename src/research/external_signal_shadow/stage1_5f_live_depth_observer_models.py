@@ -19,6 +19,11 @@ class Watermark:
     seen_source_article_ids: list[str] = None
     seen_stable_event_keys: list[str] = None
     updated_at_ms: int = 0
+    watermark_schema_version: int = 1
+    bootstrap_max_seen_detected_at_ms: int | None = None
+    bootstrap_created_at_ms: int | None = None
+    bootstrap_source_root: str = ""
+    bootstrap_root_id: str = ""
 
     def __post_init__(self):
         # Handle frozen list defaults
@@ -106,6 +111,22 @@ class EventSymbolState:
     empty_book_snapshot_count: int = 0
     invalid_book_snapshot_count: int = 0
 
+    # Terminal Hygiene Fields
+    terminal_hygiene_id: str = ""
+    terminal_status: str = ""
+    terminal_reason: str = ""
+    terminal_at_ms: int | None = None
+    consumable_by_stage1_5g: bool | None = None
+    source_event_payload_hash: str = ""
+    terminal_ignored_revision_seen_count: int = 0
+    duplicate_suppressed_count: int = 0
+    last_duplicate_seen_at_ms: int | None = None
+    diagnostic_sample_reserved: bool = False
+    diagnostic_expected: bool = False
+    diagnostic_emitted: bool = False
+    terminal_audit_type: str = ""
+    terminal_audit_row: dict | None = None
+
     def __post_init__(self):
         if self.observation_anchor_candidates is None:
             object.__setattr__(self, "observation_anchor_candidates", {})
@@ -125,6 +146,8 @@ class EventSymbolState:
             "anchor_resolution_deadline_ms",
             "bootstrap_watermark_max_seen_detected_at_ms",
             "admission_watermark_at_first_seen_ms",
+            "terminal_at_ms",
+            "last_duplicate_seen_at_ms",
         )
         for field in nullable_ts_fields:
             if getattr(self, field) == 0:
@@ -149,6 +172,8 @@ class EventSymbolState:
             "anchor_resolution_deadline_ms",
             "bootstrap_watermark_max_seen_detected_at_ms",
             "admission_watermark_at_first_seen_ms",
+            "terminal_at_ms",
+            "last_duplicate_seen_at_ms",
         )
         for field in nullable_ts_fields:
             if clean_data.get(field) == 0:
@@ -256,6 +281,19 @@ class LiveDepthObserverSummary:
     active_unique_snapshot_bucket_count: int = 0
     active_missing_snapshot_bucket_count: int = 0
     active_out_of_window_snapshot_row_count: int = 0
+    terminal_ignored_pre_bootstrap_anchor_count: int = 0
+    historical_anchor_ignored_count: int = 0
+    rejected_event_symbol_count: int = 0
+    historical_anchor_duplicate_suppressed_total: int = 0
+    rejected_event_symbol_duplicate_suppressed_total: int = 0
+    rejected_missing_identity_count: int = 0
+    rejected_missing_reason_count: int = 0
+    rejection_hygiene_diagnostic_count: int = 0
+    terminal_ignored_revision_seen_count: int = 0
+    terminal_state_hits_this_poll: int = 0
+    historical_anchor_newly_ignored_this_poll: int = 0
+    bootstrap_watermark_missing_diagnostic_count: int = 0
+    malformed_terminal_diagnostic_count: int = 0
     # L0/L1 Risk & Compliance controls hard-gates:
     execution_feasibility_claim_allowed: bool = False
     trade_signal_allowed: bool = False

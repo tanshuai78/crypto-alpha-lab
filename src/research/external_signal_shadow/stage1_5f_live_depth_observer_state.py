@@ -10,13 +10,166 @@ from configs import base
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
     DepthSnapshot,
     EventSymbolState,
-    )
+)
+from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+    make_event_symbol_id,
+    make_stable_event_symbol_key,
+)
+from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
+    get_stable_event_key,
+)
 
 
 def make_acceptance_id(state: EventSymbolState) -> str:
     stable_key = state.stable_event_symbol_key or state.event_symbol_id
     anchor = state.observation_anchor_ms or state.observation_window_start_ms or 0
     return hashlib.sha256(f"{stable_key}|{anchor}".encode("utf-8")).hexdigest()
+
+
+def make_terminal_hygiene_id(
+    stable_event_symbol_key: str,
+    terminal_status: str,
+    normalized_anchor_class: str,
+    bootstrap_root_id: str,
+) -> str:
+    payload = f"{stable_event_symbol_key}|{terminal_status}|{normalized_anchor_class}|{bootstrap_root_id}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_terminal_ignored_state(
+    flat_event: dict,
+    terminal_reason: str,
+    terminal_status: str,
+    now_ms: int,
+    diagnostics: dict,
+) -> EventSymbolState:
+    sym = str(flat_event.get("symbol") or "").strip().upper()
+    source_article_id = str(flat_event.get("source_article_id") or "").strip()
+    event_id = str(flat_event.get("event_id") or "").strip()
+    detected_at_ms = flat_event.get("detected_at_ms")
+
+    if (not source_article_id and not event_id) or not sym or not detected_at_ms:
+        raise ValueError("terminal ignored state requires source_article_id or event_id, symbol, detected_at_ms")
+
+    stable_key = flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, sym)
+    anchor_class = diagnostics.get("normalized_anchor_class", "all_pre_bootstrap")
+    boot_root_id = diagnostics.get("bootstrap_root_id", "")
+    terminal_hygiene_id = make_terminal_hygiene_id(stable_key, terminal_status, anchor_class, boot_root_id)
+    payload_hash = str(
+        flat_event.get("detail_payload_hash")
+        or flat_event.get("payload_hash")
+        or flat_event.get("raw_payload_hash")
+        or ""
+    )
+
+    d = dict(diagnostics)
+    return EventSymbolState(
+        event_symbol_id=flat_event.get("event_symbol_id") or make_event_symbol_id(flat_event, sym),
+        event_id=event_id,
+        symbol=sym,
+        detected_at_ms=int(detected_at_ms),
+        status=terminal_status,
+        terminal_hygiene_id=terminal_hygiene_id,
+        terminal_status=terminal_status,
+        terminal_reason=terminal_reason,
+        terminal_at_ms=now_ms,
+        consumable_by_stage1_5g=False,
+        source_article_id=source_article_id,
+        stable_event_symbol_key=stable_key,
+        stable_event_key=flat_event.get("stable_event_key") or get_stable_event_key(flat_event),
+        first_seen_at_ms=d.get("first_seen_at_ms") or int(detected_at_ms),
+        announcement_capture_time_ms=d.get("announcement_capture_time_ms") or int(detected_at_ms),
+        bootstrap_watermark_max_seen_detected_at_ms=d.get("bootstrap_watermark_max_seen_detected_at_ms"),
+        admission_watermark_at_first_seen_ms=d.get("admission_watermark_at_first_seen_ms"),
+        announcement_capture_post_bootstrap_watermark=d.get("announcement_capture_post_bootstrap_watermark"),
+        launch_anchor_post_bootstrap_watermark=d.get("launch_anchor_post_bootstrap_watermark"),
+        observation_anchor_candidates=d.get("normalized_anchor_candidates") or d.get("observation_anchor_candidates", {}),
+        source_event_payload_hash=payload_hash,
+        latest_event_payload_hash=payload_hash,
+        terminal_audit_type="historical_anchor_hygiene_diagnostics",
+    )
+
+
+def build_historical_anchor_hygiene_diagnostic(state: EventSymbolState, diagnostic_at_ms: int) -> dict:
+    return {
+        "audit_metadata_version": 2,
+        "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
+        "terminal_hygiene_id": state.terminal_hygiene_id,
+        "event_symbol_id": state.event_symbol_id,
+        "event_id": state.event_id,
+        "source_article_id": state.source_article_id,
+        "stable_event_symbol_key": state.stable_event_symbol_key,
+        "stable_event_key": state.stable_event_key,
+        "symbol": state.symbol,
+        "detected_at_ms": state.detected_at_ms,
+        "terminal_status": state.terminal_status,
+        "terminal_reason": state.terminal_reason,
+        "terminal_at_ms": state.terminal_at_ms or diagnostic_at_ms,
+        "diagnostic_at_ms": diagnostic_at_ms,
+        "observation_anchor_candidates": state.observation_anchor_candidates,
+        "bootstrap_watermark_max_seen_detected_at_ms": state.bootstrap_watermark_max_seen_detected_at_ms,
+        "consumable_by_stage1_5g": False,
+    }
+
+
+def build_rejected_event_symbol_row(
+    flat_event: dict,
+    terminal_hygiene_id: str,
+    rejected_reason: str,
+    now_ms: int,
+    watermark_max_seen_detected_at_ms: int,
+    watermark_version: int,
+    eligibility_diag: dict,
+    basis_diag: dict,
+) -> dict:
+    sym = str(flat_event.get("symbol") or "").strip().upper()
+    source_article_id = str(flat_event.get("source_article_id") or "").strip()
+    event_id = str(flat_event.get("event_id") or "").strip()
+    detected_at_ms = flat_event.get("detected_at_ms")
+    event_symbol_id = flat_event.get("event_symbol_id")
+
+    if not event_symbol_id or not sym or (not source_article_id and not event_id) or not detected_at_ms or not rejected_reason:
+        raise ValueError("rejected event symbol row requires event_symbol_id, symbol, source_article_id or event_id, detected_at_ms, rejected_reason")
+
+    e_diag = dict(eligibility_diag or {})
+    b_diag = dict(basis_diag or {})
+
+    anchor_age_ms = e_diag.get("selected_anchor_age_ms") or e_diag.get("event_age_ms")
+
+    row = {
+        "audit_metadata_version": 2,
+        "event_symbol_id": event_symbol_id,
+        "event_id": event_id,
+        "source_article_id": source_article_id,
+        "stable_event_key": flat_event.get("stable_event_key") or get_stable_event_key(flat_event),
+        "stable_event_symbol_key": flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, sym),
+        "symbol": sym,
+        "event_type": flat_event.get("event_type", ""),
+        "title": flat_event.get("title", ""),
+        "detected_at_ms": detected_at_ms,
+        "available_at_ms": flat_event.get("available_at_ms"),
+        "source_published_at_ms": flat_event.get("source_published_at_ms"),
+        "source_detail_url_normalized": flat_event.get("source_detail_url_normalized", ""),
+        "rejected_reason": rejected_reason,
+        "rejection_reason": rejected_reason,
+        "status": "rejected",
+        "depth_observation_started": False,
+        "rejected_at_ms": now_ms,
+        "terminal_hygiene_id": terminal_hygiene_id,
+        "watermark_max_seen_detected_at_ms": watermark_max_seen_detected_at_ms,
+        "watermark_version": watermark_version,
+        "consumable_by_stage1_5g": True,
+    }
+    row.update(e_diag)
+    row.update(b_diag)
+
+    row["rejected_reason"] = rejected_reason
+    row["rejection_reason"] = rejected_reason
+    if anchor_age_ms is not None:
+        row["event_age_ms"] = anchor_age_ms
+        row["selected_anchor_age_ms"] = anchor_age_ms
+
+    return row
 
 
 def load_latest_state_by_event_symbol_id(observer_state_jsonl: str) -> dict:

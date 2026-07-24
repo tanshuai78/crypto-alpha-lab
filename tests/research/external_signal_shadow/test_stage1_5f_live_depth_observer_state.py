@@ -7,6 +7,9 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models im
     EventSymbolState,
 )
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+    build_historical_anchor_hygiene_diagnostic,
+    build_rejected_event_symbol_row,
+    build_terminal_ignored_state,
     compact_observer_state_jsonl,
     compute_snapshot_time_coverage,
     create_pending_observation_state,
@@ -291,6 +294,33 @@ def test_promote_pending_to_active_sets_window_from_anchor_not_now():
     assert active.acceptance_id
 
 
+def test_build_terminal_ignored_state_persists_source_payload_hash_for_revision_detection():
+    state = build_terminal_ignored_state(
+        flat_event={
+            "event_symbol_id": "es-historical",
+            "event_id": "event-historical",
+            "event_type": "futures_contract_launch",
+            "source_article_id": "article-historical",
+            "stable_event_symbol_key": "futures_contract_launch|article-historical|OLDUSDT",
+            "stable_event_key": "binance_article_historical",
+            "symbol": "OLDUSDT",
+            "detected_at_ms": 1784822376255,
+            "detail_payload_hash": "payload-hash-v1",
+        },
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        now_ms=1784850000000,
+        diagnostics={
+            "normalized_anchor_class": "all_pre_bootstrap",
+            "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
+            "bootstrap_root_id": "root-id",
+        },
+    )
+
+    assert state.source_event_payload_hash == "payload-hash-v1"
+    assert state.latest_event_payload_hash == "payload-hash-v1"
+
+
 def test_finalize_preserves_launch_anchor_and_request_metrics():
     anchor_ms = 10_000
     end_ms = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS
@@ -363,3 +393,170 @@ def test_snapshot_at_exact_window_end_does_not_create_extra_bucket():
     assert cov["expected_snapshot_count"] == 720
     assert cov["unique_snapshot_bucket_count"] == 0
     assert cov["out_of_window_snapshot_row_count"] == 1
+
+
+def test_make_terminal_hygiene_id_uses_stable_key_not_event_symbol_id():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import make_terminal_hygiene_id
+    a = make_terminal_hygiene_id(
+        stable_event_symbol_key="article|futures_contract_launch|EBAYUSDT",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        normalized_anchor_class="all_pre_bootstrap",
+        bootstrap_root_id="root-id",
+    )
+    b = make_terminal_hygiene_id(
+        stable_event_symbol_key="article|futures_contract_launch|EBAYUSDT",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        normalized_anchor_class="all_pre_bootstrap",
+        bootstrap_root_id="root-id",
+    )
+    assert a == b
+    assert len(a) == 64
+
+
+def test_terminal_ignored_state_roundtrip_defaults():
+    state = EventSymbolState(
+        event_symbol_id="volatile-id",
+        event_id="event-1",
+        source_article_id="article-1",
+        symbol="EBAYUSDT",
+        detected_at_ms=1784822376255,
+        stable_event_symbol_key="article-1|futures_contract_launch|EBAYUSDT",
+        status="ignored_historical_anchor_pre_bootstrap",
+        terminal_hygiene_id="abc",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_at_ms=1784850000000,
+        consumable_by_stage1_5g=False,
+    )
+    loaded = EventSymbolState.from_dict(state.to_dict())
+    assert loaded.status == "ignored_historical_anchor_pre_bootstrap"
+    assert loaded.terminal_hygiene_id == "abc"
+    assert loaded.consumable_by_stage1_5g is False
+
+
+def test_build_terminal_ignored_state_preserves_identity_and_is_not_1_5g_consumable():
+    flat_event = {
+        "event_symbol_id": "volatile-id",
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article-ebay",
+        "stable_event_key": "binance_article_MULTI",
+        "stable_event_symbol_key": "article-ebay|futures_contract_launch|EBAYUSDT",
+        "symbol": "EBAYUSDT",
+        "detected_at_ms": 1784822376255,
+    }
+    state = build_terminal_ignored_state(
+        flat_event=flat_event,
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        now_ms=1784850000000,
+        diagnostics={
+            "normalized_anchor_class": "all_pre_bootstrap",
+            "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
+        },
+    )
+    assert state.status == "ignored_historical_anchor_pre_bootstrap"
+    assert state.terminal_hygiene_id
+    assert state.source_article_id == "article-ebay"
+    assert state.detected_at_ms == 1784822376255
+    assert state.consumable_by_stage1_5g is False
+
+
+def test_build_historical_anchor_diagnostic_is_not_1_5g_consumable():
+    flat_event = {
+        "event_symbol_id": "volatile-id",
+        "event_id": "event-ebay",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article-ebay",
+        "stable_event_key": "binance_article_MULTI",
+        "stable_event_symbol_key": "article-ebay|futures_contract_launch|EBAYUSDT",
+        "symbol": "EBAYUSDT",
+        "detected_at_ms": 1784822376255,
+    }
+    state = build_terminal_ignored_state(
+        flat_event=flat_event,
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        now_ms=1784850000000,
+        diagnostics={
+            "normalized_anchor_class": "all_pre_bootstrap",
+            "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
+        },
+    )
+    row = build_historical_anchor_hygiene_diagnostic(state, diagnostic_at_ms=1784850000000)
+    assert row["diagnostic_type"] == "historical_anchor_pre_bootstrap_ignored"
+    assert row["consumable_by_stage1_5g"] is False
+    assert row["terminal_hygiene_id"] == state.terminal_hygiene_id
+
+
+def test_build_terminal_ignored_state_allows_event_id_when_source_article_id_missing():
+    flat_event = {
+        "event_symbol_id": "volatile-id",
+        "event_id": "event-only-id",
+        "event_type": "futures_contract_launch",
+        "stable_event_symbol_key": "event-only-id|futures_contract_launch|EBAYUSDT",
+        "symbol": "EBAYUSDT",
+        "detected_at_ms": 1784822376255,
+    }
+    state = build_terminal_ignored_state(
+        flat_event=flat_event,
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        now_ms=1784850000000,
+        diagnostics={
+            "normalized_anchor_class": "all_pre_bootstrap",
+            "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
+            "bootstrap_root_id": "root-id",
+        },
+    )
+    assert state.event_id == "event-only-id"
+    assert state.source_article_id == ""
+    assert state.status == "ignored_historical_anchor_pre_bootstrap"
+
+
+def test_build_rejected_event_symbol_row_contains_identity_and_reason_alias():
+    import pytest
+    flat_event = {
+        "event_symbol_id": "event-symbol-id",
+        "event_id": "event-1",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article-1",
+        "stable_event_key": "binance_article_SYMBOL",
+        "stable_event_symbol_key": "article-1|futures_contract_launch|XYZUSDT",
+        "symbol": "XYZUSDT",
+        "symbols": ["XYZUSDT"],
+        "title": "Binance Futures Will Launch XYZUSDT",
+        "detected_at_ms": 1784820000000,
+        "available_at_ms": 1784820000000,
+    }
+    row = build_rejected_event_symbol_row(
+        flat_event=flat_event,
+        terminal_hygiene_id="abc",
+        rejected_reason="rejected_launch_anchor_age_exceeded",
+        now_ms=1784850000000,
+        watermark_max_seen_detected_at_ms=1784822376255,
+        watermark_version=1,
+        eligibility_diag={"observation_anchor_ms": 1780995600000, "selected_anchor_age_ms": 3854400000},
+        basis_diag={"live_depth_evidence_basis": "recovery_validation_only"},
+    )
+    assert row["rejected_reason"] == "rejected_launch_anchor_age_exceeded"
+    assert row["rejection_reason"] == row["rejected_reason"]
+    assert row["event_id"] == "event-1"
+    assert row["source_article_id"] == "article-1"
+    assert row["detected_at_ms"] == 1784820000000
+    assert row["consumable_by_stage1_5g"] is True
+
+
+def test_build_rejected_event_symbol_row_rejects_missing_identity():
+    import pytest
+    with pytest.raises(ValueError):
+        build_rejected_event_symbol_row(
+            flat_event={"symbol": "XYZUSDT"},
+            terminal_hygiene_id="abc",
+            rejected_reason="bad",
+            now_ms=1,
+            watermark_max_seen_detected_at_ms=0,
+            watermark_version=1,
+            eligibility_diag={},
+            basis_diag={},
+        )

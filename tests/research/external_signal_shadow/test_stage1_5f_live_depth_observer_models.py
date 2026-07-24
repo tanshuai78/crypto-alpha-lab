@@ -145,3 +145,32 @@ def test_legacy_zero_timestamps_migrate_to_none_for_new_semantic_fields():
     assert state.observation_anchor_ms is None
     assert state.first_depth_request_at_ms is None
     assert state.first_healthy_snapshot_at_ms is None
+
+
+def test_watermark_schema_v2_has_immutable_bootstrap_fields():
+    w = Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=2000,
+        updated_at_ms=3000,
+        bootstrap_max_seen_detected_at_ms=1000,
+        bootstrap_created_at_ms=1500,
+        bootstrap_source_root="stage1_5d/root",
+        bootstrap_root_id="root_id_123",
+        watermark_schema_version=2,
+    )
+    d = w.to_dict()
+    assert d["watermark_schema_version"] == 2
+    assert d["bootstrap_max_seen_detected_at_ms"] == 1000
+    assert d["bootstrap_created_at_ms"] == 1500
+    assert d["bootstrap_source_root"] == "stage1_5d/root"
+    assert d["bootstrap_root_id"] == "root_id_123"
+
+
+def test_legacy_watermark_defaults_do_not_enable_historical_classification():
+    w = Watermark.from_dict({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": 2000,
+        "updated_at_ms": 3000,
+    })
+    assert getattr(w, "watermark_schema_version", 1) == 1
+    assert getattr(w, "bootstrap_max_seen_detected_at_ms", None) is None

@@ -212,3 +212,12 @@ Before any strategy touches real money, ALL 8 must be satisfied:
 | `screening/`, `router/`, `buckets/` | Governance surface built for a different design philosophy |
 | `shadow_mode/` | Replaced by new strategy-level shadow simulation |
 | Phase 4.5, bucket allocator, carry builder | Historical complexity with no forward value |
+
+
+---
+
+## Recent Hotfixes & Operational Status (2026-07)
+
+- **2026-07-22 1.5D BAPI Article Detail Source Hotfix**: Fixed missing symbol extractions from POPMART/USDT articles by adding BAPI detail fetching.
+- **2026-07-23 1.5F Launch-Time Gate Hotfix**: Fixed 1.5F runner to hold events in `pending_launch_time_in_future` when detected before contract launch onboard time.
+- **2026-07-24 1.5F Historical-Anchor Rejection Hygiene Hotfix**: Fixed 1.5F runner so pre-bootstrap historical launch anchors become idempotent terminal ignored states (`ignored_historical_anchor_pre_bootstrap`) outside `events_rejected`, preserving complete identity audit fields for post-bootstrap rejections and 1.5G downstream pipeline clean consumption.

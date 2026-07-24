@@ -434,3 +434,56 @@ def test_summary_includes_launch_gate_pending_and_bucket_gauges():
     assert summary["active_unique_snapshot_bucket_count"] == 10
     assert summary["active_missing_snapshot_bucket_count"] == 710
     assert summary["active_out_of_window_snapshot_row_count"] == 2
+
+
+def test_summary_includes_terminal_hygiene_metrics():
+    term_ignored = EventSymbolState(
+        event_symbol_id="es-term",
+        event_id="e-term",
+        source_article_id="a-term",
+        symbol="EBAYUSDT",
+        detected_at_ms=1000,
+        status="ignored_historical_anchor_pre_bootstrap",
+        terminal_hygiene_id="term-1",
+        terminal_status="ignored_historical_anchor_pre_bootstrap",
+        terminal_reason="historical_anchor_pre_bootstrap",
+        terminal_at_ms=2000,
+        terminal_ignored_revision_seen_count=3,
+        consumable_by_stage1_5g=False,
+    )
+    summary = build_live_depth_observer_summary(
+        decision="stage1_5f_observer_running_no_new_event",
+        bootstrap_watermark_allowed=True,
+        live_depth_observation_allowed=True,
+        stage1_5d_summary_path="dummy_d",
+        stage1_5e_summary_path="dummy_e",
+        stage1_5e_context_missing=False,
+        stage1_5e_context_suspicious=False,
+        watermark_present=True,
+        watermark_version=2,
+        max_seen_detected_at_ms=1000,
+        pre_watermark_events_ignored=0,
+        post_watermark_events_accepted=0,
+        active_states=[],
+        completed_states=[],
+        expired_states=[],
+        failed_states=[],
+        request_manifest_rows=[],
+        heartbeat_rows=[],
+        terminal_ignored_states=[term_ignored],
+        historical_anchor_newly_ignored_this_poll=1,
+        bootstrap_watermark_missing_diagnostic_count=2,
+        malformed_terminal_diagnostic_count=3,
+    ).to_dict()
+
+    assert summary["terminal_ignored_pre_bootstrap_anchor_count"] == 1
+    assert summary["historical_anchor_ignored_count"] == 1
+    assert summary["rejected_event_symbol_count"] == 0
+    assert summary["historical_anchor_duplicate_suppressed_total"] == 0
+    assert summary["rejected_missing_identity_count"] == 0
+    assert summary["rejected_missing_reason_count"] == 0
+    assert summary["rejection_hygiene_diagnostic_count"] == 5
+    assert summary["terminal_ignored_revision_seen_count"] == 3
+    assert summary["historical_anchor_newly_ignored_this_poll"] == 1
+    assert summary["bootstrap_watermark_missing_diagnostic_count"] == 2
+    assert summary["malformed_terminal_diagnostic_count"] == 3

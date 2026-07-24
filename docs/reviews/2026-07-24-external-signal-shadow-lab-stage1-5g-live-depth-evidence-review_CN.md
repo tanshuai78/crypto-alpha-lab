@@ -1,8 +1,8 @@
 # Stage 1.5G Live Depth Evidence Review Report
 
-**审计结论 (Decision):** `stage1_5g_depth_evidence_invalid`
-**允许的下一步行动 (Allowed Next Action):** `continue_observation`
-**证据范围 (Evidence Scope):** `none`
+**审计结论 (Decision):** `stage1_5g_depth_evidence_quarantined_pass`
+**允许的下一步行动 (Allowed Next Action):** `write_stage1_5h_design_only`
+**证据范围 (Evidence Scope):** `single_event`
 **是否允许推导家族级结论 (Event-Family Conclusion Allowed):** `False`
 
 ## 1. 安全边界审计 (Safety Boundaries)
@@ -18,9 +18,7 @@
 
 ## 2. 阻断器与警告 (Blockers & Warnings)
 
-### 阻断项 (Blockers):
-- :x: `invalid_book`
-- :x: `null_ratio_above_threshold`
+- :white_check_mark: 无阻断项 (No blockers)
 
 
 ## 3. 水印审计与证据分类 (Watermark & Evidence Labels)
@@ -44,30 +42,41 @@
 
 - **JSONL 解析错误行数 (JSONL parse error count):** `0`
 - **JSONL 解析错误率 (JSONL parse error ratio):** `0.0`
-- **交叉盘/非法订单簿数 (Invalid book count):** `56`
+- **交叉盘/非法订单簿数 (Invalid book count):** `12`
 - **非单调递增时间戳数 (Non-monotonic timestamp count):** `0`
 - **最大重复快照占比 (Max duplicate snapshot ratio):** `0.0`
-- **最大空值率 (Max null ratio):** `0.03894297635605007`
+- **最大空值率 (Max null ratio):** `0.008356545961002786`
 
 ## 6. Quarantine 审计
 
-- **隔离的无效订单簿行数 (invalid_book_row_count):** `56`
-- **隔离的无效订单簿分钟数 (invalid_book_minute_bucket_count):** `56`
-- **订单簿可用率 (book_availability_ratio):** `0.9208333333333333`
-- **订单簿不可用率 (book_unavailable_ratio):** `0.07777777777777778`
-- **首个有效订单簿延迟时间 (first_valid_book_latency_ms):** `3368743 ms`
-- **最大连续无效行数 (max_consecutive_invalid):** `56`
-- **Warmup后最大连续无效行数 (max_consecutive_invalid_after_warmup):** `41`
+- **隔离的无效订单簿行数 (invalid_book_row_count):** `12`
+- **隔离的无效订单簿分钟数 (invalid_book_minute_bucket_count):** `12`
+- **订单簿可用率 (book_availability_ratio):** `0.9805555555555555`
+- **订单簿不可用率 (book_unavailable_ratio):** `0.016666666666666666`
+- **首个有效订单簿延迟时间 (first_valid_book_latency_ms):** `660000 ms`
+- **最大连续无效行数 (max_consecutive_invalid):** `11`
+- **Warmup后最大连续无效行数 (max_consecutive_invalid_after_warmup):** `1`
 - **执行可用性声明 (execution_availability_claim):** `None`
-- **隔离无效行路径 (quarantined_rows_path):** `data/external_signal_shadow/stage1_5g/reviews/20260723T152909Z_popmartusdt/quarantined_invalid_book_rows.jsonl`
-- **深度质量输入行路径 (depth_quality_input_rows_path):** `data/external_signal_shadow/stage1_5g/reviews/20260723T152909Z_popmartusdt/depth_quality_input_rows.jsonl`
+- **隔离无效行路径 (quarantined_rows_path):** `/private/var/folders/kl/8l2btt7x06z9qwsnfmblw6yw0000gn/T/pytest-of-tanshuai/pytest-299/test_cli_writes_quarantine_art0/review_out/quarantined_invalid_book_rows.jsonl`
+- **深度质量输入行路径 (depth_quality_input_rows_path):** `/private/var/folders/kl/8l2btt7x06z9qwsnfmblw6yw0000gn/T/pytest-of-tanshuai/pytest-299/test_cli_writes_quarantine_art0/review_out/depth_quality_input_rows.jsonl`
 
 > [!WARNING]
 > quarantined pass 只能支持 1.5H design，不允许 execution feasibility claim / paper / live。
 
 ## 7. 深度与滑点审计 (Depth & Slippage Quality)
 
-- 未计算 (Not evaluated)
+- **P50 价差 (Spread bps P50):** `None bps`
+- **P95 价差 (Spread bps P95):** `None bps`
+- **P50 买滑点 (Buy slippage bps P50):** `None bps`
+- **P95 买滑点 (Buy slippage bps P95):** `None bps`
+- **P50 卖滑点 (Sell slippage bps P50):** `None bps`
+- **P95 卖滑点 (Sell slippage bps P95):** `None bps`
+- **P05 买盘深度 (Top bid depth P05):** `None USDT`
+- **P50 买盘深度 (Top bid depth P50):** `None USDT`
+- **P05 卖盘深度 (Top ask depth P05):** `None USDT`
+- **P50 卖盘深度 (Top ask depth P50):** `None USDT`
+- **健康时间占比 (Healthy window ratio):** `None`
+- **深度与持仓上限容量比 (Depth capacity ratio to risk cap P50):** `None`
 
 ## 8. 风险与局限性声明 (Risks & Limitations)
 

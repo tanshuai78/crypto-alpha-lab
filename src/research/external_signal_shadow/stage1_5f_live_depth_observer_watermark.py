@@ -90,34 +90,40 @@ def write_watermark_atomic(path: str, watermark: Watermark) -> None:
         raise e
 
 
-def bootstrap_watermark_from_stage1_5d_events(events: list) -> Watermark:
+def bootstrap_watermark_from_stage1_5d_events(
+    events: list,
+    source_root: str = "",
+    output_root: str = "",
+    now_ms: int | None = None,
+) -> Watermark:
+    created_at = now_ms if now_ms is not None else int(time.time() * 1000)
     if not events:
-        return Watermark(
-            watermark_version=1,
-            max_seen_detected_at_ms=0,
-            seen_event_ids=[],
-            seen_source_article_ids=[],
-            seen_stable_event_keys=[],
-            updated_at_ms=int(time.time() * 1000),
-        )
+        max_detected = 0
+        seen_event_ids = []
+        seen_source_article_ids = []
+        seen_stable_event_keys = []
+    else:
+        max_detected = max((_get_field(e, "detected_at_ms") or 0) for e in events)
 
-    max_detected = max((_get_field(e, "detected_at_ms") or 0) for e in events)
+        seen_event_ids = []
+        seen_source_article_ids = []
+        seen_stable_event_keys = []
 
-    seen_event_ids = []
-    seen_source_article_ids = []
-    seen_stable_event_keys = []
+        for e in events:
+            eid = _get_field(e, "event_id")
+            aid = _get_field(e, "source_article_id")
+            skey = get_stable_event_key(e)
 
-    for e in events:
-        eid = _get_field(e, "event_id")
-        aid = _get_field(e, "source_article_id")
-        skey = get_stable_event_key(e)
+            if eid and eid not in seen_event_ids:
+                seen_event_ids.append(eid)
+            if aid and aid not in seen_source_article_ids:
+                seen_source_article_ids.append(aid)
+            if skey not in seen_stable_event_keys:
+                seen_stable_event_keys.append(skey)
 
-        if eid and eid not in seen_event_ids:
-            seen_event_ids.append(eid)
-        if aid and aid not in seen_source_article_ids:
-            seen_source_article_ids.append(aid)
-        if skey not in seen_stable_event_keys:
-            seen_stable_event_keys.append(skey)
+    abs_out_root = os.path.abspath(output_root) if output_root else ""
+    raw_root_payload = f"{abs_out_root}|{created_at}|{source_root}|{max_detected}"
+    bootstrap_root_id = hashlib.sha256(raw_root_payload.encode("utf-8")).hexdigest()
 
     return Watermark(
         watermark_version=1,
@@ -125,7 +131,12 @@ def bootstrap_watermark_from_stage1_5d_events(events: list) -> Watermark:
         seen_event_ids=seen_event_ids,
         seen_source_article_ids=seen_source_article_ids,
         seen_stable_event_keys=seen_stable_event_keys,
-        updated_at_ms=int(time.time() * 1000),
+        updated_at_ms=created_at,
+        watermark_schema_version=2,
+        bootstrap_max_seen_detected_at_ms=max_detected,
+        bootstrap_created_at_ms=created_at,
+        bootstrap_source_root=source_root,
+        bootstrap_root_id=bootstrap_root_id,
     )
 
 
@@ -186,4 +197,9 @@ def update_watermark_with_event(watermark: Watermark, event) -> Watermark:
         seen_source_article_ids=seen_source_article_ids,
         seen_stable_event_keys=seen_stable_event_keys,
         updated_at_ms=int(time.time() * 1000),
+        watermark_schema_version=getattr(watermark, "watermark_schema_version", 1),
+        bootstrap_max_seen_detected_at_ms=getattr(watermark, "bootstrap_max_seen_detected_at_ms", None),
+        bootstrap_created_at_ms=getattr(watermark, "bootstrap_created_at_ms", None),
+        bootstrap_source_root=getattr(watermark, "bootstrap_source_root", ""),
+        bootstrap_root_id=getattr(watermark, "bootstrap_root_id", ""),
     )

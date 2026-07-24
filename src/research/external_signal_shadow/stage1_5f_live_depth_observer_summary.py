@@ -60,6 +60,12 @@ def build_live_depth_observer_summary(
     request_manifest_rows: list,
     heartbeat_rows: list,
     pending_states: list | None = None,
+    terminal_states: list | None = None,
+    terminal_ignored_states: list | None = None,
+    terminal_state_hits_this_poll: int = 0,
+    historical_anchor_newly_ignored_this_poll: int = 0,
+    bootstrap_watermark_missing_diagnostic_count: int = 0,
+    malformed_terminal_diagnostic_count: int = 0,
 ) -> LiveDepthObserverSummary:
 
     pending_states = pending_states or []
@@ -120,6 +126,42 @@ def build_live_depth_observer_summary(
         (s.out_of_window_snapshot_row_count if hasattr(s, "out_of_window_snapshot_row_count") else s.get("out_of_window_snapshot_row_count", 0))
         for s in active_states
     )
+
+    all_terminal_states = terminal_states if terminal_states is not None else (terminal_ignored_states or [])
+    term_ignored_states = [
+        s for s in all_terminal_states
+        if (s.status if hasattr(s, "status") else s.get("status")) == "ignored_historical_anchor_pre_bootstrap"
+    ]
+    rejected_states = [
+        s for s in all_terminal_states
+        if (s.status if hasattr(s, "status") else s.get("status")) == "rejected"
+    ]
+    terminal_ignored_pre_bootstrap_anchor_count = len([
+        s for s in term_ignored_states
+        if (s.status if hasattr(s, "status") else s.get("status")) == "ignored_historical_anchor_pre_bootstrap"
+    ])
+    rejected_event_symbol_count = len(rejected_states)
+    historical_anchor_duplicate_suppressed_total = sum(
+        (s.duplicate_suppressed_count if hasattr(s, "duplicate_suppressed_count") else s.get("duplicate_suppressed_count", 0))
+        for s in term_ignored_states
+    )
+    rejected_event_symbol_duplicate_suppressed_total = sum(
+        (s.duplicate_suppressed_count if hasattr(s, "duplicate_suppressed_count") else s.get("duplicate_suppressed_count", 0))
+        for s in rejected_states
+    )
+    terminal_ignored_revision_seen_count = sum(
+        (s.terminal_ignored_revision_seen_count if hasattr(s, "terminal_ignored_revision_seen_count") else s.get("terminal_ignored_revision_seen_count", 0))
+        for s in term_ignored_states
+    )
+    rejected_missing_identity_count = sum(
+        1 for s in rejected_states
+        if not ((s.event_id if hasattr(s, "event_id") else s.get("event_id")) or (s.source_article_id if hasattr(s, "source_article_id") else s.get("source_article_id")))
+    )
+    rejected_missing_reason_count = sum(
+        1 for s in rejected_states
+        if not (s.terminal_reason if hasattr(s, "terminal_reason") else s.get("terminal_reason"))
+    )
+    rejection_hygiene_diagnostic_count = bootstrap_watermark_missing_diagnostic_count + malformed_terminal_diagnostic_count
 
     final_decision = derive_stage1_5f_decision(
         base_decision=decision,
@@ -186,6 +228,19 @@ def build_live_depth_observer_summary(
         active_unique_snapshot_bucket_count=active_unique_bucket_count,
         active_missing_snapshot_bucket_count=active_missing_bucket_count,
         active_out_of_window_snapshot_row_count=active_out_of_window_count,
+        terminal_ignored_pre_bootstrap_anchor_count=terminal_ignored_pre_bootstrap_anchor_count,
+        historical_anchor_ignored_count=terminal_ignored_pre_bootstrap_anchor_count,
+        rejected_event_symbol_count=rejected_event_symbol_count,
+        historical_anchor_duplicate_suppressed_total=historical_anchor_duplicate_suppressed_total,
+        rejected_event_symbol_duplicate_suppressed_total=rejected_event_symbol_duplicate_suppressed_total,
+        rejected_missing_identity_count=rejected_missing_identity_count,
+        rejected_missing_reason_count=rejected_missing_reason_count,
+        rejection_hygiene_diagnostic_count=rejection_hygiene_diagnostic_count,
+        terminal_ignored_revision_seen_count=terminal_ignored_revision_seen_count,
+        terminal_state_hits_this_poll=terminal_state_hits_this_poll,
+        historical_anchor_newly_ignored_this_poll=historical_anchor_newly_ignored_this_poll,
+        bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,
+        malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
         execution_feasibility_claim_allowed=False,
         trade_signal_allowed=False,
         paper_trading_allowed=False,

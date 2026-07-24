@@ -244,7 +244,7 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ### 7.1 本地同步到服务器
 
-本轮部署目标：把已提交的 Stage 1.5D detail endpoint fallback hotfix 和 Stage 1.5F/1.5G 兼容修补同步到服务器。
+本轮部署目标：把已提交的 Stage 1.5D BAPI detail source hotfix、detail retry overdue starvation hotfix 和 Stage 1.5F launch-time gated observation hotfix 同步到服务器。
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
@@ -329,12 +329,14 @@ tmux kill-session -t stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix 
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix 2>/dev/null || true
 
 # 停止旧 1.5D collector。
 tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix 2>/dev/null || true
 
 # 兜底：按当前 tmux 中真实 session 名停止所有 1.5D/1.5F 会话。
 for s in $(tmux ls 2>/dev/null | awk -F: '/stage1_5d|stage1_5f/ {print $1}'); do
@@ -347,14 +349,14 @@ ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_
 
 如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程，避免多个进程同时采集或写入不同证据 root。
 
-### 7.4 启动 Stage 1.5D detail retry overdue starvation hotfix collector
+### 7.4 启动 Stage 1.5D BAPI detail + launch-time gate hotfix collector
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_detail_retry_overdue_starvation_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix"
 
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
   echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
@@ -362,7 +364,7 @@ if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
 fi
 mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -393,9 +395,9 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
     data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
 fi
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
 STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_detail_retry_overdue_starvation_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
@@ -424,14 +426,14 @@ cat "$STAGE1_5F_OUT/live_depth_observer_summary.json"
 
 bootstrap 只建立启动时的新旧边界，不对 bootstrap 前 rows 产生正式 live depth evidence。1.5F 运行后，watermark 会随 accepted events 继续前推；对 delayed launch contract-symbol，后续 eligibility 必须同时审计 launch/onboard time evidence。
 
-### 7.6 启动新 Stage 1.5F observer
+### 7.6 启动新 Stage 1.5F launch-time gated observer
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
 export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
@@ -440,7 +442,7 @@ if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
   exit 1
 fi
 
-tmux new -d -s stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix "
+tmux new -d -s stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -462,8 +464,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
 
 date -u
 tmux ls
@@ -476,6 +478,9 @@ wc -l "$STAGE1_5D_EVENTS_OUT"/request_manifest/*.jsonl 2>/dev/null || true
 wc -l "$STAGE1_5F_OUT"/heartbeat/*.jsonl 2>/dev/null || true
 find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
 find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python -m json.tool | grep -E \
+"pending_launch_observation_count|pending_launch_time_in_future_count|pending_launch_anchor_missing_count|pending_anchor_conflict_count|active_expected_snapshot_count|active_unique_snapshot_bucket_count|active_missing_snapshot_bucket_count|active_out_of_window_snapshot_row_count" || true
 ```
 
 ## 8. 日常监控
@@ -488,8 +493,8 @@ find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/n
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -624,8 +629,8 @@ source .venv/bin/activate
 
 export ARTICLE_ID="6cbb1b11a9c843949624cf2eacaac8b4"
 export SYMBOL="SPCXUSD1"
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_retry_overdue_starvation_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
 
 python - <<'PY'
 import json
@@ -714,6 +719,111 @@ PY
   terminal_failure_type = candidate_validation_rejected
   symbol_parse_failed_reason = exchange_info_disallowed_contract_type
   events_rejected 中 reason = pre_watermark 且 symbol_effective_launch_times_ms[SYMBOL] 晚于 watermark
+```
+
+### 8.6 Stage 1.5F launch-time gated schema 专项检查
+
+用于确认新 1.5F observer 已经按 launch/onboard anchor 启动，而不是继续按 `detected_at_ms` 立即采集。这个检查在每次部署后、以及新事件 accepted 后都应执行。
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+
+echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python -m json.tool | grep -E \
+"pending_launch_observation_count|pending_launch_time_in_future_count|pending_launch_anchor_missing_count|pending_anchor_conflict_count|pending_observation_capacity_count|active_expected_snapshot_count|active_unique_snapshot_bucket_count|active_missing_snapshot_bucket_count|active_out_of_window_snapshot_row_count" || true
+
+python - <<'PY'
+import glob
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["STAGE1_5F_OUT"])
+latest = {}
+state_file = root / "observer_state.jsonl"
+if state_file.exists():
+    for line in state_file.read_text(errors="ignore").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        latest[row.get("event_symbol_id")] = row
+
+print("state_count", len(latest))
+for row in list(latest.values())[-10:]:
+    print(json.dumps({
+        "event_symbol_id": row.get("event_symbol_id"),
+        "symbol": row.get("symbol"),
+        "status": row.get("status"),
+        "acceptance_id_present": bool(row.get("acceptance_id")),
+        "observation_anchor_ms": row.get("observation_anchor_ms"),
+        "observation_anchor_basis": row.get("observation_anchor_basis"),
+        "observation_anchor_confidence": row.get("observation_anchor_confidence"),
+        "observation_started_at_ms": row.get("observation_started_at_ms"),
+        "observation_window_start_ms": row.get("observation_window_start_ms"),
+        "observation_window_end_ms": row.get("observation_window_end_ms"),
+        "first_depth_request_at_ms": row.get("first_depth_request_at_ms"),
+        "first_depth_request_latency_ms": row.get("first_depth_request_latency_ms"),
+        "expected_snapshot_count": row.get("expected_snapshot_count"),
+        "unique_snapshot_bucket_count": row.get("unique_snapshot_bucket_count"),
+        "missing_snapshot_bucket_count": row.get("missing_snapshot_bucket_count"),
+        "out_of_window_snapshot_row_count": row.get("out_of_window_snapshot_row_count"),
+        "evidence_start_class": row.get("evidence_start_class"),
+        "live_depth_evidence_basis": row.get("live_depth_evidence_basis"),
+    }, ensure_ascii=False))
+
+print("\n=== accepted rows tail ===")
+for p in sorted((root / "events_accepted").glob("*.jsonl"))[-3:]:
+    for line in p.read_text(errors="ignore").splitlines()[-10:]:
+        if line.strip():
+            row = json.loads(line)
+            print(json.dumps({
+                "event_symbol_id": row.get("event_symbol_id"),
+                "symbol": row.get("symbol"),
+                "acceptance_id_present": bool(row.get("acceptance_id")),
+                "observation_anchor_ms": row.get("observation_anchor_ms"),
+                "observation_anchor_basis": row.get("observation_anchor_basis"),
+                "observation_window_start_ms": row.get("observation_window_start_ms"),
+                "observation_window_end_ms": row.get("observation_window_end_ms"),
+                "announcement_time_capture_evidence_allowed": row.get("announcement_time_capture_evidence_allowed"),
+                "launch_time_depth_evidence_allowed": row.get("launch_time_depth_evidence_allowed"),
+                "live_depth_evidence_basis": row.get("live_depth_evidence_basis"),
+                "evidence_start_class": row.get("evidence_start_class"),
+            }, ensure_ascii=False))
+PY
+```
+
+判定标准：
+
+```text
+新事件 pending 且 launch/onboard time 未到:
+  status = pending_launch_time_in_future
+  observation_anchor_ms 非空
+  events_accepted 中没有该 symbol
+  depth_snapshots 中没有该 symbol
+
+新事件 accepted 后:
+  accepted row 必须有 acceptance_id
+  observation_anchor_ms 非空
+  observation_window_start_ms == observation_anchor_ms
+  first_depth_request_at_ms >= observation_anchor_ms
+  observation_anchor_basis = symbol_effective_launch_time / symbol_onboard_time / exchangeinfo_current_onboard_time
+  live_depth_evidence_basis = announcement_and_launch_time 或 launch_time_only
+
+12h completed 后:
+  expected_snapshot_count = 720
+  unique_snapshot_bucket_count 使用 anchor-based [anchor, anchor+12h) bucket
+  out_of_window_snapshot_row_count 不应被算入 coverage
+
+异常:
+  新 accepted/completed state 中 observation_anchor_ms = null
+  新 accepted/completed state 中 acceptance_id 为空
+  observation_window_start_ms 仍等于 observation_started_at_ms 且早于 launch/onboard anchor
+  first_depth_request_at_ms 早于 observation_anchor_ms
+  expected_snapshot_count / unique_snapshot_bucket_count 长期为空
 ```
 
 ## 9. Raw Payload 与 Events 检查

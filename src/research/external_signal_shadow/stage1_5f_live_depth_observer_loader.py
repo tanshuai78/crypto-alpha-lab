@@ -10,6 +10,19 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark
 )
 
 
+def historical_anchor_classification_allowed(watermark) -> bool:
+    return (
+        getattr(watermark, "watermark_schema_version", 1) >= 2
+        and getattr(watermark, "bootstrap_max_seen_detected_at_ms", None) is not None
+    )
+
+
+def get_immutable_bootstrap_watermark_ms(watermark) -> int | None:
+    if not historical_anchor_classification_allowed(watermark):
+        return None
+    return int(watermark.bootstrap_max_seen_detected_at_ms)
+
+
 def iter_stage1_5d_event_rows(events_glob: str):
     for filepath in sorted(glob.glob(events_glob)):
         with open(filepath, "r") as f:
@@ -26,6 +39,17 @@ def iter_stage1_5d_event_rows(events_glob: str):
 def flatten_event_symbols(event_row: dict):
     symbols = event_row.get("symbols")
     if not symbols:
+        single_sym = event_row.get("symbol")
+        if single_sym:
+            yield {
+                **event_row,
+                "symbol": single_sym
+            }
+        else:
+            yield {
+                **event_row,
+                "symbol": ""
+            }
         return
     for symbol in symbols:
         yield {
@@ -55,10 +79,44 @@ def make_event_symbol_id(event_row: dict, symbol: str) -> str:
 def make_stable_event_symbol_key(row: dict, symbol: str) -> str:
     source_article_id = str(row.get("source_article_id") or "")
     event_type = str(row.get("event_type") or "")
-    sym = symbol.strip().upper()
+    sym = symbol.strip().upper() if symbol else ""
     if source_article_id:
         return f"{event_type}|{source_article_id}|{sym}"
     return f"{event_type}|{get_stable_event_key(row)}|{sym}"
+
+
+def normalize_event_symbol_identity(flat_event: dict, symbol: str) -> dict:
+    errors = []
+    sym = (symbol or flat_event.get("symbol") or "").strip().upper()
+    if not sym:
+        errors.append("symbol_missing")
+
+    detected_at_ms = _valid_ms(flat_event.get("detected_at_ms"))
+    if detected_at_ms is None:
+        errors.append("detected_at_ms_invalid_or_missing")
+
+    source_article_id = str(flat_event.get("source_article_id") or "").strip()
+    event_id = str(flat_event.get("event_id") or "").strip()
+    if not source_article_id and not event_id:
+        errors.append("source_article_id_and_event_id_both_missing")
+
+    event_type = flat_event.get("event_type")
+    if not event_type:
+        errors.append("event_type_missing")
+
+    identity_valid = len(errors) == 0
+    event_symbol_id = flat_event.get("event_symbol_id") or (make_event_symbol_id(flat_event, sym) if sym else "")
+    stable_key = flat_event.get("stable_event_symbol_key") or (make_stable_event_symbol_key(flat_event, sym) if sym else "")
+
+    return {
+        "identity_valid": identity_valid,
+        "event_symbol_id": event_symbol_id,
+        "stable_event_symbol_key": stable_key,
+        "source_article_id": source_article_id,
+        "event_id": event_id,
+        "detected_at_ms": detected_at_ms,
+        "identity_errors": errors,
+    }
 
 
 def upsert_pending_state_with_event_revision(pending_state, event_row: dict, symbol: str):
@@ -315,6 +373,75 @@ def delayed_launch_event_symbol_is_post_watermark(row: dict, symbol: str, waterm
     return launch_time_ms is not None and launch_time_ms > watermark.max_seen_detected_at_ms
 
 
+def delayed_launch_event_symbol_is_post_bootstrap_watermark(row: dict, symbol: str, bootstrap_watermark_ms: int) -> bool:
+    if row.get("symbol_extraction_source") not in {"title_contract_symbol", "detail_contract_symbol"}:
+        return False
+    if row.get("symbol_validation_status") != "validated":
+        return False
+
+    launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
+    if launch_time_ms is None:
+        launch_time_ms = _get_symbol_time(row, "symbol_onboard_times_ms", symbol)
+    return launch_time_ms is not None and launch_time_ms > bootstrap_watermark_ms
+
+
+def normalize_anchor_candidates(anchor_candidates: dict) -> dict:
+    out = {}
+    for key, value in (anchor_candidates or {}).items():
+        try:
+            v = int(value)
+        except (TypeError, ValueError):
+            continue
+        if v <= 0:
+            continue
+        if v < base.EXTERNAL_SIGNAL_STAGE1_5F_MIN_VALID_ANCHOR_EPOCH_MS or v > base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_VALID_ANCHOR_EPOCH_MS:
+            continue
+        out[key] = v
+    return out
+
+
+def classify_historical_anchor_pre_bootstrap(row: dict, symbol: str, anchor_diag: dict, watermark) -> tuple[str, str, dict]:
+    boot = get_immutable_bootstrap_watermark_ms(watermark)
+    normalized = normalize_anchor_candidates(anchor_diag.get("observation_anchor_candidates", {}))
+    if not normalized:
+        return "normal", "", {"normalized_anchor_candidates": normalized}
+
+    max_seen = getattr(watermark, "max_seen_detected_at_ms", 0)
+    cutoff = boot if boot is not None else max_seen
+
+    detected_at_ms = row.get("detected_at_ms")
+    if detected_at_ms and int(detected_at_ms) > cutoff:
+        return "normal", "", {"normalized_anchor_candidates": normalized, "announcement_post_bootstrap_watermark": True}
+
+    if delayed_launch_event_symbol_is_post_bootstrap_watermark(row, symbol, cutoff):
+        return "normal", "", {"normalized_anchor_candidates": normalized, "delayed_launch_exception_active": True}
+
+    if all(v <= cutoff for v in normalized.values()):
+        if boot is None:
+            return (
+                "diagnostic_only",
+                "historical_classification_bootstrap_watermark_missing",
+                {
+                    "historical_anchor_classification_allowed": False,
+                    "bootstrap_watermark_missing": True,
+                    "normalized_anchor_candidates": normalized,
+                },
+            )
+        return (
+            "ignored",
+            "ignored_historical_anchor_pre_bootstrap",
+            {
+                "terminal_status": "ignored_historical_anchor_pre_bootstrap",
+                "terminal_reason": "historical_anchor_pre_bootstrap",
+                "normalized_anchor_candidates": normalized,
+                "bootstrap_watermark_max_seen_detected_at_ms": boot,
+                "normalized_anchor_class": "all_pre_bootstrap",
+            },
+        )
+
+    return "normal", "", {"normalized_anchor_candidates": normalized}
+
+
 def resolve_observation_age_base_ms(row: dict, symbol: str) -> tuple[int | None, str]:
     for field, basis in (
         ("symbol_effective_launch_times_ms", "symbol_effective_launch_time"),
@@ -388,12 +515,32 @@ def classify_event_symbol_eligibility_with_diagnostics(
     exchangeinfo_state: dict,
     budget_state: dict,
 ) -> tuple[str, str, dict]:
+    norm_id = normalize_event_symbol_identity(row, symbol)
+    if not norm_id["identity_valid"]:
+        return "diagnostic_only", "malformed_source_identity", {"identity_diagnostics": norm_id}
+
     event_type = row.get("event_type")
     if event_type != "futures_contract_launch":
         return "rejected", "wrong_event_type", {}
 
-    if not symbol:
-        return "rejected", "symbol_missing", {}
+    anchor_diag = resolve_depth_observation_anchor_ms(row, symbol, exchangeinfo_state or {}, now_ms)
+    hist_status, hist_reason, hist_diag = classify_historical_anchor_pre_bootstrap(row, symbol, anchor_diag, watermark)
+
+    anchor_ms = anchor_diag.get("observation_anchor_ms")
+    diag = dict(anchor_diag)
+    diag["announcement_capture_time_ms"], diag["announcement_capture_time_source"] = resolve_announcement_capture_time_ms(row)
+    diag["observation_age_base_ms"] = anchor_ms
+    diag["event_age_ms"] = (now_ms - anchor_ms) if anchor_ms is not None else None
+    diag["max_event_age_ms"] = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+    diag["watermark_max_seen_detected_at_ms"] = getattr(watermark, "max_seen_detected_at_ms", 0)
+    diag["watermark_version"] = getattr(watermark, "watermark_version", 1)
+    diag.update(build_first_seen_watermark_diagnostics(row, symbol, diag, watermark))
+    diag.update(hist_diag)
+
+    if hist_status == "diagnostic_only":
+        return "diagnostic_only", hist_reason, diag
+    elif hist_status == "ignored":
+        return "ignored", hist_reason, diag
 
     if not event_is_post_watermark(row, watermark) and not delayed_launch_event_symbol_is_post_watermark(
         row, symbol, watermark
@@ -410,24 +557,9 @@ def classify_event_symbol_eligibility_with_diagnostics(
     if budget_state and budget_state.get("budget_exceeded", False):
         return "rejected", "budget_exceeded", {}
 
-    anchor_diag = resolve_depth_observation_anchor_ms(row, symbol, exchangeinfo_state, now_ms)
-    anchor_ms = anchor_diag.get("observation_anchor_ms")
     conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
-
-    diag = dict(anchor_diag)
-    diag["announcement_capture_time_ms"], diag["announcement_capture_time_source"] = resolve_announcement_capture_time_ms(row)
-    diag["observation_age_base_ms"] = anchor_ms
-    diag["event_age_ms"] = (now_ms - anchor_ms) if anchor_ms is not None else None
-    diag["max_event_age_ms"] = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
-    diag["watermark_max_seen_detected_at_ms"] = getattr(watermark, "max_seen_detected_at_ms", 0)
-    diag["watermark_version"] = getattr(watermark, "watermark_version", 1)
-    diag.update(build_first_seen_watermark_diagnostics(row, symbol, diag, watermark))
-
-
-
     if conflict_active:
         return "pending", "pending_anchor_conflict", diag
-
 
     if anchor_ms is None:
         diag["live_depth_evidence_basis"] = "recovery_validation_only"
