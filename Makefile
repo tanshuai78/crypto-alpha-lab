@@ -1,4 +1,4 @@
-.PHONY: install test fmt lint check
+.PHONY: install test test-verbose fmt lint smoke check
 
 install:
 	uv sync --all-extras

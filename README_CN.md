@@ -1,88 +1,113 @@
 # crypto-alpha-lab（中文说明）
 
-**个人加密货币 Alpha 研究与小仓位实盘执行平台。**（alpha：可验证的收益假设）
+**个人加密货币 Alpha 研究与证据验证实验室，具有安全执行底座。**
 
-这不是套利系统，也不是“躺赚机器”。它是一个“验证 Alpha + 安全执行底座”的实验平台。（execution base：执行底座）
-
----
-
-## 项目背景（Project Context：项目背景）
-
-本项目创建于 2026 年 5 月，从 `my-bitcoin-project`（一个 carry/MR 套利系统）转向而来：旧系统在工程上可靠，但被市场结构卡死（期限结构趋平、数据链路脆弱）。（carry/MR：资金费 carry / 均值回归 MR）
-
-关键决策：停止围绕“死掉的 Alpha”继续堆工程，重新以更好的 Alpha 假设为起点。（dead alpha：没有可交易边际）
-
-请先阅读 `docs/roadmap.md` 以获取完整设计理由与策略规范。（roadmap：路线图与决策记录）
+本项目**不是**套利系统，也**不是**“躺赚机器”。它是一个设计在 5,000 – 50,000 USDT 资金规模假设下的**个人 Alpha 验证实验室**。所有未经验证的候选信号均被严格视为研究假设，而非利润来源。
 
 ---
 
-## 架构（Architecture：目录结构与职责）
+## 当前安全状态 (Current Safety Status)
 
+所有安全控制和风险边界均由 [configs/base.py](configs/base.py) 与 [src/risk/limits.py](src/risk/limits.py) 统一治理：
+
+* `RISK_LIVE_TRADING_ENABLED = False` — 系统启动后严格处于影子观测模式。
+* `trade_signal_allowed = False` — 禁止自动生成可交易的 `SignalCandidate` 信号。
+* `paper_trading_allowed = False` — 禁止模拟盘下单或虚拟交易撮合。
+* `live_trading_allowed = False` — 实盘下单交易已被完全禁用。
+* `execution_engine_allowed = False` — 禁止连接实盘执行引擎。
+* `alpha_interpretation_allowed = False` — 在没有正式证据审查前，禁止将观测数据解构为已验证的 Alpha。
+* `execution_feasibility_claim_allowed = False` — 严禁宣称订单簿深度具备交易执行可行性。
+
+---
+
+## 当前研究聚焦 (Current Research Focus)
+
+当前的核心研究方向是 **External Signal Shadow Lab (Stage 1.5)** — 实时观测交易所催化剂公告事件、收集实时 L2 深度盘口快照、并在严格的证据闸门下离线审计数据质量。
+
+获取详细运行状态、研究规范与文档索引入口，请参阅：
+* [项目当前状态 (docs/project-status/current-project-state_CN.md)](docs/project-status/current-project-state_CN.md)
+* [研究路线图与决策记录 (docs/roadmap.md)](docs/roadmap.md)
+* [当前文档索引入口 (docs/project-status/current-document-index_CN.md)](docs/project-status/current-document-index_CN.md)
+
+---
+
+## 架构职责 (Architecture)
+
+```text
+crypto-alpha-lab/
+├── configs/
+│   └── base.py                        # 配置常量与安全开关的单一事实源 (Single Source of Truth)
+├── src/
+│   ├── execution/                     # 底层执行层代码（原样迁移，共 355 行）
+│   │   └── order_executor.py          # 7 种异常恢复路径（限价委托超时、净边际回滚、库存保护锁等）
+│   ├── strategies/                    # 策略基础契约层
+│   │   └── base.py                    # SignalCandidate 强类型定义与 BaseStrategy 接口
+│   ├── risk/                          # 风险控制模块
+│   │   └── limits.py                  # RiskLimits 配置快照与实盘隔离开关
+│   └── research/external_signal_shadow/ # 外部催化剂影子观察管线 (Stage 1.5)
+│       ├── stage1_5d_live_event_source_* # Stage 1.5D: 公告采集 + BAPI 详情解析 + 202 Retry 调度器
+│       ├── stage1_5f_live_depth_*       # Stage 1.5F: L2 盘口观察 + 上线时间闸门 + 水印 v2 + 终端 Ignore Hygiene
+│       ├── stage1_5g_live_depth_*       # Stage 1.5G: 离线深度快照质量审查器 (Clean / Quarantine / Invalid)
+│       └── stage1_5h_static_execution_* # Stage 1.5H: 静态只读执行代理报告生成器 (Strict Read-Only)
+└── scripts/external_signal_shadow/     # 影子运行器与离线评审工具集 (Stage 1.3 - 1.5H)
 ```
-src/
-  exchange/        交易所 client + 核心行情/资金费拉取函数（exchange client：交易所客户端）
-  execution/       双腿原子化执行引擎（状态机、回滚、库存保护）（atomic dual-leg execution：双腿原子执行）
-  risk/            仓位限制、Kill Switch、资金曲线保护（kill switch：紧急停机）
-  data/            最小 schema（MarketSnapshot, SignalCandidate）+ SQLite store（schema：字段定义）
-  research/        成本模型、replay 框架（replay：回放/重放）
-  strategies/      策略实现（每个策略一个子目录）（strategy：策略）
-    extreme_funding/     极端资金费事件扫描器（Extreme Funding Event Scanner：极端费率窗口）
-    trend_regime/        趋势/清算 Regime 策略（Trend/Liquidation Regime：趋势/清算状态）
-    long_horizon_basis/  长周期资金费基差 Desk（Long-Horizon Funding Basis Desk：多日基差管理）
-configs/
-  base.py          所有配置常量（`src/` 内无魔法数字）（single source of truth：单一事实源）
-docs/
-  roadmap.md       决策记录与策略规范（decision log：决策日志）
-  strategy_specs/  各策略的详细规格（spec：规格说明）
-tests/
-  execution/       执行层全套测试（已迁移并验证）（test suite：测试套件）
-```
 
 ---
 
-## 30 天冲刺计划（30-Day Sprint Plan：节奏安排）
+## 事实来源优先级 (Source-of-Truth Order)
 
-| 天数 | 阶段 | 目标 |
-|---|---|---|
-| 1–10 | Extreme Funding Scanner | 只做数据观测，不做执行；验证真实机会频率。（observation only：仅观测） |
-| 11–20 | Trend / Liquidation Regime | 影子模拟；度量扣费后期望值。（shadow simulation：影子模拟） |
-| 21–25 | Long-Horizon Basis Desk（数据） | 构建基差历史库与 Funding Flip 检测器；不交易。（Funding Flip：资金费翻转） |
-| 26–30 | Long-Horizon Basis Desk（影子） | 仅当 Funding Persistence > 0.6 才做影子持仓模拟。（persistence：持续性） |
+在评估系统运行状态、阈值参数或技术实现决策时，请严格遵守以下优先级顺序：
 
-**在 `docs/roadmap.md` 的 8 条“实盘前置检查”全部满足前，禁止实盘交易。**（pre-live checks：实盘前检查）
+1. `configs/base.py` — 配置常量与全局安全控制开关。
+2. `docs/project-status/current-project-state_CN.md` — 经核实的本地与服务器运行快照。
+3. `docs/current-document-index_CN.md` — 有效文档索引与当前权威规范入口。
+4. `src/`、`scripts/`、`tests/` — 经测试覆盖的系统源程序与单元/集成测试套件。
+5. 运行归档证据 — 包括 Summary 指标汇总、Watermark 水印和任务状态文件。
+6. `docs/roadmap.md` — 研究路线图与决策记录。
 
 ---
 
-## 快速开始（Quick Start：常用命令）
+## 快速开始 (Quick Start)
+
+### 安装与依赖同步
 
 ```bash
-# 安装依赖
+# 使用 uv 安装和同步所有依赖
 uv sync --all-extras
+```
 
-# 跑全量测试
+### 测试与代码校验
+
+```bash
+# 跑静默单元/集成测试
 make test
 
-# 跑 smoke checks
+# 跑详细单元/集成测试
+make test-verbose
+
+# 跑 ruff 代码静态扫描
+make lint
+
+# 跑字节码编译与安全限频 Smoke 测试
 make smoke
 
-# lint + format
+# 跑一键全量校验 (Lint + Test)
 make check
 ```
 
 ---
 
-## 关键设计约束（Key Design Constraints：硬边界）
+## 安全不变量 (Safety Invariants)
 
-1. **执行层代码按“原样迁移”对待，不允许随意简化。**（verbatim migration：原样迁移）
-2. **`risk.limits.live_trading_enabled` 默认是 `False`。** 必须按策略显式开启。（live trading：实盘开关）
-3. **每条策略必须把“入场 + 出场 + 止损”当作一个原子单元。** 不允许只有入场逻辑。（atomic unit：原子单元）
-4. **任何真钱前都必须先跑影子模式。** 每个策略至少观测 30 天。（shadow mode：影子模式）
-5. **单笔最大仓位：500 USDT；最大并发：2。**（position sizing：仓位上限）
+1. **本金保全第一 (Capital Preservation First)**：本金保全优先级高于任何优化或盈利率目标。
+2. **影子验证前置 (Shadow-First)**：任何入场、出场或仓位计算逻辑的变更，必须在影子观察模式下通过至少一个完整策略周期后，方可评估实盘可行性。
+3. **免私钥/免凭证 (No Private Credentials)**：公共数据收集与观察管线在设计上仅依赖交易所公开只读接口，不使用 API Key、私钥或钱包签名。
+4. **禁止 Output Root 历史改写 (No Output-Root Rewrite)**：运行脚本仅采用追加写入方式输出带时间戳的 JSON/JSONL 文件，严禁覆盖历史运行数据。
+5. **保持执行层代码完整 (Execution Layer Integrity)**：`src/execution/order_executor.py` (共 355 行) 已通过生产环境异常考验，严禁随意简化或修改。
 
 ---
 
-## 参考归档（Reference Archive：旧项目归档）
+## 参考归档 (Reference Archive)
 
-旧项目（冻结）：`/Users/tanshuai/Desktop/AI-test/my-bitcoin-project/`（frozen reference：冻结参考）  
-对话记录 ID：`1833b66a-1d4e-455c-aedd-1d6b8cb9b9ea`（conversation log：对话日志）
-
+* 旧项目路径（已冻结）：`/Users/tanshuai/Desktop/AI-test/my-bitcoin-project/`
+* 本次重构决策对话 ID：`1833b66a-1d4e-455c-aedd-1d6b8cb9b9ea`

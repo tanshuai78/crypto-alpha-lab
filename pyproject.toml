@@ -1,7 +1,7 @@
 [project]
 name = "crypto-alpha-lab"
 version = "0.1.0"
-description = "Personal crypto alpha research and small-position live execution platform"
+description = "Personal crypto alpha research and evidence verification lab with a disabled-by-default execution base"
 readme = "README.md"
 requires-python = ">=3.11"
 

@@ -1,237 +1,156 @@
-# crypto-alpha-lab — 路线图与决策记录（中文译本）
+# Crypto Alpha Lab 研究路线图与决策记录
 
-**创建时间：** 2026-05-23（Created：创建日期）  
-**对话记录：** ID `1833b66a-1d4e-455c-aedd-1d6b8cb9b9ea`（Conversation ID：对话标识）  
-**AI 代理必读：** 每次会话开始先读本文件，它是上下文桥。（context bridge：上下文桥接文件）
-
----
-
-## 背景：为什么离开旧系统（Background：迁移原因）
-
-前身项目 `my-bitcoin-project` 在工程上可靠，但在策略层面被卡死。（technically sound：工程可靠）
-最近一次观测窗口的关键证据：
-
-| 指标（Signal） | 数值（Value） | 含义（Meaning） |
-|---|---:|---|
-| `carry_builder_total` | 1030 | Builder 有足够数据可处理（Builder：候选构建阶段） |
-| `carry_engine_reject` | 1000（97%） | **所有候选的期限结构斜率 `slope = 0.000`**（term structure slope：期限结构斜率） |
-| `mr_builder_reject` | 1030（100%） | 全部被拒：`history_insufficient`（history：历史样本不足） |
-| `medium_conviction_mr_total` | 0 | 该桶完全空（medium conviction：中等置信度） |
-
-**根因（Root cause：根因）**
-- **carry_core**：BTC 永续进入低 carry 状态（期限结构趋平）。过滤器是正确的，不是坏了；市场不付费时，工程再好也没用。（flat term structure：期限结构趋平）
-- **mr_core**：OKX 现货拉取超时导致 60 样本历史无法累积；系统对端点连续性要求过高，而端点并不可靠。（endpoint fragility：端点脆弱）
-
-**决策（Decision：决策）**：停止围绕“死掉的 Alpha”继续堆工程。旧系统擅长解释“为什么不交易”，新系统必须从“更好的 Alpha 假设”出发。（alpha hypothesis：Alpha 假设）
+**创建时间：** 2026-05-23
+**最新状态审计点：** 2026-07-26（证据时间戳：2026-07-26T02:11:01Z）
+**主状态快照文件：** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
+**有效文档索引入口：** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
 ---
 
-## 新项目使命（Mission：我们要做什么）
+## 1. 使命与风险边界 (Mission and Risk Boundary)
 
-**不是**套利系统。  
-**不是**收益机器。  
-**是**：个人 Alpha 验证实验室 + 安全执行底座。（safe execution base：安全执行底座）
+`crypto-alpha-lab` 是一个个人 Alpha 验证实验室和安全执行底座，针对 **5,000 – 50,000 USDT** 的资本规模进行研究，不以自动化利润为第一目标，而是验证可重复的统计优势。
 
-资金规模假设：**5,000 – 50,000 USDT**（capital scale：资金规模）。  
-第一阶段（30 天）：**只做观测与影子模拟，不做实盘。**（shadow simulation：影子模拟）
+### 核心安全不变量 (Hard Safety Invariants)
 
----
-
-## 架构决策（Architecture Decisions：关键架构选择）
-
-### 执行层：原样迁移（Execution Layer: Verbatim Migration）
-
-`src/execution/` 从旧项目 **原样迁移**（只改 import 路径）。（verbatim：逐字/原样）
-
-**原因（Why：原因）**：`order_executor.py`（355 行）覆盖了 7 条真实失败路径：
-1. Maker 超时 → 通过 `client_order_id` 走 `UNKNOWN_REMOTE_STATE` 恢复（maker timeout：挂单超时）
-2. 成交后净边际 ≤ 0 → 立即回滚（net edge：净边际）
-3. 对冲腿异常 → 回滚 maker 腿（hedge leg：对冲腿）
-4. 对冲腿部分成交超过 dust 阈值 → 条件回滚（dust threshold：最小可忽略成交）
-5. `abort_on_partial_fill` → 回滚并标记 `FAILED_SAFE`（abort：中止）
-6. 重复 `intent_id` → 直接拒绝，不重放（intent_id：意图 ID）
-7. `FORCE_DELEVERAGING` 锁 → 只允许 `reduce_only` 意图（force deleveraging：强平去杠杆）
-
-任何“简化执行层”的行为都会把旧项目已经修过的 bug 重新造出来。**禁止简化执行层。**（do not simplify：不要简化）
-
-### 策略接口：`SignalCandidate`（Strategy Interface：统一候选结构）
-
-所有策略必须返回 `SignalCandidate`（定义在 `src/strategies/base.py`）。（SignalCandidate：统一信号候选结构）
-策略不得输出裸 dict，也不得直接调用执行层。（no raw dicts：不允许裸字典）
-
-### 配置：单一事实源（Configuration：Single Source of Truth）
-
-所有阈值写在 `configs/base.py`；`src/` 中不允许魔法数字。（magic numbers：魔法数字）
-修改阈值必须改同一个文件，且可审计。（auditable：可审计）
-
-### 开源参考（Open-Source References：只借鉴不依赖）
-
-| 项目（Project） | 借鉴点（What to Reference） | 禁止项（What NOT to do） |
-|---|---|---|
-| Freqtrade | 策略生命周期（entry+exit+stop 一体） | 不作为依赖集成（no dependency：不引入依赖） |
-| Jesse | 策略代码风格（clean style） | 只读风格，不做框架迁移（not a framework：不是框架迁移） |
-| Hummingbot | Connector 概念（我们已有执行层实现） | 不替换我们的执行层（do not replace：不要替换） |
-| NautilusTrader | 事件驱动架构的思想 | Phase 1 不引入依赖（Phase 1：第一阶段） |
+* **纯只读观察**：所有未经验证的策略候选均严格视为研究假设，系统运行于影子和观测模式。
+* **禁用实盘交易**：[configs/base.py](../configs/base.py) 与 [src/risk/limits.py](../src/risk/limits.py) 中锁定 `RISK_LIVE_TRADING_ENABLED = False`。
+* **禁用自动化交易与模拟器解构**：全观测管线强行断言 `trade_signal_allowed = False`、`paper_trading_allowed = False`、`live_trading_allowed = False`、`execution_engine_allowed = False`、以及 `execution_feasibility_claim_allowed = False`。
+* **执行层冷冻**：包含 355 行的双腿原子化执行层代码（[src/execution/order_executor.py](../src/execution/order_executor.py)）原样迁移并冷冻，以保留经过实盘检验的 7 条失败恢复路径（限价挂单超时、净边际校验、对冲腿异常、微量成交回滚、异常中止、重复意图拦截、去杠杆锁定）。
 
 ---
 
-## 策略规格（Strategy Specifications：三条主线）
+## 2. 当前位置与运行状态 (Current Position)
 
-### 核心字段（Core Fields）
+*(本节提取自 2026-07-26 服务器运行快照与状态报告 `current-project-state_CN.md`)*
 
-| 字段（Field） | 英文（English） | 含义（Meaning） | 来源（Source） |
-|---|---|---|---|
-| timestamp_ms | timestamp_ms | 事件发生时间（毫秒） | 行情行生产器 |
-| symbol | symbol | 交易对（如 BTC/USDT） | 行情行生产器 |
-| close_price | close_price | 现货收盘价 | 行情行生产器 |
-| return_1h_pct | return_1h_pct | 1 小时收益率（%） | 行情行生产器 |
-| vol_1h_pct | vol_1h_pct | 1 小时成交量波动率（%） | 行情行生产器 |
-| vol_baseline_30d_pct | vol_baseline_30d_pct | 30 天平均成交量标准化波动率（%） | 行情行生产器 |
-| open_interest | open_interest | 持仓总量 | 行情行生产器 |
-| oi_change_1h_pct | oi_change_1h_pct | 1 小时持仓变化率（%） | 行情行生产器 |
-| volume_24h_usdt | volume_24h_usdt | 24 小时交易量（USDT） | 行情行生产器 |
-| data_age_sec | data_age_sec | 数据延迟秒数 | 行情行生产器 |
-| liquidation_notional_1h_usdt | liquidation_notional_1h_usdt | 1 小时清算名义价值（USDT） | 强制订单采集器 |
-
-### 1. Extreme Funding Event Scanner（优先级 1）
-
-**假设（Hypothesis：假设）**：当资金费年化超过约 30% 时，在 1–3 次结算窗口内收取资金费，扣除基差波动与成本后仍可能为正期望。（expected value：期望值）
-
-| 参数（Parameter） | 值（Value） | 来源（Source） |
-|---|---:|---|
-| 最小年化 | 30% | `EXTREME_FUNDING_ANNUALIZED_THRESHOLD_PCT`（annualized threshold：年化阈值） |
-| 最小持续性 | 0.70 | `EXTREME_FUNDING_MIN_PERSISTENCE`（persistence：持续性） |
-| 最大持仓 | 24 小时 | `EXTREME_FUNDING_MAX_HOLDING_HOURS`（max holding：最大持仓） |
-| 单笔最大仓位 | 500 USDT | `RISK_MAX_SINGLE_POSITION_USDT`（position size：单笔仓位） |
-| 最大并发 | 2 | `RISK_MAX_CONCURRENT_POSITIONS`（concurrency：并发） |
-
-**触发条件（Trigger condition：触发条件）**：年化 > 30% 且持续性 > 0.70 且基差没有“提前吸收”超额资金费（必须做反吸收检查）。（basis absorption：基差吸收）
-
-**失效条件（Invalidation：失效）**：年化跌破 15% 或基差扩张超过累计资金费收入。（basis expansion：基差扩张）
-
-**出场（Exit：出场）**：下一次结算若费率衰减到阈值以下则退出；或到达最大持仓边界时退出。（settlement：结算）
-
-**影子验证目标（Shadow target：影子目标）**：30 天窗口内，至少达到“每 7 天 1 次”合格信号。（signal frequency：信号频率）
-
-#### 历史验证与回测结论（Historical Verification Results）
-
-为了验证 Extreme Funding Event Scanner 的假设，我们进行了两项历史回溯分析：
-1. **最近 74 天本地订单簿数据分析（2026-02-10 至 2026-05-08）**：
-   - **数据源**：旧项目收集的本地订单簿快照（Binance 约 19.4 万条，OKX 约 10.3 万条），覆盖 BTC, ETH, SOL, XRP, ADA, DOGE。
-   - **结论**：在年化 30% 的阈值下，**未检测到任何极端资金费事件（0次）**。
-   - **关键限制与发现**：
-     - **交易所接口限幅限制**：Binance 和 OKX 的公共实时/预测资金费率接口在快照中被硬性限幅在 ±0.01%/8h（即年化 ±10.95%）。因此，实时快照中无法观测到超过 10.95% 的费率，导致 30% 的阈值物理上无法触发。
-     - **市场处于贴水状态**：该 74 天期间，市场整体处于贴水（Backwardation）状态，均值资金费率为负（BTC -1.3%, ETH -1.9%, SOL -3.2%）。贴水状态下空头支付资金费，故无套利期望。
-2. **5 年真实结算资金费率分析（2021-01-01 至 2026-05-23）**：
-   - **数据源**：Binance 公开历史结算费率（真实结算值，无限幅，每币种 5900+ 条记录）。
-   - **核心发现 1（阈值与胜率正相关）**：提高阈值能显著提升胜率和单次期望。这是因为高阈值能轻松跨越 16 bps 的往返交易成本门槛，并有效过滤短期噪声。
-     - *以 BTC 为例*：>30% 阈值时胜率仅约 30%；提升至 >100% 阈值时，**胜率升至 61%**（共 31 次事件，单次平均净边际 +21 bps，累计 +644 bps）。
-   - **核心发现 2（币种优先级差异）**：山寨币（Altcoins）的套利期望和信号频率显著优于 BTC，BTC 不应作为首选。
-     - *DOGE（>100% 阈值）*：38 次事件，**胜率 71%**，单次平均净边际 **+46 bps**，累计 +1,755 bps。
-     - *XRP（>100% 阈值）*：42 次事件，**胜率 64%**，单次平均净边际 **+51 bps**，累计 +2,119 bps。
-     - *ADA（>100% 阈值）*：43 次事件，**胜率 53%**，单次平均净边际 **+33 bps**，累计 +1,433 bps。
-     - *ETH（>100% 阈值）*：41 次事件，**胜率 51%**，单次平均净边际 **+26 bps**，累计 +1,076 bps。
-     - **推荐执行优先级**：XRP/DOGE > ADA > ETH > BTC。
-   - **核心发现 3（时间分布集中度）**：极端资金费事件高度集中在 2021–2022 年的牛市行情中。熊市与震荡市中信号极度稀缺。
-
-#### 2026-05-26 参数敏感性审计更新（Decision Update）
-
-- 已完成 pre-orderbook 参数敏感性审计（DOGE/XRP，162 组参数组合）。
-- 审计结论：**不进入 `orderbook-aware replay`**。
-- 原因：在 `conservative_1_interval` 假设下，候选数为 0；候选仅出现在 `optimistic_2_intervals` 与放宽门槛组合下，稳健性不足。
-- 主阻塞仍是 funding 强度门槛（`annualized_funding_below_trade_threshold`、`expected_funding_income_below_min`），不是 `basis_absorbed` 主导。
-- 下一步：回到策略定义层，先修正保守口径可触发性，再重跑参数敏感性审计。
+* **服务器活跃进程**：
+  * **Stage 1.5D 公告实时采集器**：运行进程 PID 88580（tmux `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），Output Root 路径为 `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
+  * **Stage 1.5F 实时盘口观察器**：运行进程 PID 88770（tmux `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），Output Root 路径为 `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
+* **活跃验证状态**：
+  * Stage 1.5D：BAPI 详情页解析与 202 异步重试调度器稳定挂载，已解决重试饥饿。
+  * Stage 1.5F：Watermark Schema V2 升级完成；已统计 2643 个 Heartbeat；76 个 pre-bootstrap 历史锚点被终端 Ignore 去重。
+* **当前第一阻塞项 (P1 Blocker)**：
+  * Stage 1.5G 审查结果仍为 `clean_depth_evidence_pass = false`（全网尚无 0 gap 的 Clean 级 L2 深度盘口数据）。
 
 ---
 
-### 2. Trend / Liquidation Regime Scanner（优先级 2）
+## 3. 研究路线矩阵 (Research Track Matrix)
 
-**假设（Hypothesis：假设）**：波动突破或清算级联之后，方向性动量在短周期内具有正期望。注意：这不是中性套利，而是明确的方向性策略。（directional：方向性）
+> **状态枚举口径**：`active` (正在推进), `blocked` (被阻塞), `observation_only` (仅影子观测), `completed` (已结题), `falsified` (已证伪), `stopped` (已停止), `superseded` (已被替代), `planned` (仅计划).
 
-| 参数（Parameter） | 值（Value） | 来源（Source） |
-|---|---:|---|
-| 波动突破倍数 | 相对 30d 基线 2.0× | `TREND_REGIME_VOL_BREAKOUT_MULTIPLIER`（vol breakout：波动突破） |
-| 最大持仓 | 48 小时 | `TREND_REGIME_MAX_HOLDING_HOURS`（max holding：最大持仓） |
-| 止损 | 入场价下 2.0% | `TREND_REGIME_STOP_LOSS_PCT`（stop-loss：止损） |
-| 单笔最大仓位 | 500 USDT | `RISK_MAX_SINGLE_POSITION_USDT`（position size：单笔仓位） |
-
-**触发条件（Trigger：触发）**：1h 波动率 > 2× 30d 基线，并由 OI 变化确认方向（OI 上升=动量，OI 下降=清算级联）。（OI：Open Interest，未平仓量）
-
-**失效条件（Invalidation：失效）**：触发止损；或价格回穿入场区域；或超过持仓上限。（time stop：时间止损）
-
-**出场（Exit：出场）**：止损或时间边界；Phase 2 可选加入移动止盈。（trailing stop：移动止盈）
-
-**影子验证目标（Shadow target：影子目标）**：至少 5 个信号，且扣除 20 bps 往返成本后净边际 > 0。（round-trip cost：往返成本）
-
----
-
-### 3. Long-Horizon Funding Basis Desk（优先级 3）
-
-**假设（Hypothesis：假设）**：当资金费处于“中等 carry 稳定区间”（年化 10–25%，持续性 > 0.6）时，3–7 天的 delta-neutral 持仓能积累足够资金费来覆盖常见的基差波动。（delta-neutral：Delta 中性）
-
-**与旧 carry_core 的关键区别（Key distinction：关键区别）**：不要求实时期限结构斜率为正；要求的是持仓周期内“累积资金费”足够稳定。（term slope：期限结构斜率）
-
-| 参数（Parameter） | 值（Value） | 来源（Source） |
-|---|---:|---|
-| 最大持仓 | 7 天 | `BASIS_DESK_MAX_HOLDING_DAYS`（max holding：最大持仓） |
-| 基差回撤停机 | 累计资金费收入的 50% | `BASIS_DESK_BASIS_DRAWDOWN_HALT_RATIO`（halt ratio：停机比例） |
-| 最小持续性 | 0.60 | `BASIS_DESK_MIN_FUNDING_PERSISTENCE`（persistence：持续性） |
-| 最小 Maker 成交率 | 70%（影子监控） | `BASIS_DESK_MIN_MAKER_FILL_RATE`（Maker fill rate：挂单成交率） |
-| 单笔最大仓位 | 500 USDT | `RISK_MAX_SINGLE_POSITION_USDT`（position size：单笔仓位） |
-
-**关键风险 1：趋势行情中的基差扩张**。BTC 若单日 +10%，永续溢价（基差）会扩张；多日持仓会承受未实现亏损。每 8h 结算后的基差回撤检查不可省略。（basis expansion：基差扩张）
-
-**关键风险 2：Funding Flip**。若资金费在持仓中途翻负，delta-neutral 组合会变成“付费”而不是“收租”，必须立刻退出。（Funding Flip：资金费翻转）
-
-**触发条件（Trigger：触发）**：年化在 10–25% 且持续性 > 0.60 且 30 天基差波动率 σ < 0.3%。（σ：标准差）
-
-**失效/出场条件（Exit：出场，8h 检查一次）**：
-- 累计基差亏损 > 累计资金费收入的 50% → 退出（drawdown halt：回撤停机）
-- 资金费翻负 → 退出（funding flip exit：翻负退出）
-- 持仓 > 7 天 → 强制退出或明确续仓决策（renewal decision：续仓决策）
-
-**影子验证目标（Shadow target：影子目标）**：
-- Day 21–25：只做数据建模，建立基差历史库，完成 8h Funding Flip 检测器测试。（data modeling：数据建模）
-- Day 26–30：只有当观测期持续性 > 0.6 才启动影子持仓模拟。（gating：门控）
-- 必须验证：影子执行中 Maker 成交率 > 70%。（Maker fill rate：挂单成交率）
+| 研究方向 / 阶段 | 状态 (Status) | 最新证据时间/路径 | 核心决策 (Decision) | 下一阶段关卡 (Next Gate) | 停止条件 (Kill Criteria) |
+|---|---|---|---|---|---|
+| **Original Carry / MR** | `stopped` | 2026-05-23 / `docs/roadmap.md` | BTC 期限斜率长期趋近 0.000，且 OKX 接口频发超时，无法交易 | 无（逻辑冷冻作为历史基线） | 期限结构斜率持续趋平 >30天 |
+| **Extreme Funding** | `observation_only` | 2026-05-23 / 5年历史结算回测 | 证实 XRP/DOGE 年化 >100% 胜率 >64%，但本地 74d 数据受限幅限制为 0 信号 | 影子扫描器挂载与基差吸收检查 | 极端费率信号频率低于 1次/30d |
+| **Trend / Liquidation** | `observation_only` | 2026-07-26 / [configs/base.py](../configs/base.py) | 波动率突破 (2.5x) 与未平仓量 (OI) 清算动量候选，止损 1.5% 且最大持仓 12h | 影子模式模拟回放 | 单次净边际扣除 20bps 成本后 $\le 0$ |
+| **Tactical Carry** | `stopped` | 2026-05-23 / `docs/roadmap.md` | 在平坦期限结构下无法获利，被 Basis Desk 和 Extreme Funding 替代 | 无 | 期限结构斜率持续为负或零 |
+| **Long-Horizon Basis** | `observation_only` | 2026-07-26 / [configs/base.py](../configs/base.py) | 多日 Delta 中性 Carry (10-25% 年化)。每 8h 必须通过基差回撤 >50% 资金收益的熔断校验 | 基差 DB 与 8h Funding Flip 检测器完成 | 累计基差亏损 > 50% 费率收益，或挂单成交率 < 70% |
+| **Factor Lab** | `falsified` | 2026-06-10 / Stage A2 因子审查报告 | CMOM 截面动量因子扣除成本后无法产生超越 Cash Fallback 的稳定超额收益 | 结题并封存为历史参考 | 因子超额收益 (阿尔法) 均值 $\le 0$ |
+| **Stage 0 – 1.2** | `completed` | 2026-06-12 / Stage 1.2 审查报告 | 实时只读采集管线基础验证通过 | 推进 Stage 1.3 信号发现 | 采集任务数据缺失率 > 5% |
+| **Stage 1.3 – 1.4E** | `superseded` | 2026-06-20 / Stage 1.4E 审查报告 | 爆仓快照与大额委托受制于交易所频控，被 Stage 1.5 催化剂公告替代 | 转向 1.5 催化剂管线开发 | 数据完整性拦截率 > 10% |
+| **Stage 1.5A – 1.5C1** | `completed` | 2026-06-24 / Stage 1.5C1 覆盖审计 | 历史重放证实公告发布后存在显著价格响应 | 推进 1.5D 采集器开发 | 价格响应延迟高于 120 秒 |
+| **Stage 1.5D** | `active` | 2026-07-26 / `detail_retry_scheduler_state.json` | 进程 PID 88580 稳定运行。支持 202 状态调度与 Title/BAPI 币种覆盖 | 维持 7d 连续运行，监测异常 | 详情页重试队列死锁或超时 > 1800s |
+| **Stage 1.5E** | `completed` | 2026-06-25 / 1.5E 静态深度审查 | 确认 L2 订单簿深度能稳定容纳 500 USDT 的单笔模拟仓位 | 推进 1.5F 实时盘口观察 | 可容纳深度限额 < 500 USDT |
+| **Stage 1.5F** | `active` | 2026-07-26 / `live_depth_observer_summary.json` | 进程 PID 88770 稳定运行。上线时间闸门与 pre-bootstrap 终端 Ignore 去重工作正常 | 积累首个 Clean 级新币盘口证据 | 网络请求错误率 > 5% |
+| **Stage 1.5G** | `blocked` | 2026-07-26 / `stage1_5g_quarantine_summary.json` | 离线审查通过 Quarantine 级 1 例 (`SKHYUSDT`)，Clean Pass 仍阻塞为 0 | 积累首个无盘口空洞的 Clean 级事件 | 无 Clean 级事件持续 > 30天 |
+| **Stage 1.5H** | `completed` | 2026-07-12 / 1.5H 治理审查报告 | 静态只读报告生成器完成。锁定只读禁令标志 | 维持只读工具，防止策略越权 | 误写为执行模拟器或交易引擎 |
+| **Stage 1.6 Roadmap** | `planned` | 2026-07-19 / Master Assessment 评估 | 确定 1.6A (下架公告) 与 1.6R (安全事故 Risk-Veto) 为下一优先设计线 | 编写 1.6A 详细设计文档 | 缺乏公开只读锚点或数据不可审计 |
 
 ---
 
-## 30 天冲刺计划（Sprint Plan：节奏与门槛）
+## 4. 当前活跃实施链 (Current Active Chain)
 
-| 天数 | 阶段 | 交付物 | 进入下一阶段的门槛 |
-|---|---|---|---|
-| 1–3 | Setup | `make test` 100% 通过；`make smoke` 通过。 | 全绿（all green：全绿） |
-| 4–10 | Extreme Funding（观测） | 扫描器产出日志；不执行。 | ≥1 合格信号 / 7 天 |
-| 11–20 | Trend Regime（影子） | 影子模拟运行；扣费后期望值 > 0。 | ≥5 信号且正期望 |
-| 21–25 | Basis Desk（数据） | 基差历史库完成；Funding Flip 检测器测试通过。 | 数据干净且触发正确 |
-| 26–30 | Basis Desk（影子） | 影子持仓模拟；监控 Maker 成交率。 | 成交率 > 70% |
-| 31+ | 实盘前评审 | 8 点清单（见下）。 | 8 点全部满足 |
+当前影子观察与证据收集的活跃工作流链条如下：
+
+```text
+Stage 1.5D 实时公告采集 (Tmux PID 88580)
+  ├── 轮询 Catalog API + BAPI Article 详情页解析
+  └── 处理 202 异步状态的重试调度器 (detail_retry_scheduler_state.json)
+        │
+        ▼ (输出 events/*.jsonl)
+Stage 1.5F 实时盘口观察 (Tmux PID 88770)
+  ├── 上线闸门拦截 (拦截早于 onboardDate 的事件)
+  ├── 锚点不可变水印 v2 保护 (bootstrap_max_seen_detected_at_ms)
+  └── 历史数据 Ignore Hygiene 分流 (pre-bootstrap 历史锚点 -> Ignore，非 Rejection)
+        │
+        ▼ (输出 120 个盘口快照及 observer_state.jsonl)
+Stage 1.5G 盘口质量离线审查 (Offline reviewer)
+  ├── 审计快照完整度、极性交叉、开盘空盘口 gap 延迟
+  └── 标记事件状态为: Clean Pass / Quarantine Pass / Invalid Failure
+        │
+        ▼
+Stage 1.5H 静态只读报告生成 (Offline reporter)
+  └── 依据 1.5G 结果输出只读报告，禁止一切方向性可执行 Alpha 宣称
+```
 
 ---
 
-## 实盘前 8 点清单（Pre-Live Checklist：必须全部满足）
+## 5. 已结题与已证伪工作 (Completed and Falsified Work)
 
-真钱之前，必须满足以下 8 条：
+为保证项目认知框架不受生存者偏差干扰，在此保留已证伪分支的负结论证据：
 
-- [ ] 信号频率 ≥ 每周 1 次（样本量足够）（signal frequency：信号频率）
-- [ ] 扣除真实成本后的净边际 > 30 bps（不是纸面）。（net edge：净边际）
-- [ ] 可执行容量 ≥ 计划仓位的 2×（通过深度验证）。（capacity：容量）
-- [ ] 最大不利滑点 ≤ 10 bps（实测，不是估计）。（slippage：滑点）
-- [ ] 最大持仓周期有硬上限（不能无限等）。（hard upper bound：硬上限）
-- [ ] 模拟最大回撤 ≤ 总资本的 5%。（max drawdown：最大回撤）
-- [ ] 信号出现时交易所充提状态正常（跨场地策略必须）。（withdraw/deposit：充提）
-- [ ] `InventoryGuard` 与 `RiskLimits` 在边界场景模拟中能正确触发。（guards：风控护栏）
+1. **Route C1 现货价格代理 7 天烟雾测试 (2026-07-05)**：
+   - 证明文件：`docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md`。
+   - 结论：`falsified`。实盘烟雾测试期间样本极易重叠，胜率低于基线，扣除成本后收益为负，价格代理路线结题。
+2. **Stage 1.4B-Lite 衍生品拥挤度反转 (2026-06-18)**：
+   - 证明文件：`docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md`。
+   - 结论：`falsified`。500 次 Monte Carlo 重放重合试验证明，在控制偶然性后，单纯衍生品拥挤度反转没有产生超越随机基线的独立 Alpha，分支终止。
+3. **Cross-Sectional Factor Lab 阶段 A2 (截面动量因子) (2026-06-10)**：
+   - 证明文件：`docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md`。
+   - 结论：`falsified`。CMOM 因子在截面溢价测试中表现极其疲软，收益被交易磨损完全侵蚀，无法跑赢 Cash Fallback 现金基线，实验室闭环结题。
 
 ---
 
-## 明确不迁移的内容（Not Migrated：刻意不搬的东西）
+## 6. 当前阻塞项 (Current Blockers)
 
-| 组件（Component） | 原因（Reason） |
-|---|---|
-| `carry_core` / `tactical_carry` 引擎 | 被期限结构趋平卡死，属于市场结构问题而非代码问题。（flat term structure：期限结构趋平） |
-| `mr_core` / `medium_conviction_mr` | 被数据链路脆弱性卡死（OKX 超时）。（data pipeline fragility：数据链路脆弱） |
-| `nextgen_paper_runtime/` | 诊断包装层，不产生 Alpha。（diagnostic wrapper：诊断包装） |
-| `screening/`, `router/`, `buckets/` | 为另一套设计哲学服务的治理表面（不适配本项目）。（governance surface：治理表面） |
-| `shadow_mode/` | 被“策略级 shadow simulation”替代。（strategy-level shadow：策略级影子） |
-| Phase 4.5、bucket allocator、carry builder | 历史复杂度，缺乏前向价值。（historical complexity：历史复杂度） |
+* **数据与验证阻塞 (P1 Blocker)**：
+  * **问题描述**：Stage 1.5G 目前积累的无 gap Clean 级盘口数据仍然为 0。
+  * **事实证据**：`_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5g/stage1_5g_quarantine_summary.json:L6` (`clean_depth_evidence_pass = false`)。
+  * **阻碍与风险**：在获得真正的 Clean 级盘口快照前，无法完全排除新币开盘前网络极性对报价深度完整性的干扰。
+  * **解封动作**：维持服务器 1.5D 和 1.5F 7天影子程序常驻，静待下一次新币上线公告。
+* **工程与设计阻塞 (P2 Blocker)**：
+  * **问题描述**：Stage 1.6A (Futures Delisting Notice) 下架事件源的设计文档尚未撰写。
+  * **事实证据**：[docs/strategy_specs/2026-07-13 统一研究路线总纲:L305](strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md#L305)。
+  * **解封动作**：按计划起草设计文档 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`。
+
+---
+
+## 7. 下一阶段关卡校验门槛 (Next Gates)
+
+### 关卡 1：Stage 1.5G 盘口 Clean Pass
+* **前置依赖**：1.5D 与 1.5F 服务器观察器无间断影子运行。
+* **所需证据**：审查器针对新上线币种生成 `stage1_5g_live_depth_evidence_review_summary.json`。
+* **通过标准**：`clean_depth_evidence_pass = true`（空盘口快照数为 0，首快照延迟 $\le 5$ 秒，`book_availability_ratio = 100%`）。
+* **拒绝/停止条件**：丢包或空快照比例 $> 10\%$，或者首包快照延迟超过 60 秒。
+* **安全边界**：无交易信号生成 (`trade_signal_allowed = False`)。
+
+### 关卡 2：Stage 1.6A 期货下架公告设计审查
+* **前置依赖**：已审定的 Stage 1.6 统一路线总纲与 Master Assessment。
+* **所需证据**：提交设计文档 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`。
+* **通过标准**：设计中必须明确定义：期货下架源获取路径、排他性范围筛选逻辑、以及三大时间锚点（`available_at_ms`, `non_reduce_only_start_time_ms`, `settlement_time_ms`）的契约规范。
+* **拒绝/停止条件**：如果数据无法区分期货下架和现货/Margin 下架，或者数据供应商的 `available_at_ms` 缺乏 Point-In-Time 审计轨迹，则中止。
+* **安全边界**：只做只读数据源设计（在设计通过前禁止编写 Implementation Plan）。
+
+---
+
+## 8. 决策日志记录 (Decision Log)
+
+* **2026-05-23**：旧 carry/MR 期限趋平且频繁超时，决策封存，转向 `crypto-alpha-lab` 新架构。建立 5k-50k USDT 资金规模假设。
+* **2026-06-10**：截面动量 (CMOM) 因子测试判定无法战胜 Cash Fallback，截面因子实验室结题闭环。
+* **2026-06-18**：500 次 Monte Carlo trials 重放证明衍生品拥挤度反转无显著 Alpha，决策转向公告催化剂。
+* **2026-06-24**：1.5D 实时公告收集器设计通过审查，1.5C 价格覆盖重放通过门槛。
+* **2026-06-26**：1.5F 实时盘口观察器设计通过审查，服务器上部署实时 L2 快照采集。
+* **2026-07-05**：Route C1 7 天实盘烟雾测试最终评估不达标，现货价格代理策略被证伪结题。
+* **2026-07-12**：1.5H 静态代理只读报告生成器通过审查，确立“只读诊断报告，无模拟器或执行声明”治理契约。
+* **2026-07-19**：发布 Master Assessment。决定放弃 listing 开盘首小时、放弃社交热点音量、降级治理提案；批准 1.6A (下架公告) 与 1.6R (安全事故 Risk-Veto) 作为下一优先设计路线。
+* **2026-07-24**：实施并验证 1.5F 历史锚点 Rejection Hygiene 热装补丁（水印 Schema v2、终端 Ignore 分流以防污染 `events_rejected`）。
+* **2026-07-26**：验证服务器 1.5D/1.5F 影子运行状态；完成项目当前状态报告（`current-project-state_CN.md`）与统一文档事实索引（`current-document-index_CN.md`）。
+
+---
+
+## 9. 已替代历史文档清单 (Superseded Documents)
+
+查看所有因热装补丁升级、证伪或架构转向而被后续设计/计划替代的历史文档清单与索引，请访问：
+
+👉 **[docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)**

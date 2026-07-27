@@ -26,6 +26,9 @@ docs/production_artifacts/
 # Local git worktrees
 .worktrees/
 
+# Local runtime snapshots and operator-only context
+_project_context/
+
 # External Signal Shadow Lab runtime data
 data/external_signal_shadow/raw/
 data/external_signal_shadow/normalized/
