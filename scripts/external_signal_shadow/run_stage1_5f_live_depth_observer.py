@@ -15,6 +15,12 @@ def parse_args():
     parser.add_argument("--stage1-5d-events-glob", type=str, default="")
     parser.add_argument("--stage1-5d-summary", type=str, default="")
     parser.add_argument("--stage1-5e-summary", type=str, default="")
+    parser.add_argument("--stage1-5d-runtime-gate", type=str, default="")
+    parser.add_argument("--historical-stage1-5d-summary", type=str, default="")
+    parser.add_argument("--allow-historical-stage1-5d-safety-gate", action="store_true")
+    parser.add_argument("--historical-stage1-5d-gate-reason", type=str, default="")
+    parser.add_argument("--historical-classification-bootstrap-watermark-ms", type=int, default=None)
+    parser.add_argument("--revalidate-runtime-gate-sec", type=float, default=10.0)
     parser.add_argument("--output-root", type=str, required=True)
     parser.add_argument("--bootstrap-watermark", action="store_true")
     parser.add_argument("--max-polls", type=int, default=None)
@@ -23,6 +29,7 @@ def parse_args():
     parser.add_argument("--fixture-events-jsonl", type=str, default="")
     parser.add_argument("--mock-response-dir", type=str, default="")
     return parser.parse_args()
+
 
 
 def emit_sample_capped_diagnostic(output_root: str, subfolder: str, row: dict, diag_type: str, now_ms: int, counts_map: dict) -> bool:
@@ -382,12 +389,14 @@ def main():
         logger.info("Watermark bootstrapped and summary written. Exiting.")
         sys.exit(0)
 
-    # 2. Validate Stage 1.5D summary
+    # 2. Validate Stage 1.5D summary. A dedicated runtime gate, when provided,
+    # is validated inside the poll loop with freshness and same-root checks.
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
         validate_stage1_5d_summary,
     )
     try:
-        validate_stage1_5d_summary(args.stage1_5d_summary)
+        if not args.stage1_5d_runtime_gate:
+            validate_stage1_5d_summary(args.stage1_5d_summary)
     except Exception as e:
         logger.error(f"Stage 1.5D summary validation failed: {e}")
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
@@ -564,6 +573,7 @@ def main():
 
     pre_watermark_ignored = 0
     post_watermark_accepted = 0
+    runtime_gate_invalid_count = 0
 
     poll_index = 0
     start_sec = time.time()
@@ -677,8 +687,42 @@ def main():
         budget_status = classify_budget_status(active_count, estimated_req_rate)
         budget_state = {"budget_exceeded": budget_status == "rate_limit_budget_exceeded"}
 
+        # Check Stage 1.5D runtime gate or historical safety gate
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+            validate_stage1_5d_runtime_gate,
+            validate_historical_stage1_5d_safety_gate,
+        )
+        gate_valid = True
+        gate_res = {"valid": True, "reason": None}
+        stage1_5d_gate_mode = "legacy_stage1_5d_summary"
+        if args.historical_stage1_5d_summary or args.allow_historical_stage1_5d_safety_gate:
+            stage1_5d_gate_mode = "historical_baseline_safety_gate"
+            gate_res = validate_historical_stage1_5d_safety_gate(
+                summary_path=args.historical_stage1_5d_summary or args.stage1_5d_summary,
+                bootstrap_watermark_ms=args.historical_classification_bootstrap_watermark_ms,
+            )
+            gate_valid = gate_res["valid"]
+        elif args.stage1_5d_runtime_gate or args.stage1_5d_events_glob:
+            stage1_5d_gate_mode = "runtime_gate"
+            gate_target = args.stage1_5d_runtime_gate or os.path.dirname(args.stage1_5d_events_glob)
+            if gate_target:
+                expected_events_glob = args.stage1_5d_events_glob if args.stage1_5d_events_glob else ""
+                gate_res = validate_stage1_5d_runtime_gate(
+                    gate_target,
+                    expected_events_glob=expected_events_glob,
+                    now_ms=now_ms,
+                )
+                gate_valid = gate_res["valid"]
+
+        block_new_event_admission = not gate_valid
+        if not gate_valid:
+            runtime_gate_invalid_count += 1
+            logger.warning(f"Stage 1.5D runtime gate invalid ({gate_res.get('reason')}). Blocking new event ingestion and watermark advancement.")
+            events = []
+
         # 6.2.1 Re-evaluate existing pending states
-        for pending_id, pending_state in list(states.items()):
+        for pending_id, pending_state in ([] if block_new_event_admission else list(states.items())):
+
             if not pending_state.status.startswith("pending_"):
                 continue
 
@@ -1092,6 +1136,18 @@ def main():
             historical_anchor_newly_ignored_this_poll=historical_anchor_newly_ignored_this_poll,
             bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,
             malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
+            runtime_gate_context={
+                "stage1_5d_gate_mode": stage1_5d_gate_mode,
+                "stage1_5d_runtime_gate_path": args.stage1_5d_runtime_gate,
+                "stage1_5d_runtime_gate_decision": gate_res.get("decision") or gate_res.get("status") or "",
+                "stage1_5d_runtime_gate_last_validated_at_ms": now_ms,
+                "stage1_5d_runtime_gate_stale": bool(gate_res.get("stale", False)),
+                "stage1_5d_runtime_gate_invalid_count": runtime_gate_invalid_count,
+                "cross_root_upstream_summary_dependency": bool(args.stage1_5d_runtime_gate and args.stage1_5d_summary),
+                "historical_stage1_5d_gate_reason": args.historical_stage1_5d_gate_reason,
+                "block_new_event_admission": block_new_event_admission,
+                "runtime_gate_diagnostic_count": runtime_gate_invalid_count,
+            },
         )
         write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
 

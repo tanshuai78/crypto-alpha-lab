@@ -982,3 +982,46 @@ def test_bapi_identity_mismatch_is_integrity_failure_with_support_fallback():
     assert state["retryable"] is False
     assert state["integrity_alert"] is True
     assert state["support_fallback_allowed"] is True
+
+
+def test_bapi_parser_diagnostics_round_trip():
+    raw_state = {
+        "art1": {
+            "source_article_id": "art1",
+            "last_bapi_detail_status": "success",
+            "last_bapi_payload_hash": "hash123",
+            "last_bapi_parser_version": "stage1_5d_symbol_extraction_v3",
+            "last_bapi_parser_status": "no_symbols",
+            "last_bapi_parse_attempt_at_ms": 1000,
+            "launch_anchor_policy": "bapi_multi_contract_strict",
+            "required_launch_anchor_source": "detail_per_symbol_time_or_exchangeinfo_onboard",
+        }
+    }
+    serialized = serialize_retry_articles(raw_state)
+    assert serialized["art1"]["last_bapi_detail_status"] == "success"
+    assert serialized["art1"]["last_bapi_payload_hash"] == "hash123"
+    assert serialized["art1"]["last_bapi_parser_version"] == "stage1_5d_symbol_extraction_v3"
+    assert serialized["art1"]["last_bapi_parser_status"] == "no_symbols"
+    assert serialized["art1"]["last_bapi_parse_attempt_at_ms"] == 1000
+    assert serialized["art1"]["launch_anchor_policy"] == "bapi_multi_contract_strict"
+    assert serialized["art1"]["required_launch_anchor_source"] == "detail_per_symbol_time_or_exchangeinfo_onboard"
+
+
+def test_v1_scheduler_state_loads_with_safe_defaults(tmp_path):
+    import json
+    v1_json = {
+        "metadata_version": 1,
+        "articles": {
+            "art1": {"source_article_id": "art1", "title": "Test Title"}
+        },
+        "endpoint_health": {}
+    }
+    file_path = tmp_path / "detail_retry_scheduler_state.json"
+    file_path.write_text(json.dumps(v1_json))
+    loaded = load_detail_retry_scheduler_state(tmp_path)
+    art = loaded["articles"]["art1"]
+    assert art["last_bapi_detail_status"] is None
+    assert art["last_bapi_parser_status"] is None
+    assert art["launch_anchor_policy"] is None
+
+

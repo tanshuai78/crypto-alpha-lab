@@ -1525,6 +1525,15 @@ EXTERNAL_SIGNAL_STAGE1_5D_MIN_OPERATIONAL_OBSERVATION_HOURS = 24
 EXTERNAL_SIGNAL_STAGE1_5D_MIN_POLL_SUCCESS_RATE = 0.95
 EXTERNAL_SIGNAL_STAGE1_5D_MAX_HEARTBEAT_GAP_COUNT = 1
 
+EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_STALENESS_SEC = 180
+# Maximum age for a live Stage 1.5D runtime gate before Stage 1.5F must fail closed for new admissions.
+
+EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_REVALIDATION_INTERVAL_SEC = 60
+# Stage 1.5F runtime gate revalidation cadence.
+
+EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_CONSECUTIVE_FAILURES = 3
+# Consecutive Stage 1.5D poll failures that make the runtime gate degraded.
+
 EXTERNAL_SIGNAL_STAGE1_5D_FIRST_BAR_OBSERVATION_TIMEOUT_HOURS = 24
 EXTERNAL_SIGNAL_STAGE1_5D_FIRST_BAR_POLL_INTERVAL_SEC = 60
 EXTERNAL_SIGNAL_STAGE1_5D_FIRST_BAR_CHECK_BUDGET_PER_POLL = 3
@@ -1580,8 +1589,18 @@ EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC = 15 * 60
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEFERRED_MANIFEST_MIN_INTERVAL_SEC = 15 * 60
 # Per-article minimum interval for compacted announcement_detail_deferred diagnostic rows.
 
-EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 1
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 2
 # Audit metadata version for Stage 1.5D detail retry scheduler diagnostics.
+
+EXTERNAL_SIGNAL_STAGE1_5D_BAPI_SCHEDULE_LINE_LOOKAHEAD = 4
+# Maximum logical lines to look ahead when matching a separated launch schedule time line.
+
+EXTERNAL_SIGNAL_STAGE1_5D_MAX_LAUNCH_TIME_DISAGREEMENT_MS = 0
+# Maximum launch time disagreement in ms across Candidate sets (0 for strict exact agreement).
+
+EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC = 3600
+# Minimum seconds before re-parsing same payload hash after trusted BAPI parser returned no symbols.
+
 
 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEGRADED_RECENT_ARTICLE_WINDOW_SEC = 3 * 60 * 60
 # Articles detected within this window are considered recent enough for protected degraded retry cadence.

@@ -36,8 +36,10 @@ def build_stream_paths(output_root: str | Path, timestamp_ms: int) -> dict[str, 
         "request_manifest": build_daily_path(root_path, "request_manifest", timestamp_ms),
         "detail_retry_scheduler_diagnostics": build_daily_path(root_path, "detail_retry_scheduler_diagnostics", timestamp_ms),
         "detail_retry_terminal_diagnostics": build_daily_path(root_path, "detail_retry_terminal_diagnostics", timestamp_ms),
+        "bapi_parse_results": build_daily_path(root_path, "bapi_parse_results", timestamp_ms),
         "summary": root_path / "binance_futures_launch_smoke_summary.json",
     }
+
 
 
 def append_jsonl(path: str | Path, row: dict) -> None:

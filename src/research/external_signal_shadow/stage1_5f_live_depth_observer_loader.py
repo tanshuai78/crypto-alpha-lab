@@ -10,6 +10,212 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark
 )
 
 
+from pathlib import Path
+from src.risk.limits import RiskLimits
+
+
+RUNTIME_GATE_SAFETY_FALSE_FIELDS = (
+    "execution_feasibility_claim_allowed",
+    "trade_signal_allowed",
+    "paper_trading_allowed",
+    "live_trading_allowed",
+    "execution_engine_allowed",
+    "alpha_interpretation_allowed",
+)
+
+
+def derive_stage1_5d_root_from_events_glob(events_glob: str) -> Path | None:
+    if not events_glob:
+        return None
+    normalized = events_glob.replace("\\", "/")
+    marker = "/events/"
+    if marker in normalized:
+        return Path(normalized.split(marker, 1)[0]).resolve()
+    path = Path(events_glob)
+    if path.name == "*.jsonl" and path.parent.name == "events":
+        return path.parent.parent.resolve()
+    if path.parent.name == "events":
+        return path.parent.parent.resolve()
+    return path.parent.resolve()
+
+
+def validate_stage1_5d_runtime_gate(
+    stage1_5d_root_or_gate_path: str | Path,
+    expected_events_glob: str = "",
+    now_ms: int | None = None,
+) -> dict:
+    path = Path(stage1_5d_root_or_gate_path)
+    if path.is_dir():
+        gate_file = path / "live_safety_gate_summary.json"
+    else:
+        gate_file = path
+
+    if not gate_file.exists() or not gate_file.is_file():
+        return {
+            "valid": False,
+            "status": "MISSING",
+            "reason": "runtime_gate_file_missing_or_corrupt",
+            "gate_summary": None,
+        }
+
+    try:
+        gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {
+            "valid": False,
+            "status": "CORRUPT",
+            "reason": "runtime_gate_file_missing_or_corrupt",
+            "error": str(e),
+            "gate_summary": None,
+        }
+
+    if gate_data.get("runtime_gate_schema_version") != 1:
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision", "UNKNOWN"),
+            "status": gate_data.get("status", "UNKNOWN"),
+            "reason": "runtime_gate_unsupported_version",
+            "gate_summary": gate_data,
+        }
+
+    if gate_data.get("fatal_blockers"):
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision"),
+            "status": "FAILED",
+            "reason": "runtime_gate_fatal_blockers_present",
+            "gate_summary": gate_data,
+        }
+
+    if gate_data.get("decision") != "stage1_5d_runtime_gate_ready":
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision"),
+            "status": gate_data.get("status", "NOT_READY"),
+            "reason": "runtime_gate_not_ready",
+            "gate_summary": gate_data,
+        }
+
+    if not gate_data.get("consumable_by_stage1_5f"):
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision"),
+            "status": gate_data.get("status"),
+            "reason": "runtime_gate_not_consumable",
+            "gate_summary": gate_data,
+        }
+
+    missing_or_true = [
+        field for field in RUNTIME_GATE_SAFETY_FALSE_FIELDS
+        if gate_data.get(field) is not False
+    ]
+    if missing_or_true:
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision"),
+            "status": "FAILED",
+            "reason": "runtime_gate_safety_field_missing_or_true",
+            "unsafe_fields": missing_or_true,
+            "gate_summary": gate_data,
+        }
+
+    if gate_data.get("live_trading_enabled") or RiskLimits.live_trading_enabled:
+        return {
+            "valid": False,
+            "decision": gate_data.get("decision"),
+            "status": "FAILED",
+            "reason": "live_trading_enabled_invariant_violation",
+            "gate_summary": gate_data,
+        }
+
+    if expected_events_glob:
+        expected_root = derive_stage1_5d_root_from_events_glob(expected_events_glob)
+        gate_root = Path(gate_data.get("source_root") or "").resolve()
+        if expected_root is None or gate_root != expected_root:
+            return {
+                "valid": False,
+                "decision": gate_data.get("decision"),
+                "status": gate_data.get("status"),
+                "reason": "runtime_gate_root_mismatch",
+                "expected_root": str(expected_root) if expected_root else "",
+                "source_root": str(gate_root),
+                "gate_summary": gate_data,
+            }
+
+    if now_ms is not None:
+        generated_at_ms = int(gate_data.get("generated_at_ms") or 0)
+        max_staleness_ms = int(getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_STALENESS_SEC", 180) * 1000)
+        if generated_at_ms <= 0 or now_ms - generated_at_ms > max_staleness_ms:
+            return {
+                "valid": False,
+                "decision": gate_data.get("decision"),
+                "status": gate_data.get("status"),
+                "reason": "runtime_gate_stale",
+                "stale": True,
+                "gate_age_ms": now_ms - generated_at_ms if generated_at_ms else None,
+                "gate_summary": gate_data,
+            }
+
+    return {
+        "valid": True,
+        "decision": gate_data.get("decision"),
+        "status": "READY",
+        "reason": None,
+        "stale": False,
+        "gate_summary": gate_data,
+    }
+
+
+def validate_historical_stage1_5d_safety_gate(
+    summary_path: str | Path,
+    bootstrap_watermark_ms: int | None,
+) -> dict:
+    path = Path(summary_path)
+    if not path.exists() or not path.is_file():
+        return {
+            "valid": False,
+            "reason": "historical_summary_missing",
+        }
+
+    if bootstrap_watermark_ms is None:
+        return {
+            "valid": False,
+            "reason": "historical_classification_bootstrap_watermark_missing",
+        }
+
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {
+            "valid": False,
+            "reason": f"historical_summary_corrupt:{e}",
+        }
+
+    if summary.get("decision") != "stage1_5d_smoke_ready":
+        return {
+            "valid": False,
+            "reason": "historical_summary_decision_not_ready",
+        }
+
+    if summary.get("fatal_blockers"):
+        return {
+            "valid": False,
+            "reason": "historical_summary_fatal_blockers_present",
+        }
+
+    if summary.get("live_trading_enabled") or RiskLimits.live_trading_enabled:
+        return {
+            "valid": False,
+            "reason": "live_trading_enabled_invariant_violation",
+        }
+
+    return {
+        "valid": True,
+        "reason": None,
+        "summary": summary,
+    }
+
+
 def historical_anchor_classification_allowed(watermark) -> bool:
     return (
         getattr(watermark, "watermark_schema_version", 1) >= 2
@@ -21,6 +227,7 @@ def get_immutable_bootstrap_watermark_ms(watermark) -> int | None:
     if not historical_anchor_classification_allowed(watermark):
         return None
     return int(watermark.bootstrap_max_seen_detected_at_ms)
+
 
 
 def iter_stage1_5d_event_rows(events_glob: str):

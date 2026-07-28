@@ -66,9 +66,11 @@ def build_live_depth_observer_summary(
     historical_anchor_newly_ignored_this_poll: int = 0,
     bootstrap_watermark_missing_diagnostic_count: int = 0,
     malformed_terminal_diagnostic_count: int = 0,
+    runtime_gate_context: dict | None = None,
 ) -> LiveDepthObserverSummary:
 
     pending_states = pending_states or []
+    runtime_gate_context = runtime_gate_context or {}
     active_count = len(active_states)
     completed_count = len(completed_states)
     expired_count = len(expired_states)
@@ -241,6 +243,16 @@ def build_live_depth_observer_summary(
         historical_anchor_newly_ignored_this_poll=historical_anchor_newly_ignored_this_poll,
         bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,
         malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
+        stage1_5d_gate_mode=runtime_gate_context.get("stage1_5d_gate_mode", "unknown"),
+        stage1_5d_runtime_gate_path=runtime_gate_context.get("stage1_5d_runtime_gate_path", ""),
+        stage1_5d_runtime_gate_decision=runtime_gate_context.get("stage1_5d_runtime_gate_decision", ""),
+        stage1_5d_runtime_gate_last_validated_at_ms=runtime_gate_context.get("stage1_5d_runtime_gate_last_validated_at_ms"),
+        stage1_5d_runtime_gate_stale=bool(runtime_gate_context.get("stage1_5d_runtime_gate_stale", False)),
+        stage1_5d_runtime_gate_invalid_count=int(runtime_gate_context.get("stage1_5d_runtime_gate_invalid_count", 0)),
+        cross_root_upstream_summary_dependency=bool(runtime_gate_context.get("cross_root_upstream_summary_dependency", False)),
+        historical_stage1_5d_gate_reason=runtime_gate_context.get("historical_stage1_5d_gate_reason", ""),
+        block_new_event_admission=bool(runtime_gate_context.get("block_new_event_admission", False)),
+        runtime_gate_diagnostic_count=int(runtime_gate_context.get("runtime_gate_diagnostic_count", 0)),
         execution_feasibility_claim_allowed=False,
         trade_signal_allowed=False,
         paper_trading_allowed=False,

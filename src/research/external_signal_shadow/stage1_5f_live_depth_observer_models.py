@@ -294,6 +294,16 @@ class LiveDepthObserverSummary:
     historical_anchor_newly_ignored_this_poll: int = 0
     bootstrap_watermark_missing_diagnostic_count: int = 0
     malformed_terminal_diagnostic_count: int = 0
+    stage1_5d_gate_mode: str = "unknown"
+    stage1_5d_runtime_gate_path: str = ""
+    stage1_5d_runtime_gate_decision: str = ""
+    stage1_5d_runtime_gate_last_validated_at_ms: int | None = None
+    stage1_5d_runtime_gate_stale: bool = False
+    stage1_5d_runtime_gate_invalid_count: int = 0
+    cross_root_upstream_summary_dependency: bool = False
+    historical_stage1_5d_gate_reason: str = ""
+    block_new_event_admission: bool = False
+    runtime_gate_diagnostic_count: int = 0
     # L0/L1 Risk & Compliance controls hard-gates:
     execution_feasibility_claim_allowed: bool = False
     trade_signal_allowed: bool = False

@@ -77,8 +77,9 @@ def test_normalize_event_adds_symbol_extraction_diagnostics_for_title_symbols():
     assert row["detail_fetch_status"] == "not_needed"
     assert row["symbol_parse_failed_reason"] is None
     assert row["symbol_parse_status"] == "parsed"
-    assert row["parser_version"] == "stage1_5d_symbol_extraction_v2"
-    assert row["symbol_extraction_version"] == 2
+    assert row["parser_version"] == "stage1_5d_symbol_extraction_v3"
+    assert row["symbol_extraction_version"] == 3
+
 
 
 def test_normalize_event_adds_terminal_failed_diagnostics_when_no_symbols_without_detail():
@@ -563,3 +564,79 @@ def test_minimized_schedule_fixture_preserves_expected_schedule_structure():
     assert result["symbols"]
     assert result["extracted_text"]
     assert "UTC" in result["extracted_text"]
+
+
+def test_a827_real_frozen_fixture_hash_matches_expected():
+    import hashlib, json
+    from pathlib import Path
+
+    fixture = Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_a827_real_frozen_fixture.json")
+    meta = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_a827_real_frozen_fixture_metadata.json").read_text())
+    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == meta["fixture_sha256"]
+    payload = json.loads(fixture.read_text())
+    assert payload.get("data", {}).get("code") == meta["articleCode"]
+
+
+def test_a827_bapi_fixture_extracts_symbols_and_launch_times():
+    import json
+    from pathlib import Path
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_bapi_article_payload,
+    )
+
+    payload = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_a827_real_frozen_fixture.json").read_text())
+    meta = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_a827_real_frozen_fixture_metadata.json").read_text())
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, title=meta["title"])
+    assert result["symbols"] == meta["expected_symbols"]
+    assert result["symbol_launch_times_ms"] == meta["expected_symbol_launch_times_ms"]
+
+
+def test_stage1_5d_parser_versions_are_v3():
+    from src.research.external_signal_shadow import stage1_5d_live_event_source_parser as p
+    assert p.PARSER_VERSION == "stage1_5d_symbol_extraction_v3"
+    assert p.SYMBOL_EXTRACTION_VERSION == 3
+    assert p.LAUNCH_SCHEDULE_PARSER_VERSION == "stage1_5d_bapi_launch_schedule_v1"
+
+
+def test_bapi_table_launch_schedule_symbol_time_count_mismatch_is_diagnostic():
+    payload = {
+        "code": "000000",
+        "data": {
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts",
+            "body": "<table><tr><th>USDⓈ-M Perpetual Contract</th><th>AAAUSDT</th><th>BBBUSDT</th></tr><tr><th>Launch Time</th><th>2026-07-27 13:30 (UTC)</th></tr></table>"
+        }
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts")
+    assert result["symbols"] == []
+    assert result["symbol_launch_times_ms"] == {}
+    assert result["parser_status"] == "launch_schedule_ambiguous"
+    assert result["consumable_event_allowed"] is False
+
+
+def test_bapi_table_parser_does_not_capture_disclaimer_symbols():
+    payload = {
+        "code": "000000",
+        "data": {
+            "title": "Binance Futures Will Launch TMFUSDT Perpetual Contract",
+            "body": "<p>Binance Futures will launch TMFUSDT Perpetual Contract at 2026-07-27 13:30 (UTC).</p><p>Disclaimer: BTCUSDT is a benchmark asset.</p>"
+        }
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, title="Binance Futures Will Launch TMFUSDT Perpetual Contract")
+    assert result["symbols"] == ["TMFUSDT"]
+    assert "BTCUSDT" not in result["symbols"]
+
+
+def test_bapi_table_parser_duplicate_mobile_desktop_table_is_ambiguous():
+    payload = {
+        "code": "000000",
+        "data": {
+            "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts",
+            "body": "<div><table><tr><th>USDⓈ-M Perpetual Contract</th><th>TMFUSDT</th></tr><tr><th>Launch Time</th><th>2026-07-27 13:30 (UTC)</th></tr></table><table><tr><th>USDⓈ-M Perpetual Contract</th><th>TMFUSDT</th></tr><tr><th>Launch Time</th><th>2026-07-27 13:30 (UTC)</th></tr></table></div>"
+        }
+    }
+    result = extract_symbol_candidates_from_bapi_article_payload(payload, title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts")
+    assert result["parser_status"] == "launch_schedule_ambiguous"
+    assert result["consumable_event_allowed"] is False
+
+
+

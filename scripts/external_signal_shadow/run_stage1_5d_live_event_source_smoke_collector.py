@@ -29,11 +29,13 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_first_bar i
 from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
     PARSER_VERSION,
     SYMBOL_EXTRACTION_VERSION,
+    LAUNCH_SCHEDULE_PARSER_VERSION,
     extract_symbol_candidates_from_detail_payload,
     extract_symbol_candidates_from_bapi_article_payload,
     normalize_live_event,
     extract_symbol_candidates_from_title,
 )
+
 from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
     append_jsonl,
     build_stream_paths,
@@ -60,6 +62,12 @@ from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import
     classify_detail_source_failure,
     summarize_detail_retry_overdue_state,
 )
+from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
+    build_stage1_5d_runtime_gate,
+    write_stage1_5d_runtime_gate,
+    get_stage1_5d_runtime_gate_filename,
+)
+
 
 
 
@@ -151,6 +159,8 @@ def build_effective_launch_times_ms(
     symbol_launch_times_ms: dict[str, int],
     source_published_at_ms: int,
     first_detected_at_ms: int,
+    allow_release_date_fallback: bool = True,
+    allow_legacy_max_age_fallback: bool = True,
 ) -> dict:
     effective = {}
     sources = set()
@@ -161,27 +171,56 @@ def build_effective_launch_times_ms(
         elif s in symbol_launch_times_ms and symbol_launch_times_ms[s] > 0:
             effective[s] = symbol_launch_times_ms[s]
             sources.add("detail")
-        elif source_published_at_ms > 0:
+        elif allow_release_date_fallback and source_published_at_ms > 0:
             effective[s] = source_published_at_ms
             sources.add("article_release_date")
-        else:
+        elif allow_legacy_max_age_fallback:
             legacy_max_age_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 3600) * 1000
             effective[s] = first_detected_at_ms + legacy_max_age_ms
             sources.add("legacy_max_age")
-            
+        else:
+            effective[s] = 0
+            sources.add("none")
+
     if "exchange_info" in sources:
         source_str = "exchange_info"
     elif "detail" in sources:
         source_str = "detail"
     elif "article_release_date" in sources:
         source_str = "article_release_date"
-    else:
+    elif "legacy_max_age" in sources:
         source_str = "legacy_max_age"
-        
+    else:
+        source_str = "none"
+
     return {
         "symbol_effective_launch_times_ms": effective,
         "launch_time_source": source_str,
     }
+
+
+def is_multi_symbol_article_ready_to_emit(
+    candidate_symbols: list[str],
+    validation_result: dict,
+    effective_launch: dict,
+    state: dict | None = None,
+) -> bool:
+    candidates = list(candidate_symbols or [])
+    validated = set(validation_result.get("validated_symbols") or [])
+    pending = validation_result.get("pending_symbols") or []
+    rejected = validation_result.get("rejected_symbols") or []
+    launch_times = effective_launch.get("symbol_effective_launch_times_ms") or {}
+
+    if len(candidates) == 0:
+        return False
+    if len(validated) != len(candidates) or set(candidates) != validated:
+        return False
+    if pending or rejected:
+        return False
+    if not all(int(launch_times.get(sym) or 0) > 0 for sym in candidates):
+        return False
+    return True
+
 
 
 def should_expire_candidate_validation(state: dict, now_ms: int) -> bool:
@@ -409,7 +448,9 @@ def main():
 
     # 2. Validate Upstream Evidence
     evidence_res = validate_upstream_evidence(args.stage1_5c1_summary, args.stage1_5c_summary)
+    prior_stage_safety_prerequisite_met = bool(evidence_res.get("upstream_evidence_valid", True))
     if not evidence_res["upstream_evidence_valid"]:
+
         invalid_summary = {
             "decision": "stage1_5d_smoke_invalid",
             "blockers": ["upstream_evidence_missing_or_invalid"] + evidence_res["blockers"],
@@ -434,6 +475,13 @@ def main():
     # 3. Main Polling Loop
     start_time = time.time()
     poll_count = 0
+    poll_success_count = 0
+    poll_failed_count = 0
+    consecutive_failed_polls = 0
+    source_format_drift_count = 0
+    schema_parse_error_count = 0
+    storage_budget_passed = True
+    detail_budget_starved_count = 0
     heartbeats = []
     events_detected = []
     seen_event_ids = set()
@@ -443,6 +491,9 @@ def main():
     symbol_parsed_event_count = 0
     symbol_parse_failed_count = 0
     last_poll_started_at_ms = None
+    first_poll_started_at_ms = None
+
+
 
     detail_retry_state = {}
     scheduler_state = load_detail_retry_scheduler_state(output_root)
@@ -495,10 +546,26 @@ def main():
             "symbol_launch_times_ms": article.get("symbol_launch_times_ms", {}),
             "symbol_onboard_times_ms": article.get("symbol_onboard_times_ms", {}),
             "symbol_effective_launch_times_ms": article.get("symbol_effective_launch_times_ms", {}),
-            "launch_time_source": article.get("launch_time_source"),
             "last_detail_failure_class": article.get("last_detail_failure_class"),
             "detail_retryable": article.get("detail_retryable"),
+            "last_bapi_detail_status": article.get("last_bapi_detail_status"),
+            "last_bapi_payload_hash": article.get("last_bapi_payload_hash"),
+            "last_bapi_parser_version": article.get("last_bapi_parser_version"),
+            "last_bapi_parser_status": article.get("last_bapi_parser_status"),
+            "last_bapi_parser_failure_reason": article.get("last_bapi_parser_failure_reason"),
+            "last_bapi_parse_attempt_at_ms": article.get("last_bapi_parse_attempt_at_ms"),
+            "last_support_detail_status": article.get("last_support_detail_status"),
+            "last_support_failure_class": article.get("last_support_failure_class"),
+            "parsed_candidate_symbols": article.get("parsed_candidate_symbols"),
+            "candidate_provenance": article.get("candidate_provenance"),
+            "launch_time_resolution_status": article.get("launch_time_resolution_status"),
+            "launch_anchor_policy": article.get("launch_anchor_policy"),
+            "required_launch_anchor_source": article.get("required_launch_anchor_source"),
+            "consumable_event_allowed": article.get("consumable_event_allowed"),
+            "symbol_launch_time_candidates_ms": article.get("symbol_launch_time_candidates_ms"),
+            "launch_time_conflict_ms": article.get("launch_time_conflict_ms"),
         }
+
 
     detail_fetch_attempted_count = 0
     detail_fetch_fallback_attempt_count = 0
@@ -570,8 +637,38 @@ def main():
         "/bapi/composite/v1/public/cms/article/list/query",
     )
 
+    fatal_blockers = []
     source_parent_url = "https://www.binance.com/en/support/announcement"
     output_root.mkdir(parents=True, exist_ok=True)
+
+    # Write startup runtime gate (INITIALIZING)
+    init_gate_context = {
+        "output_root": output_root,
+        "run_id": output_root.name,
+        "events_stream_relative_path": "events/*.jsonl",
+        "live_public_readonly": args.live_public_readonly,
+        "generated_at_ms": int(time.time() * 1000),
+        "first_poll_started_at_ms": 0,
+        "last_poll_finished_at_ms": 0,
+        "last_successful_poll_at_ms": 0,
+        "poll_attempt_count": 0,
+        "successful_poll_count": 0,
+        "failed_poll_count": 0,
+        "consecutive_failed_polls": 0,
+        "fatal_blockers": fatal_blockers,
+        "prior_stage_safety_prerequisite_met": prior_stage_safety_prerequisite_met,
+
+        "fixture_run": bool(args.fixture_json),
+        "source_format_drift_active": False,
+        "schema_parse_error_active": False,
+        "storage_budget_passed": True,
+        "detail_endpoint_degraded_active": False,
+        "bapi_trusted_payload_rate": 1.0,
+        "symbol_parse_success_rate": 1.0,
+        "symbol_validation_success_rate": 1.0,
+        "scheduler_starved_expired_count": 0,
+    }
+    write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(init_gate_context))
 
     while True:
         if args.max_polls is not None and poll_count >= args.max_polls:
@@ -579,9 +676,13 @@ def main():
         if args.max_seconds is not None and (time.time() - start_time) >= args.max_seconds:
             break
 
+
         poll_count += 1
         now_ms = int(time.time() * 1000)
+        if first_poll_started_at_ms is None:
+            first_poll_started_at_ms = now_ms
         actual_poll_interval_sec = None
+
         poll_schedule_drift_ms = None
         if last_poll_started_at_ms is not None:
             actual_interval_ms = now_ms - last_poll_started_at_ms
@@ -739,7 +840,10 @@ def main():
         request_manifest.append(manifest_row)
 
         if payload:
+            poll_success_count += 1
+            consecutive_failed_polls = 0
             cycle_res = run_one_poll_cycle(
+
                 payload=payload,
                 detected_at_ms=now_ms,
                 source_parent_url="https://www.binance.com/en/support/announcement",
@@ -1293,10 +1397,17 @@ def main():
 
                 # Perform fetch
                 bapi_degraded = is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", now_ms)
+                bapi_recheck_interval_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC", 3600) * 1000
+                is_bapi_no_symbol_deduped = (
+                    state.get("last_bapi_payload_hash") is not None
+                    and state.get("last_bapi_parser_version") == PARSER_VERSION
+                    and state.get("last_bapi_parser_status") == "no_symbols"
+                    and (now_ms - int(state.get("last_bapi_parse_attempt_at_ms") or 0) < bapi_recheck_interval_ms)
+                )
                 bapi_handled = False
                 pattern = bapi_article_code_pattern
 
-                if not bapi_degraded and detail_http_requests_remaining > 0 and code and re.match(pattern, code):
+                if not bapi_degraded and not is_bapi_no_symbol_deduped and detail_http_requests_remaining > 0 and code and re.match(pattern, code):
                     bapi_url = build_bapi_article_detail_url(code)
 
                     bapi_res = None
@@ -1371,7 +1482,7 @@ def main():
                     bapi_manifest = {
                         "request_id": f"detail_bapi_{now_ms}_{code}",
                         "request_type": "announcement_detail",
-                        "audit_metadata_version": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 1),
+                        "audit_metadata_version": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 2),
                         "source_article_id": code,
                         "source_detail_url_normalized": state["source_detail_url_normalized"],
                         "source_type": "announcement_detail",
@@ -1408,6 +1519,11 @@ def main():
                         degraded_backoff_sec=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC,
                     )
 
+                    state["last_bapi_detail_status"] = "success" if bapi_is_trusted else "failure"
+                    state["last_bapi_payload_hash"] = bapi_write_res.get("raw_payload_sha256")
+                    state["last_bapi_parser_version"] = PARSER_VERSION
+                    state["last_bapi_parse_attempt_at_ms"] = now_ms
+
                     if bapi_is_trusted:
                         bapi_detail_success_count += 1
                         bapi_detail_trusted_payload_count += 1
@@ -1417,6 +1533,29 @@ def main():
                         )
 
                         bapi_parsed_symbols = bapi_extraction.get("symbols") or []
+                        state["last_bapi_parser_status"] = bapi_extraction.get("parser_status", "no_symbols" if not bapi_parsed_symbols else "parsed")
+                        state["last_bapi_parser_failure_reason"] = bapi_extraction.get("symbol_parse_failed_reason")
+                        state["parsed_candidate_symbols"] = bapi_parsed_symbols
+                        state["candidate_provenance"] = bapi_extraction.get("candidate_provenance")
+                        state["launch_time_resolution_status"] = bapi_extraction.get("launch_time_resolution_status")
+                        state["consumable_event_allowed"] = bapi_extraction.get("consumable_event_allowed")
+
+                        bapi_parse_audit_row = {
+                            "request_id": bapi_manifest["request_id"],
+                            "source_article_id": code,
+                            "payload_sha256": bapi_write_res.get("raw_payload_sha256"),
+                            "parser_version": PARSER_VERSION,
+                            "launch_schedule_parser_version": bapi_extraction.get("launch_schedule_parser_version", LAUNCH_SCHEDULE_PARSER_VERSION),
+                            "parser_status": bapi_extraction.get("parser_status", "no_symbols" if not bapi_parsed_symbols else "parsed"),
+                            "parser_failure_reason": bapi_extraction.get("symbol_parse_failed_reason"),
+                            "symbol_count": len(bapi_parsed_symbols),
+                            "launch_time_count": len(bapi_extraction.get("symbol_launch_times_ms") or {}),
+                            "fallback_reason": "bapi_trusted_parser_no_match" if not bapi_parsed_symbols else None,
+                            "candidate_provenance": bapi_extraction.get("candidate_provenance") or [],
+                            "parsed_at_ms": now_ms,
+                        }
+                        append_jsonl(stream_paths["bapi_parse_results"], bapi_parse_audit_row)
+
                         if bapi_parsed_symbols:
                             bapi_symbol_parse_success_count += 1
                             exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
@@ -2082,7 +2221,10 @@ def main():
             hb = cycle_res["heartbeat"]
 
         else:
+            poll_failed_count += 1
+            consecutive_failed_polls += 1
             hb = {
+
                 "poll_started_at_ms": now_ms,
                 "poll_completed_at_ms": int(time.time() * 1000),
                 "configured_poll_interval_sec": args.poll_interval_sec,
@@ -2168,10 +2310,38 @@ def main():
 
             first_bar_queue = processed + remaining
 
+        loop_gate_context = {
+            "output_root": output_root,
+            "run_id": output_root.name,
+            "events_stream_relative_path": "events/*.jsonl",
+            "live_public_readonly": args.live_public_readonly,
+            "generated_at_ms": int(time.time() * 1000),
+            "first_poll_started_at_ms": first_poll_started_at_ms or int(time.time() * 1000),
+            "last_poll_finished_at_ms": int(time.time() * 1000),
+            "last_successful_poll_at_ms": int(time.time() * 1000) if hb.get("poll_success") else 0,
+            "poll_attempt_count": poll_count,
+            "successful_poll_count": poll_success_count,
+            "failed_poll_count": poll_failed_count,
+            "consecutive_failed_polls": consecutive_failed_polls,
+            "fatal_blockers": fatal_blockers,
+            "prior_stage_safety_prerequisite_met": prior_stage_safety_prerequisite_met,
+            "fixture_run": bool(args.fixture_json),
+            "source_format_drift_active": source_format_drift_count > 0,
+            "schema_parse_error_active": schema_parse_error_count > 0,
+            "storage_budget_passed": storage_budget_passed,
+            "detail_endpoint_degraded_active": is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", int(time.time() * 1000)),
+            "bapi_trusted_payload_rate": 1.0 if bapi_detail_request_count == 0 else (bapi_detail_trusted_payload_count / float(bapi_detail_request_count)),
+            "symbol_parse_success_rate": 1.0 if bapi_detail_trusted_payload_count == 0 else (bapi_symbol_parse_success_count / float(bapi_detail_trusted_payload_count)),
+            "symbol_validation_success_rate": 1.0 if bapi_symbol_parse_success_count == 0 else (bapi_symbol_validation_success_count / float(bapi_symbol_parse_success_count)),
+            "scheduler_starved_expired_count": detail_budget_starved_count,
+        }
+        write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(loop_gate_context))
+
         if args.max_polls is not None and poll_count >= args.max_polls:
             break
 
         time.sleep(args.poll_interval_sec)
+
 
     end_time = time.time()
     observation_hours = (end_time - start_time) / 3600.0

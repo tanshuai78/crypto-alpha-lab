@@ -1972,3 +1972,166 @@ def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, mo
     diag_files = list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl"))
     diags = [json.loads(line) for f in diag_files for line in f.read_text().splitlines() if line.strip()]
     assert len(diags) == 1
+
+
+def test_1_5f_runner_blocks_events_when_runtime_gate_initializing(tmp_path):
+    import sys, json
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "event-gate-test",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "art_gate_test",
+        "stable_event_key": "binance_art_gate_MULTI",
+        "detected_at_ms": 1784822376255,
+        "symbols": ["GATEUSDT"],
+        "symbol_effective_launch_times_ms": {"GATEUSDT": 1780995600000},
+    }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+
+    # Initializing gate file
+    gate_dir = tmp_path / "gate_dir"
+    gate_dir.mkdir()
+    (gate_dir / "live_safety_gate_summary.json").write_text(json.dumps({
+        "gate_version": 1,
+        "status": "INITIALIZING",
+        "consumable_by_stage1_5f": False,
+        "fatal_blockers": [],
+        "live_trading_enabled": False,
+    }))
+
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "exchangeinfo.json").write_text(json.dumps({
+        "symbols": [{"symbol": "GATEUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1780996800000}]
+    }))
+
+    output_root = tmp_path / "out"
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--bootstrap-watermark",
+        ]
+        with pytest.raises(SystemExit):
+            main()
+
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--stage1-5d-runtime-gate", str(gate_dir / "live_safety_gate_summary.json"),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    state_file = output_root / "observer_state.jsonl"
+    assert not state_file.exists() or len(state_file.read_text().strip()) == 0
+
+
+def test_1_5f_runtime_gate_invalid_preserves_pending_without_promoting(tmp_path):
+    import sys, json, time
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+
+    now_ms = int(time.time() * 1000)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps(Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=now_ms - 10_000,
+        updated_at_ms=now_ms - 10_000,
+    ).to_dict()))
+
+    state_file = output_root / "observer_state.jsonl"
+    state_file.write_text(json.dumps({
+        "event_symbol_id": "pending-gate-symbol",
+        "event_id": "event-pending-gate",
+        "symbol": "GATEUSDT",
+        "detected_at_ms": now_ms - 20_000,
+        "status": "pending_launch_time_in_future",
+        "source_article_id": "article-pending-gate",
+        "stable_event_key": "binance_article_pending_gate_MULTI",
+        "stable_event_symbol_key": "binance_article_pending_gate_MULTI_GATEUSDT",
+        "observation_anchor_ms": now_ms - 1000,
+        "next_admission_check_at_ms": now_ms - 1000,
+        "first_seen_at_ms": now_ms - 20_000,
+    }) + "\n")
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "event-pending-gate",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "article-pending-gate",
+        "stable_event_key": "binance_article_pending_gate_MULTI",
+        "detected_at_ms": now_ms - 20_000,
+        "symbols": ["GATEUSDT"],
+        "symbol_effective_launch_times_ms": {"GATEUSDT": now_ms - 1000},
+    }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
+
+    gate_dir = tmp_path / "gate_dir"
+    gate_dir.mkdir()
+    (gate_dir / "live_safety_gate_summary.json").write_text(json.dumps({
+        "runtime_gate_schema_version": 1,
+        "decision": "stage1_5d_runtime_gate_initializing",
+        "source_root": str(tmp_path.resolve()),
+        "events_stream_relative_path": "events/*.jsonl",
+        "generated_at_ms": now_ms,
+        "fatal_blockers": [],
+        "consumable_by_stage1_5f": False,
+        "execution_feasibility_claim_allowed": False,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "exchangeinfo.json").write_text(json.dumps({
+        "symbols": [{"symbol": "GATEUSDT", "status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms - 1000}]
+    }))
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--stage1-5d-runtime-gate", str(gate_dir / "live_safety_gate_summary.json"),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    rows = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert rows[-1]["status"].startswith("pending_")
+    assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
+    assert not list((output_root / "depth_snapshots").glob("**/*.jsonl"))

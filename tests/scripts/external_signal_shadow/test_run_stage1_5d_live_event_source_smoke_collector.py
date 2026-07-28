@@ -441,8 +441,9 @@ def test_detail_request_manifest_and_payload_are_written(tmp_path):
     assert detail_row is not None
     assert "payload_sha256" in detail_row
     assert detail_row["payload_size_bytes"] > 0
-    assert detail_row["parser_version"] == "stage1_5d_symbol_extraction_v2"
-    assert detail_row["symbol_extraction_version"] == 2
+    assert detail_row["parser_version"] == "stage1_5d_symbol_extraction_v3"
+    assert detail_row["symbol_extraction_version"] == 3
+
 
     payload_file = output_root / detail_row["payload_path"]
     assert payload_file.exists()
@@ -3316,6 +3317,16 @@ def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
     def fake_fetch_payload(url, **kwargs):
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
 
+    def fake_fetch_bapi_article_detail(article_code, **kwargs):
+        return {
+            "ok": False,
+            "payload": None,
+            "raw_bytes": b"",
+            "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}",
+            "http_status": 503,
+            "error": "bapi_test_transient",
+        }
+
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
         "--live-public-readonly",
@@ -3328,9 +3339,10 @@ def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_fetch_bapi_article_detail):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     manifest_rows = _read_jsonl_files(output_root / "request_manifest")
@@ -4335,3 +4347,109 @@ def test_new_post_watermark_bapi_event_can_reach_1_5f_formal_acceptance(tmp_path
     }
     assert event["source_published_at_ms"] >= 1784640600000
     assert event["extraction_metadata"]["evidence_source"] == "official_article_body_confirmed"
+
+
+def test_bapi_parser_no_symbol_preserves_bapi_diagnostic_even_if_support_fallback_202():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import serialize_retry_articles
+    state = {
+        "art_no_sym": {
+            "source_article_id": "art_no_sym",
+            "last_bapi_detail_status": "success",
+            "last_bapi_payload_hash": "hash_no_sym",
+            "last_bapi_parser_version": "stage1_5d_symbol_extraction_v3",
+            "last_bapi_parser_status": "no_symbols",
+            "last_bapi_parse_attempt_at_ms": 1000,
+            "last_support_detail_status": "http_202_empty",
+        }
+    }
+    serialized = serialize_retry_articles(state)
+    assert serialized["art_no_sym"]["last_bapi_detail_status"] == "success"
+    assert serialized["art_no_sym"]["last_bapi_parser_status"] == "no_symbols"
+    assert serialized["art_no_sym"]["last_support_detail_status"] == "http_202_empty"
+
+
+def test_bapi_same_hash_same_parser_no_symbols_dedupes_high_frequency_retry():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import PARSER_VERSION
+    from configs import base
+    now_ms = 5000
+    recheck_ms = base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC * 1000
+    state = {
+        "last_bapi_payload_hash": "hash_same",
+        "last_bapi_parser_version": PARSER_VERSION,
+        "last_bapi_parser_status": "no_symbols",
+        "last_bapi_parse_attempt_at_ms": now_ms - 1000,
+    }
+    is_deduped = (
+        state.get("last_bapi_payload_hash") is not None
+        and state.get("last_bapi_parser_version") == PARSER_VERSION
+        and state.get("last_bapi_parser_status") == "no_symbols"
+        and (now_ms - int(state.get("last_bapi_parse_attempt_at_ms") or 0) < recheck_ms)
+    )
+    assert is_deduped is True
+
+
+def test_bapi_parser_version_change_allows_reparse_of_same_payload_hash():
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import PARSER_VERSION
+    from configs import base
+    now_ms = 5000
+    recheck_ms = base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC * 1000
+    state = {
+        "last_bapi_payload_hash": "hash_same",
+        "last_bapi_parser_version": "stage1_5d_symbol_extraction_v2", # old version
+        "last_bapi_parser_status": "no_symbols",
+        "last_bapi_parse_attempt_at_ms": now_ms - 1000,
+    }
+    is_deduped = (
+        state.get("last_bapi_payload_hash") is not None
+        and state.get("last_bapi_parser_version") == PARSER_VERSION
+        and state.get("last_bapi_parser_status") == "no_symbols"
+        and (now_ms - int(state.get("last_bapi_parse_attempt_at_ms") or 0) < recheck_ms)
+    )
+    assert is_deduped is False
+
+
+def test_multi_symbol_one_of_three_validated_does_not_emit_partial_event():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
+    candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
+    val_res = {"validated_symbols": ["TMFUSDT"], "pending_symbols": ["TBTUSDT", "BITOUSDT"], "rejected_symbols": []}
+    eff_launch = {"symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000}}
+    assert is_multi_symbol_article_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_multi_symbol_all_three_validated_emits():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
+    candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
+    val_res = {"validated_symbols": ["TMFUSDT", "TBTUSDT", "BITOUSDT"], "pending_symbols": [], "rejected_symbols": []}
+    eff_launch = {"symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000}}
+    assert is_multi_symbol_article_ready_to_emit(candidates, val_res, eff_launch) is True
+
+
+def test_bapi_multi_contract_missing_launch_time_does_not_use_article_release_date_anchor():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import build_effective_launch_times_ms
+    candidates = ["TMFUSDT", "TBTUSDT"]
+    res = build_effective_launch_times_ms(
+        candidate_symbols=candidates,
+        symbol_onboard_times_ms={},
+        symbol_launch_times_ms={},
+        source_published_at_ms=10000,
+        first_detected_at_ms=10000,
+        allow_release_date_fallback=False,
+        allow_legacy_max_age_fallback=False,
+    )
+    assert res["symbol_effective_launch_times_ms"]["TMFUSDT"] == 0
+    assert res["launch_time_source"] == "none"
+
+
+def test_pending_revalidation_never_reenables_release_date_fallback():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import build_effective_launch_times_ms
+    res = build_effective_launch_times_ms(
+        candidate_symbols=["TMFUSDT"],
+        symbol_onboard_times_ms={},
+        symbol_launch_times_ms={},
+        source_published_at_ms=10000,
+        first_detected_at_ms=10000,
+        allow_release_date_fallback=False,
+        allow_legacy_max_age_fallback=False,
+    )
+    assert res["launch_time_source"] != "article_release_date"
+

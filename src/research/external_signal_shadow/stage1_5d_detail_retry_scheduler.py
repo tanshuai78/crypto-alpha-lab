@@ -292,6 +292,23 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "launch_time_source": state.get("launch_time_source"),
             "last_detail_failure_class": state.get("last_detail_failure_class"),
             "detail_retryable": state.get("detail_retryable"),
+            # Schema V2 new BAPI parser and anchor fields
+            "last_bapi_detail_status": state.get("last_bapi_detail_status"),
+            "last_bapi_payload_hash": state.get("last_bapi_payload_hash"),
+            "last_bapi_parser_version": state.get("last_bapi_parser_version"),
+            "last_bapi_parser_status": state.get("last_bapi_parser_status"),
+            "last_bapi_parser_failure_reason": state.get("last_bapi_parser_failure_reason"),
+            "last_bapi_parse_attempt_at_ms": state.get("last_bapi_parse_attempt_at_ms"),
+            "last_support_detail_status": state.get("last_support_detail_status"),
+            "last_support_failure_class": state.get("last_support_failure_class"),
+            "parsed_candidate_symbols": state.get("parsed_candidate_symbols"),
+            "candidate_provenance": state.get("candidate_provenance"),
+            "launch_time_resolution_status": state.get("launch_time_resolution_status"),
+            "launch_anchor_policy": state.get("launch_anchor_policy"),
+            "required_launch_anchor_source": state.get("required_launch_anchor_source"),
+            "consumable_event_allowed": state.get("consumable_event_allowed"),
+            "symbol_launch_time_candidates_ms": state.get("symbol_launch_time_candidates_ms"),
+            "launch_time_conflict_ms": state.get("launch_time_conflict_ms"),
         }
     return serialized
 
@@ -299,17 +316,37 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
 def load_detail_retry_scheduler_state(output_root: Path) -> dict:
     path = output_root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME
     if not path.exists():
-        return {"metadata_version": 1, "articles": {}, "endpoint_health": {}}
+        return {"metadata_version": 2, "articles": {}, "endpoint_health": {}}
     with path.open("r", encoding="utf-8") as f:
         loaded = json.load(f)
     if not isinstance(loaded.get("articles"), dict):
         loaded["articles"] = {}
     if not isinstance(loaded.get("endpoint_health"), dict):
         loaded["endpoint_health"] = {}
+
+    for art in loaded["articles"].values():
+        art.setdefault("last_bapi_detail_status", None)
+        art.setdefault("last_bapi_payload_hash", None)
+        art.setdefault("last_bapi_parser_version", None)
+        art.setdefault("last_bapi_parser_status", None)
+        art.setdefault("last_bapi_parser_failure_reason", None)
+        art.setdefault("last_bapi_parse_attempt_at_ms", None)
+        art.setdefault("last_support_detail_status", None)
+        art.setdefault("last_support_failure_class", None)
+        art.setdefault("parsed_candidate_symbols", None)
+        art.setdefault("candidate_provenance", None)
+        art.setdefault("launch_time_resolution_status", None)
+        art.setdefault("launch_anchor_policy", None)
+        art.setdefault("required_launch_anchor_source", None)
+        art.setdefault("consumable_event_allowed", None)
+        art.setdefault("symbol_launch_time_candidates_ms", None)
+        art.setdefault("launch_time_conflict_ms", None)
+
     return loaded
 
 
-def write_detail_retry_scheduler_state(output_root: Path, state: dict, *, metadata_version: int) -> None:
+
+def write_detail_retry_scheduler_state(output_root: Path, state: dict, *, metadata_version: int = 2) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
     path = output_root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME
     tmp_path = path.with_suffix(".json.tmp")
@@ -317,6 +354,7 @@ def write_detail_retry_scheduler_state(output_root: Path, state: dict, *, metada
     serializable["metadata_version"] = metadata_version
     tmp_path.write_text(json.dumps(serializable, sort_keys=True), encoding="utf-8")
     tmp_path.replace(path)
+
 
 
 def update_detail_endpoint_health(

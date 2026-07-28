@@ -1,0 +1,23 @@
+{
+  "articleCode": "a827177a387e4ebea830110ba222ca48",
+  "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-27)",
+  "data_quality": "real_frozen_bapi_payload",
+  "payload_size_bytes": 103429,
+  "raw_payload_sha256": "5aeb68aa70a0f68b44e548899ab0db572072eeb7b77438dbfba56b6a112898e3",
+  "fixture_sha256": "5aeb68aa70a0f68b44e548899ab0db572072eeb7b77438dbfba56b6a112898e3",
+  "expected_symbols": [
+    "TMFUSDT",
+    "TBTUSDT",
+    "BITOUSDT"
+  ],
+  "expected_symbol_launch_times_ms": {
+    "TMFUSDT": 1785159000000,
+    "TBTUSDT": 1785159300000,
+    "BITOUSDT": 1785159600000
+  },
+  "expected_symbol_launch_times_utc": {
+    "TMFUSDT": "2026-07-27T13:30:00+00:00",
+    "TBTUSDT": "2026-07-27T13:35:00+00:00",
+    "BITOUSDT": "2026-07-27T13:40:00+00:00"
+  }
+}
