@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+from configs import base
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +43,27 @@ def select_detail_retry_attempts(
 
     never_attempted = []
     attempted = []
+    max_retries = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
     for code, state in detail_retry_state.items():
         if state.get("terminal_state"):
+            continue
+        if state.get("detail_fetch_status") == "not_needed" and not _not_needed_state_missing_launch_anchor(state):
             continue
         attempt_count = state.get("detail_http_request_count")
         if attempt_count is None:
             attempt_count = state.get("detail_fetch_attempt_count", 0)
-        if int(attempt_count or 0) <= 0:
+        cnt = int(attempt_count or 0)
+        if cnt >= max_retries:
+            continue
+        if cnt <= 0:
             never_attempted.append((code, state))
         else:
             attempted.append((code, state))
 
     never_attempted.sort(
         key=lambda item: (
+            0 if len(item[1].get("candidate_symbols") or item[1].get("symbols") or []) == 1 else
+            (1 if len(item[1].get("candidate_symbols") or item[1].get("symbols") or []) > 1 else 2),
             0 if _first_attempt_sla_breached(
                 item[1],
                 now_ms=now_ms,
@@ -187,6 +196,21 @@ def _is_overdue_detail_retryable(state: dict) -> bool:
     if state.get("detail_retryable") is False:
         return False
     return state.get("last_detail_failure_class") in ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES
+
+
+def _not_needed_state_missing_launch_anchor(state: dict) -> bool:
+    candidates = state.get("candidate_symbols") or []
+    if not candidates:
+        return False
+    launch_times = state.get("symbol_launch_times_ms") or {}
+    effective_sources = state.get("symbol_effective_launch_time_sources") or {}
+    for symbol in candidates:
+        sym = str(symbol or "").strip().upper()
+        if int(launch_times.get(sym) or 0) > 0:
+            return False
+        if str(effective_sources.get(sym) or "") in ("detail_symbol_launch_time", "exchangeinfo_onboard_date"):
+            return False
+    return True
 
 
 

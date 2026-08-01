@@ -29,6 +29,36 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader im
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState, Watermark
 
 
+def _formalize_launch_event(event: dict, symbol: str) -> dict:
+    """Return a formal v1 event fixture so tests can exercise post-contract gates."""
+    row = dict(event)
+    launch_ms = row.get("symbol_effective_launch_times_ms", {}).get(symbol)
+    if launch_ms is None:
+        raise AssertionError(f"formal fixture for {symbol} requires symbol_effective_launch_times_ms")
+    article_id = row.setdefault("source_article_id", f"article-{symbol.lower()}")
+    row.setdefault("event_id", f"{article_id}-{symbol}-event")
+    row.setdefault("stable_event_key", f"binance_{article_id}_{symbol}")
+    row.setdefault("symbols", [symbol])
+    row.setdefault("symbol_onboard_times_ms", {})
+    row.setdefault("detail_fetch_attempted", True)
+    row.setdefault("detail_fetch_status", "success")
+    row.setdefault("detail_fetch_variant", "bapi_article_detail_query")
+    row.setdefault("detail_confirmation_missing", False)
+    row.setdefault("parser_version", "stage1_5d_symbol_extraction_v3")
+    row.setdefault("symbol_extraction_version", 3)
+    row["formal_event_contract_version"] = 1
+    row["formal_event_consumable_by_stage1_5f"] = True
+    row["source_contract_status"] = "formal_v1_valid"
+    row["symbol_identity_validation_status"] = "validated_by_exchangeinfo"
+    row["symbol_launch_time_candidates_ms"] = {symbol: launch_ms}
+    row["symbol_effective_launch_time_sources"] = {symbol: "detail_symbol_launch_time"}
+    row["launch_anchor_validation_status"] = "valid"
+    row["launch_anchor_disagreement_ms"] = None
+    row["launch_anchor_comparison_status"] = "single_source_detail"
+    row["launch_anchor_evidence_level"] = "detail_confirmed"
+    return row
+
+
 
 def test_only_futures_contract_launch_is_eligible():
     event = {
@@ -71,13 +101,104 @@ def test_symbol_not_in_current_exchangeinfo_is_skipped_not_failed():
         "event_type": "futures_contract_launch",
         "detected_at_ms": 1000,
         "symbols": ["ABCUSDT"],
+        "source_article_id": "art1",
     }
     w = Watermark(1, 500, [], [], [], 500)
     exinfo = {"available": True, "symbols": {"XYZUSDT"}}  # ABCUSDT missing
 
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
-    assert status == "rejected"
-    assert reason == "symbol_not_in_exchangeinfo"
+    assert status == "pending"
+    assert reason == "pending_launch_anchor_missing"
+
+
+def test_legacy_unvalidated_post_watermark_event_becomes_pending_not_rejected():
+    event = {
+        "event_id": "e1",
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 1000,
+        "symbols": ["ABCUSDT"],
+    }
+    w = Watermark(1, 500, [], [], [], 500)
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}}
+
+    status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
+    assert status == "pending"
+    assert reason == "pending_launch_anchor_missing"
+
+
+def test_legacy_event_never_becomes_active_without_formal_v1_valid_revision():
+    event = {
+        "event_id": "e1",
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 1000,
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 1000},
+        "symbols": ["ABCUSDT"],
+        "formal_event_consumable_by_stage1_5f": False,  # Explicitly marked non-consumable
+    }
+    w = Watermark(1, 500, [], [], [], 500)
+    exinfo = {
+        "available": True,
+        "symbols": {"ABCUSDT"},
+        "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+    }
+
+    status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
+    assert status == "diagnostic_only"
+    assert reason == "explicit_non_consumable"
+
+
+def test_legacy_event_with_exchangeinfo_anchor_remains_pending_without_formal_revision():
+    event = {
+        "event_id": "e1",
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": 1000,
+        "symbols": ["ABCUSDT"],
+        "symbol_validation_status": "validated",
+        "detail_fetch_attempted": True,
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 1000},
+        "symbol_onboard_times_ms": {"ABCUSDT": 1000},
+    }
+    w = Watermark(1, 500, [], [], [], 500)
+    exinfo = {
+        "available": True,
+        "symbols": {"ABCUSDT"},
+        "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+    }
+
+    status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
+    assert status == "pending"
+    assert reason == "pending_source_event_unvalidated"
+
+
+def test_formal_v1_valid_event_can_become_eligible():
+    from src.research.external_signal_shadow.stage1_5_launch_event_contract import build_formal_launch_event
+    raw = {"source_article_id": "art1", "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract", "detected_at_ms": 1000}
+    s_rows = [{"symbol": "ABCUSDT", "effective_launch_time_ms": 1000, "onboard_time_ms": 1000, "launch_time_source": "bapi_detail_body", "identity_validation_status": "validated_by_exchangeinfo", "detail_fetch_attempted": True, "detail_fetch_status": "success", "detail_confirmation_missing": False}]
+    diag = {"launch_anchor_disagreement_ms": None, "launch_anchor_comparison_status": "single_source_detail", "launch_anchor_evidence_level": "detail_confirmed"}
+    formal_event = build_formal_launch_event(raw_event=raw, symbol_rows=s_rows, diagnostics=diag)
+
+    w = Watermark(1, 500, [], [], [], 500)
+    exinfo = {
+        "available": True,
+        "symbols": {"ABCUSDT"},
+        "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+    }
+
+    status, reason = classify_event_symbol_eligibility(formal_event, "ABCUSDT", 1000, w, exinfo, {})
+    assert status == "eligible"
+    assert reason == "eligible_clean_start"
+
+
+def test_static_check_no_production_return_of_symbol_not_in_exchangeinfo():
+    import glob
+    for p in glob.glob("src/research/external_signal_shadow/*.py") + glob.glob("scripts/external_signal_shadow/*.py"):
+        with open(p, "r", encoding="utf-8") as f:
+            content = f.read()
+            assert 'return "rejected", "symbol_not_in_exchangeinfo"' not in content, f"Forbidden legacy return string found in {p}"
+
 
 
 def test_exchangeinfo_unavailable_keeps_event_pending_not_symbol_not_found():
@@ -86,13 +207,16 @@ def test_exchangeinfo_unavailable_keeps_event_pending_not_symbol_not_found():
         "event_type": "futures_contract_launch",
         "detected_at_ms": 1000,
         "symbols": ["ABCUSDT"],
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 1000},
+        "symbol_validation_status": "validated",
     }
+    event = _formalize_launch_event(event, "ABCUSDT")
     w = Watermark(1, 500, [], [], [], 500)
     exinfo = {"available": False, "symbols": set()}  # exchangeInfo unavailable
 
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
     assert status == "pending"
-    assert reason == "exchangeinfo_unavailable"
+    assert reason == "pending_exchangeinfo_unavailable"
 
 
 def test_multiple_symbols_are_flattened_to_event_symbol_rows():
@@ -292,7 +416,9 @@ def test_missing_anchor_rechecks_latest_event_revision():
         "source_article_id": "article1",
         "symbols": ["ABCUSDT"],
         "symbol_effective_launch_times_ms": {"ABCUSDT": 15_000},
+        "symbol_validation_status": "validated",
     }
+    revision = _formalize_launch_event(revision, "ABCUSDT")
 
     result = re_resolve_pending_anchor(pending, [revision], {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}, now_ms=10_000)
 
@@ -334,7 +460,9 @@ def test_anchor_conflict_can_resolve_after_event_revision():
         "symbols": ["ABCUSDT"],
         "symbol_effective_launch_times_ms": {"ABCUSDT": 10_000},
         "symbol_onboard_times_ms": {"ABCUSDT": 10_000},
+        "symbol_validation_status": "validated",
     }
+    revision = _formalize_launch_event(revision, "ABCUSDT")
 
     result = re_resolve_pending_anchor(pending, [revision], {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}, now_ms=9_000)
 
@@ -391,6 +519,7 @@ def test_late_launch_start_is_recovery_only_not_clean():
         "symbols": ["ABCUSDT"],
         "symbol_effective_launch_times_ms": {"ABCUSDT": launch_ms},
     }
+    event = _formalize_launch_event(event, "ABCUSDT")
     w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
 
@@ -515,6 +644,7 @@ def test_delayed_launch_event_with_launch_time_after_watermark_bypasses_detected
         "symbol_effective_launch_times_ms": {"SPCXUSD1": launch_ms},
         "symbol_onboard_times_ms": {"SPCXUSD1": launch_ms},
     }
+    event = _formalize_launch_event(event, "SPCXUSD1")
     w = Watermark(1, now_ms - 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"SPCXUSD1"}}
 
@@ -681,6 +811,7 @@ def test_delayed_launch_event_uses_symbol_effective_launch_time_for_age_gate():
         "symbols": ["ETHUSD1"],
         "symbol_effective_launch_times_ms": {"ETHUSD1": now_ms - 5 * 60 * 1000},
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 
@@ -736,6 +867,7 @@ def test_launch_time_age_just_inside_15m_window_is_eligible():
         "symbols": ["ETHUSD1"],
         "symbol_effective_launch_times_ms": {"ETHUSD1": launch_ms},
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 
@@ -755,6 +887,7 @@ def test_launch_time_age_just_outside_15m_window_is_rejected():
         "symbols": ["ETHUSD1"],
         "symbol_effective_launch_times_ms": {"ETHUSD1": launch_ms},
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 
@@ -826,6 +959,7 @@ def test_eligibility_diagnostics_expose_observation_age_basis():
         "symbols": ["ETHUSD1"],
         "symbol_effective_launch_times_ms": {"ETHUSD1": now_ms - 5 * 60 * 1000},
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 
@@ -848,6 +982,7 @@ def test_rejected_age_exceeded_diagnostics_expose_observation_age_basis():
         "symbols": ["ETHUSD1"],
         "symbol_effective_launch_times_ms": {"ETHUSD1": launch_ms},
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 
@@ -926,6 +1061,7 @@ def test_regression_ethusd1_onboard_launch_time_delay_accepts():
         "symbol_onboard_times_ms": {"ETHUSD1": 1783069200000},
         "symbol_resolved_at_ms": 1783023650000,
     }
+    event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, 1783009167053, [], [], [], 1783009167053)
     exinfo = {"available": True, "symbols": {"ETHUSD1"}}
 

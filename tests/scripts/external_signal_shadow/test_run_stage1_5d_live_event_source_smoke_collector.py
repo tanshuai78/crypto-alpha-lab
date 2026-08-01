@@ -1,5 +1,7 @@
 import json
+import ast
 import time
+from pathlib import Path
 from unittest.mock import patch
 from configs import base
 
@@ -25,6 +27,39 @@ def _write_valid_upstream(tmp_path):
         "alpha_interpretation_allowed": False,
     }))
     return c1, c
+
+
+def test_only_formal_event_writer_can_append_events_stream():
+    source_path = Path("scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py")
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "id", "") != "append_jsonl":
+            continue
+        if not node.args:
+            continue
+        first_arg = ast.get_source_segment(source, node.args[0]) or ""
+        if 'stream_paths["events"]' not in first_arg:
+            continue
+        cur = node
+        parent_func = None
+        while cur in parents:
+            cur = parents[cur]
+            if isinstance(cur, ast.FunctionDef):
+                parent_func = cur.name
+                break
+        if parent_func != "append_formal_futures_launch_event":
+            violations.append((node.lineno, parent_func))
+
+    assert violations == []
 
 
 def test_runner_requires_live_flag_without_fixture(tmp_path):
@@ -79,6 +114,7 @@ def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
                         "code": "abc",
                         "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract",
                         "releaseDate": int(time.time() * 1000) - 1000,
+                        "detailPayload": "Binance Futures will launch USDⓈ-Margined ABCUSDT Perpetual Contract at 2026-08-01 12:00 (UTC).",
                     },
                     {
                         "code": "tradfi",
@@ -87,6 +123,9 @@ def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
                     },
                 ]
             }]
+        },
+        "exchangeInfoPayload": {
+            "symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}]
         }
     }))
     summary = tmp_path / "summary.json"
@@ -102,8 +141,31 @@ def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
         "--max-polls", "2",
         "--poll-interval-sec", "0",
     ]
-    with patch("sys.argv", args):
-        rc = main()
+    exchange_info = {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}]}
+
+    def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": exchange_info, "final_url": url, "http_status": 200, "error": None}
+        return {"ok": True, "payload": {}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        bapi_payload = {
+            "code": "000000",
+            "message": None,
+            "messageDetail": None,
+            "data": {
+                "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract",
+                "body": "Binance Futures will launch ABCUSDT at 2026-08-01 12:00 (UTC).",
+                "releaseDate": int(time.time() * 1000) - 1000,
+            },
+            "success": True,
+        }
+        return {"ok": True, "payload": bapi_payload, "final_url": url, "http_status": 200, "error": None}
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
     assert rc == 0
     s = json.loads(summary.read_text())
     assert s["raw_futures_launch_article_count"] == 4
@@ -158,9 +220,24 @@ def test_runner_live_first_bar_writes_exchangeinfo_manifest(tmp_path):
         "--max-polls", "1",
         "--poll-interval-sec", "0",
     ]
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        bapi_payload = {
+            "code": "000000",
+            "message": None,
+            "messageDetail": None,
+            "data": {
+                "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract",
+                "body": "Binance Futures will launch ABCUSDT at 2026-08-01 12:00 (UTC).",
+                "releaseDate": 1710000000000,
+            },
+            "success": True,
+        }
+        return {"ok": True, "payload": bapi_payload, "final_url": url, "http_status": 200, "error": None}
+
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch):
-        with patch("sys.argv", args):
-            rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+            with patch("sys.argv", args):
+                rc = main()
     assert rc == 0
     s = json.loads(summary.read_text())
     assert s["decision"] == "stage1_5d_event_detection_passed"
@@ -188,6 +265,17 @@ def test_detail_fetch_transient_failure_does_not_permanently_dedup_article(tmp_p
     def fake_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "AMDUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                    {"symbol": "QCOMUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908860000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         if "/support/announcement/tradfi" in url:
             calls["detail"] += 1
             if calls["detail"] == 1:
@@ -290,13 +378,13 @@ def test_detail_max_age_expired_marks_terminal_failed(tmp_path):
     assert rc == 0
     s = json.loads(summary.read_text())
 
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["symbols"] == []
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
-    assert events[0]["symbol_parse_failed_reason"] in {"detail_retry_max_age_exceeded", "detail_retry_exhausted"}
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "tradfi"]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["symbols"] == []
+    assert terminal_rows[0]["symbol_parse_status"] == "terminal_failed"
+    assert terminal_rows[0]["symbol_parse_failed_reason"] in {"detail_retry_max_age_exceeded", "detail_retry_exhausted"}
     assert s["detail_symbol_parse_failed_count"] >= 1
 
 
@@ -323,6 +411,17 @@ def test_detail_budget_deferred_retries_next_poll(tmp_path):
     def fake_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "AAPLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                    {"symbol": "MSFTUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908860000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         if "/support/announcement/tradfi1" in url:
             return {
                 "ok": True,
@@ -487,12 +586,12 @@ def test_detail_url_missing_marks_url_missing_without_crash(tmp_path):
     s = json.loads(summary.read_text())
     assert s["detail_fetch_url_rejected_count"] >= 1
 
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["detail_fetch_status"] == "url_missing"
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["detail_fetch_status"] == "url_missing"
+    assert terminal_rows[0]["symbol_parse_status"] == "terminal_failed"
 
 
 def test_detail_url_not_allowlisted_marks_terminal_failed_without_network(tmp_path):
@@ -532,12 +631,12 @@ def test_detail_url_not_allowlisted_marks_terminal_failed_without_network(tmp_pa
     s = json.loads(summary.read_text())
     assert s["detail_fetch_url_rejected_count"] >= 1
 
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["detail_fetch_status"] == "url_not_allowlisted"
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "evil_path"]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["detail_fetch_status"] == "url_not_allowlisted"
+    assert terminal_rows[0]["symbol_parse_status"] == "terminal_failed"
 
 
 def test_detail_redirect_to_non_allowlisted_host_rejected(tmp_path):
@@ -595,12 +694,12 @@ def test_detail_redirect_to_non_allowlisted_host_rejected(tmp_path):
     s = json.loads(summary.read_text())
     assert s["detail_fetch_url_rejected_count"] >= 1
 
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["detail_fetch_status"] == "final_url_not_allowlisted"
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "tradfi"]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["detail_fetch_status"] == "final_url_not_allowlisted"
+    assert terminal_rows[0]["symbol_parse_status"] == "terminal_failed"
 
 
 def test_runner_fixture_detail_payload_extracts_multiple_tradfi_symbols_without_network(tmp_path):
@@ -617,6 +716,13 @@ def test_runner_fixture_detail_payload_extracts_multiple_tradfi_symbols_without_
                     }
                 }]
             }]
+        },
+        "exchangeInfoPayload": {
+            "symbols": [
+                {"symbol": "AMDUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                {"symbol": "QCOMUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908860000},
+                {"symbol": "USARUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908920000},
+            ]
         }
     }))
 
@@ -777,13 +883,16 @@ def test_base_asset_derived_symbol_not_emitted_when_exchange_info_missing(tmp_pa
     assert rc == 0
     json.loads(summary.read_text())
 
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["symbols"] == ["BTCU", "ETHU"]
-    assert events[0]["symbol_validation_status"] == "rejected"
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "25da4614ffff435fa28544b27fd33a39"]
+    assert terminal_rows == []
+    state = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())
+    row = state["articles"]["25da4614ffff435fa28544b27fd33a39"]
+    assert row["candidate_symbols"] == ["BTCU", "ETHU"]
+    assert row["symbol_validation_status"] == "pending_candidate_set_readiness"
+    assert row["pending_reason"] == "multi_symbol_candidate_set_not_ready"
+    assert row.get("terminal_failure_type") is None
 
 
 def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
@@ -928,6 +1037,17 @@ def test_detail_retry_success_preserves_first_detected_at_ms(tmp_path):
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "AMDUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                    {"symbol": "NVDAUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908860000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -958,9 +1078,7 @@ def test_detail_retry_success_preserves_first_detected_at_ms(tmp_path):
                         rc = main()
 
     assert rc == 0
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
+    events = _read_jsonl_files(output_root / "events")
     assert len(events) == 1
     # Check that first_detected_at_ms is preserved
     assert events[0]["detected_at_ms"] == events[0]["first_detected_at_ms"]
@@ -985,6 +1103,16 @@ def test_detail_terminal_failed_paths_preserve_first_detected_at_ms(tmp_path):
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -1011,11 +1139,11 @@ def test_detail_terminal_failed_paths_preserve_first_detected_at_ms(tmp_path):
                     rc = main()
 
     assert rc == 0
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
-    assert len(events) == 1
-    assert events[0]["detected_at_ms"] == events[0]["first_detected_at_ms"]
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "tradfi"]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["detected_at_ms"] == terminal_rows[0]["first_detected_at_ms"]
 
 
 def test_failed_detail_request_writes_manifest_error_row(tmp_path):
@@ -1033,6 +1161,16 @@ def test_failed_detail_request_writes_manifest_error_row(tmp_path):
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -1476,14 +1614,14 @@ def test_rejected_candidate_validation_emits_terminal_diagnostic_event(tmp_path)
                 rc = main()
 
     assert rc == 0
-    event_files = list((output_root / "events").glob("*.jsonl"))
-    assert len(event_files) == 1
-    events = [json.loads(line) for line in event_files[0].read_text().splitlines() if line.strip()]
-    assert len(events) == 1
-    assert events[0]["symbols"] == []
-    assert events[0]["symbol_validation_status"] == "rejected"
-    assert events[0]["symbol_parse_status"] == "terminal_failed"
-    assert events[0]["symbol_parse_failed_reason"] == "exchange_info_disallowed_contract_type"
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    terminal_rows = [d.get("raw_event", d) for d in diagnostics if d.get("source_article_id") == "25da4614ffff435fa28544b27fd33a39"]
+    assert len(terminal_rows) == 1
+    assert terminal_rows[0]["symbols"] == []
+    assert terminal_rows[0]["symbol_validation_status"] == "rejected"
+    assert terminal_rows[0]["symbol_parse_status"] == "terminal_failed"
+    assert terminal_rows[0]["symbol_parse_failed_reason"] == "exchange_info_disallowed_contract_type"
 
 
 def test_effective_launch_time_prefers_exchangeinfo_onboard_date_over_detail_time():
@@ -1842,11 +1980,11 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
 
 
     assert rc == 0
-    events = _read_jsonl_files(output_root / "events")
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
     terminal_rows = [
-        row for row in events
-        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
-        and row.get("symbol_parse_status") == "terminal_failed"
+        d.get("raw_event", d) for d in diagnostics
+        if d.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
     ]
     assert len(terminal_rows) == 1
     assert terminal_rows[0]["symbols"] == []
@@ -2036,6 +2174,23 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
     assert len(parsed_rows2) == 1
 
 
+def _official_single_symbol_detail_text(symbol: str) -> str:
+    return (
+        "Fellow Binancians,\n"
+        "To expand trading choices, Binance Futures will launch the following perpetual contract(s) as below:\n"
+        f"2029-01-01 00:00 (UTC):\n{symbol}\nPerpetual Contract\n"
+        "More details on the aforementioned perpetual contract(s) can be found in the table below:\n"
+        f"USDⓈ-M Perpetual Contract\n{symbol}\nLaunch Time\n2029-01-01 00:00 (UTC)\nSettlement Asset\nUSD1"
+    )
+
+
+def _official_single_symbol_bapi_payload(symbol: str) -> dict:
+    return {
+        "code": "000000",
+        "data": {"body": [{"text": _official_single_symbol_detail_text(symbol)}]},
+    }
+
+
 def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp_path):
     list_payload = {
         "data": {
@@ -2043,7 +2198,7 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
                 "articles": [{
                     "code": "23c9b8e88309409cbcd8509af0b78d10",
                     "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
-                    "releaseDate": 1782989104900,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2055,7 +2210,7 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
             "status": "TRADING",
             "quoteAsset": "USD1",
             "marginAsset": "USD1",
-            "onboardDate": 1782989000000,
+            "onboardDate": 4070908800000,
         }]
     }
 
@@ -2072,7 +2227,34 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
-        raise AssertionError("title contract symbol path must not fetch detail")
+        return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": _official_single_symbol_bapi_payload("ETHUSD1"),
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 200,
+            "error": None,
+        }
+
+    summary = tmp_path / "summary.json"
+    output_root = tmp_path / "out"
+    c1, c = _write_valid_upstream(tmp_path)
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--poll-interval-sec", "0",
+    ]
+
+    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+        detail_calls["count"] += 1
+        return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
@@ -2089,9 +2271,10 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -2099,11 +2282,12 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
     assert len(parsed) == 1
     assert parsed[0]["symbols"] == ["ETHUSD1"] or parsed[0]["symbols"] == ("ETHUSD1",)
     assert parsed[0]["symbol_parse_status"] == "parsed"
-    assert parsed[0]["symbol_extraction_source"] == "title_contract_symbol"
-    assert parsed[0]["symbol_validation_status"] == "validated"
-    assert parsed[0]["detail_fetch_attempted"] is False
-    assert parsed[0]["detail_fetch_status"] == "not_needed"
-    assert detail_calls["count"] == 0
+    assert parsed[0]["source_contract_status"] == "formal_v1_valid"
+    assert parsed[0]["symbol_identity_validation_status"] == "validated_by_exchangeinfo"
+    assert parsed[0]["detail_fetch_attempted"] is True
+    assert parsed[0]["detail_fetch_status"] == "success"
+    assert parsed[0]["launch_anchor_evidence_level"] == "detail_confirmed"
+    assert detail_calls["count"] == 1
 
 
 def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
@@ -2113,7 +2297,7 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
                 "articles": [{
                     "code": "6cbb1b11a9c843949624cf2eacaac8b4",
                     "title": "Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract (2026-07-20)",
-                    "releaseDate": 1784277011242,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2125,7 +2309,7 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
             "status": "TRADING",
             "quoteAsset": "USD1",
             "marginAsset": "USD1",
-            "onboardDate": 1784538000000,
+            "onboardDate": 4070908800000,
         }]
     }
 
@@ -2142,7 +2326,16 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
-        raise AssertionError("title contract symbol path must not fetch detail")
+        return {"ok": True, "payload": _official_single_symbol_detail_text("SPCXUSD1"), "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": _official_single_symbol_bapi_payload("SPCXUSD1"),
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 200,
+            "error": None,
+        }
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
@@ -2159,9 +2352,10 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
@@ -2169,14 +2363,15 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
     assert len(parsed) == 1
     assert parsed[0]["symbols"] == ["SPCXUSD1"] or parsed[0]["symbols"] == ("SPCXUSD1",)
     assert parsed[0]["symbol_parse_status"] == "parsed"
-    assert parsed[0]["symbol_extraction_source"] == "title_contract_symbol"
-    assert parsed[0]["symbol_validation_status"] == "validated"
+    assert parsed[0]["source_contract_status"] == "formal_v1_valid"
+    assert parsed[0]["symbol_identity_validation_status"] == "validated_by_exchangeinfo"
     assert parsed[0]["symbol_parse_failed_reason"] is None
     assert parsed[0].get("terminal_failure_type") is None
-    assert parsed[0]["detail_fetch_attempted"] is False
-    assert parsed[0]["detail_fetch_status"] == "not_needed"
-    assert parsed[0]["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 1784538000000
-    assert detail_calls["count"] == 0
+    assert parsed[0]["detail_fetch_attempted"] is True
+    assert parsed[0]["detail_fetch_status"] == "success"
+    assert parsed[0]["launch_anchor_evidence_level"] in {"detail_confirmed", "detail_exchangeinfo_consensus"}
+    assert parsed[0]["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 4070908800000
+    assert detail_calls["count"] == 1
 
 
 def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_fetch(tmp_path):
@@ -2186,7 +2381,7 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
                 "articles": [{
                     "code": "23c9b8e88309409cbcd8509af0b78d10",
                     "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
-                    "releaseDate": 1782989104900,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2198,7 +2393,7 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
             "status": "PENDING_TRADING",
             "quoteAsset": "USD1",
             "marginAsset": "USD1",
-            "onboardDate": 1783069200000,
+            "onboardDate": 4070908800000,
         }]
     }
 
@@ -2213,7 +2408,16 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
-        raise AssertionError("pending title candidate must not fetch detail")
+        return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": _official_single_symbol_bapi_payload("ETHUSD1"),
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 200,
+            "error": None,
+        }
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
@@ -2230,17 +2434,16 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
     assert not any(row.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10" for row in events)
-    assert detail_calls["count"] == 0
+    assert detail_calls["count"] == 1
     s = json.loads(summary.read_text())
-    assert s["detail_pending_retry_count"] == 0
-    assert s["candidate_validation_pending_count"] == 0
     assert s["pre_launch_validation_deferred_count"] >= 1
 
 
@@ -2251,7 +2454,7 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
                 "articles": [{
                     "code": "6cbb1b11a9c843949624cf2eacaac8b4",
                     "title": "Binance Futures Will Launch USDⓈ-Margined SPCXUSD1 Perpetual Contract (2026-07-20)",
-                    "releaseDate": 1784277011242,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2263,7 +2466,7 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
             "status": "PENDING_TRADING",
             "quoteAsset": "USD1",
             "marginAsset": "USD1",
-            "onboardDate": 1784538000000,
+            "onboardDate": 4070908800000,
         }]
     }
 
@@ -2278,7 +2481,16 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
-        raise AssertionError("pending title contract symbol path must not fetch detail")
+        return {"ok": True, "payload": _official_single_symbol_detail_text("SPCXUSD1"), "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": _official_single_symbol_bapi_payload("SPCXUSD1"),
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 200,
+            "error": None,
+        }
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
@@ -2295,14 +2507,15 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
     assert not any(row.get("source_article_id") == "6cbb1b11a9c843949624cf2eacaac8b4" for row in events)
-    assert detail_calls["count"] == 0
+    assert detail_calls["count"] == 1
     s = json.loads(summary.read_text())
     assert s["candidate_validation_pending_count"] == 0
     assert s["pre_launch_validation_deferred_count"] >= 1
@@ -2312,7 +2525,7 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
     assert row["candidate_symbols"] == ["SPCXUSD1"]
     assert row["symbol_validation_status"] == "pending_pre_trading"
     assert row.get("terminal_failure_type") is None
-    assert row["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 1784538000000
+    assert row["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 4070908800000
 
 
 def test_title_contract_candidate_pending_survives_process_restart_without_detail_fetch(tmp_path):
@@ -2322,7 +2535,7 @@ def test_title_contract_candidate_pending_survives_process_restart_without_detai
                 "articles": [{
                     "code": "23c9b8e88309409cbcd8509af0b78d10",
                     "title": "Binance Futures Will Launch USDⓈ-Margined ETHUSD1 Perpetual Contract (2026-07-03)",
-                    "releaseDate": 1782989104900,
+                    "releaseDate": int(time.time() * 1000) - 1000,
                 }]
             }]
         }
@@ -2335,14 +2548,24 @@ def test_title_contract_candidate_pending_survives_process_restart_without_detai
             "status": "TRADING",
             "quoteAsset": "USD1",
             "marginAsset": "USD1",
-            "onboardDate": 1782989000000,
+            "onboardDate": 4070908800000,
         }]
     }
     detail_calls = {"count": 0}
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
-        raise AssertionError("title candidate restart path must not fetch detail")
+        return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        detail_calls["count"] += 1
+        return {
+            "ok": True,
+            "payload": _official_single_symbol_bapi_payload("ETHUSD1"),
+            "final_url": "https://www.binance.com/bapi/...",
+            "http_status": 200,
+            "error": None,
+        }
 
     summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
@@ -2369,9 +2592,10 @@ def test_title_contract_candidate_pending_survives_process_restart_without_detai
             "--poll-interval-sec", "0",
         ]
         with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
-                with patch("sys.argv", args):
-                    return main()
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        return main()
 
     assert run_once(pending_exchange_info) == 0
     assert _read_jsonl_files(output_root / "events") == []
@@ -2380,7 +2604,7 @@ def test_title_contract_candidate_pending_survives_process_restart_without_detai
     events = _read_jsonl_files(output_root / "events")
     parsed = [r for r in events if r.get("source_article_id") == "23c9b8e88309409cbcd8509af0b78d10"]
     assert len(parsed) == 1
-    assert detail_calls["count"] == 0
+    assert detail_calls["count"] == 2
 
 
 def test_transient_detail_http_202_does_not_terminal_fail_by_max_retries(tmp_path):
@@ -2399,6 +2623,16 @@ def test_transient_detail_http_202_does_not_terminal_fail_by_max_retries(tmp_pat
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -2463,6 +2697,16 @@ def test_transient_detail_http_202_does_not_terminal_fail_after_backoff_retries_
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -2726,8 +2970,12 @@ def test_never_attempted_detail_article_does_not_terminal_fail_as_symbol_empty(t
                     rc = main()
 
     assert rc == 0
-    event_rows = _read_jsonl_files(output_root / "events")
-    starved_events = [r for r in event_rows if r.get("source_article_id") == "never_attempted_starved"]
+    assert _read_jsonl_files(output_root / "events") == []
+    diagnostics = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
+    starved_events = [
+        d.get("raw_event", d) for d in diagnostics
+        if d.get("source_article_id") == "never_attempted_starved"
+    ]
     assert len(starved_events) == 1
     event_row = starved_events[0]
     assert event_row["terminal_failure_type"] == "detail_never_attempted_budget_starved"
@@ -2918,6 +3166,16 @@ def test_detail_fetch_fallback_detail_url_used_after_primary_http_202(tmp_path):
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -2998,6 +3256,16 @@ def test_detail_fetch_fallback_detail_url_used_after_primary_200_empty_untrusted
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+        if "exchangeInfo" in url:
+            return {
+                "ok": True,
+                "payload": {"symbols": [
+                    {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 4070908800000},
+                ]},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
         raise AssertionError(url)
 
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
@@ -4225,7 +4493,7 @@ def test_detail_parsed_exchangeinfo_not_visible_enters_pending_validation_withou
         "data": {
             "code": hex32,
             "title": "Binance Futures Will Launch Multiple USDⓈ-Margined Perpetual Contracts",
-            "body": "<p>Binance Futures will launch NEWCOINUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+            "body": [{"text": _official_single_symbol_detail_text("NEWCOINUSDT")}],
         }
     }
 
@@ -4283,6 +4551,7 @@ def test_detail_parsed_exchangeinfo_not_visible_enters_pending_validation_withou
                     "marginAsset": "USDT",
                     "quoteAsset": "USDT",
                     "contractType": "PERPETUAL",
+                    "onboardDate": 1861920000000,
                 }]
             },
             "final_url": url,

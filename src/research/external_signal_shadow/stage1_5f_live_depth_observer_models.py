@@ -58,8 +58,21 @@ class EventSymbolState:
     max_gap_pass: bool = False
     research_result_valid: bool = False
 
-    # Launch Gate & Anchor Fields (Schema Version 2)
-    observer_state_schema_version: int = 2
+    # Launch Gate & Anchor Fields (Schema Version 3)
+    observer_state_schema_version: int = 3
+    source_contract_status: str | None = None
+    pending_source_event_unvalidated: bool = False
+    required_source_revision: str | None = None
+    pending_reason: str | None = None
+    anchor_resolution_started_at_ms: int | None = None
+    anchor_resolution_deadline_ms: int | None = None
+    anchor_resolution_retry_count: int = 0
+    anchor_resolution_last_attempt_at_ms: int | None = None
+    legacy_source_revision_wait_started_at_ms: int | None = None
+    legacy_source_revision_wait_deadline_ms: int | None = None
+    symbol_visibility_deadline_ms: int | None = None
+    capacity_deferred_at_ms: int | None = None
+    next_capacity_check_at_ms: int | None = None
     observation_anchor_ms: int | None = None
     observation_anchor_basis: str = ""
     observation_anchor_confidence: str = ""

@@ -343,6 +343,20 @@ def test_detail_extracts_july_2_tradfi_usdt_symbols_from_body_text():
     ]
 
 
+def test_detail_exact_usdt_symbol_extracts_nearby_launch_time():
+    detail_text = "Binance Futures will launch GRVTUSDT Perpetual Contract at 2026-07-31 12:45 (UTC)."
+
+    result = extract_symbol_candidates_from_detail_payload(
+        detail_text,
+        max_symbols=30,
+        title="Binance Futures Will Launch USDⓈ-Margined GRVTUSDT Perpetual Contract (2026-07-31)",
+    )
+
+    assert result["symbols"] == ["GRVTUSDT"]
+    assert result["symbol_extraction_source"] == "detail"
+    assert result["symbol_launch_times_ms"] == {"GRVTUSDT": 1785501900000}
+
+
 def test_title_extracts_raw_contract_symbol_candidate_ethusd1():
     from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
         extract_symbol_candidates_from_title,
@@ -637,6 +651,5 @@ def test_bapi_table_parser_duplicate_mobile_desktop_table_is_ambiguous():
     result = extract_symbol_candidates_from_bapi_article_payload(payload, title="Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts")
     assert result["parser_status"] == "launch_schedule_ambiguous"
     assert result["consumable_event_allowed"] is False
-
 
 

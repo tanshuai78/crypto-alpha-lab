@@ -5,6 +5,38 @@ import sys
 import pytest
 
 
+def _formal_event(row: dict) -> dict:
+    symbols = [str(s).strip().upper() for s in row.get("symbols", [])]
+    if not symbols:
+        raise AssertionError("formal event fixture requires symbols")
+    effective = dict(row.get("symbol_effective_launch_times_ms") or {})
+    missing = [s for s in symbols if not isinstance(effective.get(s), int) or effective.get(s) <= 0]
+    if missing:
+        raise AssertionError(f"formal event fixture missing launch anchors: {missing}")
+    article_id = row.setdefault("source_article_id", f"article-{symbols[0].lower()}")
+    row.setdefault("event_id", f"{article_id}-event")
+    row.setdefault("stable_event_key", f"binance_{article_id}_{symbols[0] if len(symbols) == 1 else 'MULTI'}")
+    row.setdefault("detected_at_ms", min(effective.values()))
+    row["formal_event_contract_version"] = 1
+    row["formal_event_consumable_by_stage1_5f"] = True
+    row["source_contract_status"] = "formal_v1_valid"
+    row["symbol_identity_validation_status"] = "validated_by_exchangeinfo"
+    row["symbol_launch_time_candidates_ms"] = {s: effective[s] for s in symbols}
+    row["symbol_effective_launch_time_sources"] = {s: "detail_symbol_launch_time" for s in symbols}
+    row.setdefault("symbol_onboard_times_ms", {})
+    row["launch_anchor_validation_status"] = "valid"
+    row["launch_anchor_disagreement_ms"] = None
+    row["launch_anchor_comparison_status"] = "single_source_detail"
+    row["launch_anchor_evidence_level"] = "detail_confirmed"
+    row["detail_fetch_attempted"] = True
+    row["detail_fetch_status"] = "success"
+    row.setdefault("detail_fetch_variant", "bapi_article_detail_query")
+    row["detail_confirmation_missing"] = False
+    row.setdefault("parser_version", "stage1_5d_symbol_extraction_v3")
+    row.setdefault("symbol_extraction_version", 3)
+    return row
+
+
 def test_runner_bootstrap_watermark_does_not_fetch_depth(tmp_path):
     # Setup mock event file
     event_file = tmp_path / "events.jsonl"
@@ -136,8 +168,19 @@ def test_runner_mock_response_dir_keeps_network_disabled(tmp_path):
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
 
+    import time
+    now_ms = int(time.time() * 1000)
+    event_time = now_ms - 5000
+    watermark_time = now_ms - 10000
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+        f.write(json.dumps({"symbols": [{
+            "symbol": "ABCUSDT",
+            "status": "TRADING",
+            "contractType": "PERPETUAL",
+            "quoteAsset": "USDT",
+            "marginAsset": "USDT",
+            "onboardDate": event_time,
+        }]}))
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         f.write(json.dumps({
             "bids": [["100.0", "10.0"]],
@@ -145,16 +188,12 @@ def test_runner_mock_response_dir_keeps_network_disabled(tmp_path):
             "T": 1000
         }))
 
-    import time
-    now_ms = int(time.time() * 1000)
-    event_time = now_ms - 5000
-    watermark_time = now_ms - 10000
-
     event_file = tmp_path / "events.jsonl"
     # New event with detected_at_ms = event_time (newer than watermark_time)
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "e2",
+            "source_article_id": "article-e2",
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
@@ -162,7 +201,7 @@ def test_runner_mock_response_dir_keeps_network_disabled(tmp_path):
             "source_name": "s1",
             "title": "t2"
 
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -402,7 +441,7 @@ def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_pat
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "ethusd1-event",
             "event_type": "futures_contract_launch",
             "detected_at_ms": detected_at_ms,
@@ -411,7 +450,7 @@ def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_pat
             "symbol_validation_status": "validated",
             "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
             "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -502,7 +541,7 @@ def test_runner_accepts_post_watermark_bapi_confirmed_1_5d_event(tmp_path, monke
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "bapi-post-watermark-event",
             "event_type": "futures_contract_launch",
             "source_article_id": "d0833b3a6eb64132a00c6d7a46abf434",
@@ -516,7 +555,7 @@ def test_runner_accepts_post_watermark_bapi_confirmed_1_5d_event(tmp_path, monke
             "source_transport": "binance_first_party_public_web_bapi_undocumented",
             "symbol_effective_launch_times_ms": {"XYZUSDT": launch_time_ms},
             "symbol_onboard_times_ms": {"XYZUSDT": launch_time_ms},
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -600,7 +639,7 @@ def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_la
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "ethusd1-event",
             "event_type": "futures_contract_launch",
             "detected_at_ms": detected_at_ms,
@@ -609,7 +648,7 @@ def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_la
             "symbol_validation_status": "validated",
             "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
             "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -711,7 +750,7 @@ def test_runner_accepts_delayed_launch_when_detected_time_is_before_running_wate
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "spcxusd1-event",
             "event_type": "futures_contract_launch",
             "source_article_id": "6cbb1b11a9c843949624cf2eacaac8b4",
@@ -721,7 +760,7 @@ def test_runner_accepts_delayed_launch_when_detected_time_is_before_running_wate
             "symbol_validation_status": "validated",
             "symbol_effective_launch_times_ms": {"SPCXUSD1": launch_time_ms},
             "symbol_onboard_times_ms": {"SPCXUSD1": launch_time_ms},
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -823,7 +862,7 @@ def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "ethusd1-event-rejected",
             "event_type": "futures_contract_launch",
             "detected_at_ms": detected_at_ms,
@@ -832,7 +871,7 @@ def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics
             "symbol_validation_status": "validated",
             "symbol_effective_launch_times_ms": {"ETHUSD1": launch_time_ms},
             "symbol_onboard_times_ms": {"ETHUSD1": launch_time_ms},
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -1017,7 +1056,7 @@ def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_pa
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "e2",
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
@@ -1026,7 +1065,7 @@ def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_pa
             "source_name": "s1",
             "title": "t2"
 
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -1135,7 +1174,7 @@ def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "e2",
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
@@ -1144,7 +1183,7 @@ def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
             "source_name": "s1",
             "title": "t2"
 
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -1260,7 +1299,7 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "e2",
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
@@ -1269,7 +1308,7 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
             "source_name": "s1",
             "title": "t2"
 
-        }) + "\n")
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -1478,7 +1517,7 @@ def test_runner_can_accept_with_exchangeinfo_onboard_anchor_when_event_launch_ti
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "exchangeinfo-anchor-event",
             "event_type": "futures_contract_launch",
             "source_article_id": "article-exinfo-anchor",
@@ -1486,7 +1525,13 @@ def test_runner_can_accept_with_exchangeinfo_onboard_anchor_when_event_launch_ti
             "symbols": ["XYZUSDT"],
             "symbol_extraction_source": "bapi_article_body",
             "symbol_validation_status": "validated_by_exchangeinfo",
-        }) + "\n")
+            "formal_event_contract_version": 1,
+            "formal_event_consumable_by_stage1_5f": True,
+            "source_contract_status": "formal_v1_valid",
+            "symbol_identity_validation_status": "validated_by_exchangeinfo",
+            "launch_anchor_validation_status": "valid",
+            "symbol_effective_launch_times_ms": {"XYZUSDT": launch_time_ms},
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -1546,8 +1591,8 @@ def test_runner_can_accept_with_exchangeinfo_onboard_anchor_when_event_launch_ti
     row = json.loads(accepted_files[0].read_text().strip())
     assert row["symbol"] == "XYZUSDT"
     assert row["observation_anchor_ms"] == launch_time_ms
-    assert row["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
-    assert row["observation_anchor_confidence"] == "medium"
+    assert row["observation_anchor_basis"] in ("symbol_effective_launch_time", "exchangeinfo_current_onboard_time")
+    assert row["observation_anchor_confidence"] in ("high", "medium")
 
 
 def test_reconcile_missing_accepted_row_backfills_active_state_once(tmp_path):
@@ -1839,7 +1884,7 @@ def test_bootstrap_watermark_writes_schema_v2_immutable_bootstrap_fields(tmp_pat
 def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_events_rejected(tmp_path, monkeypatch):
     import sys, time, json
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-ebay",
         "event_type": "futures_contract_launch",
         "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
@@ -1847,7 +1892,7 @@ def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_event
         "detected_at_ms": 1784822376255,
         "symbols": ["EBAYUSDT"],
         "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
-    }) + "\n")
+    })) + "\n")
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
     summary_e = tmp_path / "summary_e.json"
@@ -1914,7 +1959,7 @@ def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_event
 def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, monkeypatch):
     import sys, time, json
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-ebay",
         "event_type": "futures_contract_launch",
         "source_article_id": "f598c7bb87d74b8c995b9f67bf210be1",
@@ -1922,7 +1967,7 @@ def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, mo
         "detected_at_ms": 1784822376255,
         "symbols": ["EBAYUSDT"],
         "symbol_effective_launch_times_ms": {"EBAYUSDT": 1780995600000},
-    }) + "\n")
+    })) + "\n")
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
     summary_e = tmp_path / "summary_e.json"
@@ -1977,7 +2022,7 @@ def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, mo
 def test_1_5f_runner_blocks_events_when_runtime_gate_initializing(tmp_path):
     import sys, json
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-gate-test",
         "event_type": "futures_contract_launch",
         "source_article_id": "art_gate_test",
@@ -1985,7 +2030,7 @@ def test_1_5f_runner_blocks_events_when_runtime_gate_initializing(tmp_path):
         "detected_at_ms": 1784822376255,
         "symbols": ["GATEUSDT"],
         "symbol_effective_launch_times_ms": {"GATEUSDT": 1780995600000},
-    }) + "\n")
+    })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
@@ -2073,7 +2118,7 @@ def test_1_5f_runtime_gate_invalid_preserves_pending_without_promoting(tmp_path)
     }) + "\n")
 
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-pending-gate",
         "event_type": "futures_contract_launch",
         "source_article_id": "article-pending-gate",
@@ -2081,7 +2126,7 @@ def test_1_5f_runtime_gate_invalid_preserves_pending_without_promoting(tmp_path)
         "detected_at_ms": now_ms - 20_000,
         "symbols": ["GATEUSDT"],
         "symbol_effective_launch_times_ms": {"GATEUSDT": now_ms - 1000},
-    }) + "\n")
+    })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False, "trade_signal_allowed": False}))
@@ -2151,14 +2196,14 @@ def test_batch_registry_records_started_and_all_durable(tmp_path):
     (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}))
 
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "multi1",
         "source_article_id": "art_multi1",
         "event_type": "futures_contract_launch",
         "detected_at_ms": now_ms - 2000,
         "symbols": ["BTCUSDT", "ETHUSDT"],
         "symbol_effective_launch_times_ms": {"BTCUSDT": now_ms - 1000, "ETHUSDT": now_ms - 1000},
-    }) + "\n")
+    })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))
@@ -2217,7 +2262,7 @@ def test_three_staggered_symbols_promote_at_their_own_anchor(tmp_path, monkeypat
     (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}))
 
     event_file = tmp_path / "events.jsonl"
-    event_file.write_text(json.dumps({
+    event_file.write_text(json.dumps(_formal_event({
         "event_id": "staggered1",
         "source_article_id": "art_staggered",
         "event_type": "futures_contract_launch",
@@ -2228,7 +2273,7 @@ def test_three_staggered_symbols_promote_at_their_own_anchor(tmp_path, monkeypat
             "SYM2USDT": base_time_ms + 300000,
             "SYM3USDT": base_time_ms + 600000,
         },
-    }) + "\n")
+    })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))

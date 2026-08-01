@@ -4,6 +4,9 @@ import json
 import os
 
 from configs import base
+from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
+    validate_formal_launch_event,
+)
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
     event_is_post_watermark,
     get_stable_event_key,
@@ -352,8 +355,17 @@ def classify_event_symbol_revision_admission(
             return "exact_replay_noop", existing, {"reason": "exact_payload_hash_replay"}
 
         status = getattr(existing, "status", "") or ""
-        if status.startswith("pending_"):
-            return "pending_revision_upsert", existing, {"reason": "pending_state_revision"}
+        rej_reason = getattr(existing, "rejection_reason", "") or getattr(existing, "rejected_reason", "") or getattr(existing, "terminal_reason", "")
+        existing_contract_status = getattr(existing, "source_contract_status", None)
+
+        is_legacy_rejected = (
+            status == "rejected"
+            and (rej_reason == "symbol_not_in_exchangeinfo" or existing_contract_status == "legacy_unvalidated_recoverable")
+        )
+        new_is_formal = validate_formal_launch_event(flat_event, sym)["valid"]
+
+        if status.startswith("pending_") or (is_legacy_rejected and new_is_formal):
+            return "pending_revision_upsert", existing, {"reason": "pending_state_revision" if status.startswith("pending_") else "legacy_rejected_upgraded_by_formal_v1"}
         elif status in ("active", "completed"):
             return "active_or_completed_duplicate_revision", existing, {"reason": f"existing_{status}_state"}
         else:
@@ -517,7 +529,14 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
     if not getattr(pending_state, "status", "").startswith("pending_"):
         return pending_state
 
-    deadline = pending_state.anchor_resolution_deadline_ms
+    source_status = getattr(pending_state, "source_contract_status", None)
+    is_legacy = source_status == "legacy_unvalidated_recoverable" or pending_state.status == "pending_source_event_unvalidated"
+
+    if is_legacy:
+        deadline = getattr(pending_state, "legacy_source_revision_wait_deadline_ms", None) or pending_state.anchor_resolution_deadline_ms
+    else:
+        deadline = pending_state.anchor_resolution_deadline_ms
+
     if deadline is not None and now_ms >= deadline:
         status = "rejected_launch_anchor_unavailable_timeout"
         if pending_state.status == "pending_anchor_conflict":
@@ -541,16 +560,24 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         if stable_key_matches or legacy_symbol_match:
             target_row = rev
 
-    anchor_diag = resolve_depth_observation_anchor_ms(target_row, pending_state.symbol, exchangeinfo_state, now_ms)
-    anchor_ms = anchor_diag.get("observation_anchor_ms")
-    conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
-
     d = pending_state.to_dict()
+
     if target_row:
         if target_row.get("event_id"):
             d["event_id"] = target_row["event_id"]
-        if target_row.get("detail_payload_hash") or target_row.get("payload_hash"):
-            d["latest_event_payload_hash"] = target_row.get("detail_payload_hash") or target_row.get("payload_hash")
+            d["latest_source_event_id"] = target_row["event_id"]
+        payload_hash = str(target_row.get("detail_payload_hash") or target_row.get("payload_hash") or target_row.get("raw_payload_hash") or "")
+        if payload_hash:
+            d["latest_event_payload_hash"] = payload_hash
+
+        # Re-triage contract if revision provided
+        c_res = classify_stage1_5d_source_contract(target_row, pending_state.symbol)
+        d.update(c_res)
+        source_status = c_res["source_contract_status"]
+
+    anchor_diag = resolve_depth_observation_anchor_ms(target_row or pending_state.to_dict(), pending_state.symbol, exchangeinfo_state, now_ms)
+    anchor_ms = anchor_diag.get("observation_anchor_ms")
+    conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
 
     d["anchor_resolution_attempt_count"] = pending_state.anchor_resolution_attempt_count + 1
     d["last_anchor_resolution_at_ms"] = now_ms
@@ -566,13 +593,19 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         d["status"] = "pending_anchor_conflict"
         d["observation_anchor_ms"] = None
     elif anchor_ms is None:
-        d["status"] = "pending_launch_anchor_missing"
+        if source_status == "legacy_unvalidated_recoverable":
+            d["status"] = "pending_source_event_unvalidated"
+        else:
+            d["status"] = "pending_launch_anchor_missing"
         d["observation_anchor_ms"] = None
     else:
         d["observation_anchor_ms"] = anchor_ms
         d["observation_anchor_basis"] = anchor_diag.get("observation_anchor_basis", "")
         d["observation_anchor_confidence"] = anchor_diag.get("observation_anchor_confidence", "")
-        if now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
+
+        if source_status != "formal_v1_valid":
+            d["status"] = "pending_source_event_unvalidated"
+        elif now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
             d["status"] = "pending_launch_time_in_future"
             d["next_admission_check_at_ms"] = anchor_ms
         else:
@@ -763,6 +796,52 @@ def _build_eligibility_diagnostics(
     }
 
 
+def classify_stage1_5d_source_contract(row: dict, symbol: str) -> dict:
+    if not isinstance(row, dict):
+        return {
+            "source_contract_status": "malformed",
+            "pending_source_event_unvalidated": True,
+            "required_source_revision": "formal_v1_valid",
+            "source_contract_blocker": "row_not_dict",
+        }
+
+    val = validate_formal_launch_event(row, symbol)
+    if val["valid"]:
+        return {
+            "source_contract_status": "formal_v1_valid",
+            "pending_source_event_unvalidated": False,
+            "required_source_revision": None,
+            "source_contract_blocker": None,
+        }
+
+    if row.get("consumable_event_allowed") is False or row.get("formal_event_consumable_by_stage1_5f") is False:
+        return {
+            "source_contract_status": "explicit_non_consumable",
+            "pending_source_event_unvalidated": False,
+            "required_source_revision": "formal_v1_valid",
+            "source_contract_blocker": "explicitly_marked_non_consumable",
+        }
+
+    code = row.get("source_article_id") or row.get("code") or row.get("event_id") or ""
+    sym = (symbol or row.get("symbol") or (row.get("symbols") or [""])[0]).strip().upper()
+    has_identity = bool(code and sym)
+
+    if has_identity and "formal_event_contract_version" not in row:
+        return {
+            "source_contract_status": "legacy_unvalidated_recoverable",
+            "pending_source_event_unvalidated": True,
+            "required_source_revision": "formal_v1_valid",
+            "source_contract_blocker": "legacy_unversioned_contract",
+        }
+
+    return {
+        "source_contract_status": "malformed",
+        "pending_source_event_unvalidated": True,
+        "required_source_revision": "formal_v1_valid",
+        "source_contract_blocker": f"contract_invalid:{','.join(val.get('blockers', []))}",
+    }
+
+
 def classify_event_symbol_eligibility_with_diagnostics(
     row: dict,
     symbol: str,
@@ -798,20 +877,19 @@ def classify_event_symbol_eligibility_with_diagnostics(
     elif hist_status == "ignored":
         return "ignored", hist_reason, diag
 
+    contract_res = classify_stage1_5d_source_contract(row, symbol)
+    diag.update(contract_res)
+    source_status = contract_res["source_contract_status"]
+
+    if source_status == "explicit_non_consumable":
+        return "diagnostic_only", "explicit_non_consumable", diag
+    elif source_status == "malformed":
+        return "diagnostic_only", "malformed_source_contract", diag
+
     if not event_is_post_watermark(row, watermark) and not delayed_launch_event_symbol_is_post_watermark(
         row, symbol, watermark
     ):
         return "rejected", "pre_watermark", {}
-
-    if not exchangeinfo_state or not exchangeinfo_state.get("available", False):
-        return "pending", "exchangeinfo_unavailable", {}
-
-    symbols_in_exchange = exchangeinfo_state.get("symbols", set())
-    if symbol not in symbols_in_exchange:
-        return "rejected", "symbol_not_in_exchangeinfo", {}
-
-    if budget_state and budget_state.get("budget_exceeded", False):
-        return "rejected", "budget_exceeded", {}
 
     conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
     if conflict_active:
@@ -824,6 +902,23 @@ def classify_event_symbol_eligibility_with_diagnostics(
     if now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
         diag["next_admission_check_at_ms"] = anchor_ms
         return "pending", "pending_launch_time_in_future", diag
+
+    if source_status != "formal_v1_valid":
+        return "pending", "pending_source_event_unvalidated", diag
+
+    if not exchangeinfo_state or not exchangeinfo_state.get("available", False):
+        return "pending", "pending_exchangeinfo_unavailable", diag
+
+    symbols_in_exchange = exchangeinfo_state.get("symbols", set())
+    if symbol not in symbols_in_exchange:
+        delay_ms = now_ms - anchor_ms
+        if delay_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
+            return "pending", "pending_exchangeinfo_symbol_not_visible_after_anchor", diag
+        else:
+            return "rejected", "rejected_launch_symbol_not_visible_timeout", diag
+
+    if budget_state and budget_state.get("budget_exceeded", False):
+        return "pending", "pending_observation_capacity", diag
 
     delay_ms = now_ms - anchor_ms
     clean_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS

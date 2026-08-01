@@ -1,0 +1,18 @@
+{
+  "article_id": "20536b05b2a34b87a3bae99c45d0dc91",
+  "content_provenance": "binance_official_announcement",
+  "data_quality": "post_incident_official_bapi_frozen_payload",
+  "expected_legacy_rejected_reason": "symbol_not_in_exchangeinfo",
+  "expected_onboardDate": 1785501900000,
+  "expected_onboard_utc": "2026-07-31T12:45:00+00:00",
+  "fetched_at_ms": 1785577170403,
+  "fixture_sha256": "8e4ecca92fe00e830aaf2f96cd7410304e299048b7defaf2ad96023398011edf",
+  "http_status": 200,
+  "incident_class": "title_symbol_prelaunch_hard_reject",
+  "not_point_in_time_incident_payload": true,
+  "parser_version_at_capture": "stage1_5d_symbol_extraction_v3",
+  "raw_sha256": "8e4ecca92fe00e830aaf2f96cd7410304e299048b7defaf2ad96023398011edf",
+  "request_url": "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=20536b05b2a34b87a3bae99c45d0dc91",
+  "source_transport": "binance_first_party_public_web_bapi_undocumented",
+  "symbol": "GRVTUSDT"
+}

@@ -419,12 +419,15 @@ def extract_symbol_candidates_from_detail_payload(payload: object, max_symbols: 
                 exact_symbols.append(m)
 
     if exact_symbols:
+        combined_text = "\n".join(snippets)[:100000]
+        symbol_launch_times = extract_symbol_launch_times_ms(combined_text, exact_symbols)
         return {
             "symbols": exact_symbols,
             "symbol_extraction_source": "detail",
             "symbol_derivation_method": "none",
             "quote_derivation_source": None,
             "symbol_validation_status": "validated_by_exact_text",
+            "symbol_launch_times_ms": symbol_launch_times,
         }
 
     # 1.5 Contract-symbol candidates (e.g. BTCU, ETHU)

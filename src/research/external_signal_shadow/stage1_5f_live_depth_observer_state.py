@@ -254,6 +254,8 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
     first_seen = d.get("first_seen_at_ms") or getattr(event_symbol_row, "first_seen_at_ms", None) or now_ms
     retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
     deadline_ms = d.get("anchor_resolution_deadline_ms") or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+    legacy_wait_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LEGACY_SOURCE_REVISION_WAIT_MS", 24 * 60 * 60 * 1000)
+    legacy_deadline_ms = d.get("legacy_source_revision_wait_deadline_ms") or (now_ms + legacy_wait_ms)
 
     anchor_ms = d.get("observation_anchor_ms")
     next_check = d.get("next_admission_check_at_ms") or (anchor_ms if anchor_ms else now_ms + retry_interval_ms)
@@ -265,6 +267,13 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         symbol=event_symbol_row["symbol"],
         detected_at_ms=event_symbol_row.get("detected_at_ms", now_ms),
         status=status,
+        observer_state_schema_version=3,
+        source_contract_status=d.get("source_contract_status"),
+        pending_source_event_unvalidated=d.get("pending_source_event_unvalidated", False),
+        required_source_revision=d.get("required_source_revision"),
+        pending_reason=d.get("pending_reason") or status,
+        legacy_source_revision_wait_started_at_ms=d.get("legacy_source_revision_wait_started_at_ms", now_ms),
+        legacy_source_revision_wait_deadline_ms=legacy_deadline_ms,
         observation_anchor_ms=anchor_ms,
         observation_anchor_basis=d.get("observation_anchor_basis", ""),
         observation_anchor_confidence=d.get("observation_anchor_confidence", ""),

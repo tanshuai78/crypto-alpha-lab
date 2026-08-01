@@ -1,0 +1,35 @@
+{
+  "event_id": "d5f246e2e25b92d8aae1acb2f461dbee1449d44998b1daa47cc976dc58bf162f",
+  "event_type": "futures_contract_launch",
+  "source_name": "binance_official_announcements",
+  "source_profile": "binance_official_announcements_like_rows",
+  "title": "Binance Futures Will Launch USD\u24c8-Margined GRVTUSDT Perpetual Contract (2026-07-31)",
+  "symbols": [
+    "GRVTUSDT"
+  ],
+  "base_assets": [
+    "GRVT"
+  ],
+  "detected_at_ms": 1785497559218,
+  "available_at_ms": 1785497559218,
+  "source_article_id": "20536b05b2a34b87a3bae99c45d0dc91",
+  "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/20536b05b2a34b87a3bae99c45d0dc91",
+  "source_published_at_ms": 1785497411662,
+  "source_published_at_ms_confidence": "medium",
+  "historical_delay_comparison_allowed": true,
+  "stable_event_key": "binance_20536b05b2a34b87a3bae99c45d0dc91_GRVTUSDT",
+  "stage1_5c_research_context_label": "futures_launch_long_attention_12h_close_price_replay_only",
+  "trade_signal_allowed": false,
+  "replay_context_label_only": true,
+  "paper_trading_allowed": false,
+  "live_trading_allowed": false,
+  "execution_engine_allowed": false,
+  "alpha_interpretation_allowed": false,
+  "symbol_extraction_source": "title",
+  "detail_fetch_attempted": false,
+  "detail_fetch_status": "not_needed",
+  "symbol_parse_failed_reason": null,
+  "symbol_parse_status": "parsed",
+  "parser_version": "stage1_5d_symbol_extraction_v3",
+  "symbol_extraction_version": 3
+}
