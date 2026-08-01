@@ -77,7 +77,13 @@ class EventSymbolState:
     source_article_id: str = ""
     stable_event_symbol_key: str = ""
     stable_event_key: str = ""
+    latest_source_event_id: str = ""
     latest_event_payload_hash: str = ""
+    revision_seen_count: int = 1
+    event_batch_id: str = ""
+    batch_candidate_set_hash: str = ""
+    batch_symbol_count: int | None = None
+    batch_registration_status: str = ""
     acceptance_id: str = ""
     acceptance_state: str = ""
     first_seen_at_ms: int | None = None
@@ -294,6 +300,12 @@ class LiveDepthObserverSummary:
     historical_anchor_newly_ignored_this_poll: int = 0
     bootstrap_watermark_missing_diagnostic_count: int = 0
     malformed_terminal_diagnostic_count: int = 0
+    multi_symbol_candidate_set_event_rows_count: int = 0
+    multi_symbol_candidate_symbol_rows_admitted_count: int = 0
+    multi_symbol_candidate_symbol_rows_rejected_count: int = 0
+    multi_symbol_candidate_symbol_rows_pending_count: int = 0
+    duplicate_suppressed_count: int = 0
+    identity_collision_blocked_count: int = 0
     stage1_5d_gate_mode: str = "unknown"
     stage1_5d_runtime_gate_path: str = ""
     stage1_5d_runtime_gate_decision: str = ""

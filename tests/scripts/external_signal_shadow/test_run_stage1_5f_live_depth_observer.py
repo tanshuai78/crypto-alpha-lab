@@ -2135,3 +2135,153 @@ def test_1_5f_runtime_gate_invalid_preserves_pending_without_promoting(tmp_path)
     assert rows[-1]["status"].startswith("pending_")
     assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
     assert not list((output_root / "depth_snapshots").glob("**/*.jsonl"))
+
+
+def test_batch_registry_records_started_and_all_durable(tmp_path):
+    import time
+    now_ms = int(time.time() * 1000)
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({
+        "symbols": [
+            {"symbol": "BTCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms - 1000},
+            {"symbol": "ETHUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms - 1000},
+        ]
+    }))
+    (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}))
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "multi1",
+        "source_article_id": "art_multi1",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": now_ms - 2000,
+        "symbols": ["BTCUSDT", "ETHUSDT"],
+        "symbol_effective_launch_times_ms": {"BTCUSDT": now_ms - 1000, "ETHUSDT": now_ms - 1000},
+    }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": now_ms - 5000,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+    }))
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    registry_path = output_root / "event_batch_registry.jsonl"
+    assert registry_path.exists()
+    rows = [json.loads(line) for line in registry_path.read_text().splitlines() if line.strip()]
+    statuses = [r["status"] for r in rows]
+    assert "batch_started" in statuses
+    assert "siblings_all_durable" in statuses
+    assert "watermark_committed" in statuses
+
+
+def test_three_staggered_symbols_promote_at_their_own_anchor(tmp_path, monkeypatch):
+    import time
+    base_time_ms = 1784800000000
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({
+        "symbols": [
+            {"symbol": "SYM1USDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": base_time_ms},
+            {"symbol": "SYM2USDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": base_time_ms + 300000},
+            {"symbol": "SYM3USDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": base_time_ms + 600000},
+        ]
+    }))
+    (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}))
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_id": "staggered1",
+        "source_article_id": "art_staggered",
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": base_time_ms - 1000,
+        "symbols": ["SYM1USDT", "SYM2USDT", "SYM3USDT"],
+        "symbol_effective_launch_times_ms": {
+            "SYM1USDT": base_time_ms,
+            "SYM2USDT": base_time_ms + 300000,
+            "SYM3USDT": base_time_ms + 600000,
+        },
+    }) + "\n")
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({"decision": "stage1_5d_event_detection_passed", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({"decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer", "paper_trading_allowed": False, "live_trading_allowed": False, "execution_engine_allowed": False, "alpha_interpretation_allowed": False}))
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": base_time_ms - 5000,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+    }))
+
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    def run_poll(fake_now_ms: int):
+        monkeypatch.setattr(time, "time", lambda: fake_now_ms / 1000.0)
+        old_argv = sys.argv
+        try:
+            sys.argv = [
+                "run_stage1_5f_live_depth_observer.py",
+                "--fixture-events-jsonl", str(event_file),
+                "--stage1-5d-summary", str(summary_d),
+                "--stage1-5e-summary", str(summary_e),
+                "--output-root", str(output_root),
+                "--mock-response-dir", str(mock_dir),
+                "--max-polls", "1",
+            ]
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+        finally:
+            sys.argv = old_argv
+
+    # Poll 1: SYM1 active, SYM2 & SYM3 pending
+    run_poll(base_time_ms)
+    accepted1 = [json.loads(line) for p in (output_root / "events_accepted").glob("**/*.jsonl") for line in p.read_text().splitlines() if line.strip()]
+    accepted_symbols1 = {r["symbol"] for r in accepted1}
+    assert "SYM1USDT" in accepted_symbols1
+    assert "SYM2USDT" not in accepted_symbols1
+    assert "SYM3USDT" not in accepted_symbols1
+
+    # Poll 2: SYM2 promoted
+    run_poll(base_time_ms + 300000)
+    accepted2 = [json.loads(line) for p in (output_root / "events_accepted").glob("**/*.jsonl") for line in p.read_text().splitlines() if line.strip()]
+    accepted_symbols2 = {r["symbol"] for r in accepted2}
+    assert "SYM2USDT" in accepted_symbols2
+
+    # Poll 3: SYM3 promoted
+    run_poll(base_time_ms + 600000)
+    accepted3 = [json.loads(line) for p in (output_root / "events_accepted").glob("**/*.jsonl") for line in p.read_text().splitlines() if line.strip()]
+    accepted_symbols3 = {r["symbol"] for r in accepted3}
+    assert "SYM3USDT" in accepted_symbols3

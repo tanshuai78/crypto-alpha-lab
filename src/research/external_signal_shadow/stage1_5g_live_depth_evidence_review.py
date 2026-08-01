@@ -74,6 +74,36 @@ def _load_jsonl_glob(
     return rows
 
 
+def _stable_event_symbol_key_for_review(row: dict) -> str:
+    key = str(row.get("stable_event_symbol_key") or "").strip()
+    if key:
+        return key
+    source_article_id = str(row.get("source_article_id") or "").strip()
+    event_type = str(row.get("event_type") or "futures_contract_launch").strip()
+    symbol = str(row.get("symbol") or "").strip().upper()
+    if source_article_id and event_type and symbol:
+        return f"{event_type}|{source_article_id}|{symbol}"
+    return ""
+
+
+def detect_duplicate_stable_event_symbol_identity(rows: list[dict]) -> list[dict]:
+    by_key: dict[str, set[str]] = {}
+    for row in rows:
+        event_symbol_id = str(row.get("event_symbol_id") or "").strip()
+        key = _stable_event_symbol_key_for_review(row)
+        if not event_symbol_id or not key:
+            continue
+        by_key.setdefault(key, set()).add(event_symbol_id)
+    return [
+        {
+            "stable_event_symbol_key": key,
+            "event_symbol_ids": sorted(ids),
+        }
+        for key, ids in sorted(by_key.items())
+        if len(ids) > 1
+    ]
+
+
 def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
     root = Path(output_root)
     loader_blockers: list[str] = []
@@ -108,6 +138,18 @@ def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
     # 4. Accepted/Rejected events
     accepted_events = _load_jsonl_glob(root, "events_accepted/*.jsonl", loader_blockers, state_errors)
     rejected_events = _load_jsonl_glob(root, "events_rejected/*.jsonl", loader_blockers, state_errors)
+    duplicate_stable_identity_rows = detect_duplicate_stable_event_symbol_identity(
+        accepted_events + [
+            row for row in states
+            if str(row.get("status") or "") in {"active", "completed"}
+        ]
+    )
+    if duplicate_stable_identity_rows:
+        loader_blockers.append("duplicate_stable_event_symbol_identity")
+        loader_warnings.append(
+            "duplicate_stable_event_symbol_identity_count="
+            + str(len(duplicate_stable_identity_rows))
+        )
 
     # 5. Snapshots
     snapshots = _load_jsonl_glob(root, "depth_snapshots/**/*.jsonl", loader_blockers, state_errors)
@@ -1299,7 +1341,7 @@ def build_stage1_5g_review_summary(
         )
 
     # 1. Loader Blockers Check
-    if any(b in all_blockers for b in ["jsonl_parse_error", "missing_or_unreadable_summary"]):
+    if any(b in all_blockers for b in ["jsonl_parse_error", "missing_or_unreadable_summary", "duplicate_stable_event_symbol_identity"]):
         return finish({
             "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
             "decision": "stage1_5g_depth_evidence_invalid",

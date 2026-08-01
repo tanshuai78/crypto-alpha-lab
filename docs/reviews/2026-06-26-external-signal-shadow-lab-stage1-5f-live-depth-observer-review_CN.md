@@ -3,34 +3,34 @@
 **日期:** 2026-07-01  
 **对应设计:** `docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md`  
 **对应实现计划:** `docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md`  
-**当前运行重点:** Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix source collector + Stage 1.5F live depth observer
+**当前运行重点:** Stage 1.5D multi-symbol all-or-none emission + Stage 1.5F admission dedupe + Stage 1.5G duplicate identity blocker
 
 ## 1. 当前结论
 
 ```text
-decision = stage1_5d_detail_endpoint_fallback_hotfix_ready_for_deploy
+decision = stage1_5d_1_5f_multisymbol_admission_dedupe_hotfix_ready_for_deploy
 implementation_status = completed_and_locally_verified
 skhyusdt_stage1_5g_status = quarantined_depth_evidence_pass_design_only
-target_server_mode = 7d_detail_endpoint_fallback_hotfix
+target_server_mode = 7d_multisymbol_all_or_none_admission_dedupe_hotfix
 stage1_5h_allowed = design_only
 ```
 
-当前主线已经从 `Stage 1.5D detail retry scheduler starvation hotfix` 前移到 `Stage 1.5D detail endpoint degraded retry cadence + detail fetch fallback hotfix`。后续部署必须同时更新 1.5D 和 1.5F：
+当前主线已经从 `Stage 1.5D BAPI table launch-schedule parser + live runtime gate summary hotfix` 前移到 `Stage 1.5D/1.5F multi-symbol all-or-none emission + admission dedupe hotfix`。后续部署必须同时更新 1.5D、1.5F，并保留 1.5G duplicate identity blocker：
 
 ```text
-1. Stage 1.5D 使用新的 degraded recent retry cadence，避免 endpoint degraded 后长期不重试近期公告。
-2. Stage 1.5D 使用 fallback detail URL，但 fallback 请求必须计入 HTTP request budget。
-3. Stage 1.5D 区分 detail_retry_cycle_count 和 detail_http_request_count，避免审计混淆。
-4. Stage 1.5D 使用 endpoint_health_by_variant，primary URL degraded 不得污染 fallback URL health。
-5. Stage 1.5D 必须启动新的 output root；旧 SKHYUSDT root 只读保存，不改写、不补写。
-6. Stage 1.5F 必须消费新的 1.5D root，并 bootstrap 新 watermark。
+1. Stage 1.5D multi-symbol article 必须等待完整 candidate set 可见后 all-or-none emit。
+2. Stage 1.5D emitted row 必须包含 candidate_symbol_set_hash、emission_id、validated_candidate_set 等审计字段。
+3. Stage 1.5F admission 必须按 stable_event_symbol_key 去重；pending revision 不得改写原 event_symbol_id/event_id。
+4. Stage 1.5G 必须把 duplicate stable event-symbol identity 视为 hard blocker。
+5. Stage 1.5F 仍必须使用 --stage1-5d-runtime-gate，并按 launch/onboard anchor admission。
+6. Stage 1.5D/1.5F 必须启动新的 output root；旧 SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
 ```
 
 当前可以做：
 
 ```text
 1. 按第 7 章同步代码、停止旧进程、启动新的 1.5D collector 和 1.5F observer。
-2. 按第 8 章检查 1.5D scheduler/fallback state、1.5D events、1.5F summary、depth snapshots 和 request_manifest。
+2. 按第 8 章检查 1.5D multi-symbol scheduler state、emitted row 合同、1.5F admission dedupe、depth snapshots 和 request_manifest。
 3. 保留旧 SKHYUSDT evidence root 用于 Stage 1.5H design-only 输入，不再继续写入。
 4. 基于 2026-07-11 Stage 1.5G quarantined pass 结论编写 1.5H design。
 ```
@@ -66,8 +66,8 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 部署 Stage 1.5D detail endpoint degraded retry cadence + fallback hotfix，并用新的 1.5D root 启动 7d collector。
-理由: scheduler fairness 已解决“新公告拿不到第一次 detail fetch”的问题，但 2026-07-10 Multiple TradFi 事件证明 Binance detail endpoint 可能长期返回 HTTP 202 + empty，需要 fallback 和 degraded recent retry cadence。
+P0: 部署 Stage 1.5D/1.5F multi-symbol all-or-none emission + admission dedupe hotfix，并用新的 1.5D root 启动 7d collector。
+理由: 2026-07-29 Multiple TradFi 事件证明 partial symbol visibility 会导致单 symbol 先 emit，必须改为完整 candidate set all-or-none emit，并在 1.5F admission 侧做 stable identity dedupe。
 
 P1: 用新的 1.5D root bootstrap 一个新的 Stage 1.5F root。
 理由: watermark 必须从新 root 建立；旧 SKHYUSDT root 已经完成 1.5G 审计，只读保留。
@@ -110,9 +110,8 @@ P4: 已完成的 SKHYUSDT 1.5G 结论可作为 1.5H design-only 输入。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
-export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
@@ -122,8 +121,8 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 最新部署后应看到：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_multisymbol_all_or_none_admission_dedupe_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_multisymbol_all_or_none_admission_dedupe_hotfix
 ```
 
 ### 4.2 旧路径处理规则
@@ -157,7 +156,7 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 1. 不 rm -rf 旧 SKHYUSDT evidence root。
 2. 不在旧 root 上继续启动 1.5F。
 3. 不把旧 root 和新 root 的 events/depth_snapshots/request_manifest 混合审计。
-4. 新 1.5D/1.5F 部署必须使用 detail_endpoint_fallback_hotfix 后缀。
+4. 新 1.5D/1.5F 部署必须使用 multisymbol_all_or_none_admission_dedupe_hotfix 后缀。
 ```
 
 ## 5. Stage 1.5F 原理速记
@@ -242,34 +241,89 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-### 7.1 本地同步到服务器
+### 7.1 本地部署前门禁
 
-本轮部署目标：把已提交的 Stage 1.5D BAPI detail source hotfix、detail retry overdue starvation hotfix 和 Stage 1.5F launch-time gated observation hotfix 同步到服务器。
+本轮部署目标：把 Stage 1.5D/1.5F multi-symbol all-or-none emission + admission dedupe hotfix 同步到服务器。
+
+核心修复边界：
+
+```text
+1. Stage 1.5D multi-symbol article 必须按完整 candidate set all-or-none emit，不允许只 emit 首个已可见 symbol。
+2. Stage 1.5D candidate set emit 必须携带 candidate_symbol_set_hash / emission_id / validated_candidate_set 审计合同。
+3. Stage 1.5F admission 必须按 stable_event_symbol_key 去重；pending revision 不得改写原 event_symbol_id/event_id。
+4. Stage 1.5G 必须把 duplicate stable event-symbol identity 视为 hard blocker。
+5. 不改变 paper/live/execution/alpha safety flags。
+```
+
+本地先跑目标回归：
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
+  tests/research/external_signal_shadow/test_stage1_5d_a827_boundary_regression.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_state.py \
+  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_loader.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
-  -q
-
-PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_*.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py \
-  tests/scripts/external_signal_shadow/test_review_stage1_5f_live_depth_observer.py \
-  -q
-
-PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_*.py \
-  tests/scripts/external_signal_shadow/test_review_stage1_5g_live_depth_evidence.py \
   -q
 
 git diff --check
 
+PYTHONPATH=src:. .venv/bin/python -m py_compile \
+  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
+  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py \
+  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
+```
+
+最小通过标准：
+
+```text
+pytest 目标套件全部 pass。
+git diff --check 无输出且 exit 0。
+py_compile exit 0。
+```
+
+### 7.2 服务器部署前 active observation 检查
+
+部署前必须先确认旧 1.5F 没有正在采集的 12h observation。若 `active_observation_count > 0`，默认不重启 1.5F，除非明确接受该 observation 被截断。
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export OLD_STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*' | sort | tail -n 1)"
+
+echo "OLD_STAGE1_5F_OUT=[$OLD_STAGE1_5F_OUT]"
+cat "$OLD_STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null \
+  | python3 -m json.tool | grep -E \
+'"decision"|"active_observation_count"|"pending_launch_observation_count"|"completed_observation_count"|"total_snapshots_collected"|"last_heartbeat_at_ms"|"blocker"' || true
+
+find "$OLD_STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
+find "$OLD_STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+find "$OLD_STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+```
+
+判定：
+
+```text
+可以部署: active_observation_count = 0，且没有需要等待 launch 的 pending。
+谨慎部署: pending_launch_observation_count > 0，但 launch 时间距离较远；部署会用新 root 重新 bootstrap，不继承旧 pending。
+不要部署: active_observation_count > 0，除非本次 hotfix 风险高于丢失当前 observation。
+```
+
+### 7.3 本地同步到服务器
+
+默认使用 scoped sync，避免把本地 `data/`、`.venv/`、cache 或历史运行证据覆盖到服务器。
+
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+
 export SERVER=root@47.82.4.85
+
 rsync -avzP \
   --exclude='data' \
   --exclude='.git' \
@@ -281,21 +335,52 @@ rsync -avzP \
   "$SERVER:/root/crypto-alpha-lab/"
 ```
 
-如果本地已完成提交且只需要部署服务器，可直接执行 `rsync`，但不要跳过服务器端最小验证。
+同步后做关键文件 SHA256 对照。先在本地执行：
 
-### 7.2 服务器最小验证
+```bash
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
+
+shasum -a 256 \
+  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
+  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py \
+  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py \
+  configs/base.py
+```
+
+再在服务器执行：
+
+```bash
+cd /root/crypto-alpha-lab
+
+sha256sum \
+  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
+  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py \
+  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py \
+  configs/base.py
+```
+
+若 hash 不一致，不得启动新进程。
+
+### 7.4 服务器最小验证
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_config.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_summary.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_config.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
+  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_loader.py \
+  -k "93b5_prelaunch or default_rejects_article_release_date or pending_revision_preserves_event_symbol_id or duplicate_stable_event_symbol_identity or existing_event_stream_rebuilds_emission_index_from_valid_full_row or event_stream_rebuild_rejects_partial_row_with_full_candidate_hash" \
   -q
+
+PYTHONPATH=src:. .venv/bin/python -m py_compile \
+  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
+  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py \
+  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
 ```
 
 若服务器缺少 pytest：
@@ -309,7 +394,7 @@ python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
-### 7.3 停止旧 Stage 1.5D / 1.5F 进程
+### 7.5 停止旧 Stage 1.5D / 1.5F 进程
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -319,24 +404,18 @@ tmux ls
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
 
 # 停止旧 1.5F observer。
-tmux kill-session -t stage1_5f_live_depth_7d 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_u_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_empty_detail_retry_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_title_contract_transient_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_delayed_launch_age_gate_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_request_manifest_symbol_key_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 
 # 停止旧 1.5D collector。
-tmux kill-session -t stage1_5d_continuous_7d_title_contract_transient_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_detail_retry_scheduler_starvation_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_detail_retry_overdue_starvation_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_detail_endpoint_fallback_hotfix 2>/dev/null || true
 
 # 兜底：按当前 tmux 中真实 session 名停止所有 1.5D/1.5F 会话。
 for s in $(tmux ls 2>/dev/null | awk -F: '/stage1_5d|stage1_5f/ {print $1}'); do
@@ -347,16 +426,16 @@ done
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep || true
 ```
 
-如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程，避免多个进程同时采集或写入不同证据 root。
+如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程。
 
-### 7.4 启动 Stage 1.5D BAPI detail + launch-time gate hotfix collector
+### 7.6 启动 Stage 1.5D multi-symbol all-or-none collector
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_multisymbol_all_or_none_admission_dedupe_hotfix"
 
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
   echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
@@ -364,7 +443,7 @@ if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
 fi
 mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_multisymbol_all_or_none_admission_dedupe_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -380,9 +459,28 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_l
 echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
 ```
 
-### 7.5 Bootstrap 新 Stage 1.5F watermark
+等待 1 到 2 个 poll：
 
-等待新的 1.5D root 写出至少一轮 heartbeat/raw payload 后执行：
+```bash
+sleep 90
+
+cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
+  | python3 -m json.tool | grep -E \
+'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"live_public_readonly"|"trade_signal_allowed"|"paper_trading_allowed"|"live_trading_allowed"|"execution_engine_allowed"|"alpha_interpretation_allowed"|"fatal_blockers"'
+```
+
+判定标准：
+
+```text
+正常: decision = stage1_5d_runtime_gate_ready。
+正常: consumable_by_stage1_5f = true。
+正常: failed_poll_count = 0 或无连续失败。
+正常: fatal_blockers = []。
+正常: trade_signal_allowed / paper_trading_allowed / live_trading_allowed / execution_engine_allowed / alpha_interpretation_allowed 均为 false。
+异常: runtime gate 文件不存在、decision 非 ready、fatal_blockers 非空时，不得启动新 1.5F。
+```
+
+### 7.7 Bootstrap 新 Stage 1.5F watermark
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -395,10 +493,9 @@ if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_
     data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
 fi
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
 STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix"
-export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_multisymbol_all_or_none_admission_dedupe_hotfix"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ ! -d "$STAGE1_5D_EVENTS_OUT" ]; then
@@ -415,26 +512,25 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
   --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
-  --stage1-5d-summary "$STAGE1_5D_VALIDATION_SUMMARY" \
+  --stage1-5d-runtime-gate "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
   --stage1-5e-summary "$STAGE1_5E_SUMMARY" \
   --output-root "$STAGE1_5F_OUT" \
   --bootstrap-watermark
 
-cat "$STAGE1_5F_OUT/watermark.json"
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json"
+cat "$STAGE1_5F_OUT/watermark.json" | python3 -m json.tool
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" | python3 -m json.tool
 ```
 
-bootstrap 只建立启动时的新旧边界，不对 bootstrap 前 rows 产生正式 live depth evidence。1.5F 运行后，watermark 会随 accepted events 继续前推；对 delayed launch contract-symbol，后续 eligibility 必须同时审计 launch/onboard time evidence。
+bootstrap 只建立新 root 的启动边界，不产生正式 live depth evidence。
 
-### 7.6 启动新 Stage 1.5F launch-time gated observer
+### 7.8 启动新 Stage 1.5F observer
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-export STAGE1_5D_VALIDATION_SUMMARY="data/external_signal_shadow/stage1_5d/live_event_source_smoke_20260627T032026Z/binance_futures_launch_smoke_summary.json"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
@@ -442,45 +538,61 @@ if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
   exit 1
 fi
 
-tmux new -d -s stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix "
+tmux new -d -s stage1_5f_live_depth_7d_multisymbol_all_or_none_admission_dedupe_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
-STAGE1_5D_VALIDATION_SUMMARY='$STAGE1_5D_VALIDATION_SUMMARY' &&
 STAGE1_5E_SUMMARY='$STAGE1_5E_SUMMARY' &&
 STAGE1_5F_OUT='$STAGE1_5F_OUT' &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
-  --stage1-5d-events-glob \"\$STAGE1_5D_EVENTS_OUT/events/*.jsonl\" \
-  --stage1-5d-summary \"\$STAGE1_5D_VALIDATION_SUMMARY\" \
-  --stage1-5e-summary \"\$STAGE1_5E_SUMMARY\" \
-  --output-root \"\$STAGE1_5F_OUT\" \
+  --stage1-5d-events-glob "\$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
+  --stage1-5d-runtime-gate "\$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
+  --stage1-5e-summary "\$STAGE1_5E_SUMMARY" \
+  --output-root "\$STAGE1_5F_OUT" \
   --live-public-readonly
 "
 ```
 
-### 7.7 部署后首次检查
+### 7.9 部署后首次检查
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+
+echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
+echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 
 date -u
 tmux ls
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
 
-cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null || true
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null || true
+cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"fatal_blockers"' || true
+
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"stage1_5d_runtime_gate_stale"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"active_observation_count"|"pending_launch_observation_count"|"post_watermark_events_accepted"|"last_heartbeat_at_ms"|"blocker"' || true
+
 wc -l "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
+wc -l "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
 wc -l "$STAGE1_5D_EVENTS_OUT"/request_manifest/*.jsonl 2>/dev/null || true
 wc -l "$STAGE1_5F_OUT"/heartbeat/*.jsonl 2>/dev/null || true
 find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
 find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+```
 
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python -m json.tool | grep -E \
-"pending_launch_observation_count|pending_launch_time_in_future_count|pending_launch_anchor_missing_count|pending_anchor_conflict_count|active_expected_snapshot_count|active_unique_snapshot_bucket_count|active_missing_snapshot_bucket_count|active_out_of_window_snapshot_row_count" || true
+正常首检：
+
+```text
+1. tmux 中只有新的 multisymbol_all_or_none_admission_dedupe_hotfix 1.5D/1.5F session。
+2. 1.5D live_safety_gate_summary decision = stage1_5d_runtime_gate_ready。
+3. 1.5F stage1_5d_runtime_gate_decision = stage1_5d_runtime_gate_ready。
+4. 1.5F cross_root_upstream_summary_dependency = false。
+5. 1.5F block_new_event_admission = false。
+6. 没有新事件时 active_observation_count = 0、pending_launch_observation_count = 0 属于正常。
 ```
 
 ## 8. 日常监控
@@ -493,8 +605,8 @@ cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python -m js
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -507,8 +619,15 @@ date -u
 tmux ls
 ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
 
+cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null || true
 cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null || true
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null || true
+
+cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"request_success_rate"|"fatal_blockers"' || true
+
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"stage1_5d_runtime_gate_stale"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"active_observation_count"|"pending_launch_observation_count"|"pending_launch_time_in_future_count"|"pending_launch_anchor_missing_count"|"pending_anchor_conflict_count"|"post_watermark_events_accepted"|"last_heartbeat_at_ms"|"blocker"' || true
 
 wc -l "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
 wc -l "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
@@ -523,308 +642,193 @@ tail -n 3 "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
 tail -n 3 "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
 ```
 
-### 8.3 Stage 1.5D scheduler/overdue retry 专项检查
+### 8.3 Stage 1.5D multi-symbol scheduler 专项检查
+
+用于检查类似 `93b5cd2280874d9cb4303827374b940d` 的多合约公告是否仍处于 partial emit / pending 卡住状态。
 
 ```bash
-cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null | python -m json.tool | grep -E \
-"detail_budget_deferred_count|detail_budget_starved_count|detail_never_attempted_expired_count|detail_first_attempt_sla_breach_count|detail_scheduler_pending_count|detail_scheduler_backoff_count|detail_endpoint_degraded|detail_degraded_recent_retry_count|detail_fetch_fallback_attempt_count|detail_fetch_fallback_success_count|detail_fetch_attempt_manifest_mismatch_count|detail_retry_overdue_pending_count|detail_retry_overdue_attempted_count|detail_retry_due_timestamp_missing_count|detail_attempt_manifest_mismatch_count|detail_retry_oldest_overdue_ms|detail_retry_overdue_warn_active|detail_retry_overdue_hard_warn_active|detail_retry_overdue_selected_total|detail_retry_overdue_deferred_total|detail_retry_overdue_retry_cycle_total" || true
+export ARTICLE_ID="93b5cd2280874d9cb4303827374b940d"
 
-python - <<'PY'
-import json
-import os
+python3 - <<'PY'
+import json, os
 from pathlib import Path
 root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
+article = os.environ.get("ARTICLE_ID", "")
 state_path = root / "detail_retry_scheduler_state.json"
-print("scheduler_state_exists", state_path.exists())
+print("state_path", state_path)
+print("exists", state_path.exists())
 if state_path.exists():
-    state = json.loads(state_path.read_text())
-    articles = state.get("articles", {}) or {}
-    print("metadata_version", state.get("metadata_version"))
-    print("pending_articles", len(articles))
-    print("endpoint_health", state.get("endpoint_health", {}))
-    print("endpoint_health_by_variant", state.get("endpoint_health_by_variant") or state.get("endpoint_health", {}).get("by_variant", {}))
-    for code, row in list(articles.items())[-5:]:
-        print({
-            "code": code,
-            "detail_retry_cycle_count": row.get("detail_retry_cycle_count"),
-            "detail_http_request_count": row.get("detail_http_request_count"),
-            "detail_fetch_attempt_count": row.get("detail_fetch_attempt_count"),
-            "transient_errors": row.get("transient_detail_error_count"),
-            "defer_count": row.get("defer_count"),
-            "next_retry_at_ms": row.get("next_detail_retry_at_ms"),
-            "terminal_failure_type": row.get("terminal_failure_type"),
-            "title": (row.get("title") or "")[:120],
-        })
+    data = json.loads(state_path.read_text())
+    st = data.get("articles", {}).get(article) or data.get(article) or {}
+    print("article_in_scheduler", bool(st))
+    keys = [
+        "title", "event_type", "candidate_symbols", "symbol_validation_status", "pending_reason",
+        "detail_http_request_count", "detail_fetch_attempt_count", "detail_retry_cycle_count",
+        "last_bapi_detail_status", "last_bapi_parser_status", "last_bapi_parse_failed_reason",
+        "symbol_launch_times_ms", "symbol_effective_launch_times_ms", "symbol_onboard_times_ms",
+        "status", "terminal_reason", "emission_id", "candidate_symbol_set_hash",
+        "candidate_symbols_ordered", "candidate_symbols_normalized",
+    ]
+    print(json.dumps({k: st.get(k) for k in keys if k in st}, indent=2, ensure_ascii=False))
 PY
 
-find "$STAGE1_5D_EVENTS_OUT/detail_retry_scheduler_diagnostics" -type f 2>/dev/null | sort | tail -n 5 | xargs tail -n 20 2>/dev/null || true
-find "$STAGE1_5D_EVENTS_OUT/detail_retry_terminal_diagnostics" -type f 2>/dev/null | sort | tail -n 5 | xargs tail -n 20 2>/dev/null || true
+find "$STAGE1_5D_EVENTS_OUT/request_manifest" -type f 2>/dev/null \
+  -exec grep -HIn "$ARTICLE_ID" {} \; | tail -n 40
+
+find "$STAGE1_5D_EVENTS_OUT/events" -type f 2>/dev/null \
+  -exec grep -HIn "$ARTICLE_ID" {} \;
 ```
 
-判定标准：
+正常判读：
 
 ```text
-正常: scheduler_state_exists=true 或 summary 中 scheduler counters 可读。
-正常: summary 可读 detail_fetch_fallback_attempt_count / detail_fetch_fallback_success_count。
-正常: endpoint_health_by_variant 可区分 primary 和 fallback URL variant。
-正常: 新 no-symbol futures article 有 announcement_detail request row，或仍处于 scheduler pending/backoff/deferred。
-正常: overdue selected/deferred totals 可读；若有 deferred，diagnostics 中必须出现原因。
-正常: detail_unavailable_timeout 只出现在 detail_retry_terminal_diagnostics，且 consumable_by_stage1_5f=false。
-异常: detail_fetch_attempt_manifest_mismatch_count > 0。
-异常: fallback 请求数量突破 EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL。
-异常: 429/5xx/timeout/url_validation_failed 后立即 fallback。
-异常: detail_fetch_attempted=false 的新 article 被 terminal_failed + symbol_empty/parser_failed。
-异常: request_type 全部 unknown，无法区分 announcement_list / announcement_detail / exchange_info。
-异常: 同一 source_article_id 每分钟无限写 announcement_detail_deferred 行。
+1. BAPI detail success 后，candidate_symbols 应包含完整公告候选集合。
+2. 若 exchangeInfo 尚未可见，symbol_validation_status 应保持 pending_*，不得 partial emit。
+3. 若所有 candidate 都已 PENDING_TRADING/TRADING 且 anchor 完整，events/*.jsonl 应出现一条 all_or_none_candidate_set row。
+4. 该 row 的 symbols 必须是完整 candidate set，不得只含第一个 visible symbol。
+5. 该 row 应包含 multi_symbol_emission_mode、multi_symbol_candidate_set_hash、emission_id、validated_candidate_set。
 ```
 
-### 8.4 Stage 1.5F symbol-key 专项检查
+### 8.4 Stage 1.5D emitted row 合同检查
 
 ```bash
-python - <<'PY'
-import glob
-import json
-import os
-root = os.environ["STAGE1_5F_OUT"]
+python3 - <<'PY'
+import json, os
+from pathlib import Path
+root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
 rows = []
-missing = []
-for p in sorted(glob.glob(f"{root}/request_manifest/**/*.jsonl", recursive=True)):
-    with open(p) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if row.get("request_type") == "depth_snapshot":
-                rows.append(row)
-                if not row.get("event_symbol_id") or not row.get("event_id") or not row.get("symbol"):
-                    missing.append(row)
-print("depth_manifest_rows", len(rows))
-print("missing_symbol_key_rows", len(missing))
-for row in rows[-5:]:
-    print({
-        "symbol": row.get("symbol"),
-        "event_symbol_id": row.get("event_symbol_id"),
-        "event_id": row.get("event_id"),
-        "http_status": row.get("http_status"),
-        "audit_metadata_version": row.get("audit_metadata_version"),
-    })
+for p in sorted((root / "events").glob("*.jsonl")):
+    for line in p.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("multi_symbol_emission_mode") == "all_or_none_candidate_set":
+            rows.append(row)
+print("multi_symbol_rows", len(rows))
+for row in rows[-10:]:
+    print(json.dumps({
+        "source_article_id": row.get("source_article_id"),
+        "symbols": row.get("symbols"),
+        "symbol_validation_status": row.get("symbol_validation_status"),
+        "multi_symbol_emission_mode": row.get("multi_symbol_emission_mode"),
+        "candidate_symbol_set_hash_version": row.get("candidate_symbol_set_hash_version"),
+        "multi_symbol_candidate_set_hash": row.get("multi_symbol_candidate_set_hash"),
+        "emission_id": row.get("emission_id"),
+        "symbol_effective_launch_times_ms": row.get("symbol_effective_launch_times_ms"),
+        "symbol_effective_launch_time_sources": row.get("symbol_effective_launch_time_sources"),
+    }, ensure_ascii=False))
 PY
 ```
 
-判定标准：
+异常判读：
 
 ```text
-depth_manifest_rows > 0 后，missing_symbol_key_rows 必须为 0。
-exchangeInfo rows 不对应单个 event-symbol，不要求 event_symbol_id。
-announcement_detail_deferred rows 是 1.5D scheduler diagnostic，不应被 1.5F/1.5G depth request health 当成 depth_snapshot。
+1. multi_symbol_emission_mode 存在但 symbol_validation_status 不是 validated_candidate_set => 异常。
+2. symbols 只包含部分 candidate set => 异常。
+3. 缺 multi_symbol_candidate_set_hash 或 emission_id => 异常。
+4. symbol_effective_launch_times_ms 缺任一 symbol => 异常。
 ```
 
-### 8.5 Stage 1.5F delayed-launch watermark 专项检查
-
-用于确认 delayed launch 事件不会因为 `detected_at_ms` 早于运行中的 watermark 而被误判为 `pre_watermark`。以 SPCXUSD1 为例：
+### 8.5 Stage 1.5F admission dedupe / collision 检查
 
 ```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"block_new_event_admission"|"duplicate_suppressed_count"|"identity_collision_blocked_count"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"' || true
 
-export ARTICLE_ID="6cbb1b11a9c843949624cf2eacaac8b4"
-export SYMBOL="SPCXUSD1"
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-
-python - <<'PY'
-import json
-import os
-from datetime import datetime, timezone
+python3 - <<'PY'
+import json, os
 from pathlib import Path
-
-article_id = os.environ["ARTICLE_ID"]
-symbol = os.environ["SYMBOL"]
-d_root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
-f_root = Path(os.environ["STAGE1_5F_OUT"])
-
-def utc(ms):
-    if ms is None:
-        return None
-    return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).isoformat()
-
-print("STAGE1_5D_EVENTS_OUT", d_root)
-print("STAGE1_5F_OUT", f_root)
-
-w_path = f_root / "watermark.json"
-if w_path.exists():
-    w = json.loads(w_path.read_text())
-    print("\n=== 1.5F watermark ===")
-    print("max_seen_detected_at_ms", w.get("max_seen_detected_at_ms"))
-    print("max_seen_detected_utc", utc(w.get("max_seen_detected_at_ms")))
-    print("seen_source_article_contains_symbol_article", article_id in (w.get("seen_source_article_ids") or []))
-
-s_path = d_root / "detail_retry_scheduler_state.json"
-print("\n=== 1.5D scheduler ===")
-print("scheduler_exists", s_path.exists())
-if s_path.exists():
-    s = json.loads(s_path.read_text())
-    row = (s.get("articles") or {}).get(article_id)
-    print("article_in_scheduler", row is not None)
-    if row:
-        print(json.dumps({
-            "title": row.get("title"),
-            "event_type": row.get("event_type"),
-            "candidate_symbols": row.get("candidate_symbols"),
-            "symbol_validation_status": row.get("symbol_validation_status"),
-            "terminal_failure_type": row.get("terminal_failure_type"),
-            "first_detected_at_ms": row.get("first_detected_at_ms"),
-            "first_detected_utc": utc(row.get("first_detected_at_ms")),
-            "symbol_effective_launch_times_ms": row.get("symbol_effective_launch_times_ms"),
-            "symbol_effective_launch_times_utc": {
-                k: utc(v) for k, v in (row.get("symbol_effective_launch_times_ms") or {}).items()
-            },
-            "symbol_onboard_times_ms": row.get("symbol_onboard_times_ms"),
-            "symbol_onboard_times_utc": {
-                k: utc(v) for k, v in (row.get("symbol_onboard_times_ms") or {}).items()
-            },
-        }, indent=2, ensure_ascii=False))
-
-print("\n=== 1.5D event rows ===")
-events_found = 0
-for p in sorted((d_root / "events").glob("*.jsonl")):
-    for line_no, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
-        if article_id in line or symbol in line:
-            events_found += 1
-            print(p, line_no, line[:1500])
-print("events_found", events_found)
-PY
-```
-
-判定标准：
-
-```text
-上线前正常 pending:
-  article_in_scheduler = true
-  candidate_symbols contains SYMBOL
-  symbol_validation_status = pending_pre_trading
-  terminal_failure_type = null
-  symbol_effective_launch_times_ms[SYMBOL] 晚于 watermark
-  events_found = 0
-
-上线后正常 handoff:
-  1.5D events 中出现 symbols=[SYMBOL] + symbol_parse_status=parsed
-  1.5F events_accepted 中出现 SYMBOL
-  observation_age_basis = symbol_effective_launch_time 或 symbol_onboard_time
-  announcement_time_capture_evidence_allowed = false 可接受
-  launch_time_depth_evidence_allowed = true
-  live_depth_evidence_basis = launch_time_only
-
-异常:
-  terminal_failure_type = candidate_validation_rejected
-  symbol_parse_failed_reason = exchange_info_disallowed_contract_type
-  events_rejected 中 reason = pre_watermark 且 symbol_effective_launch_times_ms[SYMBOL] 晚于 watermark
-```
-
-### 8.6 Stage 1.5F launch-time gated schema 专项检查
-
-用于确认新 1.5F observer 已经按 launch/onboard anchor 启动，而不是继续按 `detected_at_ms` 立即采集。这个检查在每次部署后、以及新事件 accepted 后都应执行。
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix' | sort | tail -n 1)"
-
-echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
-
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python -m json.tool | grep -E \
-"pending_launch_observation_count|pending_launch_time_in_future_count|pending_launch_anchor_missing_count|pending_anchor_conflict_count|pending_observation_capacity_count|active_expected_snapshot_count|active_unique_snapshot_bucket_count|active_missing_snapshot_bucket_count|active_out_of_window_snapshot_row_count" || true
-
-python - <<'PY'
-import glob
-import json
-import os
-from pathlib import Path
-
 root = Path(os.environ["STAGE1_5F_OUT"])
+state_path = root / "observer_state.jsonl"
 latest = {}
-state_file = root / "observer_state.jsonl"
-if state_file.exists():
-    for line in state_file.read_text(errors="ignore").splitlines():
+if state_path.exists():
+    for line in state_path.read_text().splitlines():
         if not line.strip():
             continue
         row = json.loads(line)
         latest[row.get("event_symbol_id")] = row
-
-print("state_count", len(latest))
-for row in list(latest.values())[-10:]:
-    print(json.dumps({
-        "event_symbol_id": row.get("event_symbol_id"),
-        "symbol": row.get("symbol"),
-        "status": row.get("status"),
-        "acceptance_id_present": bool(row.get("acceptance_id")),
-        "observation_anchor_ms": row.get("observation_anchor_ms"),
-        "observation_anchor_basis": row.get("observation_anchor_basis"),
-        "observation_anchor_confidence": row.get("observation_anchor_confidence"),
-        "observation_started_at_ms": row.get("observation_started_at_ms"),
-        "observation_window_start_ms": row.get("observation_window_start_ms"),
-        "observation_window_end_ms": row.get("observation_window_end_ms"),
-        "first_depth_request_at_ms": row.get("first_depth_request_at_ms"),
-        "first_depth_request_latency_ms": row.get("first_depth_request_latency_ms"),
-        "expected_snapshot_count": row.get("expected_snapshot_count"),
-        "unique_snapshot_bucket_count": row.get("unique_snapshot_bucket_count"),
-        "missing_snapshot_bucket_count": row.get("missing_snapshot_bucket_count"),
-        "out_of_window_snapshot_row_count": row.get("out_of_window_snapshot_row_count"),
-        "evidence_start_class": row.get("evidence_start_class"),
-        "live_depth_evidence_basis": row.get("live_depth_evidence_basis"),
-    }, ensure_ascii=False))
-
-print("\n=== accepted rows tail ===")
-for p in sorted((root / "events_accepted").glob("*.jsonl"))[-3:]:
-    for line in p.read_text(errors="ignore").splitlines()[-10:]:
-        if line.strip():
-            row = json.loads(line)
-            print(json.dumps({
-                "event_symbol_id": row.get("event_symbol_id"),
-                "symbol": row.get("symbol"),
-                "acceptance_id_present": bool(row.get("acceptance_id")),
-                "observation_anchor_ms": row.get("observation_anchor_ms"),
-                "observation_anchor_basis": row.get("observation_anchor_basis"),
-                "observation_window_start_ms": row.get("observation_window_start_ms"),
-                "observation_window_end_ms": row.get("observation_window_end_ms"),
-                "announcement_time_capture_evidence_allowed": row.get("announcement_time_capture_evidence_allowed"),
-                "launch_time_depth_evidence_allowed": row.get("launch_time_depth_evidence_allowed"),
-                "live_depth_evidence_basis": row.get("live_depth_evidence_basis"),
-                "evidence_start_class": row.get("evidence_start_class"),
-            }, ensure_ascii=False))
+by_key = {}
+for row in latest.values():
+    key = row.get("stable_event_symbol_key")
+    esid = row.get("event_symbol_id")
+    if key and esid:
+        by_key.setdefault(key, set()).add(esid)
+collisions = {k: sorted(v) for k, v in by_key.items() if len(v) > 1}
+print("latest_state_count", len(latest))
+print("stable_key_collision_count", len(collisions))
+for k, ids in list(collisions.items())[:10]:
+    print({"stable_event_symbol_key": k, "event_symbol_ids": ids})
 PY
 ```
 
-判定标准：
+正常判读：
 
 ```text
-新事件 pending 且 launch/onboard time 未到:
-  status = pending_launch_time_in_future
-  observation_anchor_ms 非空
-  events_accepted 中没有该 symbol
-  depth_snapshots 中没有该 symbol
-
-新事件 accepted 后:
-  accepted row 必须有 acceptance_id
-  observation_anchor_ms 非空
-  observation_window_start_ms == observation_anchor_ms
-  first_depth_request_at_ms >= observation_anchor_ms
-  observation_anchor_basis = symbol_effective_launch_time / symbol_onboard_time / exchangeinfo_current_onboard_time
-  live_depth_evidence_basis = announcement_and_launch_time 或 launch_time_only
-
-12h completed 后:
-  expected_snapshot_count = 720
-  unique_snapshot_bucket_count 使用 anchor-based [anchor, anchor+12h) bucket
-  out_of_window_snapshot_row_count 不应被算入 coverage
-
-异常:
-  新 accepted/completed state 中 observation_anchor_ms = null
-  新 accepted/completed state 中 acceptance_id 为空
-  observation_window_start_ms 仍等于 observation_started_at_ms 且早于 launch/onboard anchor
-  first_depth_request_at_ms 早于 observation_anchor_ms
-  expected_snapshot_count / unique_snapshot_bucket_count 长期为空
+stable_key_collision_count = 0。
+block_new_event_admission = false。
+identity_collision_blocked_count = 0 或无该字段。
 ```
+
+### 8.6 新事件 active observation 检查
+
+当 `post_watermark_events_accepted > 0` 或 `active_observation_count > 0` 后执行：
+
+```bash
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"decision"|"active_observation_count"|"completed_observation_count"|"total_snapshots_collected"|"request_success_rate"|"failed_requests_count"|"active_expected_snapshot_count"|"active_unique_snapshot_bucket_count"|"active_missing_snapshot_bucket_count"|"active_out_of_window_snapshot_row_count"|"first_depth_request_at_ms"|"first_healthy_snapshot_at_ms"|"first_valid_book_latency_ms"' || true
+
+find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null -exec tail -n 20 {} \;
+find "$STAGE1_5F_OUT/observer_state.jsonl" -type f 2>/dev/null -exec tail -n 20 {} \;
+find "$STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
+find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null -exec tail -n 20 {} \;
+```
+
+### 8.7 12h 完成后 Stage 1.5G review
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_multisymbol_all_or_none_admission_dedupe_hotfix' | sort | tail -n 1)"
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_multisymbol_hotfix"
+export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
+
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
+  --stage1-5f-output-root "$STAGE1_5F_OUT" \
+  --output-root "$STAGE1_5G_OUT" \
+  --output-summary "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
+  --output-review "docs/reviews/$(date -u +%Y-%m-%d)-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md"
+
+cat "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
+  | python3 -m json.tool | grep -E \
+'"decision"|"allowed_next_action"|"clean_depth_evidence_pass"|"quarantined_depth_evidence_pass"|"quarantine_candidate"|"formal_announcement_and_launch_count"|"book_availability_ratio"|"invalid_book_row_count"|"duplicate_stable_event_symbol_identity"|"blockers"'
+```
+
+### 8.8 停止新 root
+
+正常结束或需要重新部署时：
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+date -u
+tmux ls
+ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
+
+tmux kill-session -t stage1_5f_live_depth_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
+
+ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep || true
+```
+
+停止前若 `active_observation_count > 0`，先记录：
+
+```bash
+cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
+'"active_observation_count"|"total_snapshots_collected"|"active_expected_snapshot_count"|"active_unique_snapshot_bucket_count"|"last_heartbeat_at_ms"'
+```
+
 
 ## 9. Raw Payload 与 Events 检查
 
@@ -961,17 +965,18 @@ validation=rejected + symbol_parse_status=terminal_failed = exchangeInfo 明确�
 
 ## 10. 首次输出判读模板
 
-新一轮 detail endpoint fallback hotfix 部署后，首次输出应类似：
+新一轮 BAPI table parser + runtime gate hotfix 部署后，首次输出应类似：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_detail_endpoint_fallback_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_bapi_table_runtime_gate_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_bapi_table_runtime_gate_hotfix
 
 1.5D:
   heartbeat rows > 0
   request_manifest rows > 0
-  detail_retry_scheduler_state.json exists or summary scheduler counters readable
-  detail_fetch_fallback_attempt_count readable
+  live_safety_gate_summary.json exists
+  runtime gate decision = stage1_5d_runtime_gate_ready
+  consumable_by_stage1_5f = true
   detail_fetch_attempt_manifest_mismatch_count = 0
 
 1.5F:
@@ -989,9 +994,9 @@ STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_I
 判读：
 
 ```text
-status = normal_initial_detail_endpoint_fallback_hotfix_run
+status = normal_initial_bapi_table_runtime_gate_hotfix_run
 path_status = current_1_5d_and_1_5f_roots_match
-1.5D_status = running_and_writing_heartbeats_request_manifest_scheduler_state
+1.5D_status = running_and_writing_heartbeats_request_manifest_scheduler_state_runtime_gate
 1.5F_status = running_and_waiting_for_post_watermark_event
 depth_collection_status = not_started_because_no_new_post_watermark_event_symbol
 ```
@@ -1082,7 +1087,7 @@ paper/live trading readiness。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_detail_endpoint_fallback_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_bapi_table_runtime_gate_hotfix' | sort | tail -n 1)"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
 
@@ -1303,7 +1308,7 @@ symbol = <actual_depth_symbol>
 4. fallback 只允许用于 HTTP 202 / empty untrusted payload；429/5xx/timeout/url_validation_failed 不允许同 poll fallback。
 5. endpoint_health_by_variant 按 URL variant 分桶，primary degraded 不得污染 fallback URL。
 6. fallback 成功必须保留 payload_trusted、detail_fetch_variant、detail_fetch_url_used 和 payload hash provenance。
-7. 新部署必须使用 detail_endpoint_fallback_hotfix root，不得继续写旧 SKHYUSDT evidence root。
+7. 新部署必须使用 bapi_table_runtime_gate_hotfix root，不得继续写旧 SKHYUSDT/SPCX/POPMART evidence root。
 ```
 
 Stage 1.5G 衔接：

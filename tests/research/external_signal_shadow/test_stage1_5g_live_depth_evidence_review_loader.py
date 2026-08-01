@@ -171,6 +171,63 @@ def test_loader_jsonl_parse_error_blocks_review(tmp_path):
     assert len(bundle.snapshots) == 1
 
 
+def test_loader_blocks_duplicate_stable_event_symbol_identity(tmp_path):
+    root = make_stage1_5f_fixture_root(tmp_path)
+    stable_key = "binance_article_1_futures_contract_launch_BTCUSDT"
+    accepted_rows = [
+        {
+            "event_symbol_id": "es1",
+            "stable_event_symbol_key": stable_key,
+            "source_article_id": "article_1",
+            "event_type": "futures_contract_launch",
+            "symbol": "BTCUSDT",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+        },
+        {
+            "event_symbol_id": "es2",
+            "stable_event_symbol_key": stable_key,
+            "source_article_id": "article_1",
+            "event_type": "futures_contract_launch",
+            "symbol": "BTCUSDT",
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+        },
+    ]
+    (root / "events_accepted" / "20260706.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in accepted_rows) + "\n",
+        encoding="utf-8",
+    )
+    state_rows = [
+        {
+            "event_symbol_id": "es1",
+            "stable_event_symbol_key": stable_key,
+            "source_article_id": "article_1",
+            "symbol": "BTCUSDT",
+            "status": "completed",
+            "depth_snapshot_count": 1,
+        },
+        {
+            "event_symbol_id": "es2",
+            "stable_event_symbol_key": stable_key,
+            "source_article_id": "article_1",
+            "symbol": "BTCUSDT",
+            "status": "completed",
+            "depth_snapshot_count": 1,
+        },
+    ]
+    (root / "observer_state.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in state_rows) + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = load_stage1_5g_inputs(root)
+
+    assert "duplicate_stable_event_symbol_identity" in bundle.loader_blockers
+
+
 def test_loader_missing_watermark_records_blocker_not_not_ready(tmp_path):
     root = make_stage1_5f_fixture_root(tmp_path)
     (root / "watermark.json").unlink()

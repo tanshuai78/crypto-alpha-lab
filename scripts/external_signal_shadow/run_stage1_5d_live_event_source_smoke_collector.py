@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -155,31 +156,37 @@ def validate_candidate_symbols_against_exchangeinfo(
 
 def build_effective_launch_times_ms(
     candidate_symbols: list[str],
-    symbol_onboard_times_ms: dict[str, int],
-    symbol_launch_times_ms: dict[str, int],
+    symbol_onboard_times_ms: dict,
+    symbol_launch_times_ms: dict,
     source_published_at_ms: int,
     first_detected_at_ms: int,
     allow_release_date_fallback: bool = True,
     allow_legacy_max_age_fallback: bool = True,
 ) -> dict:
     effective = {}
+    per_symbol_sources = {}
     sources = set()
     for s in candidate_symbols:
         if s in symbol_onboard_times_ms and symbol_onboard_times_ms[s] > 0:
             effective[s] = symbol_onboard_times_ms[s]
+            per_symbol_sources[s] = "exchangeinfo_onboard_date"
             sources.add("exchange_info")
         elif s in symbol_launch_times_ms and symbol_launch_times_ms[s] > 0:
             effective[s] = symbol_launch_times_ms[s]
+            per_symbol_sources[s] = "detail_symbol_launch_time"
             sources.add("detail")
         elif allow_release_date_fallback and source_published_at_ms > 0:
             effective[s] = source_published_at_ms
+            per_symbol_sources[s] = "article_release_date"
             sources.add("article_release_date")
         elif allow_legacy_max_age_fallback:
             legacy_max_age_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 3600) * 1000
             effective[s] = first_detected_at_ms + legacy_max_age_ms
+            per_symbol_sources[s] = "legacy_max_age"
             sources.add("legacy_max_age")
         else:
             effective[s] = 0
+            per_symbol_sources[s] = "none"
             sources.add("none")
 
     if "exchange_info" in sources:
@@ -196,7 +203,138 @@ def build_effective_launch_times_ms(
     return {
         "symbol_effective_launch_times_ms": effective,
         "launch_time_source": source_str,
+        "symbol_effective_launch_time_sources": per_symbol_sources,
     }
+
+
+def build_candidate_symbol_set_identity(candidate_symbols: list[str]) -> dict:
+    ordered = []
+    seen = set()
+    for sym in candidate_symbols or []:
+        norm = str(sym or "").strip().upper()
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        ordered.append(norm)
+    normalized = sorted(ordered)
+    payload = json.dumps(normalized, ensure_ascii=True, separators=(",", ":"))
+    return {
+        "candidate_symbols_ordered": ordered,
+        "candidate_symbols_normalized": normalized,
+        "candidate_symbol_set_hash_version": 1,
+        "candidate_symbol_set_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+    }
+
+
+def is_multi_symbol_article_state(state: dict, extraction_result: dict | None = None) -> bool:
+    if extraction_result and extraction_result.get("symbols"):
+        ext_symbols = list(extraction_result.get("symbols") or [])
+        if len(ext_symbols) > 1:
+            return True
+    if state.get("candidate_symbols") is not None:
+        return len(state.get("candidate_symbols") or []) > 1
+    if state.get("parsed_candidate_symbols") is not None:
+        return len(state.get("parsed_candidate_symbols") or []) > 1
+    if state.get("candidate_symbols_ordered") is not None:
+        return len(state.get("candidate_symbols_ordered") or []) > 1
+    symbols = state.get("symbols")
+    if symbols and isinstance(symbols, (list, tuple)):
+        return len(symbols) > 1
+    return False
+
+
+def build_symbol_effective_launch_time_sources(
+    candidate_symbols: list[str],
+    symbol_launch_times_ms: dict,
+    symbol_onboard_times_ms: dict,
+    effective_launch: dict,
+) -> dict[str, str]:
+    res = {}
+    eff_times = (effective_launch or {}).get("symbol_effective_launch_times_ms") or {}
+    eff_sources = (effective_launch or {}).get("symbol_effective_launch_time_sources") or {}
+    for sym in candidate_symbols or []:
+        norm = str(sym or "").strip().upper()
+        if not norm:
+            continue
+        if norm in eff_sources:
+            res[norm] = eff_sources[norm]
+        elif int((symbol_launch_times_ms or {}).get(norm) or 0) > 0:
+            res[norm] = "detail_symbol_launch_time"
+        elif int((symbol_onboard_times_ms or {}).get(norm) or 0) > 0:
+            res[norm] = "exchangeinfo_onboard_date"
+        elif int(eff_times.get(norm) or 0) > 0:
+            res[norm] = "effective_launch_time"
+        else:
+            res[norm] = "none"
+    return res
+
+
+def is_multi_symbol_candidate_set_ready_to_emit(
+    candidate_symbols: list[str],
+    validation_result: dict,
+    effective_launch_times: dict,
+    allowed_anchor_sources: tuple[str, ...] = (
+        "detail_symbol_launch_time",
+        "exchangeinfo_onboard_date",
+    ),
+) -> bool:
+    candidates = [str(s or "").strip().upper() for s in (candidate_symbols or []) if str(s or "").strip()]
+    if len(candidates) <= 1:
+        return False
+    candidate_set = set(candidates)
+    if len(candidate_set) != len(candidates):
+        return False
+
+    validated = set(validation_result.get("validated_symbols") or [])
+    pending = set(validation_result.get("pending_symbols") or [])
+    rejected = list(validation_result.get("rejected_symbols") or [])
+
+    if rejected:
+        return False
+
+    if validated & pending != set():
+        return False
+    if (validated | pending) != candidate_set:
+        return False
+
+    symbol_exchangeinfo = validation_result.get("symbol_exchangeinfo") or {}
+    launch_times = (effective_launch_times or {}).get("symbol_effective_launch_times_ms") or {}
+    anchor_sources = (effective_launch_times or {}).get("symbol_effective_launch_time_sources")
+    if not anchor_sources:
+        top_source = (effective_launch_times or {}).get("launch_time_source")
+        if top_source in ("detail", "exchange_info"):
+            anchor_sources = {sym: top_source for sym in candidates}
+        else:
+            anchor_sources = build_symbol_effective_launch_time_sources(candidates, {}, {}, effective_launch_times)
+
+    allowed_statuses = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES", ("PENDING_TRADING", "PRE_TRADING", "TRADING"))
+    pending_reasons = validation_result.get("pending_reasons") or {}
+    for sym in candidates:
+        if str(pending_reasons.get(sym) or "").startswith("exchange_info_symbol_missing") or pending_reasons.get(sym) == "exchange_info_missing":
+            return False
+
+        meta = symbol_exchangeinfo.get(sym)
+        if meta:
+            status = meta.get("status")
+        elif sym in validated:
+            status = "TRADING"
+        elif sym in pending:
+            status = "PENDING_TRADING"
+        else:
+            return False
+
+        if status not in allowed_statuses:
+            return False
+
+        t = int(launch_times.get(sym) or 0)
+        if t <= 0:
+            return False
+
+        src = str(anchor_sources.get(sym) or "").strip()
+        if src not in allowed_anchor_sources:
+            return False
+
+    return True
 
 
 def is_multi_symbol_article_ready_to_emit(
@@ -205,21 +343,189 @@ def is_multi_symbol_article_ready_to_emit(
     effective_launch: dict,
     state: dict | None = None,
 ) -> bool:
-    candidates = list(candidate_symbols or [])
-    validated = set(validation_result.get("validated_symbols") or [])
-    pending = validation_result.get("pending_symbols") or []
-    rejected = validation_result.get("rejected_symbols") or []
-    launch_times = effective_launch.get("symbol_effective_launch_times_ms") or {}
+    return is_multi_symbol_candidate_set_ready_to_emit(candidate_symbols, validation_result, effective_launch)
 
-    if len(candidates) == 0:
-        return False
-    if len(validated) != len(candidates) or set(candidates) != validated:
-        return False
-    if pending or rejected:
-        return False
-    if not all(int(launch_times.get(sym) or 0) > 0 for sym in candidates):
-        return False
-    return True
+
+def build_multi_symbol_emission_id(source_article_id: str, event_type: str, candidate_symbol_set_hash: str) -> str:
+    schema_version = 1
+    namespace = "binance_futures_announcement"
+    raw_key = f"{schema_version}|{namespace}|{event_type}|{source_article_id}|{candidate_symbol_set_hash}"
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def apply_multi_symbol_candidate_set_contract(
+    norm_event: dict,
+    state: dict,
+    validation_result: dict,
+    symbols_override: list[str],
+    identity: dict,
+    emission_id: str,
+    effective_launch: dict,
+    now_ms: int,
+) -> None:
+    norm_event["multi_symbol_emission_mode"] = "all_or_none_candidate_set"
+    norm_event["multi_symbol_candidate_set_hash"] = identity["candidate_symbol_set_hash"]
+    norm_event["candidate_symbol_set_hash_version"] = identity["candidate_symbol_set_hash_version"]
+    norm_event["candidate_symbols_ordered"] = identity["candidate_symbols_ordered"]
+    norm_event["candidate_symbols_normalized"] = identity["candidate_symbols_normalized"]
+    norm_event["emission_id"] = emission_id
+    norm_event["symbol_validation_status"] = "validated_candidate_set"
+    norm_event["symbol_exchangeinfo_statuses"] = {
+        s: validation_result.get("symbol_exchangeinfo", {}).get(s, {}).get("status")
+        for s in symbols_override
+    }
+    norm_event["symbol_effective_launch_time_sources"] = (
+        effective_launch.get("symbol_effective_launch_time_sources") or {}
+    )
+    norm_event["launch_anchor_policy"] = "bapi_multi_contract_strict"
+
+    state["terminal_state"] = True
+    state["terminal_reason"] = "multi_symbol_candidate_set_emitted"
+    state["terminal_at_ms"] = now_ms
+    state["status"] = "emitted_all_symbols"
+    state["symbol_validation_status"] = "emitted_all_symbols"
+    state["emission_id"] = emission_id
+    state["candidate_symbol_set_hash"] = identity["candidate_symbol_set_hash"]
+    state["candidate_symbol_set_hash_version"] = identity["candidate_symbol_set_hash_version"]
+    state["candidate_symbols_ordered"] = identity["candidate_symbols_ordered"]
+    state["candidate_symbols_normalized"] = identity["candidate_symbols_normalized"]
+    state["symbol_effective_launch_time_sources"] = norm_event["symbol_effective_launch_time_sources"]
+    state["symbol_exchangeinfo_statuses"] = norm_event["symbol_exchangeinfo_statuses"]
+    state["launch_anchor_policy"] = norm_event["launch_anchor_policy"]
+
+
+def build_emission_index_key(source_article_id: str, candidate_symbol_set_hash: str) -> str:
+    return f"{source_article_id}|{candidate_symbol_set_hash}"
+
+
+def validate_emitted_candidate_set_event_row(row: dict) -> tuple[bool, str, dict]:
+    source_article_id = str(row.get("source_article_id") or "").strip()
+    if not source_article_id:
+        return False, "missing_source_article_id", {}
+
+    symbols = list(row.get("symbols") or [])
+    if len(symbols) <= 1 and row.get("multi_symbol_emission_mode") != "all_or_none_candidate_set":
+        return False, "not_candidate_set_event_row", {}
+    if len(symbols) <= 1:
+        return False, "missing_symbols", {}
+
+    mode = row.get("multi_symbol_emission_mode")
+    if mode != "all_or_none_candidate_set":
+        return False, "invalid_multi_symbol_emission_mode", {}
+    if row.get("symbol_validation_status") != "validated_candidate_set":
+        return False, "invalid_candidate_set_validation_status", {}
+    if row.get("event_type") != "futures_contract_launch":
+        return False, "invalid_event_type", {}
+
+    identity = build_candidate_symbol_set_identity(symbols)
+    computed_hash = identity["candidate_symbol_set_hash"]
+    stored_hash = row.get("multi_symbol_candidate_set_hash")
+    if not stored_hash:
+        return False, "missing_candidate_set_hash", {}
+    if stored_hash != computed_hash:
+        return False, "candidate_set_hash_mismatch", {}
+
+    event_type = str(row.get("event_type") or "futures_contract_launch")
+    computed_emission_id = build_multi_symbol_emission_id(source_article_id, event_type, computed_hash)
+    stored_emission_id = row.get("emission_id")
+    if not stored_emission_id:
+        return False, "missing_emission_id", {}
+    if stored_emission_id != computed_emission_id:
+        return False, "emission_id_mismatch", {}
+
+    key = build_emission_index_key(source_article_id, computed_hash)
+    info = {
+        "key": key,
+        "source_article_id": source_article_id,
+        "candidate_symbol_set_hash": computed_hash,
+        "emission_id": computed_emission_id,
+        "event_id": row.get("event_id"),
+        "symbols": symbols,
+        "parser_payload_hash": row.get("parser_payload_hash"),
+    }
+    return True, "valid", info
+
+
+def rebuild_emission_index_from_events(output_root: Path) -> tuple[dict, list[dict]]:
+    index = {}
+    diagnostics = []
+    events_dir = Path(output_root) / "events"
+    if not events_dir.exists():
+        return index, diagnostics
+
+    seen_emission_ids = {}
+
+    for event_file in sorted(events_dir.glob("*.jsonl")):
+        try:
+            lines = event_file.read_text(encoding="utf-8").splitlines()
+        except Exception as e:
+            diagnostics.append({"file": str(event_file), "reason": f"read_error: {e}"})
+            continue
+
+        for line_no, line in enumerate(lines, 1):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                row = json.loads(line_str)
+            except Exception:
+                diagnostics.append({
+                    "file": str(event_file),
+                    "line": line_no,
+                    "reason": "malformed_jsonl",
+                })
+                continue
+
+            valid, reason, info = validate_emitted_candidate_set_event_row(row)
+            if not valid:
+                if reason == "not_candidate_set_event_row":
+                    continue
+                diagnostics.append({
+                    "file": str(event_file),
+                    "line": line_no,
+                    "reason": reason,
+                    "source_article_id": row.get("source_article_id"),
+                })
+                continue
+
+            em_id = info["emission_id"]
+            if em_id in seen_emission_ids and seen_emission_ids[em_id] != info["parser_payload_hash"]:
+                diagnostics.append({
+                    "file": str(event_file),
+                    "line": line_no,
+                    "reason": "duplicate_emission_id_different_payload",
+                    "emission_id": em_id,
+                })
+                continue
+            seen_emission_ids[em_id] = info["parser_payload_hash"]
+
+            try:
+                rel_path = str(event_file.relative_to(output_root))
+            except ValueError:
+                rel_path = str(event_file)
+            info["event_stream_path"] = rel_path
+            index[info["key"]] = info
+
+    return index, diagnostics
+
+
+def check_article_emission_eligibility(
+    state: dict,
+    validation_result: dict,
+    effective_launch: dict,
+    extraction_res: dict | None = None,
+) -> tuple[bool, bool, list[str]]:
+    is_multi = is_multi_symbol_article_state(state, extraction_res)
+    if is_multi:
+        candidates = state.get("candidate_symbols") or (extraction_res.get("symbols") if extraction_res else None) or []
+        ready = is_multi_symbol_candidate_set_ready_to_emit(candidates, validation_result, effective_launch)
+        return ready, True, list(candidates)
+    else:
+        valid_symbols = list(validation_result.get("validated_symbols") or [])
+        return bool(valid_symbols), False, valid_symbols
+
+
+
 
 
 
@@ -251,7 +557,7 @@ def build_candidate_terminal_event(
         detected_at_ms=state["first_detected_at_ms"],
         source_published_at_ms=state["raw"].get("releaseDate"),
         source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-        symbols_override=(),
+        symbols_override=() if symbol_validation_status == "rejected" else tuple(state.get("candidate_symbols") or ()),
         extraction_metadata={
             "symbol_extraction_source": state.get("symbol_extraction_source", "none"),
             "symbol_derivation_method": state.get("symbol_derivation_method"),
@@ -1025,6 +1331,8 @@ def main():
                 if code not in detail_retry_state:
                     continue
                 state = detail_retry_state[code]
+                if state.get("terminal_state"):
+                    continue
 
                 # 1. Check max-age expiry
                 max_age_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_AGE_SEC", 3600)
@@ -1073,7 +1381,7 @@ def main():
                         detected_at_ms=state["first_detected_at_ms"],
                         source_published_at_ms=state["raw"].get("releaseDate"),
                         source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                        symbols_override=(),
+                        symbols_override=tuple(state.get("candidate_symbols") or ()),
                         extraction_metadata={
                             "symbol_extraction_source": state.get("symbol_extraction_source", "none"),
                             "symbol_derivation_method": state.get("symbol_derivation_method", None),
@@ -1184,16 +1492,23 @@ def main():
                     state["symbol_effective_launch_times_ms"] = effective_launch["symbol_effective_launch_times_ms"]
                     state["launch_time_source"] = effective_launch["launch_time_source"]
 
-                    if validation_result["validated_symbols"]:
+                    should_emit, is_multi, symbols_override = check_article_emission_eligibility(
+                        state, validation_result, effective_launch
+                    )
+                    if should_emit:
                         if state.get("detail_fetch_attempted", True):
                             detail_fetch_success_count += 1
                         detail_symbol_extracted_count += 1
-                        candidate_validation_success_count += len(validation_result["validated_symbols"])
+                        candidate_validation_success_count += len(symbols_override)
 
-                        for sym in validation_result["validated_symbols"]:
+                        for sym in symbols_override:
                             meta = validation_result["symbol_exchangeinfo"].get(sym, {})
                             if meta.get("quoteAsset") == "U" or meta.get("marginAsset") == "U":
                                 u_settlement_symbol_extracted_count += 1
+
+                        identity = build_candidate_symbol_set_identity(symbols_override)
+                        c_hash = identity["candidate_symbol_set_hash"]
+                        em_id = build_multi_symbol_emission_id(code, state.get("event_type", "futures_contract_launch"), c_hash)
 
                         norm_event = normalize_live_event(
                             raw=state["raw"],
@@ -1201,12 +1516,12 @@ def main():
                             detected_at_ms=state["first_detected_at_ms"],
                             source_published_at_ms=state["raw"].get("releaseDate"),
                             source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                            symbols_override=validation_result["validated_symbols"],
+                            symbols_override=symbols_override,
                             extraction_metadata={
                                 "symbol_extraction_source": state["symbol_extraction_source"],
                                 "symbol_derivation_method": state["symbol_derivation_method"],
                                 "quote_derivation_source": "exchange_info",
-                                "symbol_validation_status": "validated",
+                                "symbol_validation_status": "validated_candidate_set" if is_multi else "validated",
                                 "detail_fetch_attempted": state.get("detail_fetch_attempted", True),
                                 "detail_fetch_status": state.get("detail_fetch_status", "success"),
                                 "symbol_parse_failed_reason": None,
@@ -1226,6 +1541,18 @@ def main():
                         norm_event["symbol_effective_launch_times_ms"] = state.get("symbol_effective_launch_times_ms", {})
                         norm_event["launch_time_source"] = state.get("launch_time_source")
 
+                        if is_multi:
+                            apply_multi_symbol_candidate_set_contract(
+                                norm_event,
+                                state,
+                                validation_result,
+                                symbols_override,
+                                identity,
+                                em_id,
+                                effective_launch,
+                                now_ms,
+                            )
+
                         event_id = norm_event["event_id"]
                         if event_id not in seen_event_ids:
                             seen_event_ids.add(event_id)
@@ -1238,9 +1565,19 @@ def main():
                             eq_item["first_futures_bar_start_ms"] = None
                             first_bar_queue.append(eq_item)
 
-                        detail_retry_state.pop(code, None)
+                        if is_multi:
+                            state["event_id"] = event_id
+                        else:
+                            detail_retry_state.pop(code, None)
                     else:
-                        if validation_result["pending_symbols"]:
+                        if is_multi and (validation_result.get("pending_symbols") or len(state.get("candidate_symbols", [])) == 0):
+                            state["symbol_validation_status"] = "pending_candidate_set_readiness"
+                            state["pending_reason"] = "multi_symbol_candidate_set_not_ready" if validation_result.get("pending_symbols") else "multi_symbol_candidate_symbols_empty"
+                            state["exchangeinfo_visible_symbols"] = list(validation_result.get("symbol_exchangeinfo", {}).keys())
+                            state["exchangeinfo_missing_symbols"] = [s for s in state.get("candidate_symbols", []) if s not in validation_result.get("symbol_exchangeinfo", {})]
+                            state["hard_rejected_symbols"] = list(validation_result.get("rejected_symbols", []))
+                            state["symbol_exchangeinfo_statuses"] = {s: meta.get("status") for s, meta in validation_result.get("symbol_exchangeinfo", {}).items()}
+                        elif validation_result["pending_symbols"]:
                             is_prelaunch = any(
                                 reason == "exchange_info_symbol_status_not_trading_prelaunch"
                                   for reason in validation_result["pending_reasons"].values()
@@ -1251,6 +1588,11 @@ def main():
                             else:
                                 state["symbol_validation_status"] = "pending_exchangeinfo_missing"
                                 candidate_validation_pending_count += len(validation_result["pending_symbols"])
+                        elif not state.get("candidate_symbols") and (not state.get("detail_fetch_attempted", False) or state.get("status") == "pending_detail_retry"):
+                            state["status"] = "pending_detail_retry"
+                            state["symbol_validation_status"] = "pending_detail_retry"
+                            state["pending_reason"] = state.get("pending_reason") or "title_symbol_missing"
+                            detail_retry_state[code] = state
                         else:
                             state["symbol_validation_status"] = "rejected"
                             reason = next(
@@ -1277,7 +1619,10 @@ def main():
                                 seen_event_ids.add(event_id)
                                 append_jsonl(stream_paths["events"], norm_event)
                                 events_detected.append(norm_event)
-                            detail_retry_state.pop(code, None)
+                            state["terminal_state"] = True
+                            state["terminal_reason"] = "candidate_validation_rejected"
+                            state["terminal_at_ms"] = now_ms
+                            state["symbol_validation_status"] = "rejected"
                     continue
 
                 # 3. Check if this code is allowed to fetch in this poll (scheduling check)
@@ -1558,8 +1903,9 @@ def main():
 
                         if bapi_parsed_symbols:
                             bapi_symbol_parse_success_count += 1
+                            state["candidate_symbols"] = bapi_parsed_symbols
                             exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
-                            valid_symbols = []
+                            validation_res = {}
                             if ex_ok:
                                 validation_res = validate_candidate_symbols_against_exchangeinfo(
                                     candidates=bapi_parsed_symbols,
@@ -1571,18 +1917,35 @@ def main():
                                     emittable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES,
                                     now_ms=now_ms,
                                 )
-                                valid_symbols = validation_res.get("validated_symbols", [])
+                            state["symbol_onboard_times_ms"] = validation_res.get("symbol_onboard_times_ms", {})
+                            state["symbol_launch_times_ms"] = bapi_extraction.get("symbol_launch_times_ms", {})
+                            effective_launch = build_effective_launch_times_ms(
+                                candidate_symbols=bapi_parsed_symbols,
+                                symbol_onboard_times_ms=state.get("symbol_onboard_times_ms", {}),
+                                symbol_launch_times_ms=state.get("symbol_launch_times_ms", {}),
+                                source_published_at_ms=state["raw"].get("releaseDate") or 0,
+                                first_detected_at_ms=state["first_detected_at_ms"],
+                            )
+                            state["symbol_effective_launch_times_ms"] = effective_launch.get("symbol_effective_launch_times_ms", {})
+                            state["launch_time_source"] = effective_launch.get("launch_time_source")
+                            should_emit, is_multi, symbols_override = check_article_emission_eligibility(
+                                state,
+                                validation_res,
+                                effective_launch,
+                                bapi_extraction,
+                            )
 
-                            if len(valid_symbols) == len(bapi_parsed_symbols) and len(valid_symbols) > 0:
+                            if should_emit:
                                 bapi_symbol_validation_success_count += 1
                                 bapi_handled = True
+                                symbol_validation_status = "validated_candidate_set" if is_multi else "validated_by_exchangeinfo"
                                 norm_event = normalize_live_event(
                                     raw=state["raw"],
                                     source_parent_url=source_parent_url,
                                     detected_at_ms=state["first_detected_at_ms"],
                                     source_published_at_ms=state["raw"].get("releaseDate"),
                                     source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                                    symbols_override=tuple(valid_symbols),
+                                    symbols_override=tuple(symbols_override),
                                     extraction_metadata={
                                         "evidence_source": "official_article_body_confirmed",
                                         "detail_transport": "bapi_article_detail_query",
@@ -1593,22 +1956,31 @@ def main():
                                         "detail_fetch_status": "success",
                                         "detail_fetch_variant": "bapi_article_detail_query",
                                         "detail_payload_trusted": True,
-                                        "symbol_validation_status": "validated_by_exchangeinfo",
-                                    }
+                                        "symbol_validation_status": symbol_validation_status,
+                                    },
                                 )
-                                effective_launch = build_effective_launch_times_ms(
-                                    candidate_symbols=valid_symbols,
-                                    symbol_onboard_times_ms=state.get("symbol_onboard_times_ms", {}),
-                                    symbol_launch_times_ms=bapi_extraction.get("symbol_launch_times_ms", {}),
-                                    source_published_at_ms=state["raw"].get("releaseDate") or 0,
-                                    first_detected_at_ms=state["first_detected_at_ms"],
-                                )
-                                norm_event["symbol_launch_times_ms"] = bapi_extraction.get("symbol_launch_times_ms", {})
+                                norm_event["symbol_launch_times_ms"] = state.get("symbol_launch_times_ms", {})
+                                norm_event["symbol_onboard_times_ms"] = state.get("symbol_onboard_times_ms", {})
                                 norm_event["symbol_effective_launch_times_ms"] = effective_launch.get("symbol_effective_launch_times_ms", {})
                                 norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
                                 norm_event["detail_fetched_at_ms"] = now_ms
                                 norm_event["symbol_resolved_at_ms"] = now_ms
                                 norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
+
+                                if is_multi:
+                                    identity = build_candidate_symbol_set_identity(symbols_override)
+                                    c_hash = identity["candidate_symbol_set_hash"]
+                                    em_id = build_multi_symbol_emission_id(code, state.get("event_type", "futures_contract_launch"), c_hash)
+                                    apply_multi_symbol_candidate_set_contract(
+                                        norm_event,
+                                        state,
+                                        validation_res,
+                                        symbols_override,
+                                        identity,
+                                        em_id,
+                                        effective_launch,
+                                        now_ms,
+                                    )
 
                                 event_id = norm_event["event_id"]
                                 if event_id not in seen_event_ids:
@@ -1621,7 +1993,10 @@ def main():
                                     eq_item["first_futures_bar_start_ms"] = None
                                     first_bar_queue.append(eq_item)
 
-                                detail_retry_state.pop(code, None)
+                                if is_multi:
+                                    state["event_id"] = event_id
+                                else:
+                                    detail_retry_state.pop(code, None)
                                 continue
                             else:
                                 bapi_symbol_validation_pending_count += 1
@@ -1902,59 +2277,42 @@ def main():
                     variant_name = "primary" if chosen_url_idx == 0 else "detail_path_fallback"
 
                     if extraction_res["symbols"]:
-                        if extraction_res["symbol_validation_status"] == "validated_by_exact_text":
-                            norm_event = normalize_live_event(
-                                raw=state["raw"],
-                                source_parent_url=source_parent_url,
-                                detected_at_ms=state["first_detected_at_ms"],
-                                source_published_at_ms=state["raw"].get("releaseDate"),
-                                source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                                symbols_override=extraction_res["symbols"],
-                                extraction_metadata={
-                                    "symbol_extraction_source": "detail_path_fallback" if chosen_url_idx > 0 else extraction_res["symbol_extraction_source"],
-                                    "symbol_derivation_method": extraction_res["symbol_derivation_method"],
-                                    "quote_derivation_source": None,
-                                    "symbol_validation_status": "validated_by_exact_text",
-                                    "detail_fetch_attempted": True,
-                                    "detail_fetch_status": "success",
-                                    "symbol_parse_failed_reason": None,
-                                    "symbol_parse_status": "parsed",
-                                    "detail_fetch_variant": variant_name,
-                                    "detail_fetch_url_used": chosen_url,
-                                    "detail_payload_hash": chosen_payload_sha256,
-                                    "detail_payload_trusted": True,
-                                }
+                        state["candidate_symbols"] = extraction_res["symbols"]
+                        state["symbol_extraction_source"] = "detail_path_fallback" if chosen_url_idx > 0 else extraction_res["symbol_extraction_source"]
+                        state["symbol_derivation_method"] = extraction_res["symbol_derivation_method"]
+                        state["quote_derivation_source"] = "exchange_info"
+                        state["symbol_validation_status"] = "pending_exchangeinfo_missing"
+                        state["symbol_launch_times_ms"] = extraction_res.get("symbol_launch_times_ms", {})
+                        state["symbol_onboard_times_ms"] = {}
+                        state["detail_fetch_variant"] = variant_name
+                        state["detail_fetch_url_used"] = chosen_url
+                        state["detail_payload_hash"] = chosen_payload_sha256
+                        state["detail_payload_trusted"] = True
+
+                        effective_launch = build_effective_launch_times_ms(
+                            candidate_symbols=state["candidate_symbols"],
+                            symbol_onboard_times_ms=state["symbol_onboard_times_ms"],
+                            symbol_launch_times_ms=state["symbol_launch_times_ms"],
+                            source_published_at_ms=state["raw"].get("releaseDate") or 0,
+                            first_detected_at_ms=state["first_detected_at_ms"],
+                        )
+                        state["symbol_effective_launch_times_ms"] = effective_launch["symbol_effective_launch_times_ms"]
+                        state["launch_time_source"] = effective_launch["launch_time_source"]
+
+                        exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
+                        if ex_ok:
+                            validation_result = validate_candidate_symbols_against_exchangeinfo(
+                                candidates=state["candidate_symbols"],
+                                exchangeinfo_by_symbol=exchangeinfo_by_symbol,
+                                allowed_margin_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS,
+                                allowed_quote_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS,
+                                allowed_contract_types=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES,
+                                validatable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES,
+                                emittable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES,
+                                now_ms=now_ms,
                             )
-                            norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
-                            norm_event["detail_fetched_at_ms"] = now_ms
-                            norm_event["symbol_resolved_at_ms"] = now_ms
-                            norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
-                            event_id = norm_event["event_id"]
-                            if event_id not in seen_event_ids:
-                                seen_event_ids.add(event_id)
-                                append_jsonl(stream_paths["events"], norm_event)
-                                events_detected.append(norm_event)
-
-                                eq_item = dict(norm_event)
-                                eq_item["first_futures_bar_status"] = "not_yet_available"
-                                eq_item["first_futures_bar_start_ms"] = None
-                                first_bar_queue.append(eq_item)
-
-                            detail_retry_state.pop(code, None)
-                        else:
-                            state["candidate_symbols"] = extraction_res["symbols"]
-                            state["symbol_extraction_source"] = "detail_path_fallback" if chosen_url_idx > 0 else extraction_res["symbol_extraction_source"]
-                            state["symbol_derivation_method"] = extraction_res["symbol_derivation_method"]
-                            state["quote_derivation_source"] = "exchange_info"
-                            state["symbol_validation_status"] = "pending_exchangeinfo_missing"
-                            state["symbol_launch_times_ms"] = extraction_res.get("symbol_launch_times_ms", {})
-                            state["symbol_onboard_times_ms"] = {}
-                            state["detail_fetch_variant"] = variant_name
-                            state["detail_fetch_url_used"] = chosen_url
-                            state["detail_payload_hash"] = chosen_payload_sha256
-                            state["detail_payload_trusted"] = True
-
+                            state["symbol_onboard_times_ms"] = validation_result.get("symbol_onboard_times_ms", {})
                             effective_launch = build_effective_launch_times_ms(
                                 candidate_symbols=state["candidate_symbols"],
                                 symbol_onboard_times_ms=state["symbol_onboard_times_ms"],
@@ -1965,78 +2323,84 @@ def main():
                             state["symbol_effective_launch_times_ms"] = effective_launch["symbol_effective_launch_times_ms"]
                             state["launch_time_source"] = effective_launch["launch_time_source"]
 
-                            exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
-                            if ex_ok:
-                                validation_result = validate_candidate_symbols_against_exchangeinfo(
-                                    candidates=state["candidate_symbols"],
-                                    exchangeinfo_by_symbol=exchangeinfo_by_symbol,
-                                    allowed_margin_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS,
-                                    allowed_quote_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS,
-                                    allowed_contract_types=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES,
-                                    validatable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES,
-                                    emittable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES,
-                                    now_ms=now_ms,
+                            should_emit, is_multi, symbols_override = check_article_emission_eligibility(
+                                state, validation_result, effective_launch
+                            )
+                            if should_emit:
+                                candidate_validation_success_count += len(symbols_override)
+
+                                for sym in symbols_override:
+                                    meta = validation_result["symbol_exchangeinfo"].get(sym, {})
+                                    if meta.get("quoteAsset") == "U" or meta.get("marginAsset") == "U":
+                                        u_settlement_symbol_extracted_count += 1
+
+                                identity = build_candidate_symbol_set_identity(symbols_override)
+                                c_hash = identity["candidate_symbol_set_hash"]
+                                em_id = build_multi_symbol_emission_id(code, state.get("event_type", "futures_contract_launch"), c_hash)
+
+                                norm_event = normalize_live_event(
+                                    raw=state["raw"],
+                                    source_parent_url=source_parent_url,
+                                    detected_at_ms=state["first_detected_at_ms"],
+                                    source_published_at_ms=state["raw"].get("releaseDate"),
+                                    source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
+                                    symbols_override=symbols_override,
+                                    extraction_metadata={
+                                        "symbol_extraction_source": state["symbol_extraction_source"],
+                                        "symbol_derivation_method": state["symbol_derivation_method"],
+                                        "quote_derivation_source": "exchange_info",
+                                        "symbol_validation_status": "validated_candidate_set" if is_multi else "validated",
+                                        "detail_fetch_attempted": True,
+                                        "detail_fetch_status": "success",
+                                        "symbol_parse_failed_reason": None,
+                                        "symbol_parse_status": "parsed",
+                                        "detail_fetch_variant": state.get("detail_fetch_variant", variant_name),
+                                        "detail_fetch_url_used": state.get("detail_fetch_url_used", chosen_url),
+                                        "detail_payload_hash": state.get("detail_payload_hash", chosen_payload_sha256),
+                                        "detail_payload_trusted": state.get("detail_payload_trusted", True),
+                                    }
                                 )
+                                norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
+                                norm_event["detail_fetched_at_ms"] = now_ms
+                                norm_event["symbol_resolved_at_ms"] = now_ms
+                                norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
-                                state["symbol_onboard_times_ms"] = validation_result.get("symbol_onboard_times_ms", {})
-                                effective_launch = build_effective_launch_times_ms(
-                                    candidate_symbols=state["candidate_symbols"],
-                                    symbol_onboard_times_ms=state["symbol_onboard_times_ms"],
-                                    symbol_launch_times_ms=state["symbol_launch_times_ms"],
-                                    source_published_at_ms=state["raw"].get("releaseDate") or 0,
-                                    first_detected_at_ms=state["first_detected_at_ms"],
-                                )
-                                state["symbol_effective_launch_times_ms"] = effective_launch["symbol_effective_launch_times_ms"]
-                                state["launch_time_source"] = effective_launch["launch_time_source"]
-
-                                if validation_result["validated_symbols"]:
-                                    candidate_validation_success_count += len(validation_result["validated_symbols"])
-
-                                    for sym in validation_result["validated_symbols"]:
-                                        meta = validation_result["symbol_exchangeinfo"].get(sym, {})
-                                        if meta.get("quoteAsset") == "U" or meta.get("marginAsset") == "U":
-                                            u_settlement_symbol_extracted_count += 1
-
-                                    norm_event = normalize_live_event(
-                                        raw=state["raw"],
-                                        source_parent_url=source_parent_url,
-                                        detected_at_ms=state["first_detected_at_ms"],
-                                        source_published_at_ms=state["raw"].get("releaseDate"),
-                                        source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                                        symbols_override=validation_result["validated_symbols"],
-                                        extraction_metadata={
-                                            "symbol_extraction_source": state["symbol_extraction_source"],
-                                            "symbol_derivation_method": state["symbol_derivation_method"],
-                                            "quote_derivation_source": "exchange_info",
-                                            "symbol_validation_status": "validated",
-                                            "detail_fetch_attempted": True,
-                                            "detail_fetch_status": "success",
-                                            "symbol_parse_failed_reason": None,
-                                            "symbol_parse_status": "parsed",
-                                            "detail_fetch_variant": state["detail_fetch_variant"],
-                                            "detail_fetch_url_used": state["detail_fetch_url_used"],
-                                            "detail_payload_hash": state["detail_payload_hash"],
-                                            "detail_payload_trusted": True,
-                                        }
+                                if is_multi:
+                                    apply_multi_symbol_candidate_set_contract(
+                                        norm_event,
+                                        state,
+                                        validation_result,
+                                        symbols_override,
+                                        identity,
+                                        em_id,
+                                        effective_launch,
+                                        now_ms,
                                     )
-                                    norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
-                                    norm_event["detail_fetched_at_ms"] = now_ms
-                                    norm_event["symbol_resolved_at_ms"] = now_ms
-                                    norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
-                                    event_id = norm_event["event_id"]
-                                    if event_id not in seen_event_ids:
-                                        seen_event_ids.add(event_id)
-                                        append_jsonl(stream_paths["events"], norm_event)
-                                        events_detected.append(norm_event)
+                                event_id = norm_event["event_id"]
+                                if event_id not in seen_event_ids:
+                                    seen_event_ids.add(event_id)
+                                    append_jsonl(stream_paths["events"], norm_event)
+                                    events_detected.append(norm_event)
 
-                                        eq_item = dict(norm_event)
-                                        eq_item["first_futures_bar_status"] = "not_yet_available"
-                                        eq_item["first_futures_bar_start_ms"] = None
-                                        first_bar_queue.append(eq_item)
+                                    eq_item = dict(norm_event)
+                                    eq_item["first_futures_bar_status"] = "not_yet_available"
+                                    eq_item["first_futures_bar_start_ms"] = None
+                                    first_bar_queue.append(eq_item)
 
-                                    detail_retry_state.pop(code, None)
+                                if is_multi:
+                                    state["event_id"] = event_id
                                 else:
+                                    detail_retry_state.pop(code, None)
+                            else:
+                                if is_multi and (validation_result.get("pending_symbols") or len(state.get("candidate_symbols", [])) == 0):
+                                    state["symbol_validation_status"] = "pending_candidate_set_readiness"
+                                    state["pending_reason"] = "multi_symbol_candidate_set_not_ready" if validation_result.get("pending_symbols") else "multi_symbol_candidate_symbols_empty"
+                                    state["exchangeinfo_visible_symbols"] = list(validation_result.get("symbol_exchangeinfo", {}).keys())
+                                    state["exchangeinfo_missing_symbols"] = [s for s in state.get("candidate_symbols", []) if s not in validation_result.get("symbol_exchangeinfo", {})]
+                                    state["hard_rejected_symbols"] = list(validation_result.get("rejected_symbols", []))
+                                    state["symbol_exchangeinfo_statuses"] = {s: meta.get("status") for s, meta in validation_result.get("symbol_exchangeinfo", {}).items()}
+                                elif validation_result["rejected_symbols"]:
                                     candidate_validation_failed_count += len(validation_result["rejected_symbols"])
 
                                     reason = next(
@@ -2063,24 +2427,66 @@ def main():
                                             "detail_fetch_status": "success",
                                             "symbol_parse_failed_reason": reason,
                                             "symbol_parse_status": "terminal_failed",
-                                            "detail_fetch_variant": state["detail_fetch_variant"],
-                                            "detail_fetch_url_used": state["detail_fetch_url_used"],
-                                            "detail_payload_hash": state["detail_payload_hash"],
-                                            "detail_payload_trusted": True,
+                                            "detail_fetch_variant": state.get("detail_fetch_variant", variant_name),
+                                            "detail_fetch_url_used": state.get("detail_fetch_url_used", chosen_url),
+                                            "detail_payload_hash": state.get("detail_payload_hash", chosen_payload_sha256),
+                                            "detail_payload_trusted": state.get("detail_payload_trusted", True),
                                         }
                                     )
                                     norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
                                     norm_event["detail_fetched_at_ms"] = now_ms
                                     norm_event["symbol_resolved_at_ms"] = now_ms
-                                    norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
-
                                     event_id = norm_event["event_id"]
                                     if event_id not in seen_event_ids:
                                         seen_event_ids.add(event_id)
                                         append_jsonl(stream_paths["events"], norm_event)
                                         events_detected.append(norm_event)
 
-                                    detail_retry_state.pop(code, None)
+                                    state["terminal_state"] = True
+                                    state["terminal_reason"] = "candidate_validation_rejected"
+                                    state["terminal_at_ms"] = now_ms
+                                    state["symbol_validation_status"] = "rejected"
+                        else:
+                            if extraction_res and extraction_res.get("symbol_validation_status") == "validated_by_exact_text":
+                                norm_event = normalize_live_event(
+                                    raw=state["raw"],
+                                    source_parent_url=source_parent_url,
+                                    detected_at_ms=state["first_detected_at_ms"],
+                                    source_published_at_ms=state["raw"].get("releaseDate"),
+                                    source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
+                                    symbols_override=extraction_res["symbols"],
+                                    extraction_metadata={
+                                        "symbol_extraction_source": "detail_path_fallback" if chosen_url_idx > 0 else extraction_res["symbol_extraction_source"],
+                                        "symbol_derivation_method": extraction_res["symbol_derivation_method"],
+                                        "quote_derivation_source": None,
+                                        "symbol_validation_status": "validated_by_exact_text",
+                                        "detail_fetch_attempted": True,
+                                        "detail_fetch_status": "success",
+                                        "symbol_parse_failed_reason": None,
+                                        "symbol_parse_status": "parsed",
+                                        "detail_fetch_variant": variant_name,
+                                        "detail_fetch_url_used": chosen_url,
+                                        "detail_payload_hash": chosen_payload_sha256,
+                                        "detail_payload_trusted": True,
+                                    }
+                                )
+                                norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
+                                norm_event["detail_fetched_at_ms"] = now_ms
+                                norm_event["symbol_resolved_at_ms"] = now_ms
+                                norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
+
+                                event_id = norm_event["event_id"]
+                                if event_id not in seen_event_ids:
+                                    seen_event_ids.add(event_id)
+                                    append_jsonl(stream_paths["events"], norm_event)
+                                    events_detected.append(norm_event)
+
+                                    eq_item = dict(norm_event)
+                                    eq_item["first_futures_bar_status"] = "not_yet_available"
+                                    eq_item["first_futures_bar_start_ms"] = None
+                                    first_bar_queue.append(eq_item)
+
+                                detail_retry_state.pop(code, None)
                     else:
                         symbol_empty_event_count += 1
                         symbol_parse_failed_count += 1
@@ -2092,7 +2498,7 @@ def main():
                             detected_at_ms=state["first_detected_at_ms"],
                             source_published_at_ms=state["raw"].get("releaseDate"),
                             source_published_at_ms_confidence=state.get("source_published_at_ms_confidence", "medium"),
-                            symbols_override=(),
+                            symbols_override=tuple(state.get("candidate_symbols") or ()),
                             extraction_metadata={
                                 "symbol_extraction_source": extraction_res["symbol_extraction_source"],
                                 "symbol_derivation_method": extraction_res["symbol_derivation_method"],
@@ -2155,6 +2561,10 @@ def main():
                     if is_transient_detail_fetch_error(chk_res):
                         state["transient_detail_error_count"] = state.get("transient_detail_error_count", 0) + 1
                         state["retry_count"] = int(state.get("retry_count") or 0) + 1
+                        state["detail_fetch_attempt_count"] = int(state.get("detail_fetch_attempt_count") or 0) + 1
+                        state["detail_fetch_attempted"] = True
+                        state["status"] = "pending_detail_retry"
+                        state["pending_reason"] = err_reason
                         state["last_retry_at_ms"] = now_ms
                         state["last_detail_failure_class"] = attempt_res_class
                         state["detail_retryable"] = True

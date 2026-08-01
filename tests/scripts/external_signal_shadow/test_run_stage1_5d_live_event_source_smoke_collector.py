@@ -671,8 +671,8 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
-        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000}
     ]}
 
     def fake_fetch(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -721,7 +721,7 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
     assert events[0]["symbol_extraction_source"] == "detail_contract_symbol"
     assert events[0]["symbol_derivation_method"] == "none"
     assert events[0]["quote_derivation_source"] == "exchange_info"
-    assert events[0]["symbol_validation_status"] == "validated"
+    assert events[0]["symbol_validation_status"] == "validated_candidate_set"
     assert events[0]["symbol_parse_status"] == "parsed"
 
 
@@ -781,7 +781,7 @@ def test_base_asset_derived_symbol_not_emitted_when_exchange_info_missing(tmp_pa
     assert len(event_files) == 1
     events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
     assert len(events) == 1
-    assert events[0]["symbols"] == []
+    assert events[0]["symbols"] == ["BTCU", "ETHU"]
     assert events[0]["symbol_validation_status"] == "rejected"
     assert events[0]["symbol_parse_status"] == "terminal_failed"
 
@@ -800,8 +800,8 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
     }
     detail_html = "<html><body>Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts.</body></html>"
     exchange_info = {"symbols": [
-        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
-        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000}
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -868,8 +868,8 @@ def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tm
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
-        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000}
     ]}
 
     calls = {"fetch_json": 0, "fetch_payload": 0}
@@ -1083,8 +1083,8 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
-        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"}
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000}
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -1134,7 +1134,7 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
     assert ev["symbol_extraction_source"] == "detail_contract_symbol"
     assert ev["symbol_derivation_method"] == "none"
     assert ev["quote_derivation_source"] == "exchange_info"
-    assert ev["symbol_validation_status"] == "validated"
+    assert ev["symbol_validation_status"] == "validated_candidate_set"
     assert ev["symbol_parse_status"] == "parsed"
     assert ev["trade_signal_allowed"] is False
 
@@ -1216,8 +1216,8 @@ def test_persisted_base_asset_events_never_emit_unverified_validation_status(tmp
     }
     detail_payload = "Binance Futures will launch USDⓈ-Margined BTCU and ETHU Perpetual Contracts."
     exchange_info = {"symbols": [
-        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
-        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U"},
+        {"symbol": "BTCU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782896400000},
+        {"symbol": "ETHU", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "U", "marginAsset": "U", "onboardDate": 1782900000000},
     ]}
 
     def fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget=2):
@@ -1571,7 +1571,7 @@ def test_fixture_mode_exchangeinfo_payload_enables_candidate_validation_without_
     assert persisted_events
     symbols_extracted = sorted(persisted_events[0]["symbols"])
     assert symbols_extracted == ["BTCU", "ETHU"]
-    assert persisted_events[0]["symbol_validation_status"] == "validated"
+    assert persisted_events[0]["symbol_validation_status"] == "validated_candidate_set"
     assert persisted_events[0]["symbol_parse_status"] == "parsed"
 
 
@@ -1867,7 +1867,7 @@ def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_p
         "data": {
             "catalogs": [{
                 "articles": [{
-                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "code": "synthetic_empty_retry_code_001",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
                     "releaseDate": int(time.time() * 1000) - 1000,
                 }]
@@ -1934,7 +1934,7 @@ def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_p
     events = _read_jsonl_files(output_root / "events")
     parsed_rows = [
         row for row in events
-        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        if row.get("source_article_id") == "synthetic_empty_retry_code_001"
         and row.get("symbol_parse_status") == "parsed"
     ]
     assert len(parsed_rows) == 1
@@ -1947,7 +1947,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
         "data": {
             "catalogs": [{
                 "articles": [{
-                    "code": "d2acaa91c14e4cc598aaee1017efc1ac",
+                    "code": "synthetic_empty_retry_code_002",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
                     "releaseDate": int(time.time() * 1000) - 1000,
                 }]
@@ -1994,7 +1994,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
 
     assert rc1 == 0
     events1 = _read_jsonl_files(output_root / "events")
-    assert not any(row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac" for row in events1)
+    assert not any(row.get("source_article_id") == "synthetic_empty_retry_code_002" for row in events1)
 
     # Run 2 (restart): detail returns ok=True
     args2 = [
@@ -2030,7 +2030,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
     events2 = _read_jsonl_files(output_root / "events")
     parsed_rows2 = [
         row for row in events2
-        if row.get("source_article_id") == "d2acaa91c14e4cc598aaee1017efc1ac"
+        if row.get("source_article_id") == "synthetic_empty_retry_code_002"
         and row.get("symbol_parse_status") == "parsed"
     ]
     assert len(parsed_rows2) == 1
@@ -4408,11 +4408,14 @@ def test_bapi_parser_version_change_allows_reparse_of_same_payload_hash():
     assert is_deduped is False
 
 
-def test_multi_symbol_one_of_three_validated_does_not_emit_partial_event():
+def test_multi_symbol_one_rejected_does_not_emit_candidate_set():
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
     candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
-    val_res = {"validated_symbols": ["TMFUSDT"], "pending_symbols": ["TBTUSDT", "BITOUSDT"], "rejected_symbols": []}
-    eff_launch = {"symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000}}
+    val_res = {"validated_symbols": ["TMFUSDT"], "pending_symbols": ["TBTUSDT"], "rejected_symbols": ["BITOUSDT"]}
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
     assert is_multi_symbol_article_ready_to_emit(candidates, val_res, eff_launch) is False
 
 
@@ -4420,7 +4423,10 @@ def test_multi_symbol_all_three_validated_emits():
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
     candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
     val_res = {"validated_symbols": ["TMFUSDT", "TBTUSDT", "BITOUSDT"], "pending_symbols": [], "rejected_symbols": []}
-    eff_launch = {"symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000}}
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"TMFUSDT": 1000, "TBTUSDT": 2000, "BITOUSDT": 3000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
     assert is_multi_symbol_article_ready_to_emit(candidates, val_res, eff_launch) is True
 
 
@@ -4453,3 +4459,689 @@ def test_pending_revalidation_never_reenables_release_date_fallback():
     )
     assert res["launch_time_source"] != "article_release_date"
 
+
+def test_candidate_symbol_set_hash_is_order_insensitive_and_normalized():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_candidate_symbol_set_identity,
+    )
+
+    a = build_candidate_symbol_set_identity([" pyplusdt ", "GSUSDT", "SMHUSDT", "GSUSDT"])
+    b = build_candidate_symbol_set_identity(["SMHUSDT", "PYPLUSDT", "GSUSDT"])
+
+    assert a["candidate_symbols_ordered"] == ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    assert a["candidate_symbols_normalized"] == ["GSUSDT", "PYPLUSDT", "SMHUSDT"]
+    assert a["candidate_symbol_set_hash_version"] == 1
+    assert a["candidate_symbol_set_hash"] == b["candidate_symbol_set_hash"]
+
+
+def test_candidate_symbol_set_hash_preserves_ordered_symbols_for_audit():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_candidate_symbol_set_identity,
+    )
+
+    a = build_candidate_symbol_set_identity(["PYPLUSDT", "GSUSDT", "SMHUSDT"])
+    assert a["candidate_symbols_ordered"] == ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+
+
+def test_candidate_set_ready_when_all_symbols_pending_trading_with_strict_anchors():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    val_res = {
+        "validated_symbols": [],
+        "pending_symbols": candidates,
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {
+            "PYPLUSDT": 1785315600000,
+            "GSUSDT": 1785315900000,
+            "SMHUSDT": 1785316200000,
+        },
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "detail_symbol_launch_time",
+            "GSUSDT": "detail_symbol_launch_time",
+            "SMHUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is True
+
+
+def test_staggered_symbols_do_not_wait_until_all_trading():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    val_res = {
+        "validated_symbols": ["PYPLUSDT"],
+        "pending_symbols": ["GSUSDT", "SMHUSDT"],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            "PYPLUSDT": {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+            "GSUSDT": {"status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+            "SMHUSDT": {"status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {
+            "PYPLUSDT": 1785315600000,
+            "GSUSDT": 1785315900000,
+            "SMHUSDT": 1785316200000,
+        },
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "detail_symbol_launch_time",
+            "GSUSDT": "detail_symbol_launch_time",
+            "SMHUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is True
+
+
+def test_candidate_set_rejects_article_release_date_anchor():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": candidates,
+        "pending_symbols": [],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "article_release_date",
+            "GSUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert (
+        is_multi_symbol_candidate_set_ready_to_emit(
+            candidates,
+            val_res,
+            eff_launch,
+            allowed_anchor_sources=("detail_symbol_launch_time", "exchangeinfo_onboard_date", "detail", "exchange_info"),
+        )
+        is False
+    )
+
+
+def test_candidate_set_default_rejects_article_release_date_anchor():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": candidates,
+        "pending_symbols": [],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "article_release_date",
+            "GSUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_candidate_set_rejects_legacy_max_age_anchor():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": candidates,
+        "pending_symbols": [],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "legacy_max_age",
+            "GSUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_candidate_set_rejects_missing_anchor_source():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": candidates,
+        "pending_symbols": [],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {
+            "PYPLUSDT": "missing",
+            "GSUSDT": "detail_symbol_launch_time",
+        },
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_candidate_set_requires_validation_partition_complete():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    val_res = {
+        "validated_symbols": ["PYPLUSDT"],
+        "pending_symbols": ["GSUSDT"],  # SMHUSDT missing from partition
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000, "SMHUSDT": 3000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_candidate_set_requires_validated_pending_partition_disjoint():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": ["PYPLUSDT", "GSUSDT"],
+        "pending_symbols": ["GSUSDT"],  # GSUSDT in both
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            s: {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}
+            for s in candidates
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_candidate_set_rejects_unknown_status_even_if_exchangeinfo_present():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT"]
+    val_res = {
+        "validated_symbols": ["PYPLUSDT"],
+        "pending_symbols": ["GSUSDT"],
+        "rejected_symbols": [],
+        "symbol_exchangeinfo": {
+            "PYPLUSDT": {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+            "GSUSDT": {"status": "BREAK", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_emitted_all_symbols_is_terminal_for_retry_selection():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        select_detail_retry_attempts,
+    )
+
+    detail_retry_state = {
+        "93b5": {
+            "source_article_id": "93b5",
+            "terminal_state": True,
+            "status": "emitted_all_symbols",
+            "symbol_validation_status": "emitted_all_symbols",
+            "detail_http_request_count": 1,
+            "next_detail_retry_at_ms": 0,
+        }
+    }
+    selected = select_detail_retry_attempts(
+        detail_retry_state=detail_retry_state,
+        now_ms=100000,
+        detail_budget_per_poll=10,
+        endpoint_degraded_until_ms=0,
+    )
+    assert selected == []
+
+
+def test_emitted_terminal_fields_survive_scheduler_roundtrip(tmp_path):
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+        load_detail_retry_scheduler_state,
+        write_detail_retry_scheduler_state,
+    )
+
+    state = {
+        "93b5": {
+            "source_article_id": "93b5",
+            "terminal_state": True,
+            "terminal_reason": "multi_symbol_candidate_set_emitted",
+            "terminal_at_ms": 10000,
+            "status": "emitted_all_symbols",
+            "symbol_validation_status": "emitted_all_symbols",
+            "emission_id": "abc123hash",
+            "candidate_symbol_set_hash": "hash123",
+            "candidate_symbol_set_hash_version": 1,
+            "candidate_symbols_ordered": ["PYPLUSDT", "GSUSDT"],
+            "candidate_symbols_normalized": ["GSUSDT", "PYPLUSDT"],
+            "event_id": "event_1",
+            "event_stream_path": "events/2026-07-29.jsonl",
+            "parser_payload_hash": "payload_hash",
+            "symbol_effective_launch_time_sources": {"PYPLUSDT": "detail_symbol_launch_time"},
+        }
+    }
+    ser = serialize_retry_articles(state)
+    write_detail_retry_scheduler_state(tmp_path, {"articles": ser, "endpoint_health": {}}, metadata_version=2)
+    loaded = load_detail_retry_scheduler_state(tmp_path)
+
+    art = loaded["articles"]["93b5"]
+    assert art["terminal_state"] is True
+    assert art["terminal_reason"] == "multi_symbol_candidate_set_emitted"
+    assert art["status"] == "emitted_all_symbols"
+    assert art["emission_id"] == "abc123hash"
+    assert art["candidate_symbol_set_hash"] == "hash123"
+    assert art["candidate_symbols_ordered"] == ["PYPLUSDT", "GSUSDT"]
+
+
+def test_old_scheduler_schema_loads_with_safe_defaults(tmp_path):
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        load_detail_retry_scheduler_state,
+    )
+
+    file_path = tmp_path / "detail_retry_scheduler_state.json"
+    old_data = {
+        "metadata_version": 1,
+        "articles": {
+            "old_art": {
+                "source_article_id": "old_art",
+                "terminal_state": False,
+            }
+        },
+    }
+    file_path.write_text(json.dumps(old_data), encoding="utf-8")
+    loaded = load_detail_retry_scheduler_state(tmp_path)
+    art = loaded["articles"]["old_art"]
+    assert art.get("emission_id") is None
+    assert art.get("terminal_reason") is None
+
+
+def test_emitted_article_is_not_reselected_after_restart(tmp_path):
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        select_detail_retry_attempts,
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+        load_detail_retry_scheduler_state,
+    )
+
+    state = {
+        "93b5": {
+            "source_article_id": "93b5",
+            "terminal_state": True,
+            "status": "emitted_all_symbols",
+            "symbol_validation_status": "emitted_all_symbols",
+            "emission_id": "emission_xyz",
+        }
+    }
+    ser = serialize_retry_articles(state)
+    write_detail_retry_scheduler_state(tmp_path, {"articles": ser, "endpoint_health": {}}, metadata_version=2)
+    loaded = load_detail_retry_scheduler_state(tmp_path)
+    selected = select_detail_retry_attempts(
+        detail_retry_state=loaded["articles"],
+        now_ms=20000,
+        detail_budget_per_poll=5,
+        endpoint_degraded_until_ms=0,
+    )
+    assert selected == []
+
+
+def test_build_multi_symbol_emission_id_is_stable_for_same_article_candidate_set():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_multi_symbol_emission_id,
+        build_candidate_symbol_set_identity,
+    )
+
+    identity = build_candidate_symbol_set_identity(["PYPLUSDT", "GSUSDT", "SMHUSDT"])
+    a = build_multi_symbol_emission_id("93b5", "futures_contract_launch", identity["candidate_symbol_set_hash"])
+    b = build_multi_symbol_emission_id("93b5", "futures_contract_launch", identity["candidate_symbol_set_hash"])
+    assert a == b
+    assert len(a) == 64
+
+
+def test_existing_event_stream_rebuilds_emission_index_from_valid_full_row(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+        build_candidate_symbol_set_identity,
+        build_multi_symbol_emission_id,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    symbols = ["PYPLUSDT", "GSUSDT"]
+    identity = build_candidate_symbol_set_identity(symbols)
+    c_hash = identity["candidate_symbol_set_hash"]
+    em_id = build_multi_symbol_emission_id("93b5", "futures_contract_launch", c_hash)
+
+    row = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": symbols,
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": c_hash,
+        "emission_id": em_id,
+        "event_id": "ev_1",
+        "parser_payload_hash": "p_1",
+    }
+    (events_dir / "2026-07-29.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    assert len(diagnostics) == 0
+    key = f"93b5|{c_hash}"
+    assert key in index
+    assert index[key]["emission_id"] == em_id
+
+
+def test_event_stream_rebuild_rejects_partial_row_with_full_candidate_hash(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+        build_candidate_symbol_set_identity,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    symbols = ["PYPLUSDT", "BADUSDT"]
+    identity = build_candidate_symbol_set_identity(["PYPLUSDT", "GSUSDT"])
+    c_hash = identity["candidate_symbol_set_hash"]
+
+    row = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": symbols,
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": c_hash,
+        "event_id": "ev_1",
+    }
+    (events_dir / "2026-07-29.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    assert len(index) == 0
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["reason"] == "candidate_set_hash_mismatch"
+
+
+def test_event_stream_rebuild_rejects_stored_hash_mismatch(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    row = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": ["PYPLUSDT", "GSUSDT"],
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": "wrong_hash",
+        "event_id": "ev_1",
+    }
+    (events_dir / "2026-07-29.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    assert len(index) == 0
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["reason"] == "candidate_set_hash_mismatch"
+
+
+def test_event_stream_rebuild_rejects_duplicate_emission_id_different_payload(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+        build_candidate_symbol_set_identity,
+        build_multi_symbol_emission_id,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    symbols = ["PYPLUSDT", "GSUSDT"]
+    identity = build_candidate_symbol_set_identity(symbols)
+    c_hash = identity["candidate_symbol_set_hash"]
+    em_id = build_multi_symbol_emission_id("93b5", "futures_contract_launch", c_hash)
+
+    row1 = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": symbols,
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": c_hash,
+        "emission_id": em_id,
+        "parser_payload_hash": "payload_1",
+    }
+    row2 = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": symbols,
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": c_hash,
+        "emission_id": em_id,
+        "parser_payload_hash": "payload_2_different",
+    }
+    content = json.dumps(row1) + "\n" + json.dumps(row2) + "\n"
+    (events_dir / "2026-07-29.jsonl").write_text(content, encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["reason"] == "duplicate_emission_id_different_payload"
+
+
+def test_event_stream_rebuild_rejects_malformed_jsonl_fail_safe(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    (events_dir / "2026-07-29.jsonl").write_text("{malformed_json\n", encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    assert len(index) == 0
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["reason"] == "malformed_jsonl"
+
+
+def test_crash_after_event_append_before_state_write_does_not_duplicate(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+        build_candidate_symbol_set_identity,
+        build_multi_symbol_emission_id,
+    )
+
+    events_dir = tmp_path / "events"
+    events_dir.mkdir()
+    symbols = ["PYPLUSDT", "GSUSDT"]
+    identity = build_candidate_symbol_set_identity(symbols)
+    c_hash = identity["candidate_symbol_set_hash"]
+    em_id = build_multi_symbol_emission_id("93b5", "futures_contract_launch", c_hash)
+
+    row = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "93b5",
+        "symbols": symbols,
+        "multi_symbol_emission_mode": "all_or_none_candidate_set",
+        "symbol_validation_status": "validated_candidate_set",
+        "multi_symbol_candidate_set_hash": c_hash,
+        "emission_id": em_id,
+        "parser_payload_hash": "payload_1",
+    }
+    (events_dir / "2026-07-29.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    index, diagnostics = rebuild_emission_index_from_events(tmp_path)
+    key = f"93b5|{c_hash}"
+    assert key in index
+    # Simulated restart sees row in index and prevents re-emission
+    assert index[key]["emission_id"] == em_id
+
+
+def test_crash_after_state_write_before_event_append_reconciles_missing_event_or_blocks_manual_review():
+    from pathlib import Path
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        rebuild_emission_index_from_events,
+    )
+    # If state says emitted_all_symbols but event stream has 0 rows, rebuild_emission_index_from_events returns empty index
+    index, diagnostics = rebuild_emission_index_from_events(Path("/nonexistent"))
+    assert len(index) == 0
+
+
+def test_parser_returns_three_symbols_but_state_initialization_none_does_not_take_single_symbol_path():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_article_state,
+    )
+
+    state = {}
+    ext_res = {
+        "symbols": ["PYPLUSDT", "GSUSDT", "SMHUSDT"],
+        "symbol_extraction_source": "bapi_article_body",
+    }
+    assert is_multi_symbol_article_state(state, ext_res) is True
+
+
+def test_93b5_prelaunch_all_validatable_emits_one_full_row(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+
+    article_code = "93b5cd2280874d9cb4303827374b940d"
+    title = "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-29)"
+    body = (
+        "2026-07-29 09:00 (UTC):\nPYPLUSDT\nPerpetual Contract\n"
+        "2026-07-29 09:05 (UTC):\nGSUSDT\nPerpetual Contract\n"
+        "2026-07-29 09:10 (UTC):\nSMHUSDT\nPerpetual Contract\n"
+        "USDS-M Perpetual Contract\nPYPLUSDT\nGSUSDT\nSMHUSDT\nLaunch Time\n"
+        "2026-07-29 09:00 (UTC)\n2026-07-29 09:05 (UTC)\n2026-07-29 09:10 (UTC)\n"
+    )
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps({
+        "exchangeInfoPayload": {
+            "symbols": [
+                {"symbol": "PYPLUSDT", "status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1785315600000},
+                {"symbol": "GSUSDT", "status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1785315900000},
+                {"symbol": "SMHUSDT", "status": "PENDING_TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1785316200000},
+            ],
+        },
+        "data": {"catalogs": [{"articles": [{
+            "code": article_code,
+            "title": title,
+            "releaseDate": 1785305721576,
+            "bapiPayload": {
+                "code": "000000",
+                "message": "success",
+                    "data": {
+                        "code": article_code,
+                        "title": title,
+                        "body": {"children": [{"text": body}]},
+                        "releaseDate": 1785305721576,
+                    },
+                },
+        }]}]},
+    }))
+    summary = tmp_path / "summary.json"
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--fixture-json", str(fixture),
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+    with patch("sys.argv", args):
+        rc = main()
+    assert rc == 0
+    rows = _read_jsonl_files(output_root / "events")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_article_id"] == article_code
+    assert row["symbols"] == ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    assert row["multi_symbol_emission_mode"] == "all_or_none_candidate_set"
+    assert row["symbol_validation_status"] == "validated_candidate_set"
+    assert row["candidate_symbols_ordered"] == ["PYPLUSDT", "GSUSDT", "SMHUSDT"]
+    assert row["candidate_symbols_normalized"] == ["GSUSDT", "PYPLUSDT", "SMHUSDT"]
+    assert row["candidate_symbol_set_hash_version"] == 1
+    assert row["symbol_effective_launch_time_sources"] == {
+        "PYPLUSDT": "exchangeinfo_onboard_date",
+        "GSUSDT": "exchangeinfo_onboard_date",
+        "SMHUSDT": "exchangeinfo_onboard_date",
+    }
+
+
+def test_hard_rejected_symbol_blocks_entire_multi_symbol_article():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_candidate_set_ready_to_emit,
+    )
+
+    candidates = ["PYPLUSDT", "GSUSDT", "BADSYMBOL"]
+    val_res = {
+        "validated_symbols": ["PYPLUSDT", "GSUSDT"],
+        "pending_symbols": [],
+        "rejected_symbols": ["BADSYMBOL"],
+        "symbol_exchangeinfo": {
+            "PYPLUSDT": {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+            "GSUSDT": {"status": "TRADING", "contractType": "TRADIFI_PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"},
+            "BADSYMBOL": {"status": "TRADING", "contractType": "SPOT", "quoteAsset": "USDT", "marginAsset": "USDT"},
+        },
+    }
+    eff_launch = {
+        "symbol_effective_launch_times_ms": {"PYPLUSDT": 1000, "GSUSDT": 2000, "BADSYMBOL": 3000},
+        "symbol_effective_launch_time_sources": {s: "detail_symbol_launch_time" for s in candidates},
+    }
+
+    assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False

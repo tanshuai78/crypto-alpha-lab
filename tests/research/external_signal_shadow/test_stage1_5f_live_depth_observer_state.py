@@ -560,3 +560,171 @@ def test_build_rejected_event_symbol_row_rejects_missing_identity():
             eligibility_diag={},
             basis_diag={},
         )
+
+
+def test_pending_active_completed_history_same_event_symbol_id_is_not_collision(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="pending", stable_event_symbol_key="art1|launch|BTCUSDT")
+    s2 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="art1|launch|BTCUSDT")
+    s3 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="completed", stable_event_symbol_key="art1|launch|BTCUSDT")
+
+    with open(p, "w", encoding="utf-8") as f:
+        for s in [s1, s2, s3]:
+            f.write(json.dumps(s.to_dict()) + "\n")
+
+    latest = load_latest_states_by_event_symbol_id(p)
+    assert len(latest) == 1
+    assert latest["es1"].status == "completed"
+
+    grouped = group_latest_states_by_stable_event_symbol_key(latest)
+    collisions = detect_stable_event_symbol_key_collisions(grouped)
+    assert len(collisions) == 0
+
+
+def test_same_stable_key_two_distinct_event_symbol_ids_is_collision(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="art1|launch|BTCUSDT")
+    s2 = EventSymbolState(event_symbol_id="es2", symbol="BTCUSDT", detected_at_ms=2000, status="active", stable_event_symbol_key="art1|launch|BTCUSDT")
+
+    with open(p, "w", encoding="utf-8") as f:
+        for s in [s1, s2]:
+            f.write(json.dumps(s.to_dict()) + "\n")
+
+    latest = load_latest_states_by_event_symbol_id(p)
+    assert len(latest) == 2
+    grouped = group_latest_states_by_stable_event_symbol_key(latest)
+    collisions = detect_stable_event_symbol_key_collisions(grouped)
+    assert len(collisions) == 1
+    assert collisions[0]["stable_event_symbol_key"] == "art1|launch|BTCUSDT"
+    assert collisions[0]["distinct_event_symbol_ids"] == ["es1", "es2"]
+
+
+def test_compaction_and_collision_detection_produce_same_result(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        compact_observer_state_jsonl,
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="pending", stable_event_symbol_key="k1")
+    s2 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="k1")
+    s3 = EventSymbolState(event_symbol_id="es2", symbol="BTCUSDT", detected_at_ms=2000, status="active", stable_event_symbol_key="k1")
+
+    with open(p, "w", encoding="utf-8") as f:
+        for s in [s1, s2, s3]:
+            f.write(json.dumps(s.to_dict()) + "\n")
+
+    latest1 = load_latest_states_by_event_symbol_id(p)
+    collisions1 = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest1))
+
+    compact_observer_state_jsonl(p)
+    latest2 = load_latest_states_by_event_symbol_id(p)
+    collisions2 = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest2))
+
+    assert collisions1 == collisions2
+    assert len(latest2) == 2
+
+
+def test_startup_detects_two_active_states_with_same_stable_key(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="ETHUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="art2|launch|ETHUSDT")
+    s2 = EventSymbolState(event_symbol_id="es2", symbol="ETHUSDT", detected_at_ms=1500, status="active", stable_event_symbol_key="art2|launch|ETHUSDT")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps(s1.to_dict()) + "\n")
+        f.write(json.dumps(s2.to_dict()) + "\n")
+
+    latest = load_latest_states_by_event_symbol_id(p)
+    collisions = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest))
+    assert len(collisions) == 1
+
+
+def test_startup_detects_active_and_completed_same_stable_key(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="ETHUSDT", detected_at_ms=1000, status="completed", stable_event_symbol_key="art2|launch|ETHUSDT")
+    s2 = EventSymbolState(event_symbol_id="es2", symbol="ETHUSDT", detected_at_ms=1500, status="active", stable_event_symbol_key="art2|launch|ETHUSDT")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps(s1.to_dict()) + "\n")
+        f.write(json.dumps(s2.to_dict()) + "\n")
+
+    latest = load_latest_states_by_event_symbol_id(p)
+    collisions = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest))
+    assert len(collisions) == 1
+
+
+def test_identity_collision_does_not_delete_existing_state(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_states_by_event_symbol_id,
+        group_latest_states_by_stable_event_symbol_key,
+        detect_stable_event_symbol_key_collisions,
+    )
+    p = tmp_path / "state.jsonl"
+    s1 = EventSymbolState(event_symbol_id="es1", symbol="SOLUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="k_sol")
+    s2 = EventSymbolState(event_symbol_id="es2", symbol="SOLUSDT", detected_at_ms=1500, status="pending", stable_event_symbol_key="k_sol")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps(s1.to_dict()) + "\n")
+        f.write(json.dumps(s2.to_dict()) + "\n")
+
+    latest = load_latest_states_by_event_symbol_id(p)
+    collisions = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest))
+    assert len(collisions) == 1
+    # Both states are preserved in latest map
+    assert "es1" in latest
+    assert "es2" in latest
+
+
+def test_missing_stable_key_is_rebuilt_only_from_complete_identity():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        rebuild_missing_stable_event_symbol_key_if_safe,
+    )
+    s_complete = EventSymbolState(event_symbol_id="es1", source_article_id="art1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="")
+    rebuilt, diag = rebuild_missing_stable_event_symbol_key_if_safe(s_complete)
+    assert diag["stable_key_rebuilt"] is True
+    assert diag["identity_missing"] is False
+    assert rebuilt.stable_event_symbol_key == "futures_contract_launch|art1|BTCUSDT"
+
+    s_incomplete = EventSymbolState(event_symbol_id="es2", source_article_id="", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="")
+    rebuilt_inc, diag_inc = rebuild_missing_stable_event_symbol_key_if_safe(s_incomplete)
+    assert diag_inc["stable_key_rebuilt"] is False
+    assert diag_inc["identity_missing"] is True
+    assert rebuilt_inc.stable_event_symbol_key == ""
+
+
+def test_active_missing_identity_blocks_new_admission():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        rebuild_missing_stable_event_symbol_key_if_safe,
+    )
+    s = EventSymbolState(event_symbol_id="es_no_id", source_article_id="", symbol="", detected_at_ms=1000, status="active", stable_event_symbol_key="")
+    _, diag = rebuild_missing_stable_event_symbol_key_if_safe(s)
+    assert diag["identity_missing"] is True
+    assert diag["block_reason"] == "unrebuildable_active_identity_missing"
+
+
+def test_missing_identity_does_not_delete_or_merge_state():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        rebuild_missing_stable_event_symbol_key_if_safe,
+    )
+    s = EventSymbolState(event_symbol_id="es_keep", source_article_id="", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="")
+    rebuilt, diag = rebuild_missing_stable_event_symbol_key_if_safe(s)
+    assert rebuilt.event_symbol_id == "es_keep"
+    assert rebuilt.status == "active"

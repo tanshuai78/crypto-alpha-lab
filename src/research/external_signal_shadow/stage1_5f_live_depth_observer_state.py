@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import json
 import os
+from pathlib import Path
 import shutil
 
 from loguru import logger
@@ -172,9 +173,9 @@ def build_rejected_event_symbol_row(
     return row
 
 
-def load_latest_state_by_event_symbol_id(observer_state_jsonl: str) -> dict:
-    # Advisory B: clean up temporary compacted file if it exists (indicating a crash before rename)
-    tmp_file = observer_state_jsonl + ".compacted.tmp"
+def load_latest_state_by_event_symbol_id(observer_state_jsonl: str | os.PathLike) -> dict:
+    observer_state_jsonl_str = str(observer_state_jsonl)
+    tmp_file = observer_state_jsonl_str + ".compacted.tmp"
     if os.path.exists(tmp_file):
         try:
             logger.info(f"Advisory B: Discarding temp state file {tmp_file} on startup.")
@@ -183,10 +184,10 @@ def load_latest_state_by_event_symbol_id(observer_state_jsonl: str) -> dict:
             logger.warning(f"Failed to remove temp state file: {e}")
 
     latest = {}
-    if not os.path.exists(observer_state_jsonl):
+    if not os.path.exists(observer_state_jsonl_str):
         return latest
 
-    with open(observer_state_jsonl, "r") as f:
+    with open(observer_state_jsonl_str, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -200,18 +201,19 @@ def load_latest_state_by_event_symbol_id(observer_state_jsonl: str) -> dict:
     return latest
 
 
-def compact_observer_state_jsonl(observer_state_jsonl: str) -> None:
-    latest = load_latest_state_by_event_symbol_id(observer_state_jsonl)
+def compact_observer_state_jsonl(observer_state_jsonl: str | os.PathLike) -> None:
+    observer_state_jsonl_str = str(observer_state_jsonl)
+    latest = load_latest_state_by_event_symbol_id(observer_state_jsonl_str)
     if not latest:
         return
 
-    dir_name = os.path.dirname(os.path.abspath(observer_state_jsonl))
+    dir_name = os.path.dirname(os.path.abspath(observer_state_jsonl_str))
     os.makedirs(dir_name, exist_ok=True)
 
-    tmp_file = observer_state_jsonl + ".compacted.tmp"
+    tmp_file = observer_state_jsonl_str + ".compacted.tmp"
     try:
         fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             for state in latest.values():
                 f.write(json.dumps(state.to_dict()) + "\n")
                 f.flush()
@@ -498,3 +500,138 @@ def finalize_observation_if_due(state: EventSymbolState, now_ms: int, snapshots:
         "coverage_ratio": cov.get("coverage_ratio", 0.0),
     })
     return EventSymbolState.from_dict(d)
+
+
+def load_latest_states_by_event_symbol_id(observer_state_jsonl: str | os.PathLike) -> dict[str, EventSymbolState]:
+    path = Path(observer_state_jsonl)
+    if not path.exists():
+        return {}
+    latest: dict[str, EventSymbolState] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                st = EventSymbolState.from_dict(data)
+                if st.event_symbol_id:
+                    latest[st.event_symbol_id] = st
+            except Exception as e:
+                logger.warning(f"Failed to parse EventSymbolState line: {e}")
+    return latest
+
+
+def rebuild_missing_stable_event_symbol_key_if_safe(state: EventSymbolState) -> tuple[EventSymbolState, dict]:
+    if state.stable_event_symbol_key and state.stable_event_symbol_key.strip():
+        return state, {"stable_key_rebuilt": False, "identity_missing": False}
+
+    src_article_id = (state.source_article_id or "").strip()
+    sym = (state.symbol or "").strip().upper()
+    if src_article_id and sym:
+        event_type = getattr(state, "event_type", None) or "futures_contract_launch"
+        mock_event = {"source_article_id": src_article_id, "event_type": event_type}
+        rebuilt_key = make_stable_event_symbol_key(mock_event, sym)
+        d = state.to_dict()
+        d["stable_event_symbol_key"] = rebuilt_key
+        return EventSymbolState.from_dict(d), {"stable_key_rebuilt": True, "identity_missing": False}
+
+    return state, {
+        "stable_key_rebuilt": False,
+        "identity_missing": True,
+        "block_reason": "unrebuildable_active_identity_missing",
+    }
+
+
+def group_latest_states_by_stable_event_symbol_key(latest: dict[str, EventSymbolState]) -> dict[str, list[EventSymbolState]]:
+    grouped: dict[str, list[EventSymbolState]] = {}
+    for st in latest.values():
+        key = (st.stable_event_symbol_key or "").strip()
+        if not key:
+            key = "__MISSING_STABLE_KEY__"
+        grouped.setdefault(key, []).append(st)
+    return grouped
+
+
+def detect_stable_event_symbol_key_collisions(grouped: dict[str, list[EventSymbolState]]) -> list[dict]:
+    collisions = []
+    for key, states in grouped.items():
+        if key == "__MISSING_STABLE_KEY__":
+            continue
+        distinct_ids = sorted(list({st.event_symbol_id for st in states if st.event_symbol_id}))
+        if len(distinct_ids) > 1:
+            collisions.append({
+                "stable_event_symbol_key": key,
+                "distinct_event_symbol_ids": distinct_ids,
+                "state_count": len(states),
+                "states": [st.to_dict() for st in states],
+            })
+    return collisions
+
+
+EVENT_BATCH_REGISTRY_FILENAME = "event_batch_registry.jsonl"
+
+
+def build_event_batch_id(event_row: dict, candidate_set_hash: str = "") -> str:
+    src_article_id = (event_row.get("source_article_id") or "").strip()
+    ev_id = (event_row.get("event_id") or "").strip()
+    c_hash = candidate_set_hash or event_row.get("multi_symbol_candidate_set_hash") or event_row.get("candidate_set_hash") or ""
+    raw_id = f"{src_article_id}|{ev_id}|{c_hash}"
+    return hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
+
+
+def load_latest_event_batch_registry(output_root: str | Path) -> dict[str, dict]:
+    path = Path(output_root) / EVENT_BATCH_REGISTRY_FILENAME
+    if not path.exists():
+        return {}
+    latest: dict[str, dict] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                b_id = row.get("event_batch_id")
+                if b_id:
+                    latest[b_id] = row
+            except Exception as e:
+                logger.warning(f"Failed to parse event_batch_registry row: {e}")
+    return latest
+
+
+def append_event_batch_registry_row(output_root: str | Path, row: dict) -> None:
+    path = Path(output_root) / EVENT_BATCH_REGISTRY_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def update_batch_registry_status(
+    output_root: str | Path,
+    event_batch_id: str,
+    status: str,
+    now_ms: int,
+    durable_stable_keys: list[str] | None = None,
+    block_reason: str | None = None,
+    registry_map: dict[str, dict] | None = None,
+) -> dict:
+    if registry_map is None:
+        registry_map = load_latest_event_batch_registry(output_root)
+    existing = registry_map.get(event_batch_id, {})
+    new_row = dict(existing)
+    new_row["event_batch_id"] = event_batch_id
+    new_row["status"] = status
+    new_row["updated_at_ms"] = now_ms
+    if "created_at_ms" not in new_row:
+        new_row["created_at_ms"] = now_ms
+    if durable_stable_keys is not None:
+        new_row["durable_stable_keys"] = sorted(list(dict.fromkeys(durable_stable_keys)))
+    if block_reason is not None:
+        new_row["block_reason"] = block_reason
+
+    append_event_batch_registry_row(output_root, new_row)
+    registry_map[event_batch_id] = new_row
+    return new_row

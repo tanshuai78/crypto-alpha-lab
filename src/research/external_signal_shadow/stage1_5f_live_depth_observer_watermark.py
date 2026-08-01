@@ -174,6 +174,9 @@ def update_watermark_with_event(watermark: Watermark, event) -> Watermark:
     seen_source_article_ids = list(watermark.seen_source_article_ids)
     seen_stable_event_keys = list(watermark.seen_stable_event_keys)
 
+    if detected_at_ms is None:
+        return watermark
+
     if detected_at_ms > watermark.max_seen_detected_at_ms:
         new_max = detected_at_ms
         seen_event_ids = [event_id] if event_id else []

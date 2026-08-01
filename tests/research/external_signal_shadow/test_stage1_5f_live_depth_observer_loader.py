@@ -156,7 +156,7 @@ def test_pending_state_upserts_new_event_revision_by_stable_key_preserving_first
 
     updated = upsert_pending_state_with_event_revision(pending, revision, "ABCUSDT")
 
-    assert updated.event_id == "revision-b"
+    assert updated.event_id == "revision-a"
     assert updated.latest_event_payload_hash == "hash-b"
     assert updated.first_seen_at_ms == 1_000
     assert updated.bootstrap_watermark_max_seen_detected_at_ms == 500
@@ -1153,3 +1153,192 @@ def test_missing_source_article_id_never_enters_normal_terminal_state():
     norm_id = normalize_event_symbol_identity(row, "GLWUSDT")
     assert norm_id["identity_valid"] is False
     assert "source_article_id_and_event_id_both_missing" in norm_id["identity_errors"]
+
+
+def test_exact_row_replay_does_not_increment_revision_duplicate_counter():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+    s = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="BTCUSDT",
+        detected_at_ms=1000,
+        status="pending_pre_trading",
+        stable_event_symbol_key="k1",
+        latest_event_payload_hash="hash123",
+        latest_source_event_id="ev1",
+    )
+    flat_event = {
+        "event_symbol_id": "es1",
+        "event_id": "ev1",
+        "symbol": "BTCUSDT",
+        "detail_payload_hash": "hash123",
+        "stable_event_symbol_key": "k1",
+    }
+    action, state, diag = classify_event_symbol_revision_admission(
+        flat_event=flat_event,
+        latest_states_by_id={"es1": s},
+        grouped_states_by_key={"k1": [s]},
+    )
+    assert action == "exact_replay_noop"
+    assert state == s
+
+
+def test_pending_revision_preserves_event_symbol_id():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+        upsert_pending_state_with_event_revision,
+    )
+    s = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        source_article_id="art1",
+        symbol="BTCUSDT",
+        detected_at_ms=1000,
+        status="pending_pre_trading",
+        stable_event_symbol_key="k1",
+        latest_event_payload_hash="hash1",
+        revision_seen_count=1,
+    )
+    flat_event = {
+        "event_symbol_id": "es1",
+        "event_id": "ev2",
+        "symbol": "BTCUSDT",
+        "detail_payload_hash": "hash2",
+        "stable_event_symbol_key": "k1",
+    }
+    action, state, diag = classify_event_symbol_revision_admission(
+        flat_event=flat_event,
+        latest_states_by_id={"es1": s},
+        grouped_states_by_key={"k1": [s]},
+    )
+    assert action == "pending_revision_upsert"
+    updated = upsert_pending_state_with_event_revision(state, flat_event, "BTCUSDT")
+    assert updated.event_symbol_id == "es1"
+    assert updated.event_id == "ev1"
+    assert updated.source_article_id == "art1"
+    assert updated.latest_source_event_id == "ev2"
+    assert updated.latest_event_payload_hash == "hash2"
+    assert updated.revision_seen_count == 2
+
+
+def test_pending_revision_does_not_create_second_state():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+    s = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="BTCUSDT",
+        detected_at_ms=1000,
+        status="pending_pre_trading",
+        stable_event_symbol_key="k1",
+    )
+    flat_event = {
+        "event_symbol_id": "es1",
+        "event_id": "ev2",
+        "symbol": "BTCUSDT",
+        "detail_payload_hash": "hash2",
+        "stable_event_symbol_key": "k1",
+    }
+    latest = {"es1": s}
+    action, existing, _ = classify_event_symbol_revision_admission(
+        flat_event=flat_event,
+        latest_states_by_id=latest,
+        grouped_states_by_key={"k1": [s]},
+    )
+    assert action == "pending_revision_upsert"
+    assert existing is s
+    # Map key stays "es1", no second entry is created
+    assert list(latest.keys()) == ["es1"]
+
+
+def test_active_revision_does_not_move_observation_window():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+    s = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="BTCUSDT",
+        detected_at_ms=1000,
+        observation_started_at_ms=2000,
+        observation_window_start_ms=2000,
+        observation_window_end_ms=2000 + 43200000,
+        status="active",
+        stable_event_symbol_key="k1",
+    )
+    flat_event = {
+        "event_symbol_id": "es1",
+        "event_id": "ev2",
+        "symbol": "BTCUSDT",
+        "detail_payload_hash": "hash_new",
+        "stable_event_symbol_key": "k1",
+    }
+    action, state, diag = classify_event_symbol_revision_admission(
+        flat_event=flat_event,
+        latest_states_by_id={"es1": s},
+        grouped_states_by_key={"k1": [s]},
+    )
+    assert action == "active_or_completed_duplicate_revision"
+    assert state.observation_started_at_ms == 2000
+    assert state.observation_window_end_ms == 2000 + 43200000
+
+
+def test_runtime_collision_blocks_subsequent_new_admission():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+    s_existing = EventSymbolState(
+        event_symbol_id="es_existing",
+        event_id="ev1",
+        symbol="ETHUSDT",
+        detected_at_ms=1000,
+        status="active",
+        stable_event_symbol_key="art1|launch|ETHUSDT",
+    )
+    flat_event_colliding = {
+        "event_symbol_id": "es_new_distinct",
+        "event_id": "ev2",
+        "symbol": "ETHUSDT",
+        "stable_event_symbol_key": "art1|launch|ETHUSDT",
+    }
+    action, existing, diag = classify_event_symbol_revision_admission(
+        flat_event=flat_event_colliding,
+        latest_states_by_id={"es_existing": s_existing},
+        grouped_states_by_key={"art1|launch|ETHUSDT": [s_existing]},
+    )
+    assert action == "identity_collision_blocked"
+    assert diag["reason"] == "stable_key_collision_with_distinct_event_symbol_id"
+    assert diag["colliding_event_symbol_id"] == "es_existing"
+
+
+def test_terminal_revision_seen_does_not_reopen_clean_evidence():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+    s_terminal = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="SOLUSDT",
+        detected_at_ms=1000,
+        status="rejected",
+        terminal_status="rejected",
+        terminal_reason="symbol_not_in_exchangeinfo",
+        stable_event_symbol_key="k_sol",
+    )
+    flat_event = {
+        "event_symbol_id": "es1",
+        "event_id": "ev2",
+        "symbol": "SOLUSDT",
+        "detail_payload_hash": "hash_rev2",
+        "stable_event_symbol_key": "k_sol",
+    }
+    action, state, diag = classify_event_symbol_revision_admission(
+        flat_event=flat_event,
+        latest_states_by_id={"es1": s_terminal},
+        grouped_states_by_key={"k_sol": [s_terminal]},
+    )
+    assert action == "terminal_revision_seen"
+    assert state.status == "rejected"

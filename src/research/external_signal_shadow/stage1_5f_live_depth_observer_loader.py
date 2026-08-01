@@ -326,20 +326,69 @@ def normalize_event_symbol_identity(flat_event: dict, symbol: str) -> dict:
     }
 
 
+def classify_event_symbol_revision_admission(
+    flat_event: dict,
+    latest_states_by_id: dict,
+    grouped_states_by_key: dict,
+) -> tuple[str, object | None, dict]:
+    sym = (flat_event.get("symbol") or "").strip().upper()
+    event_symbol_id = flat_event.get("event_symbol_id") or make_event_symbol_id(flat_event, sym)
+    stable_key = flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, sym)
+    payload_hash = str(
+        flat_event.get("detail_payload_hash")
+        or flat_event.get("payload_hash")
+        or flat_event.get("raw_payload_hash")
+        or ""
+    )
+
+    existing = latest_states_by_id.get(event_symbol_id)
+    if existing is not None:
+        latest_event_id = getattr(existing, "latest_source_event_id", None) or existing.event_id
+        if (
+            latest_event_id == flat_event.get("event_id")
+            and getattr(existing, "latest_event_payload_hash", "") == payload_hash
+            and payload_hash != ""
+        ):
+            return "exact_replay_noop", existing, {"reason": "exact_payload_hash_replay"}
+
+        status = getattr(existing, "status", "") or ""
+        if status.startswith("pending_"):
+            return "pending_revision_upsert", existing, {"reason": "pending_state_revision"}
+        elif status in ("active", "completed"):
+            return "active_or_completed_duplicate_revision", existing, {"reason": f"existing_{status}_state"}
+        else:
+            return "terminal_revision_seen", existing, {"reason": f"terminal_{status}_state"}
+
+    matching_key_states = grouped_states_by_key.get(stable_key, [])
+    distinct_colliding = [s for s in matching_key_states if getattr(s, "event_symbol_id", None) != event_symbol_id]
+    if distinct_colliding:
+        return "identity_collision_blocked", distinct_colliding[0], {
+            "reason": "stable_key_collision_with_distinct_event_symbol_id",
+            "stable_event_symbol_key": stable_key,
+            "colliding_event_symbol_id": getattr(distinct_colliding[0], "event_symbol_id", None),
+            "new_event_symbol_id": event_symbol_id,
+        }
+
+    return "new_event_symbol", None, {"reason": "new_unseen_event_symbol"}
+
+
 def upsert_pending_state_with_event_revision(pending_state, event_row: dict, symbol: str):
     if not getattr(pending_state, "status", "").startswith("pending_"):
         return pending_state
 
     event_id = event_row.get("event_id") or pending_state.event_id
-    latest_payload_hash = (
+    latest_payload_hash = str(
         event_row.get("detail_payload_hash")
         or event_row.get("payload_hash")
+        or event_row.get("raw_payload_hash")
         or getattr(pending_state, "latest_event_payload_hash", "")
     )
+    rev_count = int(getattr(pending_state, "revision_seen_count", 1) or 1) + 1
 
     d = pending_state.to_dict()
-    d["event_id"] = event_id
+    d["latest_source_event_id"] = event_id
     d["latest_event_payload_hash"] = latest_payload_hash
+    d["revision_seen_count"] = rev_count
     return pending_state.__class__.from_dict(d)
 
 

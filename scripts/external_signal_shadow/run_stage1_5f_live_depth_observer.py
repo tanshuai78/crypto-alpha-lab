@@ -765,39 +765,109 @@ def main():
                     states[pending_id] = updated_pending
                     append_jsonl(state_file, updated_pending.to_dict())
 
-        # 6.2.2 Classify new incoming events
-        for event in events:
-            for flat_event in flatten_event_symbols(event):
+        # 6.2.2 Classify and process incoming event batches
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+            build_event_batch_id,
+            load_latest_event_batch_registry,
+            update_batch_registry_status,
+            group_latest_states_by_stable_event_symbol_key,
+        )
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+            classify_event_symbol_revision_admission,
+            upsert_pending_state_with_event_revision,
+        )
+
+        event_batch_registry = load_latest_event_batch_registry(output_root)
+
+        for event in ([] if block_new_event_admission else events):
+            if block_new_event_admission:
+                break
+            expected_siblings = list(flatten_event_symbols(event))
+            if not expected_siblings:
+                continue
+
+            c_hash = event.get("multi_symbol_candidate_set_hash") or event.get("candidate_set_hash") or ""
+            b_id = build_event_batch_id(event, candidate_set_hash=c_hash)
+            expected_stable_keys = [
+                flat.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat, flat.get("symbol", ""))
+                for flat in expected_siblings
+            ]
+
+            update_batch_registry_status(
+                output_root=output_root,
+                event_batch_id=b_id,
+                status="batch_started",
+                now_ms=now_ms,
+                durable_stable_keys=[],
+                registry_map=event_batch_registry,
+            )
+
+            durable_keys_for_batch = []
+            batch_blocked = False
+            has_pending_siblings = False
+
+            for flat_event in expected_siblings:
                 symbol = flat_event["symbol"]
-                event_symbol_id = make_event_symbol_id(flat_event, symbol)
-                stable_key = make_stable_event_symbol_key(flat_event, symbol)
+                event_symbol_id = flat_event.get("event_symbol_id") or make_event_symbol_id(flat_event, symbol)
+                stable_key = flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, symbol)
                 flat_event["event_symbol_id"] = event_symbol_id
                 flat_event["stable_event_symbol_key"] = stable_key
 
-                if event_symbol_id in states:
-                    existing_state = states[event_symbol_id]
-                    if existing_state.status == "ignored_historical_anchor_pre_bootstrap":
-                        new_hash = flat_event.get("detail_payload_hash") or flat_event.get("payload_hash") or ""
-                        if new_hash and getattr(existing_state, "source_event_payload_hash", "") and new_hash != existing_state.source_event_payload_hash:
-                            d = existing_state.to_dict()
-                            d["terminal_ignored_revision_seen_count"] = existing_state.terminal_ignored_revision_seen_count + 1
-                            d["latest_event_payload_hash"] = new_hash
-                            updated = EventSymbolState.from_dict(d)
-                            states[event_symbol_id] = updated
-                            append_jsonl(state_file, updated.to_dict())
+                grouped_by_key = group_latest_states_by_stable_event_symbol_key(states)
+
+                action, existing_state, diag = classify_event_symbol_revision_admission(
+                    flat_event=flat_event,
+                    latest_states_by_id=states,
+                    grouped_states_by_key=grouped_by_key,
+                )
+
+                if action == "exact_replay_noop":
+                    durable_keys_for_batch.append(stable_key)
                     continue
 
-                if stable_key in terminal_states_by_stable_event_symbol_key:
-                    existing_terminal = terminal_states_by_stable_event_symbol_key[stable_key]
-                    d = existing_terminal.to_dict()
-                    d["duplicate_suppressed_count"] = getattr(existing_terminal, "duplicate_suppressed_count", 0) + 1
+                if action == "pending_revision_upsert":
+                    updated = upsert_pending_state_with_event_revision(existing_state, flat_event, symbol)
+                    states[event_symbol_id] = updated
+                    append_jsonl(state_file, updated.to_dict())
+                    durable_keys_for_batch.append(stable_key)
+                    continue
+
+                if action == "active_or_completed_duplicate_revision":
+                    d = existing_state.to_dict()
+                    d["duplicate_suppressed_count"] = getattr(existing_state, "duplicate_suppressed_count", 0) + 1
+                    d["last_duplicate_seen_at_ms"] = now_ms
+                    d["latest_source_event_id"] = flat_event.get("event_id") or existing_state.event_id
+                    updated = EventSymbolState.from_dict(d)
+                    states[event_symbol_id] = updated
+                    append_jsonl(state_file, updated.to_dict())
+                    durable_keys_for_batch.append(stable_key)
+                    continue
+
+                if action == "terminal_revision_seen":
+                    d = existing_state.to_dict()
+                    d["duplicate_suppressed_count"] = getattr(existing_state, "duplicate_suppressed_count", 0) + 1
                     d["last_duplicate_seen_at_ms"] = now_ms
                     updated = EventSymbolState.from_dict(d)
-                    states[existing_terminal.event_symbol_id] = updated
-                    terminal_states_by_stable_event_symbol_key[stable_key] = updated
+                    states[event_symbol_id] = updated
                     append_jsonl(state_file, updated.to_dict())
+                    durable_keys_for_batch.append(stable_key)
                     continue
 
+                if action == "identity_collision_blocked":
+                    update_batch_registry_status(
+                        output_root=output_root,
+                        event_batch_id=b_id,
+                        status="batch_blocked",
+                        now_ms=now_ms,
+                        durable_stable_keys=durable_keys_for_batch,
+                        block_reason="identity_collision_blocked",
+                        registry_map=event_batch_registry,
+                    )
+                    batch_blocked = True
+                    block_new_event_admission = True
+                    break
+
+                # action == "new_event_symbol"
                 status, reason, eligibility_diag = classify_event_symbol_eligibility_with_diagnostics(
                     row=flat_event,
                     symbol=symbol,
@@ -836,6 +906,7 @@ def main():
 
                     append_jsonl(state_file, terminal_state.to_dict())
                     historical_anchor_newly_ignored_this_poll += 1
+                    durable_keys_for_batch.append(stable_key)
                     continue
 
                 if status == "diagnostic_only":
@@ -876,6 +947,7 @@ def main():
                             now_ms,
                             historical_diagnostic_samples_by_type,
                         )
+                    durable_keys_for_batch.append(stable_key)
                     continue
 
                 if status == "pending":
@@ -896,6 +968,8 @@ def main():
                         "next_admission_check_at_ms": pending_state.next_admission_check_at_ms,
                         "anchor_resolution_deadline_ms": pending_state.anchor_resolution_deadline_ms,
                     })
+                    durable_keys_for_batch.append(stable_key)
+                    has_pending_siblings = True
                     continue
 
                 if status == "eligible":
@@ -924,8 +998,7 @@ def main():
                         accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
                         accepted_row = {**eligibility_diag, **build_accepted_row_from_state(new_state, watermark, now_ms)}
                         append_jsonl(accepted_path, accepted_row)
-                        watermark = update_watermark_with_event(watermark, flat_event)
-                        write_watermark_atomic(watermark_path, watermark)
+                        durable_keys_for_batch.append(stable_key)
                     else:
                         reason = "budget_exceeded"
                         status = "rejected"
@@ -962,8 +1035,8 @@ def main():
                             terminal_at_ms=now_ms,
                             consumable_by_stage1_5g=True,
                             source_article_id=str(flat_event.get("source_article_id") or ""),
-                            stable_event_symbol_key=flat_event["stable_event_symbol_key"],
-                            stable_event_key=str(flat_event.get("stable_event_key") or ""),
+                            stable_event_symbol_key=flat_event.get("stable_event_symbol_key", ""),
+                            stable_event_key=flat_event.get("stable_event_key", ""),
                             terminal_audit_type="events_rejected",
                             terminal_audit_row=rejected_row,
                         )
@@ -972,7 +1045,37 @@ def main():
                         if term_hygiene_id:
                             terminal_states_by_terminal_hygiene_id[term_hygiene_id] = rejected_state
                         append_jsonl(state_file, rejected_state.to_dict())
+                    durable_keys_for_batch.append(stable_key)
                     continue
+
+            if not batch_blocked and not has_pending_siblings and len(durable_keys_for_batch) >= len(expected_siblings):
+                update_batch_registry_status(
+                    output_root=output_root,
+                    event_batch_id=b_id,
+                    status="siblings_all_durable",
+                    now_ms=now_ms,
+                    durable_stable_keys=durable_keys_for_batch,
+                    registry_map=event_batch_registry,
+                )
+                watermark = update_watermark_with_event(watermark, event)
+                write_watermark_atomic(watermark_path, watermark)
+                update_batch_registry_status(
+                    output_root=output_root,
+                    event_batch_id=b_id,
+                    status="watermark_committed",
+                    now_ms=now_ms,
+                    durable_stable_keys=durable_keys_for_batch,
+                    registry_map=event_batch_registry,
+                )
+            elif not batch_blocked and has_pending_siblings:
+                update_batch_registry_status(
+                    output_root=output_root,
+                    event_batch_id=b_id,
+                    status="siblings_partially_durable",
+                    now_ms=now_ms,
+                    durable_stable_keys=durable_keys_for_batch,
+                    registry_map=event_batch_registry,
+                )
 
 
         # 6.3 Fetch public depth for active observations

@@ -112,7 +112,11 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "failed_poll_count": int(ctx.get("failed_poll_count") or 0),
         "consecutive_failed_polls": consecutive_failed,
         "request_success_rate": request_success_rate,
-        "fatal_blockers": fatal_blockers,
+        "multi_symbol_candidate_set_emission_enabled": bool(ctx.get("multi_symbol_candidate_set_emission_enabled", True)),
+        "multi_symbol_candidate_set_ready_count": int(ctx.get("multi_symbol_candidate_set_ready_count") or 0),
+        "multi_symbol_candidate_set_pending_count": int(ctx.get("multi_symbol_candidate_set_pending_count") or 0),
+        "multi_symbol_full_emit_count": int(ctx.get("multi_symbol_full_emit_count") or 0),
+        "multi_symbol_emission_registry_count": int(ctx.get("multi_symbol_emission_registry_count") or 0),
         "live_trading_enabled": bool(RiskLimits.live_trading_enabled),
     }
     for field in SAFETY_FALSE_FIELDS:

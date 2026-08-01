@@ -309,6 +309,23 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "consumable_event_allowed": state.get("consumable_event_allowed"),
             "symbol_launch_time_candidates_ms": state.get("symbol_launch_time_candidates_ms"),
             "launch_time_conflict_ms": state.get("launch_time_conflict_ms"),
+            # Terminal emitted and candidate-set contract fields
+            "status": state.get("status"),
+            "terminal_reason": state.get("terminal_reason"),
+            "terminal_at_ms": state.get("terminal_at_ms"),
+            "emission_id": state.get("emission_id"),
+            "candidate_symbol_set_hash": state.get("candidate_symbol_set_hash"),
+            "candidate_symbol_set_hash_version": state.get("candidate_symbol_set_hash_version"),
+            "candidate_symbols_ordered": state.get("candidate_symbols_ordered"),
+            "candidate_symbols_normalized": state.get("candidate_symbols_normalized"),
+            "event_id": state.get("event_id"),
+            "event_stream_path": state.get("event_stream_path"),
+            "parser_payload_hash": state.get("parser_payload_hash"),
+            "symbol_effective_launch_time_sources": state.get("symbol_effective_launch_time_sources"),
+            "exchangeinfo_visible_symbols": state.get("exchangeinfo_visible_symbols"),
+            "exchangeinfo_missing_symbols": state.get("exchangeinfo_missing_symbols"),
+            "hard_rejected_symbols": state.get("hard_rejected_symbols"),
+            "symbol_exchangeinfo_statuses": state.get("symbol_exchangeinfo_statuses"),
         }
     return serialized
 
