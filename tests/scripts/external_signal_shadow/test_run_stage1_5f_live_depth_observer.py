@@ -1099,7 +1099,10 @@ def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_pa
             "updated_at_ms": watermark_time
         }, f)
 
-    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        load_all_jsonl_from_subdirs,
+        main,
+    )
 
     args = [
         "run_stage1_5f_live_depth_observer.py",
@@ -1217,7 +1220,10 @@ def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
             "updated_at_ms": watermark_time
         }, f)
 
-    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        load_all_jsonl_from_subdirs,
+        main,
+    )
 
     args = [
         "run_stage1_5f_live_depth_observer.py",
@@ -1342,7 +1348,10 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
             "updated_at_ms": watermark_time
         }, f)
 
-    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        load_all_jsonl_from_subdirs,
+        main,
+    )
 
     args = [
         "run_stage1_5f_live_depth_observer.py",
@@ -1465,7 +1474,10 @@ def test_exchangeinfo_manifest_row_is_not_depth_symbol_specific(monkeypatch, tmp
             "updated_at_ms": watermark_time
         }, f)
 
-    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main, load_all_jsonl_from_subdirs
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        load_all_jsonl_from_subdirs,
+        main,
+    )
 
     args = [
         "run_stage1_5f_live_depth_observer.py",
@@ -1629,7 +1641,7 @@ def test_reconcile_missing_accepted_row_backfills_active_state_once(tmp_path):
     )
     watermark = Watermark(1, 5_000, [], [], [], 5_000)
 
-    rows = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_200)
+    reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_200)
     rows_again = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_300)
 
     accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
@@ -1713,6 +1725,7 @@ def test_capped_terminal_state_does_not_trigger_diagnostic_backfill(tmp_path):
 
 
 def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, monkeypatch):
+    from configs import base
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         emit_sample_capped_diagnostic,
         load_terminal_hygiene_diagnostic_sample_counts,
@@ -1721,7 +1734,6 @@ def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, 
         append_jsonl,
         build_daily_path,
     )
-    from configs import base
 
     output_root = tmp_path / "output"
     output_root.mkdir()
@@ -1838,7 +1850,9 @@ def test_terminal_hygiene_reconciliation_rebuilds_rejected_state_from_audit_arti
 
 
 def test_bootstrap_watermark_writes_schema_v2_immutable_bootstrap_fields(tmp_path, monkeypatch):
-    import sys, time, json
+    import json
+    import sys
+    import time
     event_file = tmp_path / "events.jsonl"
     event_file.write_text(json.dumps({
         "event_id": "old-event",
@@ -1879,10 +1893,14 @@ def test_bootstrap_watermark_writes_schema_v2_immutable_bootstrap_fields(tmp_pat
     assert w["bootstrap_created_at_ms"] == 2000
     assert w["bootstrap_source_root"]
     assert w["bootstrap_root_id"]
+    root_contract = json.loads((output_root / "observer_root_contract.json").read_text())
+    assert root_contract["root_mode"] == "v2_production"
+    assert root_contract["formal_event_contract_versions_allowed"] == [2]
 
 
 def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_events_rejected(tmp_path, monkeypatch):
-    import sys, time, json
+    import json
+    import sys
     event_file = tmp_path / "events.jsonl"
     event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-ebay",
@@ -1957,7 +1975,8 @@ def test_historical_anchor_pre_bootstrap_writes_terminal_ignored_state_not_event
 
 
 def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, monkeypatch):
-    import sys, time, json
+    import json
+    import sys
     event_file = tmp_path / "events.jsonl"
     event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-ebay",
@@ -2020,7 +2039,8 @@ def test_historical_anchor_pre_bootstrap_is_idempotent_across_polls(tmp_path, mo
 
 
 def test_1_5f_runner_blocks_events_when_runtime_gate_initializing(tmp_path):
-    import sys, json
+    import json
+    import sys
     event_file = tmp_path / "events.jsonl"
     event_file.write_text(json.dumps(_formal_event({
         "event_id": "event-gate-test",
@@ -2090,7 +2110,10 @@ def test_1_5f_runner_blocks_events_when_runtime_gate_initializing(tmp_path):
 
 
 def test_1_5f_runtime_gate_invalid_preserves_pending_without_promoting(tmp_path):
-    import sys, json, time
+    import json
+    import sys
+    import time
+
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
 
     now_ms = int(time.time() * 1000)
@@ -2330,3 +2353,354 @@ def test_three_staggered_symbols_promote_at_their_own_anchor(tmp_path, monkeypat
     accepted3 = [json.loads(line) for p in (output_root / "events_accepted").glob("**/*.jsonl") for line in p.read_text().splitlines() if line.strip()]
     accepted_symbols3 = {r["symbol"] for r in accepted3}
     assert "SYM3USDT" in accepted_symbols3
+
+
+def test_v2_root_writes_observer_root_contract_before_watermark(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        write_observer_root_contract_atomically,
+    )
+
+    output_root = tmp_path / "test_root"
+    write_observer_root_contract_atomically(str(output_root), "v2_production", reason="test")
+
+    root_contract_file = output_root / "observer_root_contract.json"
+    assert root_contract_file.exists()
+    saved = json.loads(root_contract_file.read_text())
+    assert saved["root_mode"] == "v2_production"
+    assert saved["formal_event_contract_versions_allowed"] == [2]
+    assert not (output_root / "observer_root_contract.json.tmp").exists()
+
+
+def test_v1_compatibility_root_requires_valid_suffix(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        validate_root_mode_and_suffix,
+    )
+
+    # Invalid suffix for v1 compatibility -> raises ValueError
+    with pytest.raises(ValueError, match="v1_compatibility_diagnostic_only"):
+        validate_root_mode_and_suffix(str(tmp_path / "invalid_root_name"), allow_v1_compat=True)
+
+    # Valid suffix for v1 compatibility -> passes
+    valid_root = str(tmp_path / "my_root_v1_compatibility_diagnostic_only")
+    mode = validate_root_mode_and_suffix(valid_root, allow_v1_compat=True)
+    assert mode == "v1_compatibility_diagnostic_only"
+
+
+def test_build_accepted_row_from_state_preserves_anchor_contract_lineage():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        build_accepted_row_from_state,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+        Watermark,
+    )
+
+    state = EventSymbolState(
+        event_symbol_id="es-v2",
+        event_id="ev-v2",
+        symbol="GIGADEVUSDT",
+        detected_at_ms=1_000,
+        status="active",
+        observation_anchor_ms=10_000,
+        observation_anchor_basis="official_schedule_anchor",
+        observation_anchor_confidence="high",
+        observation_admitted_at_ms=10_100,
+        source_anchor_contract_hash="source-hash",
+        admission_anchor_contract_hash="admission-hash",
+        latest_anchor_contract_hash="latest-hash",
+        anchor_contract_version=2,
+        anchor_precedence_policy="official_schedule_priority_v1",
+        anchor_contract_decision_at_ms=2_000,
+        admission_anchor_evidence_level="official_schedule",
+        latest_anchor_evidence_level="official_schedule",
+        admission_max_evidence_class="clean_or_recovery",
+        latest_max_evidence_class="clean_or_recovery",
+        anchor_contract_revision_count=1,
+        applied_schedule_revision_ids=["rev-app-1"],
+    )
+    row = build_accepted_row_from_state(
+        state,
+        Watermark(max_seen_detected_at_ms=500),
+        now_ms=10_200,
+    )
+
+    assert row["source_anchor_contract_hash"] == "source-hash"
+    assert row["admission_anchor_contract_hash"] == "admission-hash"
+    assert row["latest_anchor_contract_hash"] == "latest-hash"
+    assert row["anchor_contract_version"] == 2
+    assert row["anchor_precedence_policy"] == "official_schedule_priority_v1"
+    assert row["admission_max_evidence_class"] == "clean_or_recovery"
+    assert row["anchor_contract_revision_count"] == 1
+    assert row["applied_schedule_revision_ids"] == ["rev-app-1"]
+
+
+def test_runner_active_state_selector_keeps_contaminated_active_collecting():
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        select_completed_observation_states,
+        select_depth_collection_active_states,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+
+    states = {
+        "active": EventSymbolState(event_symbol_id="active", status="active", symbol="AUSDT"),
+        "contaminated": EventSymbolState(
+            event_symbol_id="contaminated",
+            status="active_anchor_revision_contaminated",
+            symbol="BUSDT",
+        ),
+        "completed": EventSymbolState(event_symbol_id="completed", status="completed", symbol="CUSDT"),
+        "completed_contaminated": EventSymbolState(
+            event_symbol_id="completed_contaminated",
+            status="completed_anchor_revision_contaminated",
+            symbol="DUSDT",
+        ),
+    }
+
+    assert {s.event_symbol_id for s in select_depth_collection_active_states(states)} == {"active", "contaminated"}
+    assert {s.event_symbol_id for s in select_completed_observation_states(states)} == {"completed", "completed_contaminated"}
+
+
+def test_schedule_revision_event_updates_matching_pending_state_and_registry(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        process_schedule_revision_event,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+
+    state = EventSymbolState(
+        event_symbol_id="es-gigadev",
+        event_id="launch-1",
+        symbol="GIGADEVUSDT",
+        source_article_id="orig-article",
+        stable_event_symbol_key="futures_contract_launch|orig-article|GIGADEVUSDT",
+        status="pending_launch_time_in_future",
+        observation_anchor_ms=1_000,
+        latest_anchor_contract_hash="latest-before",
+    )
+    states = {state.event_symbol_id: state}
+    state_file = tmp_path / "observer_state.jsonl"
+    registry_file = tmp_path / "schedule_revision_registry.jsonl"
+    revision = {
+        "event_type": "futures_contract_launch_schedule_revision",
+        "formal_schedule_revision_contract_version": 1,
+        "source_article_id": "revision-article",
+        "supersedes_source_article_id": "orig-article",
+        "stable_schedule_identity": "binance|futures_contract_launch|orig-article|GIGADEVUSDT",
+        "symbols": ["GIGADEVUSDT"],
+        "symbol_revised_anchor_ms": {"GIGADEVUSDT": 2_000},
+        "revision_id": "rev-1",
+        "revision_payload_hash": "hash-1",
+    }
+
+    res = process_schedule_revision_event(
+        revision,
+        states=states,
+        state_file=str(state_file),
+        registry_file=registry_file,
+        now_ms=1_500,
+    )
+
+    assert res["status"] == "revision_applied"
+    assert states["es-gigadev"].observation_anchor_ms == 2_000
+    assert states["es-gigadev"].anchor_contract_revision_count == 1
+    rows = [json.loads(line) for line in registry_file.read_text().splitlines()]
+    assert [r["status"] for r in rows] == ["revision_received", "revision_applied"]
+
+    replay_res = process_schedule_revision_event(
+        revision,
+        states=states,
+        state_file=str(state_file),
+        registry_file=registry_file,
+        now_ms=1_600,
+    )
+    assert replay_res["status"] == "revision_replay_noop"
+    assert states["es-gigadev"].anchor_contract_revision_count == 1
+
+
+def test_schedule_revision_arriving_before_launch_is_orphaned(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        process_schedule_revision_event,
+    )
+
+    registry_file = tmp_path / "schedule_revision_registry.jsonl"
+    revision = {
+        "event_type": "futures_contract_launch_schedule_revision",
+        "formal_schedule_revision_contract_version": 1,
+        "supersedes_source_article_id": "missing-article",
+        "stable_schedule_identity": "binance|futures_contract_launch|missing-article|ABCUSDT",
+        "symbols": ["ABCUSDT"],
+        "symbol_revised_anchor_ms": {"ABCUSDT": 2_000},
+        "revision_id": "rev-orphan",
+        "revision_payload_hash": "hash-orphan",
+    }
+
+    res = process_schedule_revision_event(
+        revision,
+        states={},
+        state_file=str(tmp_path / "observer_state.jsonl"),
+        registry_file=registry_file,
+        now_ms=1_500,
+    )
+
+    assert res["status"] == "revision_orphaned"
+    rows = [json.loads(line) for line in registry_file.read_text().splitlines()]
+    assert rows[-1]["status"] == "revision_orphaned"
+
+    replay_res = process_schedule_revision_event(
+        revision,
+        states={},
+        state_file=str(tmp_path / "observer_state.jsonl"),
+        registry_file=registry_file,
+        now_ms=1_600,
+    )
+    replay_rows = [json.loads(line) for line in registry_file.read_text().splitlines()]
+    assert replay_res["status"] == "revision_orphaned_replay_noop"
+    assert len(replay_rows) == len(rows)
+
+
+def test_ambiguous_schedule_revision_does_not_mutate_state(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        process_schedule_revision_event,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+
+    states = {
+        "es-a": EventSymbolState(
+            event_symbol_id="es-a",
+            symbol="ABCUSDT",
+            source_article_id="orig-article",
+            status="active",
+            observation_anchor_ms=1_000,
+        ),
+        "es-b": EventSymbolState(
+            event_symbol_id="es-b",
+            symbol="ABCUSDT",
+            source_article_id="orig-article",
+            status="pending_launch_time_in_future",
+            observation_anchor_ms=1_100,
+        ),
+    }
+    revision = {
+        "event_type": "futures_contract_launch_schedule_revision",
+        "formal_schedule_revision_contract_version": 1,
+        "supersedes_source_article_id": "orig-article",
+        "symbols": ["ABCUSDT"],
+        "symbol_revised_anchor_ms": {"ABCUSDT": 2_000},
+        "revision_id": "rev-ambiguous",
+        "revision_payload_hash": "hash-ambiguous",
+    }
+
+    res = process_schedule_revision_event(
+        revision,
+        states=states,
+        state_file=str(tmp_path / "observer_state.jsonl"),
+        registry_file=tmp_path / "schedule_revision_registry.jsonl",
+        now_ms=1_500,
+    )
+
+    assert res["status"] == "revision_ambiguous"
+    assert states["es-a"].observation_anchor_ms == 1_000
+    assert states["es-b"].observation_anchor_ms == 1_100
+
+    registry_file = tmp_path / "schedule_revision_registry.jsonl"
+    row_count = len([line for line in registry_file.read_text().splitlines() if line.strip()])
+    replay_res = process_schedule_revision_event(
+        revision,
+        states=states,
+        state_file=str(tmp_path / "observer_state.jsonl"),
+        registry_file=registry_file,
+        now_ms=1_600,
+    )
+    replay_row_count = len([line for line in registry_file.read_text().splitlines() if line.strip()])
+    assert replay_res["status"] == "revision_ambiguous_replay_noop"
+    assert replay_row_count == row_count
+
+
+def test_schedule_revision_event_is_not_admitted_as_new_launch_by_runner(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+
+    now_ms = 2_000_000
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": 1_000_000,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+        "updated_at_ms": 1_000_000,
+    }))
+    pending = EventSymbolState(
+        event_symbol_id="es-abc",
+        event_id="launch-abc",
+        symbol="ABCUSDT",
+        source_article_id="orig-article",
+        stable_event_symbol_key="futures_contract_launch|orig-article|ABCUSDT",
+        status="pending_launch_time_in_future",
+        observation_anchor_ms=now_ms + 60_000,
+        latest_anchor_contract_hash="latest-before",
+    )
+    (output_root / "observer_state.jsonl").write_text(json.dumps(pending.to_dict()) + "\n")
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps({
+        "event_type": "futures_contract_launch_schedule_revision",
+        "formal_schedule_revision_contract_version": 1,
+        "source_article_id": "revision-article",
+        "supersedes_source_article_id": "orig-article",
+        "stable_schedule_identity": "binance|futures_contract_launch|orig-article|ABCUSDT",
+        "symbols": ["ABCUSDT"],
+        "symbol_revised_anchor_ms": {"ABCUSDT": now_ms + 120_000},
+        "revision_id": "rev-runner",
+        "revision_payload_hash": "hash-runner",
+    }) + "\n")
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+            "--live-public-readonly",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    assert not (output_root / "event_batch_registry.jsonl").exists()
+    assert not list((output_root / "events_accepted").glob("*.jsonl"))
+    registry_rows = [
+        json.loads(line)
+        for line in (output_root / "schedule_revision_registry.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert registry_rows[-1]["status"] == "revision_applied"
+    summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
+    assert summary["schedule_revision_registry_orphan_count"] == 0
+    assert summary["schedule_revision_registry_ambiguous_count"] == 0
+    assert summary["anchor_contract_revision_count"] == 1

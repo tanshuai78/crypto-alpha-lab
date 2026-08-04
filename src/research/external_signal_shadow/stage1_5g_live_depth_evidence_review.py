@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -206,6 +205,23 @@ class EvidenceIntegrityResult:
     formal_completed_event_symbol_ids: set[str]
 
 
+def reduce_latest_states_by_event_symbol_id(states: list[dict]) -> dict[str, dict]:
+    """
+    Reduce observer_state rows to latest state per event_symbol_id.
+    Uses (ts, seq_num) tuple to guarantee deterministic monotonic ordering.
+    """
+    latest: dict[str, tuple[tuple[int, int], dict]] = {}
+    for seq_num, row in enumerate(states):
+        es_id = row.get("event_symbol_id")
+        if not es_id:
+            continue
+        ts = int(row.get("updated_at_ms") or row.get("state_written_at_ms") or 0)
+        sort_key = (ts, seq_num)
+        if es_id not in latest or sort_key > latest[es_id][0]:
+            latest[es_id] = (sort_key, row)
+    return {es_id: item[1] for es_id, item in latest.items()}
+
+
 def validate_evidence_integrity(
     accepted_events: list[dict],
     watermark: dict,
@@ -223,6 +239,8 @@ def validate_evidence_integrity(
     # 1. Verify Watermark Presence
     if not watermark or "watermark_version" not in watermark:
         blockers.append("missing_or_unreadable_watermark")
+
+    state_by_id = reduce_latest_states_by_event_symbol_id(states_list)
 
     # 2. Verify Accepted Events
     evidence_label_counts = {lbl: 0 for lbl in VALID_EVIDENCE_LABELS}
@@ -250,8 +268,28 @@ def validate_evidence_integrity(
             ):
                 blockers.append("watermark_max_seen_detected_at_ms_mismatch")
 
+        # 1.5G Anchor Lineage & Contamination Blockers
+        es_id = event.get("event_symbol_id")
+        latest_st = state_by_id.get(es_id) if es_id else None
+        if not latest_st and es_id:
+            blockers.append("anchor_contract_lineage_state_missing")
+        elif latest_st:
+            adm_acc = event.get("admission_anchor_contract_hash")
+            adm_st = latest_st.get("admission_anchor_contract_hash")
+            if adm_acc and adm_st and adm_acc != adm_st:
+                blockers.append("anchor_contract_lineage_mismatch")
+            if latest_st.get("observation_anchor_revision_contaminated"):
+                blockers.append("anchor_revision_contaminated")
+            if latest_st.get("validation_status") == "malformed" or event.get("validation_status") == "malformed":
+                blockers.append("malformed_anchor_contract")
+
+        if (
+            event.get("effective_observation_anchor_source") == "exchangeinfo_onboard_date"
+            or event.get("anchor_evidence_level") == "exchangeinfo_fallback"
+        ):
+            blockers.append("exchangeinfo_fallback_anchor")
+
     # 3. Cross-Validation Join Checks
-    state_by_id = {st.get("event_symbol_id"): st for st in states_list if st.get("event_symbol_id")}
     snapshots_by_id = {}
     for sn in snapshots_list:
         es_id = sn.get("event_symbol_id")
@@ -1389,25 +1427,60 @@ def build_stage1_5g_review_summary(
         snapshots=snapshots,
         summary=summary,
     )
+    ANCHOR_LINEAGE_INVALID_BLOCKERS = {
+        "anchor_contract_lineage_state_missing",
+        "anchor_contract_lineage_mismatch",
+        "anchor_revision_contaminated",
+        "malformed_anchor_contract",
+        "exchangeinfo_fallback_anchor",
+        "exchangeinfo_fallback_clean_claim",
+    }
+    has_anchor_lineage_blocker = bool(set(integrity_result.blockers).intersection(ANCHOR_LINEAGE_INVALID_BLOCKERS))
+
     if integrity_result.blockers:
         all_blockers.extend(integrity_result.blockers)
-        return finish({
-            "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
-            "decision": "stage1_5g_depth_evidence_invalid",
-            "allowed_next_action": "continue_observation",
-            "evidence_scope": "none",
-            "event_family_conclusion_allowed": False,
-            "blockers": sorted(list(set(all_blockers))),
-            "warnings": all_warnings,
-            "evidence_label_counts": integrity_result.evidence_label_counts,
-            "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
-            "trade_signal_allowed": False,
-            "paper_trading_allowed": False,
-            "live_trading_allowed": False,
-            "execution_engine_allowed": False,
-            "alpha_interpretation_allowed": False,
-            "execution_feasibility_claim_allowed": False,
-        }, integrity_result.formal_completed_event_symbol_ids)
+        if has_anchor_lineage_blocker:
+            return finish({
+                "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
+                "decision": "stage1_5g_depth_evidence_invalid",
+                "allowed_next_action": "collect_official_anchor_evidence_or_wait_for_next_event",
+                "evidence_scope": "none",
+                "event_family_conclusion_allowed": False,
+                "clean_depth_evidence_pass": False,
+                "quarantined_depth_evidence_pass": False,
+                "quarantine_candidate": False,
+                "blockers": sorted(list(set(all_blockers))),
+                "warnings": all_warnings,
+                "evidence_label_counts": integrity_result.evidence_label_counts,
+                "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+                "trade_signal_allowed": False,
+                "paper_trading_allowed": False,
+                "live_trading_allowed": False,
+                "execution_engine_allowed": False,
+                "alpha_interpretation_allowed": False,
+                "execution_feasibility_claim_allowed": False,
+            }, set())
+        else:
+            return finish({
+                "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
+                "decision": "stage1_5g_depth_evidence_invalid",
+                "allowed_next_action": "recollect_events_or_fix_data_source",
+                "evidence_scope": "none",
+                "event_family_conclusion_allowed": False,
+                "clean_depth_evidence_pass": False,
+                "quarantined_depth_evidence_pass": False,
+                "quarantine_candidate": False,
+                "blockers": sorted(list(set(all_blockers))),
+                "warnings": all_warnings,
+                "evidence_label_counts": integrity_result.evidence_label_counts,
+                "formal_announcement_and_launch_count": integrity_result.formal_announcement_and_launch_count,
+                "trade_signal_allowed": False,
+                "paper_trading_allowed": False,
+                "live_trading_allowed": False,
+                "execution_engine_allowed": False,
+                "alpha_interpretation_allowed": False,
+                "execution_feasibility_claim_allowed": False,
+            }, set())
 
     # 4. Completed Observation Manifest Check
     completed_obs_count = summary.get("completed_observation_count", 0)

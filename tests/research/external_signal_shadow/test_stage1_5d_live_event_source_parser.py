@@ -4,13 +4,12 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_parser impo
     derive_symbol_candidates_from_base_assets_in_launch_context,
     extract_futures_launch_base_assets,
     extract_futures_launch_symbols,
+    extract_symbol_candidates_from_bapi_article_payload,
+    extract_symbol_candidates_from_detail_payload,
     extract_symbols_from_detail_payload,
     normalize_live_event,
     parse_binance_announcement_payload,
-    extract_symbol_candidates_from_detail_payload,
-    extract_symbol_candidates_from_bapi_article_payload,
 )
-
 
 
 def test_extract_symbols_from_binance_futures_launch_title():
@@ -581,7 +580,8 @@ def test_minimized_schedule_fixture_preserves_expected_schedule_structure():
 
 
 def test_a827_real_frozen_fixture_hash_matches_expected():
-    import hashlib, json
+    import hashlib
+    import json
     from pathlib import Path
 
     fixture = Path("tests/fixtures/external_signal_shadow/stage1_5d/bapi_article_detail_a827_real_frozen_fixture.json")
@@ -594,6 +594,7 @@ def test_a827_real_frozen_fixture_hash_matches_expected():
 def test_a827_bapi_fixture_extracts_symbols_and_launch_times():
     import json
     from pathlib import Path
+
     from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
         extract_symbol_candidates_from_bapi_article_payload,
     )

@@ -128,6 +128,25 @@ def build_live_depth_observer_summary(
         (s.out_of_window_snapshot_row_count if hasattr(s, "out_of_window_snapshot_row_count") else s.get("out_of_window_snapshot_row_count", 0))
         for s in active_states
     )
+    active_anchor_revision_contaminated_count = sum(
+        1
+        for s in active_states
+        if (s.status if hasattr(s, "status") else s.get("status")) == "active_anchor_revision_contaminated"
+    )
+    completed_anchor_revision_contaminated_count = sum(
+        1
+        for s in completed_states
+        if (s.status if hasattr(s, "status") else s.get("status")) == "completed_anchor_revision_contaminated"
+    )
+    anchor_contract_revision_count = sum(
+        (s.anchor_contract_revision_count if hasattr(s, "anchor_contract_revision_count") else s.get("anchor_contract_revision_count", 0))
+        for s in active_states + completed_states + pending_states + expired_states + failed_states
+    )
+    anchor_contract_lineage_mismatch_count = sum(
+        1
+        for s in active_states + completed_states + pending_states + expired_states + failed_states
+        if (s.observation_anchor_revision_contaminated if hasattr(s, "observation_anchor_revision_contaminated") else s.get("observation_anchor_revision_contaminated", False))
+    )
 
     all_terminal_states = terminal_states if terminal_states is not None else (terminal_ignored_states or [])
     term_ignored_states = [
@@ -249,6 +268,12 @@ def build_live_depth_observer_summary(
         multi_symbol_candidate_symbol_rows_pending_count=int(runtime_gate_context.get("multi_symbol_candidate_symbol_rows_pending_count", 0)),
         duplicate_suppressed_count=int(runtime_gate_context.get("duplicate_suppressed_count", 0)),
         identity_collision_blocked_count=int(runtime_gate_context.get("identity_collision_blocked_count", 0)),
+        active_anchor_revision_contaminated_count=active_anchor_revision_contaminated_count,
+        completed_anchor_revision_contaminated_count=completed_anchor_revision_contaminated_count,
+        anchor_contract_revision_count=anchor_contract_revision_count,
+        anchor_contract_lineage_mismatch_count=anchor_contract_lineage_mismatch_count,
+        schedule_revision_registry_orphan_count=int(runtime_gate_context.get("schedule_revision_registry_orphan_count", 0)),
+        schedule_revision_registry_ambiguous_count=int(runtime_gate_context.get("schedule_revision_registry_ambiguous_count", 0)),
         stage1_5d_gate_mode=runtime_gate_context.get("stage1_5d_gate_mode", "unknown"),
         stage1_5d_runtime_gate_path=runtime_gate_context.get("stage1_5d_runtime_gate_path", ""),
         stage1_5d_runtime_gate_decision=runtime_gate_context.get("stage1_5d_runtime_gate_decision", ""),

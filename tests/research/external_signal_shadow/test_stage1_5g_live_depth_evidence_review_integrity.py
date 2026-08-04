@@ -1,7 +1,5 @@
-import pytest
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     validate_evidence_integrity,
-    EvidenceIntegrityResult,
 )
 
 
@@ -293,3 +291,84 @@ def test_raw_snapshot_integrity_blocks_jsonl_parse_error_from_loader():
     )
     assert "jsonl_parse_error" in result.blockers
     assert result.jsonl_parse_error_ratio == 0.01
+
+
+def test_stage1_5g_uses_latest_state_for_anchor_contamination():
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_evidence_integrity,
+    )
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "ABCUSDT",
+        "source_article_id": "a1",
+        "evidence_label": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+        "admission_anchor_contract_hash": "hash_adm_1",
+    }
+    # Multiple state rows: active first, then contaminated state
+    states = [
+        {"event_symbol_id": "es1", "status": "active", "admission_anchor_contract_hash": "hash_adm_1", "updated_at_ms": 1000},
+        {"event_symbol_id": "es1", "status": "active_anchor_revision_contaminated", "observation_anchor_revision_contaminated": True, "admission_anchor_contract_hash": "hash_adm_1", "updated_at_ms": 2000},
+    ]
+    res = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=states,
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "anchor_revision_contaminated" in res.blockers
+
+
+def test_anchor_contract_hash_mismatch_is_invalid():
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_evidence_integrity,
+    )
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "ABCUSDT",
+        "source_article_id": "a1",
+        "evidence_label": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+        "admission_anchor_contract_hash": "hash_accepted",
+    }
+    states = [
+        {"event_symbol_id": "es1", "status": "completed", "admission_anchor_contract_hash": "hash_different", "updated_at_ms": 1000},
+    ]
+    res = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=states,
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "anchor_contract_lineage_mismatch" in res.blockers
+
+
+def test_exchangeinfo_fallback_blocks_clean_depth_evidence_pass():
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_evidence_integrity,
+    )
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "ABCUSDT",
+        "source_article_id": "a1",
+        "evidence_label": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+        "anchor_evidence_level": "exchangeinfo_fallback",
+        "effective_observation_anchor_source": "exchangeinfo_onboard_date",
+    }
+    states = [
+        {"event_symbol_id": "es1", "status": "completed", "updated_at_ms": 1000},
+    ]
+    res = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=states,
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "exchangeinfo_fallback_anchor" in res.blockers

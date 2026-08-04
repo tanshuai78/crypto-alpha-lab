@@ -1,0 +1,14 @@
+{
+  "event_symbol_id": "gigadev-legacy-v1-event:GIGADEVUSDT",
+  "event_id": "gigadev-legacy-v1-event",
+  "symbol": "GIGADEVUSDT",
+  "status": "pending_anchor_conflict",
+  "pending_reason": "anchor_disagreement_exceeds_threshold",
+  "observation_anchor_ms": null,
+  "detected_at_ms": 1785724209135,
+  "updated_at_ms": 1785740000000,
+  "state_written_at_ms": 1785740000000,
+  "observer_state_schema_version": 2,
+  "formal_event_contract_version": 1,
+  "source_contract_status": "formal_v1_valid"
+}

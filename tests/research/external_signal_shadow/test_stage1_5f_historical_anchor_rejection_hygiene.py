@@ -1,6 +1,6 @@
 import json
-import os
 import sys
+
 import pytest
 
 from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
@@ -190,6 +190,19 @@ def test_end_to_end_genuine_rejection_retains_identity(tmp_path):
             "detected_at_ms": 1784830000000,
             "symbols": ["LATEUSDT"],
             "symbol_effective_launch_times_ms": {"LATEUSDT": 1780000000000},
+            "symbol_launch_time_candidates_ms": {"LATEUSDT": 1780000000000},
+            "symbol_effective_launch_time_sources": {"LATEUSDT": "detail_symbol_launch_time"},
+            "formal_event_contract_version": 1,
+            "formal_event_consumable_by_stage1_5f": True,
+            "source_contract_status": "formal_v1_valid",
+            "symbol_identity_validation_status": "validated_by_exchangeinfo",
+            "launch_anchor_evidence_level": "detail_confirmed",
+            "launch_anchor_comparison_status": "single_source_detail",
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "symbol_extraction_version": 3,
+            "detail_fetch_attempted": True,
+            "detail_fetch_status": "success",
+            "detail_confirmation_missing": False,
         }) + "\n"
     )
     summary_d = tmp_path / "summary_d.json"

@@ -1,6 +1,27 @@
 import hashlib
-import json
+
 from configs import base
+from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+    build_formal_event_anchor_contract_row,
+    build_symbol_anchor_contract,
+    canonical_json_bytes,
+    compute_admission_anchor_contract_hash,
+    compute_latest_anchor_contract_hash,
+    compute_source_anchor_contract_hash,
+    select_latest_applicable_official_schedule,
+    validate_launch_anchor_contract,
+)
+
+__all__ = [
+    "build_formal_event_anchor_contract_row",
+    "build_symbol_anchor_contract",
+    "canonical_json_bytes",
+    "compute_admission_anchor_contract_hash",
+    "compute_latest_anchor_contract_hash",
+    "compute_source_anchor_contract_hash",
+    "select_latest_applicable_official_schedule",
+    "validate_launch_anchor_contract",
+]
 
 FORMAL_CONTRACT_VERSION = 1
 PARSER_VERSION = "stage1_5d_symbol_extraction_v3"
@@ -325,17 +346,9 @@ def coerce_legacy_launch_event_to_formal(row: dict) -> dict:
         return row
 
     sources = row.get("symbol_effective_launch_time_sources") or {}
-    if not isinstance(sources, dict):
-        source = row.get("launch_time_source") or ""
-        if source == "detail":
-            sources = {sym: "detail_symbol_launch_time" for sym in symbols}
-        elif source == "exchange_info":
-            sources = {sym: "exchangeinfo_onboard_date" for sym in symbols}
-        else:
-            sources = {sym: source for sym in symbols}
-    elif not sources:
-        source = row.get("launch_time_source") or ""
-        if source == "detail":
+    if not isinstance(sources, dict) or not sources:
+        source = row.get("launch_time_source") or "detail"
+        if source in ("detail", ""):
             sources = {sym: "detail_symbol_launch_time" for sym in symbols}
         elif source == "exchange_info":
             sources = {sym: "exchangeinfo_onboard_date" for sym in symbols}

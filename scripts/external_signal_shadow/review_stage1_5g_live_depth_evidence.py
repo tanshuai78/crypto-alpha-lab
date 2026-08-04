@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
-    load_stage1_5g_inputs,
     build_stage1_5g_review_summary,
     generate_stage1_5g_chinese_review,
+    load_stage1_5g_inputs,
 )
 
 

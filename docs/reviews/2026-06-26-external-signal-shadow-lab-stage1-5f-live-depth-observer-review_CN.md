@@ -571,13 +571,15 @@ STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
 STAGE1_5E_SUMMARY='$STAGE1_5E_SUMMARY' &&
 STAGE1_5F_OUT='$STAGE1_5F_OUT' &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
-  --stage1-5d-events-glob "\$STAGE1_5D_EVENTS_OUT/events/\*.jsonl" \
-  --stage1-5d-runtime-gate "\$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
-  --stage1-5e-summary "\$STAGE1_5E_SUMMARY" \
-  --output-root "\$STAGE1_5F_OUT" \
+  --stage1-5d-events-glob '$STAGE1_5D_EVENTS_OUT/events/*.jsonl' \
+  --stage1-5d-runtime-gate '$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json' \
+  --stage1-5e-summary '$STAGE1_5E_SUMMARY' \
+  --output-root '$STAGE1_5F_OUT' \
   --live-public-readonly
 "
 ```
+
+注意：`--stage1-5d-events-glob` 必须让 Python 收到未转义的 `events/*.jsonl`。不要写成带反斜杠的 glob；带反斜杠会被 Python `glob.glob()` 当成字面量，匹配不到任何 `events/YYYY-MM-DD.jsonl`。
 
 ### 7.9 部署后首次检查
 
@@ -593,7 +595,31 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 
 date -u
 tmux ls
-ps -ef | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
+ps -efww | grep -E "run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer" | grep -v grep
+
+python3 - <<'PY'
+import glob
+import os
+import subprocess
+
+root = os.environ["STAGE1_5D_EVENTS_OUT"]
+pattern = f"{root}/events/*.jsonl"
+hits = sorted(glob.glob(pattern))
+print("stage1_5d_events_glob_pattern", pattern)
+print("stage1_5d_events_glob_hit_count", len(hits))
+print("stage1_5d_events_glob_tail", hits[-5:])
+if not hits:
+    raise SystemExit("ERROR: Stage 1.5F events glob matches zero files")
+
+ps = subprocess.check_output(
+    "ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep",
+    shell=True,
+    text=True,
+)
+if "\\*.jsonl" in ps:
+    raise SystemExit("ERROR: Stage 1.5F process uses escaped events glob; restart with events/*.jsonl")
+print("stage1_5f_events_glob_process_check", "ok")
+PY
 
 cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
 '"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"fatal_blockers"' || true
@@ -619,7 +645,8 @@ find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/
 4. 1.5F stage1_5d_runtime_gate_decision = stage1_5d_runtime_gate_ready。
 5. 1.5F cross_root_upstream_summary_dependency = false。
 6. 1.5F block_new_event_admission = false。
-7. 没有新事件时 active_observation_count = 0、pending_launch_observation_count = 0 属于正常。
+7. `stage1_5d_events_glob_hit_count > 0`，且 `stage1_5f_events_glob_process_check = ok`。
+8. 没有新事件时 active_observation_count = 0、pending_launch_observation_count = 0 属于正常。
 ```
 
 ## 8. 日常监控

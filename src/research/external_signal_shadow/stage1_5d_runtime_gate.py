@@ -4,7 +4,6 @@ from pathlib import Path
 from configs import base
 from src.risk.limits import RiskLimits
 
-
 STAGE1_5D_RUNTIME_GATE_FILENAME = "live_safety_gate_summary.json"
 RUNTIME_GATE_SCHEMA_VERSION = 1
 
@@ -99,6 +98,16 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "source_root": str(output_root),
         "run_id": str(ctx.get("run_id") or output_root.name),
         "events_stream_relative_path": str(ctx.get("events_stream_relative_path") or "events/*.jsonl"),
+        "formal_event_contract_versions_supported": [getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_FORMAL_EVENT_CONTRACT_VERSION", 2)],
+        "formal_schedule_revision_contract_versions_supported": [
+            getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION", 1)
+        ],
+        "anchor_precedence_policy": getattr(
+            base,
+            "EXTERNAL_SIGNAL_STAGE1_5_ANCHOR_PRECEDENCE_POLICY",
+            "official_schedule_priority_v1",
+        ),
+        "shared_anchor_validator_enabled": True,
         "live_public_readonly": bool(ctx.get("live_public_readonly", False)),
         "prior_stage_safety_prerequisite_met": prior_met,
         "not_ready_reasons": _build_not_ready_reasons(ctx),

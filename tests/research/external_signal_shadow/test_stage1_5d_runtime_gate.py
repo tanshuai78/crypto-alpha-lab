@@ -1,9 +1,10 @@
 from pathlib import Path
+
 from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
     build_stage1_5d_runtime_gate,
+    get_stage1_5d_runtime_gate_filename,
     write_stage1_5d_runtime_gate,
     write_stage1_5d_runtime_gate_atomic,
-    get_stage1_5d_runtime_gate_filename,
 )
 
 
@@ -71,6 +72,10 @@ def test_stage1_5d_runtime_gate_ready_state():
     assert gate["source_root"] == str(Path("/tmp/test_root").resolve())
     assert gate["events_stream_relative_path"] == "events/*.jsonl"
     assert gate["consumable_by_stage1_5f"] is True
+    assert gate["formal_event_contract_versions_supported"] == [2]
+    assert gate["formal_schedule_revision_contract_versions_supported"] == [1]
+    assert gate["anchor_precedence_policy"] == "official_schedule_priority_v1"
+    assert gate["shared_anchor_validator_enabled"] is True
     for field in (
         "execution_feasibility_claim_allowed",
         "trade_signal_allowed",

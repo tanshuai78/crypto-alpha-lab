@@ -6,21 +6,40 @@ import sys
 import time
 from pathlib import Path
 
-
 from configs import base
+from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+    build_formal_event_anchor_contract_row,
+    build_symbol_anchor_contract,
+    validate_launch_anchor_contract,
+    validate_schedule_revision_contract,
+)
 from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
-    build_formal_launch_event,
     coerce_legacy_launch_event_to_formal,
     validate_formal_launch_event,
 )
+from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+    ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES,
+    classify_never_attempted_defer_state,
+    compute_detail_transient_backoff_ms,
+    is_detail_source_degraded,
+    load_detail_retry_scheduler_state,
+    select_detail_retry_attempts,
+    serialize_retry_articles,
+    summarize_detail_retry_overdue_state,
+    summarize_detail_source_health,
+    update_detail_endpoint_health,
+    update_detail_endpoint_health_by_source,
+    update_detail_endpoint_health_by_variant,
+    write_detail_retry_scheduler_state,
+)
 from src.research.external_signal_shadow.stage1_5d_live_event_source_client import (
+    build_announcement_detail_fallback_urls,
     build_announcement_list_url,
+    build_bapi_article_detail_url,
+    fetch_public_bapi_article_detail,
     fetch_public_json,
     fetch_public_payload,
     validate_announcement_detail_url,
-    build_announcement_detail_fallback_urls,
-    build_bapi_article_detail_url,
-    fetch_public_bapi_article_detail,
     validate_bapi_article_detail_payload,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_collector import (
@@ -33,15 +52,14 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_first_bar i
     check_first_bar_for_event,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+    LAUNCH_SCHEDULE_PARSER_VERSION,
     PARSER_VERSION,
     SYMBOL_EXTRACTION_VERSION,
-    LAUNCH_SCHEDULE_PARSER_VERSION,
-    extract_symbol_candidates_from_detail_payload,
     extract_symbol_candidates_from_bapi_article_payload,
-    normalize_live_event,
+    extract_symbol_candidates_from_detail_payload,
     extract_symbol_candidates_from_title,
+    normalize_live_event,
 )
-
 from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
     append_jsonl,
     build_stream_paths,
@@ -52,26 +70,9 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
 from src.research.external_signal_shadow.stage1_5d_live_event_source_summary import (
     build_smoke_summary,
 )
-from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-    ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES,
-    select_detail_retry_attempts,
-    compute_detail_transient_backoff_ms,
-    serialize_retry_articles,
-    load_detail_retry_scheduler_state,
-    write_detail_retry_scheduler_state,
-    classify_never_attempted_defer_state,
-    update_detail_endpoint_health,
-    update_detail_endpoint_health_by_variant,
-    update_detail_endpoint_health_by_source,
-    is_detail_source_degraded,
-    summarize_detail_source_health,
-    classify_detail_source_failure,
-    summarize_detail_retry_overdue_state,
-)
 from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
     build_stage1_5d_runtime_gate,
     write_stage1_5d_runtime_gate,
-    get_stage1_5d_runtime_gate_filename,
 )
 
 
@@ -85,20 +86,58 @@ def append_stage1_5d_diagnostic(stream_paths: dict, row: dict) -> None:
 
 
 def append_formal_futures_launch_event(stream_paths: dict, row: dict) -> dict | None:
-    row = coerce_legacy_launch_event_to_formal(row)
-    validation = validate_formal_launch_event(row)
-    if not validation["valid"]:
+    symbols = row.get("symbols", [])
+
+    # Check v2 contract validation for all symbols
+    blockers = []
+    if row.get("formal_event_contract_version") == 2:
+        if not symbols:
+            blockers.append("symbols_empty")
+        for sym in symbols:
+            val = validate_launch_anchor_contract(row, sym, compatibility_mode=False)
+            if not val["valid"]:
+                blockers.extend([f"{sym}:{b}" for b in val.get("blockers", [])])
+        if row.get("event_all_symbols_consumable_by_stage1_5f") is False:
+            blockers.append("batch_not_consumable")
+    else:
+        row = coerce_legacy_launch_event_to_formal(row)
+        validation = validate_formal_launch_event(row)
+        if not validation["valid"]:
+            blockers.extend(validation.get("blockers", []))
+
+    if blockers:
         append_stage1_5d_diagnostic(
             stream_paths,
             {
                 "diagnostic_stream": "formal_contract_validation_failed",
                 "diagnostic_type": "formal_event_contract_invalid",
-                "formal_contract_blockers": validation.get("blockers", []),
+                "formal_contract_blockers": blockers,
                 "source_article_id": row.get("source_article_id"),
                 "event_id": row.get("event_id"),
                 "symbols": row.get("symbols"),
                 "parser_version": row.get("parser_version"),
                 "symbol_extraction_version": row.get("symbol_extraction_version"),
+                "raw_event": row,
+            },
+        )
+        return None
+    append_jsonl(stream_paths["events"], row)
+    return row
+
+
+def append_formal_schedule_revision(stream_paths: dict, row: dict) -> dict | None:
+    validation = validate_schedule_revision_contract(row)
+    if not validation["valid"]:
+        append_stage1_5d_diagnostic(
+            stream_paths,
+            {
+                "diagnostic_stream": "formal_schedule_revision_contract_validation_failed",
+                "diagnostic_type": "formal_schedule_revision_contract_invalid",
+                "formal_contract_blockers": validation.get("blockers", []),
+                "source_article_id": row.get("source_article_id"),
+                "supersedes_source_article_id": row.get("supersedes_source_article_id"),
+                "symbols": row.get("symbols"),
+                "revision_id": row.get("revision_id"),
                 "raw_event": row,
             },
         )
@@ -152,24 +191,24 @@ def validate_candidate_symbols_against_exchangeinfo(
             pending_symbols.append(c)
             pending_reasons[c] = "exchange_info_symbol_missing"
             continue
-        
+
         meta = exchangeinfo_by_symbol[target_symbol]
         required_keys = ("status", "contractType", "quoteAsset", "marginAsset")
         if not all(k in meta for k in required_keys):
             rejected_symbols.append(c)
             rejection_reasons[c] = "exchange_info_incomplete_metadata"
             continue
-        
+
         if meta.get("contractType") not in allowed_contract_types:
             rejected_symbols.append(c)
             rejection_reasons[c] = "exchange_info_disallowed_contract_type"
             continue
-            
+
         if meta.get("marginAsset") not in allowed_margin_assets:
             rejected_symbols.append(c)
             rejection_reasons[c] = "exchange_info_disallowed_margin_asset"
             continue
-            
+
         if meta.get("quoteAsset") not in allowed_quote_assets:
             rejected_symbols.append(c)
             rejection_reasons[c] = "exchange_info_disallowed_quote_asset"
@@ -621,59 +660,96 @@ def apply_formal_launch_event_contract(
     symbols = [str(s or "").strip().upper() for s in symbols_override if str(s or "").strip()]
     launch_times = dict(state.get("symbol_launch_times_ms") or {})
     onboard_times = dict(state.get("symbol_onboard_times_ms") or validation_result.get("symbol_onboard_times_ms") or {})
-    effective_times = dict((effective_launch or {}).get("symbol_effective_launch_times_ms") or {})
-    sources = dict((effective_launch or {}).get("symbol_effective_launch_time_sources") or {})
-
-    norm_event["symbol_launch_times_ms"] = launch_times
-    norm_event["symbol_onboard_times_ms"] = onboard_times
-    norm_event["symbol_effective_launch_times_ms"] = effective_times
-    norm_event["symbol_launch_time_candidates_ms"] = {
-        sym: launch_times.get(sym) or onboard_times.get(sym) or effective_times.get(sym)
-        for sym in symbols
-        if int((launch_times.get(sym) or onboard_times.get(sym) or effective_times.get(sym) or 0)) > 0
-    }
-    norm_event["symbol_effective_launch_time_sources"] = sources
-    norm_event["launch_time_source"] = (effective_launch or {}).get("launch_time_source")
-    norm_event["formal_event_contract_version"] = 1
-    norm_event["formal_event_consumable_by_stage1_5f"] = True
-    norm_event["source_contract_status"] = "formal_v1_valid"
-    norm_event["symbol_identity_validation_status"] = "validated_by_exchangeinfo"
-    norm_event["launch_anchor_validation_status"] = "valid"
 
     detail_status = str(norm_event.get("detail_fetch_status") or state.get("detail_fetch_status") or "")
     detail_attempted = bool(norm_event.get("detail_fetch_attempted", state.get("detail_fetch_attempted", False)))
-    has_detail = all(int(launch_times.get(sym) or 0) > 0 for sym in symbols)
-    has_onboard = all(int(onboard_times.get(sym) or 0) > 0 for sym in symbols)
 
     norm_event["detail_fetch_attempted"] = detail_attempted
     norm_event["detail_fetch_status"] = detail_status
 
-    if has_detail and has_onboard:
-        disagreement_ms = max(abs(int(launch_times[sym]) - int(onboard_times[sym])) for sym in symbols)
-        tolerance_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_DISAGREEMENT_MS", 60000)
-        if disagreement_ms <= tolerance_ms:
-            norm_event["launch_anchor_evidence_level"] = "detail_exchangeinfo_consensus"
-            norm_event["launch_anchor_comparison_status"] = "consensus"
-            norm_event["launch_anchor_disagreement_ms"] = disagreement_ms
-            norm_event["detail_confirmation_missing"] = False
-        else:
-            norm_event["launch_anchor_evidence_level"] = "detail_confirmed"
-            norm_event["launch_anchor_comparison_status"] = "single_source_detail"
-            norm_event["launch_anchor_disagreement_ms"] = disagreement_ms
-            norm_event["detail_confirmation_missing"] = False
-    elif has_detail:
-        norm_event["launch_anchor_evidence_level"] = "detail_confirmed"
-        norm_event["launch_anchor_comparison_status"] = "single_source_detail"
-        norm_event["launch_anchor_disagreement_ms"] = None
-        norm_event["detail_confirmation_missing"] = False
-    elif has_onboard and detail_attempted:
-        norm_event["launch_anchor_evidence_level"] = "exchangeinfo_fallback"
-        norm_event["launch_anchor_comparison_status"] = "single_source_exchangeinfo"
-        norm_event["launch_anchor_disagreement_ms"] = None
-        norm_event["detail_confirmation_missing"] = True
+    decision_at_ms = int(
+        norm_event.get("symbol_resolved_at_ms")
+        or norm_event.get("detail_fetched_at_ms")
+        or norm_event.get("detected_at_ms")
+        or time.time() * 1000
+    )
+    article_id = str(norm_event.get("source_article_id") or state.get("source_article_id") or "")
+    payload_hash = str(
+        norm_event.get("detail_payload_hash")
+        or norm_event.get("payload_sha256")
+        or state.get("last_bapi_payload_sha256")
+        or state.get("payload_sha256")
+        or ""
+    )
+    parser_version = str(norm_event.get("parser_version") or PARSER_VERSION)
+    title = str(norm_event.get("title") or state.get("title") or "")
+    mapping_confidence = "exact_single_symbol" if len(symbols) == 1 else "exact_per_symbol_row"
+
+    symbol_contracts = {}
+    for sym in symbols:
+        official_ms = int(launch_times.get(sym) or 0) or None
+        onboard_ms = int(onboard_times.get(sym) or 0) or None
+        raw_time_text = str(
+            (state.get("symbol_launch_times_utc") or {}).get(sym)
+            or (state.get("symbol_effective_launch_times_utc") or {}).get(sym)
+            or official_ms
+            or onboard_ms
+            or ""
+        )
+        provenance = {
+            "payload_sha256": payload_hash,
+            "parser_version": parser_version,
+            "raw_time_text": raw_time_text,
+            "timezone_text": "UTC",
+            "node_path": "bapi_article_body" if detail_attempted else "title_or_exchangeinfo",
+            "logical_block_id": f"{article_id}:{sym}" if article_id else sym,
+            "schedule_text_context": title,
+            "mapping_method": "per_symbol_official_schedule" if official_ms is not None else "exchangeinfo_fallback",
+            "mapping_confidence": mapping_confidence,
+        }
+        symbol_contracts[sym] = build_symbol_anchor_contract(
+            symbol=sym,
+            official_schedule_anchor_ms=official_ms,
+            exchangeinfo_onboard_date_ms=onboard_ms,
+            anchor_contract_decision_at_ms=decision_at_ms,
+            official_schedule_revision_id=f"{article_id}:{sym}:initial_official_schedule" if official_ms is not None and article_id else None,
+            official_schedule_available_at_ms=int(norm_event.get("source_published_at_ms") or norm_event.get("detected_at_ms") or decision_at_ms),
+            mapping_confidence=mapping_confidence,
+            provenance=provenance,
+        )
+
+    formal_row = build_formal_event_anchor_contract_row(
+        base_event=norm_event,
+        symbol_contracts=symbol_contracts,
+    )
+    norm_event.clear()
+    norm_event.update(formal_row)
+
+    effective_observation_times = dict(norm_event.get("symbol_effective_observation_anchor_ms") or {})
+    effective_observation_sources = dict(norm_event.get("symbol_effective_observation_anchor_sources") or {})
+    norm_event["symbol_launch_times_ms"] = launch_times
+    norm_event["symbol_onboard_times_ms"] = onboard_times
+    norm_event["symbol_effective_launch_times_ms"] = effective_observation_times
+    norm_event["symbol_effective_launch_time_sources"] = effective_observation_sources
+    norm_event["symbol_launch_time_candidates_ms"] = {
+        sym: launch_times.get(sym) or onboard_times.get(sym) or effective_observation_times.get(sym)
+        for sym in symbols
+        if int((launch_times.get(sym) or onboard_times.get(sym) or effective_observation_times.get(sym) or 0)) > 0
+    }
+    norm_event["launch_time_source"] = "official_schedule_priority_v1"
+    norm_event["formal_event_consumable_by_stage1_5f"] = bool(norm_event.get("event_all_symbols_consumable_by_stage1_5f"))
+    norm_event["source_contract_status"] = "formal_v2_valid" if norm_event["formal_event_consumable_by_stage1_5f"] else "formal_v2_invalid"
+    norm_event["symbol_identity_validation_status"] = "validated_by_exchangeinfo"
+    norm_event["launch_anchor_validation_status"] = "valid" if norm_event["formal_event_consumable_by_stage1_5f"] else "invalid"
+    norm_event["launch_anchor_evidence_level"] = "official_schedule" if any(
+        source == "official_schedule_anchor" for source in effective_observation_sources.values()
+    ) else "exchangeinfo_fallback"
+    norm_event["launch_anchor_comparison_status"] = norm_event.get("event_anchor_aggregate_status")
+    norm_event["launch_anchor_disagreement_ms"] = norm_event.get("event_max_anchor_disagreement_ms")
+    norm_event["detail_confirmation_missing"] = not any(int(launch_times.get(sym) or 0) > 0 for sym in symbols)
 
     state["symbol_launch_time_candidates_ms"] = norm_event["symbol_launch_time_candidates_ms"]
-    state["symbol_effective_launch_time_sources"] = sources
+    state["symbol_effective_launch_time_sources"] = effective_observation_sources
 
 
 def apply_pending_candidate_validation_state(state: dict, validation_result: dict) -> str:
@@ -1202,7 +1278,7 @@ def main():
                         ex_ok = True
                 except Exception as e:
                     print(f"Error parsing fixture exchangeInfoPayload: {e}")
-                
+
                 ex_manifest = {
                     "request_id": f"exchangeInfo_fixture_{int(time.time()*1000)}",
                     "request_type": "exchange_info",
@@ -1735,29 +1811,22 @@ def main():
                                 now_ms,
                             )
 
-                        val_res = validate_formal_launch_event(norm_event)
                         event_id = norm_event["event_id"]
 
-                        if val_res["valid"]:
-                            if event_id not in seen_event_ids:
-                                written_event = record_formal_futures_launch_event(
-                                    stream_paths=stream_paths,
-                                    row=norm_event,
-                                    seen_event_ids=seen_event_ids,
-                                    events_detected=events_detected,
-                                )
+                        if event_id not in seen_event_ids:
+                            written_event = record_formal_futures_launch_event(
+                                stream_paths=stream_paths,
+                                row=norm_event,
+                                seen_event_ids=seen_event_ids,
+                                events_detected=events_detected,
+                            )
 
-                                # Add to first_bar_queue
-                                if written_event is not None:
-                                    eq_item = dict(written_event)
-                                    eq_item["first_futures_bar_status"] = "not_yet_available"
-                                    eq_item["first_futures_bar_start_ms"] = None
-                                    first_bar_queue.append(eq_item)
-                        else:
-                            diag = dict(norm_event)
-                            diag["formal_contract_blockers"] = val_res.get("blockers", [])
-                            diag["diagnostic_stream"] = "formal_contract_validation_failed"
-                            append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], diag)
+                            # Add to first_bar_queue
+                            if written_event is not None:
+                                eq_item = dict(written_event)
+                                eq_item["first_futures_bar_status"] = "not_yet_available"
+                                eq_item["first_futures_bar_start_ms"] = None
+                                first_bar_queue.append(eq_item)
 
                         if is_multi:
                             state["event_id"] = event_id

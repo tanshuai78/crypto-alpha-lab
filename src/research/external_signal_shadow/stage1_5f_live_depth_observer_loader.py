@@ -2,8 +2,15 @@ import glob
 import hashlib
 import json
 import os
+from pathlib import Path
 
 from configs import base
+from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+    ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE,
+    FORMAL_EVENT_CONTRACT_VERSION_V2,
+    compute_admission_anchor_contract_hash,
+    validate_launch_anchor_contract,
+)
 from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
     validate_formal_launch_event,
 )
@@ -11,11 +18,7 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark
     event_is_post_watermark,
     get_stable_event_key,
 )
-
-
-from pathlib import Path
 from src.risk.limits import RiskLimits
-
 
 RUNTIME_GATE_SAFETY_FALSE_FIELDS = (
     "execution_feasibility_claim_allowed",
@@ -362,11 +365,13 @@ def classify_event_symbol_revision_admission(
             status == "rejected"
             and (rej_reason == "symbol_not_in_exchangeinfo" or existing_contract_status == "legacy_unvalidated_recoverable")
         )
-        new_is_formal = validate_formal_launch_event(flat_event, sym)["valid"]
+        new_contract_status = classify_stage1_5d_source_contract(flat_event, sym)["source_contract_status"]
+        new_is_formal = new_contract_status in {"formal_v1_valid", "formal_v2_valid"}
 
         if status.startswith("pending_") or (is_legacy_rejected and new_is_formal):
-            return "pending_revision_upsert", existing, {"reason": "pending_state_revision" if status.startswith("pending_") else "legacy_rejected_upgraded_by_formal_v1"}
-        elif status in ("active", "completed"):
+            upgraded_reason = "legacy_rejected_upgraded_by_formal_v2" if new_contract_status == "formal_v2_valid" else "legacy_rejected_upgraded_by_formal_v1"
+            return "pending_revision_upsert", existing, {"reason": "pending_state_revision" if status.startswith("pending_") else upgraded_reason}
+        elif status in ("active", "completed", "active_anchor_revision_contaminated", "completed_anchor_revision_contaminated"):
             return "active_or_completed_duplicate_revision", existing, {"reason": f"existing_{status}_state"}
         else:
             return "terminal_revision_seen", existing, {"reason": f"terminal_{status}_state"}
@@ -424,6 +429,55 @@ def _get_symbol_time(row: dict, field: str, symbol: str) -> int | None:
 def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_state: dict, now_ms: int) -> dict:
     sym = symbol.strip().upper()
     candidates = {}
+
+    if row.get("formal_event_contract_version") == FORMAL_EVENT_CONTRACT_VERSION_V2:
+        val = validate_launch_anchor_contract(row, sym, compatibility_mode=False)
+        if val.get("valid"):
+            official_anchor = _get_symbol_time(row, "symbol_official_schedule_anchor_ms", sym)
+            exchangeinfo_onboard = _get_symbol_time(row, "symbol_exchangeinfo_onboard_date_ms", sym)
+            effective_anchor = _valid_ms(val.get("effective_observation_anchor_ms"))
+            effective_source = str(val.get("effective_observation_anchor_source") or "")
+            if official_anchor:
+                candidates["official_schedule_anchor"] = official_anchor
+            if exchangeinfo_onboard:
+                candidates["exchangeinfo_onboard_date"] = exchangeinfo_onboard
+
+            ex_rows = exchangeinfo_state.get("symbol_rows", {}) if isinstance(exchangeinfo_state, dict) else {}
+            ex_row = ex_rows.get(sym) or ex_rows.get(symbol) or {}
+            ex_onboard = _valid_ms(ex_row.get("onboardDate"))
+            if ex_onboard:
+                candidates["exchangeinfo_current_onboard_time"] = ex_onboard
+
+            disagreement_map = row.get("symbol_anchor_disagreement_ms", {})
+            disagreement_ms = 0
+            if isinstance(disagreement_map, dict):
+                disagreement_ms = int(disagreement_map.get(sym) or disagreement_map.get(symbol) or 0)
+
+            source_hashes = row.get("symbol_source_anchor_contract_hashes", {})
+            evidence_levels = row.get("symbol_anchor_evidence_levels", {})
+            max_classes = row.get("symbol_max_evidence_classes", {})
+            return {
+                "observation_anchor_ms": effective_anchor,
+                "observation_anchor_basis": effective_source,
+                "observation_anchor_confidence": "high" if effective_source == "official_schedule_anchor" else "medium",
+                "observation_anchor_candidates": candidates,
+                "observation_anchor_disagreement_max_ms": disagreement_ms,
+                "observation_anchor_conflict_active": bool(val.get("observation_anchor_conflict_active", False)),
+                "exchangeinfo_anchor_clean_eligible": False,
+                "exchangeinfo_anchor_evidence": {
+                    "payload_sha256": str(exchangeinfo_state.get("payload_sha256") or "") if isinstance(exchangeinfo_state, dict) else "",
+                    "raw_payload_path": str(exchangeinfo_state.get("raw_payload_path") or "") if isinstance(exchangeinfo_state, dict) else "",
+                    "fetched_at_ms": exchangeinfo_state.get("fetched_at_ms", 0) if isinstance(exchangeinfo_state, dict) else 0,
+                },
+                "source_anchor_contract_hash": source_hashes.get(sym) if isinstance(source_hashes, dict) else "",
+                "anchor_contract_version": FORMAL_EVENT_CONTRACT_VERSION_V2,
+                "anchor_precedence_policy": row.get("anchor_precedence_policy", ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE),
+                "anchor_contract_decision_at_ms": row.get("anchor_contract_decision_at_ms"),
+                "admission_anchor_evidence_level": evidence_levels.get(sym, "") if isinstance(evidence_levels, dict) else "",
+                "latest_anchor_evidence_level": evidence_levels.get(sym, "") if isinstance(evidence_levels, dict) else "",
+                "admission_max_evidence_class": max_classes.get(sym, "") if isinstance(max_classes, dict) else "",
+                "latest_max_evidence_class": max_classes.get(sym, "") if isinstance(max_classes, dict) else "",
+            }
 
     eff_launch = _get_symbol_time(row, "symbol_effective_launch_times_ms", sym)
     if eff_launch:
@@ -585,6 +639,18 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
     d["observation_anchor_candidates"] = anchor_diag.get("observation_anchor_candidates", {})
     d["observation_anchor_disagreement_max_ms"] = anchor_diag.get("observation_anchor_disagreement_max_ms", 0)
     d["observation_anchor_conflict_active"] = conflict_active
+    for key in (
+        "source_anchor_contract_hash",
+        "anchor_contract_version",
+        "anchor_precedence_policy",
+        "anchor_contract_decision_at_ms",
+        "admission_anchor_evidence_level",
+        "latest_anchor_evidence_level",
+        "admission_max_evidence_class",
+        "latest_max_evidence_class",
+    ):
+        if anchor_diag.get(key) not in (None, ""):
+            d[key] = anchor_diag[key]
 
     retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
     d["next_anchor_resolution_at_ms"] = now_ms + retry_interval_ms
@@ -603,7 +669,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         d["observation_anchor_basis"] = anchor_diag.get("observation_anchor_basis", "")
         d["observation_anchor_confidence"] = anchor_diag.get("observation_anchor_confidence", "")
 
-        if source_status != "formal_v1_valid":
+        if source_status not in {"formal_v1_valid", "formal_v2_valid"}:
             d["status"] = "pending_source_event_unvalidated"
         elif now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
             d["status"] = "pending_launch_time_in_future"
@@ -611,6 +677,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         else:
             d["status"] = "pending_ready_for_admission"
             d["next_admission_check_at_ms"] = now_ms
+            _attach_admission_anchor_lineage(d, now_ms)
 
     return pending_state.__class__.from_dict(d)
 
@@ -656,7 +723,9 @@ def delayed_launch_event_symbol_is_post_watermark(row: dict, symbol: str, waterm
     if row.get("symbol_validation_status") != "validated":
         return False
 
-    launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
+    launch_time_ms = _get_symbol_time(row, "symbol_effective_observation_anchor_ms", symbol)
+    if launch_time_ms is None:
+        launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
     if launch_time_ms is None:
         launch_time_ms = _get_symbol_time(row, "symbol_onboard_times_ms", symbol)
     return launch_time_ms is not None and launch_time_ms > watermark.max_seen_detected_at_ms
@@ -668,7 +737,9 @@ def delayed_launch_event_symbol_is_post_bootstrap_watermark(row: dict, symbol: s
     if row.get("symbol_validation_status") != "validated":
         return False
 
-    launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
+    launch_time_ms = _get_symbol_time(row, "symbol_effective_observation_anchor_ms", symbol)
+    if launch_time_ms is None:
+        launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
     if launch_time_ms is None:
         launch_time_ms = _get_symbol_time(row, "symbol_onboard_times_ms", symbol)
     return launch_time_ms is not None and launch_time_ms > bootstrap_watermark_ms
@@ -732,6 +803,12 @@ def classify_historical_anchor_pre_bootstrap(row: dict, symbol: str, anchor_diag
 
 
 def resolve_observation_age_base_ms(row: dict, symbol: str) -> tuple[int | None, str]:
+    ms = _get_symbol_time(row, "symbol_effective_observation_anchor_ms", symbol)
+    if ms is not None:
+        source = row.get("symbol_effective_observation_anchor_sources", {})
+        basis = source.get(symbol.strip().upper(), "effective_observation_anchor") if isinstance(source, dict) else "effective_observation_anchor"
+        return ms, basis
+
     for field, basis in (
         ("symbol_effective_launch_times_ms", "symbol_effective_launch_time"),
         ("symbol_onboard_times_ms", "symbol_onboard_time"),
@@ -796,13 +873,56 @@ def _build_eligibility_diagnostics(
     }
 
 
+def _attach_admission_anchor_lineage(diag: dict, now_ms: int) -> dict:
+    source_hash = str(diag.get("source_anchor_contract_hash") or "")
+    if not source_hash:
+        return diag
+    admission_hash = compute_admission_anchor_contract_hash(
+        source_anchor_contract_hash=source_hash,
+        admission_snapshot={
+            "admission_at_ms": now_ms,
+            "observation_anchor_ms": diag.get("observation_anchor_ms"),
+            "evidence_start_class": diag.get("evidence_start_class"),
+            "admission_max_evidence_class": diag.get("admission_max_evidence_class")
+            or diag.get("latest_max_evidence_class")
+            or "clean_or_recovery",
+        },
+    )
+    diag["admission_anchor_contract_hash"] = admission_hash
+    diag["latest_anchor_contract_hash"] = admission_hash
+    return diag
+
+
 def classify_stage1_5d_source_contract(row: dict, symbol: str) -> dict:
     if not isinstance(row, dict):
         return {
             "source_contract_status": "malformed",
             "pending_source_event_unvalidated": True,
-            "required_source_revision": "formal_v1_valid",
+            "required_source_revision": "formal_v2_valid",
             "source_contract_blocker": "row_not_dict",
+        }
+
+    if row.get("formal_event_contract_version") == FORMAL_EVENT_CONTRACT_VERSION_V2:
+        if row.get("consumable_event_allowed") is False or row.get("formal_event_consumable_by_stage1_5f") is False or row.get("event_all_symbols_consumable_by_stage1_5f") is False:
+            return {
+                "source_contract_status": "explicit_non_consumable",
+                "pending_source_event_unvalidated": False,
+                "required_source_revision": "formal_v2_valid",
+                "source_contract_blocker": "explicitly_marked_non_consumable",
+            }
+        val_v2 = validate_launch_anchor_contract(row, symbol, compatibility_mode=False)
+        if val_v2["valid"]:
+            return {
+                "source_contract_status": "formal_v2_valid",
+                "pending_source_event_unvalidated": False,
+                "required_source_revision": None,
+                "source_contract_blocker": None,
+            }
+        return {
+            "source_contract_status": "malformed",
+            "pending_source_event_unvalidated": True,
+            "required_source_revision": "formal_v2_valid",
+            "source_contract_blocker": f"contract_invalid:{','.join(val_v2.get('blockers', []))}",
         }
 
     val = validate_formal_launch_event(row, symbol)
@@ -903,7 +1023,7 @@ def classify_event_symbol_eligibility_with_diagnostics(
         diag["next_admission_check_at_ms"] = anchor_ms
         return "pending", "pending_launch_time_in_future", diag
 
-    if source_status != "formal_v1_valid":
+    if source_status not in {"formal_v1_valid", "formal_v2_valid"}:
         return "pending", "pending_source_event_unvalidated", diag
 
     if not exchangeinfo_state or not exchangeinfo_state.get("available", False):
@@ -924,13 +1044,23 @@ def classify_event_symbol_eligibility_with_diagnostics(
     clean_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS
     recovery_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
 
+    max_evidence_class = diag.get("admission_max_evidence_class") or diag.get("latest_max_evidence_class") or "clean_or_recovery"
+    if max_evidence_class != "clean_or_recovery":
+        diag["evidence_start_class"] = "recovery_start"
+        diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        diag["clean_start_forbidden_reason"] = "anchor_contract_not_clean_eligible"
+        _attach_admission_anchor_lineage(diag, now_ms)
+        return "eligible", "eligible_recovery_only", diag
+
     if delay_ms <= clean_delay_max:
         diag["evidence_start_class"] = "clean_start"
         diag["live_depth_evidence_basis"] = "announcement_and_launch_time"
+        _attach_admission_anchor_lineage(diag, now_ms)
         return "eligible", "eligible_clean_start", diag
     elif delay_ms <= recovery_delay_max:
         diag["evidence_start_class"] = "recovery_start"
         diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        _attach_admission_anchor_lineage(diag, now_ms)
         return "eligible", "eligible_recovery_only", diag
     else:
         diag["evidence_start_class"] = "expired"

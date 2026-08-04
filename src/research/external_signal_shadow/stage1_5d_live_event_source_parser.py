@@ -1,13 +1,11 @@
-import html
 import hashlib
+import html
 import json
 import re
 import unicodedata
 from datetime import datetime, timezone
 
 from configs import base
-
-
 
 
 def classify_event_type(title: str) -> str:
@@ -127,7 +125,7 @@ def extract_contract_symbol_candidates_from_detail_text(text: str, max_symbols: 
     window = _find_launch_candidate_window(text)
     if not window:
         return []
-    
+
     # 2. Filter out lines containing "warning" or "risk" from the window
     clean_lines = []
     for line in window.splitlines():
@@ -564,7 +562,7 @@ def _build_bapi_logical_lines(text_nodes: list[dict]) -> list[dict]:
             continue
         clean_node_text = re.sub(r"<(?:p|div|tr|br|li|h[1-6]|table|td|th)[^>]*>", "\n", raw_text, flags=re.IGNORECASE)
         clean_node_text = re.sub(r"<[^>]+>", " ", clean_node_text)
-        
+
         for line in clean_node_text.splitlines():
             norm_line = _normalize_article_text(line)
             if not norm_line:
@@ -723,7 +721,6 @@ def _extract_bapi_schedule_candidates(logical_lines: list[dict], max_symbols: in
     # Check for duplicate responsive rendering tables
     if len(symbols_found) > len(unique_symbols):
         if len(symbols_found) % len(unique_symbols) == 0:
-            dup_factor = len(symbols_found) // len(unique_symbols)
             if len(times_found) == len(symbols_found):
                 # Duplicate table in HTML -> ambiguous
                 return {

@@ -146,11 +146,29 @@ class EventSymbolState:
     terminal_audit_type: str = ""
     terminal_audit_row: dict | None = None
 
+    # Lineage and Contamination Fields (Schema V3)
+    source_anchor_contract_hash: str = ""
+    admission_anchor_contract_hash: str = ""
+    latest_anchor_contract_hash: str = ""
+    anchor_contract_version: int | None = None
+    anchor_precedence_policy: str = ""
+    anchor_contract_decision_at_ms: int | None = None
+    admission_anchor_evidence_level: str = ""
+    latest_anchor_evidence_level: str = ""
+    admission_max_evidence_class: str = ""
+    latest_max_evidence_class: str = ""
+    anchor_contract_revision_count: int = 0
+    applied_schedule_revision_ids: list[str] | None = None
+    observation_anchor_revision_contaminated: bool = False
+    anchor_revision_contamination_reason: str = ""
+
     def __post_init__(self):
         if self.observation_anchor_candidates is None:
             object.__setattr__(self, "observation_anchor_candidates", {})
         if self.last_anchor_resolution_sources is None:
             object.__setattr__(self, "last_anchor_resolution_sources", [])
+        if self.applied_schedule_revision_ids is None:
+            object.__setattr__(self, "applied_schedule_revision_ids", [])
 
         nullable_ts_fields = (
             "observation_anchor_ms",
@@ -319,6 +337,12 @@ class LiveDepthObserverSummary:
     multi_symbol_candidate_symbol_rows_pending_count: int = 0
     duplicate_suppressed_count: int = 0
     identity_collision_blocked_count: int = 0
+    active_anchor_revision_contaminated_count: int = 0
+    completed_anchor_revision_contaminated_count: int = 0
+    anchor_contract_revision_count: int = 0
+    anchor_contract_lineage_mismatch_count: int = 0
+    schedule_revision_registry_orphan_count: int = 0
+    schedule_revision_registry_ambiguous_count: int = 0
     stage1_5d_gate_mode: str = "unknown"
     stage1_5d_runtime_gate_path: str = ""
     stage1_5d_runtime_gate_decision: str = ""

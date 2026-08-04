@@ -1,4 +1,3 @@
-import pytest
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     build_stage1_5g_review_summary,
 )
@@ -466,7 +465,9 @@ def test_decision_invalid_on_per_symbol_request_success_failure():
 
 
 def test_stage1_5g_accepts_completed_formal_evidence_with_symbol_keyed_manifest():
-    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import build_stage1_5g_review_summary
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        build_stage1_5g_review_summary,
+    )
 
     snapshots = make_depth_snapshots(event_symbol_id="es1", symbol="ETHUSD1", count=700)
 
@@ -509,7 +510,9 @@ def test_stage1_5g_accepts_completed_formal_evidence_with_symbol_keyed_manifest(
 
 
 def test_stage1_5g_blocks_completed_formal_evidence_with_unkeyed_depth_manifest():
-    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import build_stage1_5g_review_summary
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        build_stage1_5g_review_summary,
+    )
 
     snapshots = make_depth_snapshots(event_symbol_id="es1", symbol="ETHUSD1", count=700)
 
@@ -709,7 +712,9 @@ def test_quarantine_expected_snapshot_count_missing_does_not_fallback_to_observe
 
 
 def test_chinese_review_includes_quarantine_section_for_quarantined_pass():
-    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import generate_stage1_5g_chinese_review
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        generate_stage1_5g_chinese_review,
+    )
 
     markdown = generate_stage1_5g_chinese_review({
         "decision": "stage1_5g_depth_evidence_quarantined_pass",

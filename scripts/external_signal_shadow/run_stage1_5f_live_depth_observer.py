@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -28,7 +29,38 @@ def parse_args():
     parser.add_argument("--live-public-readonly", action="store_true")
     parser.add_argument("--fixture-events-jsonl", type=str, default="")
     parser.add_argument("--mock-response-dir", type=str, default="")
+    parser.add_argument("--allow-formal-v1-compatibility", action="store_true")
+    parser.add_argument("--formal-v1-compatibility-reason", type=str, default="")
     return parser.parse_args()
+
+
+def validate_root_mode_and_suffix(output_root: str, allow_v1_compat: bool) -> str:
+    if allow_v1_compat:
+        if "_v1_compatibility_diagnostic_only" not in output_root:
+            raise ValueError("output_root must contain '_v1_compatibility_diagnostic_only' when --allow-formal-v1-compatibility is enabled")
+        return "v1_compatibility_diagnostic_only"
+    return "v2_production"
+
+
+def write_observer_root_contract_atomically(output_root: str, root_mode: str, reason: str = "") -> dict:
+    root_dir = Path(output_root)
+    root_dir.mkdir(parents=True, exist_ok=True)
+    root_path = root_dir / "observer_root_contract.json"
+    tmp_path = root_dir / "observer_root_contract.json.tmp"
+
+    content = {
+        "root_contract_schema_version": 1,
+        "root_mode": root_mode,
+        "formal_event_contract_versions_allowed": [1] if root_mode == "v1_compatibility_diagnostic_only" else [2],
+        "formal_schedule_revision_contract_versions_allowed": [1],
+        "anchor_precedence_policy": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_ANCHOR_PRECEDENCE_POLICY", "official_schedule_priority_v1"),
+        "created_at_ms": int(time.time() * 1000),
+        "reason": reason,
+    }
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(content, f, indent=2)
+    os.replace(tmp_path, root_path)
+    return content
 
 
 
@@ -88,6 +120,190 @@ def load_all_snapshots_for_event_symbol(root: str, event_symbol_id: str) -> list
     for filepath in sorted(glob.glob(pattern)):
         snapshots.extend(DepthSnapshot.from_dict(row) for row in read_jsonl(filepath))
     return snapshots
+
+
+def select_depth_collection_active_states(states: dict) -> list:
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        is_depth_collection_active_status,
+    )
+
+    return [s for s in states.values() if is_depth_collection_active_status(getattr(s, "status", ""))]
+
+
+def select_completed_observation_states(states: dict) -> list:
+    return [
+        s for s in states.values()
+        if getattr(s, "status", "") in {"completed", "completed_anchor_revision_contaminated"}
+    ]
+
+
+def _state_stable_schedule_identity(state) -> str:
+    source_article_id = str(getattr(state, "source_article_id", "") or "").strip()
+    symbol = str(getattr(state, "symbol", "") or "").strip().upper()
+    if not source_article_id or not symbol:
+        return ""
+    return f"binance|futures_contract_launch|{source_article_id}|{symbol}"
+
+
+def _revision_symbol(revision_event: dict) -> str:
+    symbols = [str(s).strip().upper() for s in (revision_event.get("symbols") or []) if str(s).strip()]
+    if len(symbols) == 1:
+        return symbols[0]
+    symbol = str(revision_event.get("symbol") or "").strip().upper()
+    return symbol
+
+
+def _revision_stable_schedule_identity(revision_event: dict, symbol: str) -> str:
+    stable_identity = str(revision_event.get("stable_schedule_identity") or "").strip()
+    if stable_identity:
+        return stable_identity
+    supersedes_article_id = str(revision_event.get("supersedes_source_article_id") or "").strip()
+    if supersedes_article_id and symbol:
+        return f"binance|futures_contract_launch|{supersedes_article_id}|{symbol}"
+    return ""
+
+
+def process_schedule_revision_event(
+    revision_event: dict,
+    *,
+    states: dict,
+    state_file: str,
+    registry_file: str | Path,
+    now_ms: int,
+) -> dict:
+    from research.external_signal_shadow.stage1_5f_schedule_revision_registry import (
+        ScheduleRevisionRegistry,
+        compute_revision_application_id,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+    )
+
+    registry = ScheduleRevisionRegistry(Path(registry_file))
+    symbol = _revision_symbol(revision_event)
+    stable_identity = _revision_stable_schedule_identity(revision_event, symbol)
+    revision_id = str(revision_event.get("revision_id") or "")
+    revision_payload_hash = str(revision_event.get("revision_payload_hash") or "")
+
+    if (
+        revision_event.get("event_type") != "futures_contract_launch_schedule_revision"
+        or revision_event.get("formal_schedule_revision_contract_version") != 1
+        or not symbol
+        or not stable_identity
+        or not revision_id
+        or not revision_payload_hash
+    ):
+        app_id = compute_revision_application_id(
+            stable_schedule_identity=stable_identity or "missing",
+            revision_id=revision_id or "missing",
+            revision_payload_hash=revision_payload_hash or "missing",
+        )
+        registry.record_revision(
+            revision_application_id=app_id,
+            status="revision_blocked",
+            stable_schedule_identity=stable_identity,
+            revision_id=revision_id,
+            revision_payload_hash=revision_payload_hash,
+            details={"reason": "malformed_schedule_revision_event"},
+        )
+        return {"status": "revision_blocked", "revision_application_id": app_id}
+
+    app_id = compute_revision_application_id(
+        stable_schedule_identity=stable_identity,
+        revision_id=revision_id,
+        revision_payload_hash=revision_payload_hash,
+    )
+    if registry.is_applied(app_id):
+        return {"status": "revision_replay_noop", "revision_application_id": app_id}
+    prior_status = registry.latest_status(app_id)
+
+    revision_with_id = dict(revision_event)
+    revision_with_id["revision_application_id"] = app_id
+    if not prior_status:
+        registry.record_revision(
+            revision_application_id=app_id,
+            status="revision_received",
+            stable_schedule_identity=stable_identity,
+            revision_id=revision_id,
+            revision_payload_hash=revision_payload_hash,
+            details={"source_article_id": revision_event.get("source_article_id")},
+        )
+
+    supersedes_article_id = str(revision_event.get("supersedes_source_article_id") or "").strip()
+    matches = []
+    for state in states.values():
+        state_symbol = str(getattr(state, "symbol", "") or "").strip().upper()
+        if state_symbol != symbol:
+            continue
+        if _state_stable_schedule_identity(state) == stable_identity:
+            matches.append(state)
+            continue
+        if supersedes_article_id and str(getattr(state, "source_article_id", "") or "").strip() == supersedes_article_id:
+            matches.append(state)
+
+    distinct_matches = {st.event_symbol_id: st for st in matches if getattr(st, "event_symbol_id", "")}
+    if not distinct_matches:
+        if prior_status in {"revision_orphaned", "revision_ambiguous", "revision_blocked"}:
+            return {"status": f"{prior_status}_replay_noop", "revision_application_id": app_id}
+        registry.record_revision(
+            revision_application_id=app_id,
+            status="revision_orphaned",
+            stable_schedule_identity=stable_identity,
+            revision_id=revision_id,
+            revision_payload_hash=revision_payload_hash,
+            details={"reason": "no_matching_launch_state"},
+        )
+        return {"status": "revision_orphaned", "revision_application_id": app_id}
+
+    if len(distinct_matches) > 1:
+        if prior_status in {"revision_ambiguous", "revision_blocked"}:
+            return {"status": f"{prior_status}_replay_noop", "revision_application_id": app_id}
+        registry.record_revision(
+            revision_application_id=app_id,
+            status="revision_ambiguous",
+            stable_schedule_identity=stable_identity,
+            revision_id=revision_id,
+            revision_payload_hash=revision_payload_hash,
+            details={"matching_event_symbol_ids": sorted(distinct_matches)},
+        )
+        return {"status": "revision_ambiguous", "revision_application_id": app_id}
+
+    target_state = next(iter(distinct_matches.values()))
+    updated_state = apply_anchor_contract_revision_to_state(target_state, revision_with_id, now_ms)
+    states[updated_state.event_symbol_id] = updated_state
+    append_jsonl(state_file, updated_state.to_dict())
+    registry.record_revision(
+        revision_application_id=app_id,
+        status="revision_applied",
+        stable_schedule_identity=stable_identity,
+        revision_id=revision_id,
+        revision_payload_hash=revision_payload_hash,
+        details={"event_symbol_id": updated_state.event_symbol_id},
+    )
+    return {"status": "revision_applied", "revision_application_id": app_id}
+
+
+def load_schedule_revision_registry_status_counts(registry_file: str | Path) -> dict[str, int]:
+    path = Path(registry_file)
+    counts: dict[str, int] = {}
+    if not path.exists():
+        return counts
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            status = str(row.get("status") or "")
+            if status:
+                counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def get_mock_json_response(mock_dir: str, name: str) -> dict:
@@ -153,6 +369,20 @@ def build_accepted_row_from_state(state, watermark, now_ms: int) -> dict:
         "admission_watermark_at_first_seen_ms": state.admission_watermark_at_first_seen_ms,
         "announcement_capture_post_bootstrap_watermark": state.announcement_capture_post_bootstrap_watermark,
         "launch_anchor_post_bootstrap_watermark": state.launch_anchor_post_bootstrap_watermark,
+        "source_anchor_contract_hash": state.source_anchor_contract_hash,
+        "admission_anchor_contract_hash": state.admission_anchor_contract_hash,
+        "latest_anchor_contract_hash": state.latest_anchor_contract_hash,
+        "anchor_contract_version": state.anchor_contract_version,
+        "anchor_precedence_policy": state.anchor_precedence_policy,
+        "anchor_contract_decision_at_ms": state.anchor_contract_decision_at_ms,
+        "admission_anchor_evidence_level": state.admission_anchor_evidence_level,
+        "latest_anchor_evidence_level": state.latest_anchor_evidence_level,
+        "admission_max_evidence_class": state.admission_max_evidence_class,
+        "latest_max_evidence_class": state.latest_max_evidence_class,
+        "anchor_contract_revision_count": state.anchor_contract_revision_count,
+        "applied_schedule_revision_ids": state.applied_schedule_revision_ids,
+        "observation_anchor_revision_contaminated": state.observation_anchor_revision_contaminated,
+        "anchor_revision_contamination_reason": state.anchor_revision_contamination_reason,
         **basis_diag,
     }
 
@@ -172,7 +402,7 @@ def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, n
     backfilled = []
 
     for state in states.values():
-        if state.status != "active":
+        if state not in select_depth_collection_active_states({state.event_symbol_id: state}):
             continue
         acceptance_id = state.acceptance_id or make_acceptance_id(state)
         if acceptance_id in existing_acceptance_ids or state.event_symbol_id in existing_event_symbol_ids:
@@ -340,11 +570,21 @@ def main():
     args = parse_args()
     output_root = args.output_root
     os.makedirs(output_root, exist_ok=True)
+    try:
+        root_mode = validate_root_mode_and_suffix(output_root, args.allow_formal_v1_compatibility)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     # 1. Check watermark bootstrap mode
     if args.bootstrap_watermark:
         logger.info("Watermark bootstrap mode requested.")
         events = load_all_events(args.fixture_events_jsonl, args.stage1_5d_events_glob)
+        write_observer_root_contract_atomically(
+            output_root,
+            root_mode,
+            reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "bootstrap_watermark",
+        )
 
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
             bootstrap_watermark_from_stage1_5d_events,
@@ -388,6 +628,14 @@ def main():
         write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
         logger.info("Watermark bootstrapped and summary written. Exiting.")
         sys.exit(0)
+
+    root_contract_path = Path(output_root) / "observer_root_contract.json"
+    if not root_contract_path.exists():
+        write_observer_root_contract_atomically(
+            output_root,
+            root_mode,
+            reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "runtime_start",
+        )
 
     # 2. Validate Stage 1.5D summary. A dedicated runtime gate, when provided,
     # is validated inside the poll loop with freshness and same-root checks.
@@ -640,15 +888,11 @@ def main():
         events = load_all_events(args.fixture_events_jsonl, args.stage1_5d_events_glob)
         logger.info(f"Loaded {len(events)} events. events={events}")
 
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
-            EventSymbolState,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_budget import (
             can_start_new_observation,
             classify_budget_status,
             estimate_requests_per_min,
         )
-
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
             classify_event_symbol_eligibility_with_diagnostics,
             classify_live_depth_evidence_basis,
@@ -656,6 +900,9 @@ def main():
             make_event_symbol_id,
             make_stable_event_symbol_key,
             re_resolve_pending_anchor,
+        )
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+            EventSymbolState,
         )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
             create_pending_observation_state,
@@ -668,14 +915,14 @@ def main():
         )
 
         for state in list(states.values()):
-            if state.status != "active" or now_ms < state.observation_window_end_ms:
+            if state not in select_depth_collection_active_states({state.event_symbol_id: state}) or now_ms < state.observation_window_end_ms:
                 continue
             snapshots = load_all_snapshots_for_event_symbol(output_root, state.event_symbol_id)
             final_state = finalize_observation_if_due(state, now_ms, snapshots)
             states[state.event_symbol_id] = final_state
             append_jsonl(state_file, final_state.to_dict())
 
-        active_states = [s for s in states.values() if s.status == "active"]
+        active_states = select_depth_collection_active_states(states)
         active_count = len(active_states)
 
         estimated_req_rate = estimate_requests_per_min(
@@ -689,8 +936,8 @@ def main():
 
         # Check Stage 1.5D runtime gate or historical safety gate
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
-            validate_stage1_5d_runtime_gate,
             validate_historical_stage1_5d_safety_gate,
+            validate_stage1_5d_runtime_gate,
         )
         gate_valid = True
         gate_res = {"valid": True, "reason": None}
@@ -766,15 +1013,15 @@ def main():
                     append_jsonl(state_file, updated_pending.to_dict())
 
         # 6.2.2 Classify and process incoming event batches
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-            build_event_batch_id,
-            load_latest_event_batch_registry,
-            update_batch_registry_status,
-            group_latest_states_by_stable_event_symbol_key,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
             classify_event_symbol_revision_admission,
             upsert_pending_state_with_event_revision,
+        )
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+            build_event_batch_id,
+            group_latest_states_by_stable_event_symbol_key,
+            load_latest_event_batch_registry,
+            update_batch_registry_status,
         )
 
         event_batch_registry = load_latest_event_batch_registry(output_root)
@@ -782,6 +1029,16 @@ def main():
         for event in ([] if block_new_event_admission else events):
             if block_new_event_admission:
                 break
+            if event.get("event_type") == "futures_contract_launch_schedule_revision":
+                process_schedule_revision_event(
+                    event,
+                    states=states,
+                    state_file=state_file,
+                    registry_file=Path(output_root) / "schedule_revision_registry.jsonl",
+                    now_ms=now_ms,
+                )
+                continue
+
             expected_siblings = list(flatten_event_symbols(event))
             if not expected_siblings:
                 continue
@@ -1181,8 +1438,8 @@ def main():
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
             HeartbeatRow,
         )
-        active_states = [s for s in states.values() if s.status == "active"]
-        completed_states = [s for s in states.values() if s.status == "completed"]
+        active_states = select_depth_collection_active_states(states)
+        completed_states = select_completed_observation_states(states)
 
         hb_row = HeartbeatRow(
             poll_index=poll_index,
@@ -1207,6 +1464,9 @@ def main():
 
         expired_states = [s for s in states.values() if s.status == "expired_without_depth"]
         failed_states = [s for s in states.values() if s.status == "failed"]
+        schedule_revision_registry_counts = load_schedule_revision_registry_status_counts(
+            Path(output_root) / "schedule_revision_registry.jsonl"
+        )
 
         if len(active_states) > 0:
             dec = "stage1_5f_observer_event_observation_in_progress"
@@ -1250,6 +1510,8 @@ def main():
                 "historical_stage1_5d_gate_reason": args.historical_stage1_5d_gate_reason,
                 "block_new_event_admission": block_new_event_admission,
                 "runtime_gate_diagnostic_count": runtime_gate_invalid_count,
+                "schedule_revision_registry_orphan_count": schedule_revision_registry_counts.get("revision_orphaned", 0),
+                "schedule_revision_registry_ambiguous_count": schedule_revision_registry_counts.get("revision_ambiguous", 0),
             },
         )
         write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())

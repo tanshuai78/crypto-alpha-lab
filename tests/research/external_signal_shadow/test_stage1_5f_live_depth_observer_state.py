@@ -294,6 +294,42 @@ def test_promote_pending_to_active_sets_window_from_anchor_not_now():
     assert active.acceptance_id
 
 
+def test_pending_and_active_state_preserve_anchor_contract_lineage():
+    event = {
+        "event_symbol_id": "es-v2",
+        "event_id": "ev-v2",
+        "source_article_id": "article-v2",
+        "stable_event_symbol_key": "futures_contract_launch|article-v2|GIGADEVUSDT",
+        "symbol": "GIGADEVUSDT",
+        "detected_at_ms": 1_000,
+    }
+    diag = {
+        "observation_anchor_ms": 10_000,
+        "observation_anchor_basis": "official_schedule_anchor",
+        "observation_anchor_confidence": "high",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+        "latest_anchor_contract_hash": "latest-hash",
+        "anchor_contract_version": 2,
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "anchor_contract_decision_at_ms": 2_000,
+        "admission_anchor_evidence_level": "official_schedule",
+        "latest_anchor_evidence_level": "official_schedule",
+        "admission_max_evidence_class": "clean_or_recovery",
+        "latest_max_evidence_class": "clean_or_recovery",
+    }
+
+    pending = create_pending_observation_state(event, "pending_launch_time_in_future", diag, now_ms=2_000)
+    active = promote_pending_to_active_observation(pending, now_ms=10_000, evidence_start_class="clean_start")
+
+    assert active.source_anchor_contract_hash == "source-hash"
+    assert active.admission_anchor_contract_hash == "admission-hash"
+    assert active.latest_anchor_contract_hash == "latest-hash"
+    assert active.anchor_contract_version == 2
+    assert active.anchor_precedence_policy == "official_schedule_priority_v1"
+    assert active.admission_max_evidence_class == "clean_or_recovery"
+
+
 def test_build_terminal_ignored_state_persists_source_payload_hash_for_revision_detection():
     state = build_terminal_ignored_state(
         flat_event={
@@ -396,7 +432,9 @@ def test_snapshot_at_exact_window_end_does_not_create_extra_bucket():
 
 
 def test_make_terminal_hygiene_id_uses_stable_key_not_event_symbol_id():
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import make_terminal_hygiene_id
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        make_terminal_hygiene_id,
+    )
     a = make_terminal_hygiene_id(
         stable_event_symbol_key="article|futures_contract_launch|EBAYUSDT",
         terminal_status="ignored_historical_anchor_pre_bootstrap",
@@ -515,7 +553,6 @@ def test_build_terminal_ignored_state_allows_event_id_when_source_article_id_mis
 
 
 def test_build_rejected_event_symbol_row_contains_identity_and_reason_alias():
-    import pytest
     flat_event = {
         "event_symbol_id": "event-symbol-id",
         "event_id": "event-1",
@@ -564,9 +601,9 @@ def test_build_rejected_event_symbol_row_rejects_missing_identity():
 
 def test_pending_active_completed_history_same_event_symbol_id_is_not_collision(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="pending", stable_event_symbol_key="art1|launch|BTCUSDT")
@@ -588,9 +625,9 @@ def test_pending_active_completed_history_same_event_symbol_id_is_not_collision(
 
 def test_same_stable_key_two_distinct_event_symbol_ids_is_collision(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="art1|launch|BTCUSDT")
@@ -612,9 +649,9 @@ def test_same_stable_key_two_distinct_event_symbol_ids_is_collision(tmp_path):
 def test_compaction_and_collision_detection_produce_same_result(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
         compact_observer_state_jsonl,
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="pending", stable_event_symbol_key="k1")
@@ -638,9 +675,9 @@ def test_compaction_and_collision_detection_produce_same_result(tmp_path):
 
 def test_startup_detects_two_active_states_with_same_stable_key(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="ETHUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="art2|launch|ETHUSDT")
@@ -656,9 +693,9 @@ def test_startup_detects_two_active_states_with_same_stable_key(tmp_path):
 
 def test_startup_detects_active_and_completed_same_stable_key(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="ETHUSDT", detected_at_ms=1000, status="completed", stable_event_symbol_key="art2|launch|ETHUSDT")
@@ -674,9 +711,9 @@ def test_startup_detects_active_and_completed_same_stable_key(tmp_path):
 
 def test_identity_collision_does_not_delete_existing_state(tmp_path):
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
-        load_latest_states_by_event_symbol_id,
-        group_latest_states_by_stable_event_symbol_key,
         detect_stable_event_symbol_key_collisions,
+        group_latest_states_by_stable_event_symbol_key,
+        load_latest_states_by_event_symbol_id,
     )
     p = tmp_path / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="SOLUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="k_sol")

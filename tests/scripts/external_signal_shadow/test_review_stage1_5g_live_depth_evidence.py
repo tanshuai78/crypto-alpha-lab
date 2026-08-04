@@ -1,10 +1,10 @@
 import json
 import sys
-from pathlib import Path
+
+from scripts.external_signal_shadow.review_stage1_5g_live_depth_evidence import main
 from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
     make_stage1_5f_fixture_root,
 )
-from scripts.external_signal_shadow.review_stage1_5g_live_depth_evidence import main
 
 
 def test_stage1_5g_cli_writes_summary_and_review(tmp_path, monkeypatch):
@@ -71,7 +71,9 @@ def test_stage1_5g_cli_returns_nonzero_for_missing_output_root(tmp_path, monkeyp
 
 
 def test_cli_does_not_write_quarantine_artifacts_for_clean_pass(tmp_path, monkeypatch):
-    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import make_stage1_5f_fixture_root
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
+        make_stage1_5f_fixture_root,
+    )
 
     root = make_stage1_5f_fixture_root(tmp_path)
     output_root = tmp_path / "review_out"

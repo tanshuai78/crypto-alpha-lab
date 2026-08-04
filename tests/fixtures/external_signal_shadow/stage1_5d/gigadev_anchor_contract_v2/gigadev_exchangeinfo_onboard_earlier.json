@@ -1,0 +1,12 @@
+{
+  "symbols": [
+    {
+      "symbol": "GIGADEVUSDT",
+      "status": "TRADING",
+      "contractType": "PERPETUAL",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "onboardDate": 1785722400000
+    }
+  ]
+}

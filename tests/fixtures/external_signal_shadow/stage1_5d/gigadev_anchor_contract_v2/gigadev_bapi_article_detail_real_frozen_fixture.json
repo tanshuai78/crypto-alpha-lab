@@ -1,0 +1,16 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "id": 1982734,
+    "code": "e8bfd0c5adaf4d8a880bb1b7327107ef",
+    "title": "Binance Futures Will Launch GIGADEVUSDT USDⓈ-Margined Perpetual Contract (2026-08-03)",
+    "body": "<p>Fellow Binancians,</p><p>Binance Futures will launch USDⓈ-Margined GIGADEVUSDT Perpetual Contract at 2026-08-03 05:30 (UTC) with up to 75x leverage.</p>",
+    "type": 1,
+    "catalogId": 48,
+    "catalogName": "Futures Announcements",
+    "publishDate": 1785724209135
+  },
+  "success": true
+}

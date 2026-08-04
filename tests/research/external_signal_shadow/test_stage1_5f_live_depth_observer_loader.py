@@ -3,8 +3,6 @@ import json
 import pytest
 
 from configs import base
-
-
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
     build_first_seen_watermark_diagnostics,
     classify_event_symbol_eligibility,
@@ -20,13 +18,15 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader im
     normalize_anchor_candidates,
     normalize_event_symbol_identity,
     re_resolve_pending_anchor,
-    resolve_announcement_capture_time_ms,
     resolve_depth_observation_anchor_ms,
     resolve_observation_age_base_ms,
     upsert_pending_state_with_event_revision,
     validate_stage1_5d_summary,
 )
-from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState, Watermark
+from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+    EventSymbolState,
+    Watermark,
+)
 
 
 def _formalize_launch_event(event: dict, symbol: str) -> dict:
@@ -174,7 +174,9 @@ def test_legacy_event_with_exchangeinfo_anchor_remains_pending_without_formal_re
 
 
 def test_formal_v1_valid_event_can_become_eligible():
-    from src.research.external_signal_shadow.stage1_5_launch_event_contract import build_formal_launch_event
+    from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
+        build_formal_launch_event,
+    )
     raw = {"source_article_id": "art1", "title": "Binance Futures Will Launch USDⓈ-Margined ABCUSDT Perpetual Contract", "detected_at_ms": 1000}
     s_rows = [{"symbol": "ABCUSDT", "effective_launch_time_ms": 1000, "onboard_time_ms": 1000, "launch_time_source": "bapi_detail_body", "identity_validation_status": "validated_by_exchangeinfo", "detail_fetch_attempted": True, "detail_fetch_status": "success", "detail_confirmation_missing": False}]
     diag = {"launch_anchor_disagreement_ms": None, "launch_anchor_comparison_status": "single_source_detail", "launch_anchor_evidence_level": "detail_confirmed"}
@@ -1478,3 +1480,202 @@ def test_terminal_revision_seen_does_not_reopen_clean_evidence():
     )
     assert action == "terminal_revision_seen"
     assert state.status == "rejected"
+
+
+def test_legacy_rejected_can_be_upgraded_by_formal_v2_revision():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+    )
+
+    state = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="ev1",
+        symbol="GIGADEVUSDT",
+        detected_at_ms=1_000,
+        status="rejected",
+        terminal_reason="symbol_not_in_exchangeinfo",
+        source_contract_status="legacy_unvalidated_recoverable",
+        stable_event_symbol_key="k_gigadev",
+    )
+    symbol_contract = build_symbol_anchor_contract(
+        symbol="GIGADEVUSDT",
+        official_schedule_anchor_ms=10_000,
+        exchangeinfo_onboard_date_ms=5_000,
+        anchor_contract_decision_at_ms=2_000,
+        official_schedule_revision_id="r1",
+        official_schedule_available_at_ms=1_500,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "payload-sha",
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "raw_time_text": "1970-01-01 00:00:10 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "bapi_article_body",
+            "logical_block_id": "article:GIGADEVUSDT",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    row = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_symbol_id": "es1",
+            "event_id": "ev2",
+            "event_type": "futures_contract_launch",
+            "source_article_id": "article",
+            "symbol": "GIGADEVUSDT",
+            "symbols": ["GIGADEVUSDT"],
+            "stable_event_symbol_key": "k_gigadev",
+            "detail_payload_hash": "hash-v2",
+        },
+        symbol_contracts={"GIGADEVUSDT": symbol_contract},
+    )
+
+    action, existing, diag = classify_event_symbol_revision_admission(
+        flat_event=row,
+        latest_states_by_id={"es1": state},
+        grouped_states_by_key={"k_gigadev": [state]},
+    )
+
+    assert action == "pending_revision_upsert"
+    assert existing is state
+    assert diag["reason"] == "legacy_rejected_upgraded_by_formal_v2"
+
+
+def test_v2_contract_is_validated_and_official_anchor_overrides_exchangeinfo_onboard():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_stage1_5d_source_contract,
+    )
+
+    symbol = "GIGADEVUSDT"
+    contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=1785735000000,
+        exchangeinfo_onboard_date_ms=1785722400000,
+        anchor_contract_decision_at_ms=1785726000000,
+        official_schedule_revision_id="gigadev_rev_1",
+        official_schedule_available_at_ms=1785724209135,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "c4054dd6612d440b914c9e5c0360c28254dcac71a8f545b4bfeb777ecfd31f60",
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "bapi_article_body",
+            "logical_block_id": "e8bfd0c5adaf4d8a880bb1b7327107ef:GIGADEVUSDT",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    row = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "e8bfd0c5adaf4d8a880bb1b7327107ef",
+            "event_id": "gigadev-event",
+            "symbols": [symbol],
+            "detected_at_ms": 1785724365785,
+            "symbol_validation_status": "validated",
+            "symbol_extraction_source": "detail_contract_symbol",
+        },
+        symbol_contracts={symbol: contract},
+    )
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": {symbol},
+        "symbol_rows": {
+            symbol: {
+                "status": "TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": 1785722400000,
+            }
+        },
+        "payload_sha256": "exchangeinfo-sha",
+    }
+
+    source_res = classify_stage1_5d_source_contract(row, symbol)
+    anchor_res = resolve_depth_observation_anchor_ms(row, symbol, exchangeinfo_state, now_ms=1785727000000)
+
+    assert source_res["source_contract_status"] == "formal_v2_valid"
+    assert anchor_res["observation_anchor_ms"] == 1785735000000
+    assert anchor_res["observation_anchor_basis"] == "official_schedule_anchor"
+    assert anchor_res["observation_anchor_conflict_active"] is False
+    assert anchor_res["source_anchor_contract_hash"] == row["symbol_source_anchor_contract_hashes"][symbol]
+
+
+def test_v2_eligibility_emits_admission_and_latest_anchor_hashes():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+
+    symbol = "GIGADEVUSDT"
+    contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=10_000,
+        exchangeinfo_onboard_date_ms=5_000,
+        anchor_contract_decision_at_ms=2_000,
+        official_schedule_revision_id="gigadev_rev_1",
+        official_schedule_available_at_ms=1_500,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "payload-sha",
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "raw_time_text": "1970-01-01 00:00:10 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "bapi_article_body",
+            "logical_block_id": "article:GIGADEVUSDT",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    row = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "article",
+            "event_id": "event",
+            "symbols": [symbol],
+            "detected_at_ms": 9_000,
+            "symbol_validation_status": "validated",
+            "symbol_extraction_source": "detail_contract_symbol",
+        },
+        symbol_contracts={symbol: contract},
+    )
+    wm = Watermark(max_seen_detected_at_ms=1_000)
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": {symbol},
+        "symbol_rows": {
+            symbol: {
+                "status": "TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": 5_000,
+            }
+        },
+        "payload_sha256": "exchangeinfo-sha",
+    }
+
+    status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row,
+        symbol,
+        now_ms=10_500,
+        watermark=wm,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={"budget_exceeded": False},
+    )
+
+    assert status == "eligible"
+    assert reason == "eligible_clean_start"
+    assert diag["source_anchor_contract_hash"] == row["symbol_source_anchor_contract_hashes"][symbol]
+    assert diag["admission_anchor_contract_hash"]
+    assert diag["latest_anchor_contract_hash"] == diag["admission_anchor_contract_hash"]

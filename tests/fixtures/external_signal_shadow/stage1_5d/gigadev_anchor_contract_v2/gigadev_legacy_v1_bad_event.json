@@ -1,0 +1,20 @@
+{
+  "event_id": "gigadev-legacy-v1-event",
+  "event_type": "futures_contract_launch",
+  "source_article_id": "e8bfd0c5adaf4d8a880bb1b7327107ef",
+  "detected_at_ms": 1785724209135,
+  "symbols": ["GIGADEVUSDT"],
+  "symbol_extraction_source": "bapi_article_body",
+  "symbol_validation_status": "validated_by_exchangeinfo",
+  "formal_event_contract_version": 1,
+  "formal_event_consumable_by_stage1_5f": true,
+  "source_contract_status": "formal_v1_valid",
+  "symbol_effective_launch_times_ms": {
+    "GIGADEVUSDT": 1785722400000
+  },
+  "symbol_identity_validation_status": "validated_by_exchangeinfo",
+  "launch_anchor_validation_status": "valid",
+  "launch_anchor_disagreement_ms": 12600000,
+  "launch_anchor_comparison_status": "disagreement",
+  "launch_anchor_evidence_level": "detail_exchangeinfo_disagreement"
+}

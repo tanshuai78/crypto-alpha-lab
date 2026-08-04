@@ -1,10 +1,10 @@
-import json
 import ast
+import json
 import time
 from pathlib import Path
 from unittest.mock import patch
-from configs import base
 
+from configs import base
 from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
 
 
@@ -56,7 +56,7 @@ def test_only_formal_event_writer_can_append_events_stream():
             if isinstance(cur, ast.FunctionDef):
                 parent_func = cur.name
                 break
-        if parent_func != "append_formal_futures_launch_event":
+        if parent_func not in {"append_formal_futures_launch_event", "append_formal_schedule_revision"}:
             violations.append((node.lineno, parent_func))
 
     assert violations == []
@@ -2252,7 +2252,7 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
         "--poll-interval-sec", "0",
     ]
 
-    def fake_payload_fetch(url, live_public_readonly, timeout_sec, retry_budget=0):
+    def fake_payload_fetch_2(url, live_public_readonly, timeout_sec, retry_budget=0):
         detail_calls["count"] += 1
         return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
 
@@ -2282,11 +2282,12 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
     assert len(parsed) == 1
     assert parsed[0]["symbols"] == ["ETHUSD1"] or parsed[0]["symbols"] == ("ETHUSD1",)
     assert parsed[0]["symbol_parse_status"] == "parsed"
-    assert parsed[0]["source_contract_status"] == "formal_v1_valid"
+    assert parsed[0]["source_contract_status"] == "formal_v2_valid"
     assert parsed[0]["symbol_identity_validation_status"] == "validated_by_exchangeinfo"
     assert parsed[0]["detail_fetch_attempted"] is True
     assert parsed[0]["detail_fetch_status"] == "success"
-    assert parsed[0]["launch_anchor_evidence_level"] == "detail_confirmed"
+    assert parsed[0]["launch_anchor_evidence_level"] == "official_schedule"
+    assert parsed[0]["symbol_effective_observation_anchor_sources"]["ETHUSD1"] == "official_schedule_anchor"
     assert detail_calls["count"] == 1
 
 
@@ -2363,14 +2364,15 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
     assert len(parsed) == 1
     assert parsed[0]["symbols"] == ["SPCXUSD1"] or parsed[0]["symbols"] == ("SPCXUSD1",)
     assert parsed[0]["symbol_parse_status"] == "parsed"
-    assert parsed[0]["source_contract_status"] == "formal_v1_valid"
+    assert parsed[0]["source_contract_status"] == "formal_v2_valid"
     assert parsed[0]["symbol_identity_validation_status"] == "validated_by_exchangeinfo"
     assert parsed[0]["symbol_parse_failed_reason"] is None
     assert parsed[0].get("terminal_failure_type") is None
     assert parsed[0]["detail_fetch_attempted"] is True
     assert parsed[0]["detail_fetch_status"] == "success"
-    assert parsed[0]["launch_anchor_evidence_level"] in {"detail_confirmed", "detail_exchangeinfo_consensus"}
-    assert parsed[0]["symbol_effective_launch_times_ms"]["SPCXUSD1"] == 4070908800000
+    assert parsed[0]["launch_anchor_evidence_level"] == "official_schedule"
+    assert parsed[0]["symbol_effective_observation_anchor_sources"]["SPCXUSD1"] == "official_schedule_anchor"
+    assert parsed[0]["symbol_effective_launch_times_ms"]["SPCXUSD1"] == parsed[0]["symbol_official_schedule_anchor_ms"]["SPCXUSD1"]
     assert detail_calls["count"] == 1
 
 
@@ -4619,7 +4621,9 @@ def test_new_post_watermark_bapi_event_can_reach_1_5f_formal_acceptance(tmp_path
 
 
 def test_bapi_parser_no_symbol_preserves_bapi_diagnostic_even_if_support_fallback_202():
-    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import serialize_retry_articles
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+    )
     state = {
         "art_no_sym": {
             "source_article_id": "art_no_sym",
@@ -4638,8 +4642,10 @@ def test_bapi_parser_no_symbol_preserves_bapi_diagnostic_even_if_support_fallbac
 
 
 def test_bapi_same_hash_same_parser_no_symbols_dedupes_high_frequency_retry():
-    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import PARSER_VERSION
     from configs import base
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        PARSER_VERSION,
+    )
     now_ms = 5000
     recheck_ms = base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC * 1000
     state = {
@@ -4658,8 +4664,10 @@ def test_bapi_same_hash_same_parser_no_symbols_dedupes_high_frequency_retry():
 
 
 def test_bapi_parser_version_change_allows_reparse_of_same_payload_hash():
-    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import PARSER_VERSION
     from configs import base
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        PARSER_VERSION,
+    )
     now_ms = 5000
     recheck_ms = base.EXTERNAL_SIGNAL_STAGE1_5D_BAPI_NO_SYMBOL_RECHECK_INTERVAL_SEC * 1000
     state = {
@@ -4678,7 +4686,9 @@ def test_bapi_parser_version_change_allows_reparse_of_same_payload_hash():
 
 
 def test_multi_symbol_one_rejected_does_not_emit_candidate_set():
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_article_ready_to_emit,
+    )
     candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
     val_res = {"validated_symbols": ["TMFUSDT"], "pending_symbols": ["TBTUSDT"], "rejected_symbols": ["BITOUSDT"]}
     eff_launch = {
@@ -4689,7 +4699,9 @@ def test_multi_symbol_one_rejected_does_not_emit_candidate_set():
 
 
 def test_multi_symbol_all_three_validated_emits():
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import is_multi_symbol_article_ready_to_emit
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        is_multi_symbol_article_ready_to_emit,
+    )
     candidates = ["TMFUSDT", "TBTUSDT", "BITOUSDT"]
     val_res = {"validated_symbols": ["TMFUSDT", "TBTUSDT", "BITOUSDT"], "pending_symbols": [], "rejected_symbols": []}
     eff_launch = {
@@ -4700,7 +4712,9 @@ def test_multi_symbol_all_three_validated_emits():
 
 
 def test_bapi_multi_contract_missing_launch_time_does_not_use_article_release_date_anchor():
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import build_effective_launch_times_ms
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_effective_launch_times_ms,
+    )
     candidates = ["TMFUSDT", "TBTUSDT"]
     res = build_effective_launch_times_ms(
         candidate_symbols=candidates,
@@ -4716,7 +4730,9 @@ def test_bapi_multi_contract_missing_launch_time_does_not_use_article_release_da
 
 
 def test_pending_revalidation_never_reenables_release_date_fallback():
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import build_effective_launch_times_ms
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_effective_launch_times_ms,
+    )
     res = build_effective_launch_times_ms(
         candidate_symbols=["TMFUSDT"],
         symbol_onboard_times_ms={},
@@ -5022,8 +5038,8 @@ def test_emitted_all_symbols_is_terminal_for_retry_selection():
 
 def test_emitted_terminal_fields_survive_scheduler_roundtrip(tmp_path):
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-        serialize_retry_articles,
         load_detail_retry_scheduler_state,
+        serialize_retry_articles,
         write_detail_retry_scheduler_state,
     )
 
@@ -5083,10 +5099,10 @@ def test_old_scheduler_schema_loads_with_safe_defaults(tmp_path):
 
 def test_emitted_article_is_not_reselected_after_restart(tmp_path):
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        load_detail_retry_scheduler_state,
         select_detail_retry_attempts,
         serialize_retry_articles,
         write_detail_retry_scheduler_state,
-        load_detail_retry_scheduler_state,
     )
 
     state = {
@@ -5112,8 +5128,8 @@ def test_emitted_article_is_not_reselected_after_restart(tmp_path):
 
 def test_build_multi_symbol_emission_id_is_stable_for_same_article_candidate_set():
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
-        build_multi_symbol_emission_id,
         build_candidate_symbol_set_identity,
+        build_multi_symbol_emission_id,
     )
 
     identity = build_candidate_symbol_set_identity(["PYPLUSDT", "GSUSDT", "SMHUSDT"])
@@ -5125,9 +5141,9 @@ def test_build_multi_symbol_emission_id_is_stable_for_same_article_candidate_set
 
 def test_existing_event_stream_rebuilds_emission_index_from_valid_full_row(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
-        rebuild_emission_index_from_events,
         build_candidate_symbol_set_identity,
         build_multi_symbol_emission_id,
+        rebuild_emission_index_from_events,
     )
 
     events_dir = tmp_path / "events"
@@ -5159,8 +5175,8 @@ def test_existing_event_stream_rebuilds_emission_index_from_valid_full_row(tmp_p
 
 def test_event_stream_rebuild_rejects_partial_row_with_full_candidate_hash(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
-        rebuild_emission_index_from_events,
         build_candidate_symbol_set_identity,
+        rebuild_emission_index_from_events,
     )
 
     events_dir = tmp_path / "events"
@@ -5212,9 +5228,9 @@ def test_event_stream_rebuild_rejects_stored_hash_mismatch(tmp_path):
 
 def test_event_stream_rebuild_rejects_duplicate_emission_id_different_payload(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
-        rebuild_emission_index_from_events,
         build_candidate_symbol_set_identity,
         build_multi_symbol_emission_id,
+        rebuild_emission_index_from_events,
     )
 
     events_dir = tmp_path / "events"
@@ -5269,9 +5285,9 @@ def test_event_stream_rebuild_rejects_malformed_jsonl_fail_safe(tmp_path):
 
 def test_crash_after_event_append_before_state_write_does_not_duplicate(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
-        rebuild_emission_index_from_events,
         build_candidate_symbol_set_identity,
         build_multi_symbol_emission_id,
+        rebuild_emission_index_from_events,
     )
 
     events_dir = tmp_path / "events"
@@ -5302,6 +5318,7 @@ def test_crash_after_event_append_before_state_write_does_not_duplicate(tmp_path
 
 def test_crash_after_state_write_before_event_append_reconciles_missing_event_or_blocks_manual_review():
     from pathlib import Path
+
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         rebuild_emission_index_from_events,
     )
@@ -5414,3 +5431,267 @@ def test_hard_rejected_symbol_blocks_entire_multi_symbol_article():
     }
 
     assert is_multi_symbol_candidate_set_ready_to_emit(candidates, val_res, eff_launch) is False
+
+
+def test_gigadev_fixture_emits_v2_official_schedule_anchor(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+
+    meta = json.loads(Path("tests/fixtures/external_signal_shadow/stage1_5d/gigadev_anchor_contract_v2/gigadev_fixture_metadata.json").read_text())
+    symbol = meta["symbol"]
+    sym_contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=meta["official_schedule_anchor_ms"],
+        exchangeinfo_onboard_date_ms=meta["exchangeinfo_onboardDate_ms"],
+        anchor_contract_decision_at_ms=1785726000000,
+        official_schedule_revision_id="gigadev_rev_1",
+        official_schedule_available_at_ms=1785724209135,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": meta["payload_sha256"],
+            "parser_version": meta["parser_version"],
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body[0]",
+            "logical_block_id": "block-1",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    row = build_formal_event_anchor_contract_row(
+        base_event={"event_type": "futures_contract_launch", "source_article_id": meta["article_id"], "symbols": [symbol]},
+        symbol_contracts={symbol: sym_contract},
+    )
+
+    assert row["formal_event_contract_version"] == 2
+    assert row["anchor_precedence_policy"] == "official_schedule_priority_v1"
+    assert row["symbol_official_schedule_anchor_ms"][symbol] == 1785735000000
+    assert row["symbol_exchangeinfo_onboard_date_ms"][symbol] == 1785722400000
+    assert row["symbol_effective_observation_anchor_ms"][symbol] == 1785735000000
+    assert row["symbol_effective_observation_anchor_sources"][symbol] == "official_schedule_anchor"
+    assert row["symbol_anchor_comparison_statuses"][symbol] == "exchangeinfo_disagrees_with_official_schedule"
+    assert row["symbol_max_evidence_classes"][symbol] == "clean_or_recovery"
+    assert row["event_all_symbols_consumable_by_stage1_5f"] is True
+    assert row["event_all_symbols_clean_eligible"] is True
+
+
+def test_apply_formal_launch_event_contract_writes_v2_official_schedule_anchor():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        apply_formal_launch_event_contract,
+    )
+
+    norm_event = {
+        "event_type": "futures_contract_launch",
+        "source_article_id": "e8bfd0c5adaf4d8a880bb1b7327107ef",
+        "symbols": ["GIGADEVUSDT"],
+        "title": "Binance Futures Will Launch GIGADEVUSDT USDⓈ-Margined Perpetual Contract (2026-08-03)",
+        "detected_at_ms": 1785724365785,
+        "source_published_at_ms": 1785724209135,
+        "parser_version": "stage1_5d_symbol_extraction_v3",
+        "detail_payload_hash": "c4054dd6612d440b914c9e5c0360c28254dcac71a8f545b4bfeb777ecfd31f60",
+        "detail_fetch_attempted": True,
+        "detail_fetch_status": "success",
+    }
+    state = {
+        "title": norm_event["title"],
+        "symbol_launch_times_ms": {"GIGADEVUSDT": 1785735000000},
+        "symbol_onboard_times_ms": {"GIGADEVUSDT": 1785722400000},
+        "detail_fetch_status": "success",
+        "detail_fetch_attempted": True,
+    }
+    validation_result = {
+        "symbol_onboard_times_ms": {"GIGADEVUSDT": 1785722400000},
+        "symbol_exchangeinfo": {"GIGADEVUSDT": {"status": "TRADING"}},
+    }
+    effective_launch = {
+        "symbol_effective_launch_times_ms": {"GIGADEVUSDT": 1785722400000},
+        "symbol_effective_launch_time_sources": {"GIGADEVUSDT": "exchangeinfo_onboard_date"},
+        "launch_time_source": "exchange_info",
+    }
+
+    apply_formal_launch_event_contract(
+        norm_event,
+        state,
+        validation_result,
+        ["GIGADEVUSDT"],
+        effective_launch,
+    )
+
+    assert norm_event["formal_event_contract_version"] == 2
+    assert norm_event["source_contract_status"] == "formal_v2_valid"
+    assert norm_event["symbol_effective_observation_anchor_ms"]["GIGADEVUSDT"] == 1785735000000
+    assert norm_event["symbol_effective_observation_anchor_sources"]["GIGADEVUSDT"] == "official_schedule_anchor"
+    assert norm_event["symbol_effective_launch_times_ms"]["GIGADEVUSDT"] == 1785735000000
+    assert norm_event["symbol_anchor_comparison_statuses"]["GIGADEVUSDT"] == "exchangeinfo_disagrees_with_official_schedule"
+    assert norm_event["event_all_symbols_consumable_by_stage1_5f"] is True
+    assert norm_event["event_all_symbols_clean_eligible"] is True
+
+
+def test_formal_writer_validates_every_symbol(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        append_formal_futures_launch_event,
+    )
+
+    c1 = build_symbol_anchor_contract(
+        symbol="SYM1USDT",
+        official_schedule_anchor_ms=1000000,
+        exchangeinfo_onboard_date_ms=1000000,
+        anchor_contract_decision_at_ms=500000,
+        official_schedule_revision_id="r1",
+        official_schedule_available_at_ms=400000,
+        mapping_confidence="exact_per_symbol_row",
+        provenance={"raw_time_text": "t", "timezone_text": "UTC", "node_path": "n", "logical_block_id": "b", "schedule_text_context": "c", "payload_sha256": "p", "parser_version": "v", "mapping_method": "m"},
+    )
+    c2 = build_symbol_anchor_contract(
+        symbol="SYM2USDT",
+        official_schedule_anchor_ms=None,
+        exchangeinfo_onboard_date_ms=None,  # Missing anchor!
+        anchor_contract_decision_at_ms=500000,
+        official_schedule_revision_id=None,
+        official_schedule_available_at_ms=None,
+        mapping_confidence="ambiguous",
+        provenance={},
+    )
+    row = build_formal_event_anchor_contract_row(
+        base_event={"event_type": "futures_contract_launch", "source_article_id": "art-1", "symbols": ["SYM1USDT", "SYM2USDT"]},
+        symbol_contracts={"SYM1USDT": c1, "SYM2USDT": c2},
+    )
+
+    diag_file = tmp_path / "diag.jsonl"
+    events_file = tmp_path / "events.jsonl"
+    stream_paths = {"events": events_file, "formal_contract_validation_failed": diag_file}
+
+    written = append_formal_futures_launch_event(stream_paths, row)
+    assert written is None
+    assert not events_file.exists() or len(events_file.read_text().strip()) == 0
+
+
+def test_second_symbol_malformed_blocks_entire_batch(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        append_formal_futures_launch_event,
+    )
+
+    c1 = build_symbol_anchor_contract(
+        symbol="SYM1USDT",
+        official_schedule_anchor_ms=1000000,
+        exchangeinfo_onboard_date_ms=1000000,
+        anchor_contract_decision_at_ms=500000,
+        official_schedule_revision_id="r1",
+        official_schedule_available_at_ms=400000,
+        mapping_confidence="exact_per_symbol_row",
+        provenance={"raw_time_text": "t", "timezone_text": "UTC", "node_path": "n", "logical_block_id": "b", "schedule_text_context": "c", "payload_sha256": "p", "parser_version": "v", "mapping_method": "m"},
+    )
+    c2 = {
+        "symbol": "SYM2USDT",
+        "effective_observation_anchor_ms": 1000000,
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "official_schedule_anchor_ms": 2000000,  # Effective anchor != official anchor -> malformed!
+        "mapping_confidence": "exact_per_symbol_row",
+        "anchor_evidence_level": "official_schedule",
+        "max_evidence_class": "clean_or_recovery",
+        "validation_status": "malformed",
+        "comparison_status": "missing",
+        "disagreement_ms": None,
+        "disagreement_direction": "none",
+        "anchor_contract_decision_at_ms": 500000,
+        "official_schedule_revision_id": "r2",
+        "official_schedule_available_at_ms": 400000,
+        "provenance": {"raw_time_text": "t", "timezone_text": "UTC", "node_path": "n", "logical_block_id": "b", "schedule_text_context": "c", "payload_sha256": "p", "parser_version": "v", "mapping_method": "m"},
+    }
+
+    row = build_formal_event_anchor_contract_row(
+        base_event={"event_type": "futures_contract_launch", "source_article_id": "art-2", "symbols": ["SYM1USDT", "SYM2USDT"]},
+        symbol_contracts={"SYM1USDT": c1, "SYM2USDT": c2},
+    )
+
+    diag_file = tmp_path / "diag.jsonl"
+    events_file = tmp_path / "events.jsonl"
+    stream_paths = {"events": events_file, "formal_contract_validation_failed": diag_file}
+
+    written = append_formal_futures_launch_event(stream_paths, row)
+    assert written is None
+
+
+def test_event_aggregate_is_derived_from_all_symbol_contracts():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+
+    c1 = build_symbol_anchor_contract(
+        symbol="SYM1USDT",
+        official_schedule_anchor_ms=1000000,
+        exchangeinfo_onboard_date_ms=1000000,
+        anchor_contract_decision_at_ms=500000,
+        official_schedule_revision_id="r1",
+        official_schedule_available_at_ms=400000,
+        mapping_confidence="exact_per_symbol_row",
+        provenance={"raw_time_text": "t", "timezone_text": "UTC", "node_path": "n", "logical_block_id": "b", "schedule_text_context": "c", "payload_sha256": "p", "parser_version": "v", "mapping_method": "m"},
+    )
+    c2 = build_symbol_anchor_contract(
+        symbol="SYM2USDT",
+        official_schedule_anchor_ms=None,
+        exchangeinfo_onboard_date_ms=2000000,  # Fallback anchor!
+        anchor_contract_decision_at_ms=500000,
+        official_schedule_revision_id=None,
+        official_schedule_available_at_ms=None,
+        mapping_confidence="exact_per_symbol_row",
+        provenance={"raw_time_text": "t", "timezone_text": "UTC", "node_path": "n", "logical_block_id": "b", "schedule_text_context": "c", "payload_sha256": "p", "parser_version": "v", "mapping_method": "m"},
+    )
+
+    row = build_formal_event_anchor_contract_row(
+        base_event={"event_type": "futures_contract_launch", "source_article_id": "art-3", "symbols": ["SYM1USDT", "SYM2USDT"]},
+        symbol_contracts={"SYM1USDT": c1, "SYM2USDT": c2},
+    )
+
+    assert row["event_anchor_aggregate_status"] == "mixed_official_and_fallback"
+    assert row["event_has_fallback_anchor"] is True
+    assert row["event_all_symbols_clean_eligible"] is False
+
+
+def test_append_formal_schedule_revision_writes_valid_row_and_blocks_invalid(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        append_formal_schedule_revision,
+    )
+
+    stream_paths = {
+        "events": str(tmp_path / "events.jsonl"),
+        "detail_retry_terminal_diagnostics": str(tmp_path / "diagnostics.jsonl"),
+    }
+    valid_row = build_formal_schedule_revision_row(
+        source_article_id="revision-article",
+        supersedes_source_article_id="orig-article",
+        symbol="ABCUSDT",
+        revised_anchor_ms=2_000,
+        superseded_anchor_ms=1_000,
+        revision_id="rev-1",
+        revision_payload_hash="payload-hash",
+        revision_available_at_ms=1_500,
+        revision_reason="rescheduled",
+        provenance={"payload_sha256": "payload-hash", "parser_version": "test"},
+    )
+
+    assert append_formal_schedule_revision(stream_paths, valid_row) == valid_row
+    event_rows = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert event_rows == [valid_row]
+
+    invalid_row = dict(valid_row)
+    invalid_row["revision_payload_hash"] = ""
+    assert append_formal_schedule_revision(stream_paths, invalid_row) is None
+    event_rows_after_invalid = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    diagnostics = [json.loads(line) for line in (tmp_path / "diagnostics.jsonl").read_text().splitlines()]
+    assert event_rows_after_invalid == [valid_row]
+    assert diagnostics[-1]["diagnostic_type"] == "formal_schedule_revision_contract_invalid"

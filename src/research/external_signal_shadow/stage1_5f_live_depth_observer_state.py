@@ -2,19 +2,19 @@ import datetime
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from loguru import logger
 
 from configs import base
-from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
-    DepthSnapshot,
-    EventSymbolState,
-)
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
     make_event_symbol_id,
     make_stable_event_symbol_key,
+)
+from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+    DepthSnapshot,
+    EventSymbolState,
 )
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
     get_stable_event_key,
@@ -295,6 +295,18 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         launch_anchor_post_bootstrap_watermark=d.get("launch_anchor_post_bootstrap_watermark"),
         capacity_defer_count=d.get("capacity_defer_count", 0),
         anchor_resolution_attempt_count=d.get("anchor_resolution_attempt_count", 0),
+        source_anchor_contract_hash=d.get("source_anchor_contract_hash", ""),
+        admission_anchor_contract_hash=d.get("admission_anchor_contract_hash", ""),
+        latest_anchor_contract_hash=d.get("latest_anchor_contract_hash", ""),
+        anchor_contract_version=d.get("anchor_contract_version"),
+        anchor_precedence_policy=d.get("anchor_precedence_policy", ""),
+        anchor_contract_decision_at_ms=d.get("anchor_contract_decision_at_ms"),
+        admission_anchor_evidence_level=d.get("admission_anchor_evidence_level", ""),
+        latest_anchor_evidence_level=d.get("latest_anchor_evidence_level", ""),
+        admission_max_evidence_class=d.get("admission_max_evidence_class", ""),
+        latest_max_evidence_class=d.get("latest_max_evidence_class", ""),
+        clean_start_sla_pass=d.get("clean_start_sla_pass", False),
+        clean_evidence_start_allowed=d.get("clean_evidence_start_allowed", False),
     )
 
 
@@ -340,8 +352,67 @@ def start_observation(event_symbol_row: dict, now_ms: int) -> EventSymbolState:
 
 
 
+def is_depth_collection_active_status(status: str) -> bool:
+    return status in {"active", "active_anchor_revision_contaminated"}
+
+
+def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: dict, now_ms: int) -> EventSymbolState:
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        compute_latest_anchor_contract_hash,
+    )
+
+    revision_application_id = str(revision.get("revision_application_id") or "")
+    applied_ids = list(getattr(state, "applied_schedule_revision_ids", []) or [])
+    if revision_application_id and revision_application_id in applied_ids:
+        return state
+
+    d = state.to_dict()
+    rev_anchor = (revision.get("symbol_revised_anchor_ms") or {}).get(state.symbol)
+    d["anchor_contract_revision_count"] = (state.anchor_contract_revision_count or 0) + 1
+    if revision_application_id:
+        d["applied_schedule_revision_ids"] = [*applied_ids, revision_application_id]
+
+    previous_latest_hash = state.latest_anchor_contract_hash or state.admission_anchor_contract_hash or state.source_anchor_contract_hash
+    if revision_application_id and previous_latest_hash:
+        d["latest_anchor_contract_hash"] = compute_latest_anchor_contract_hash(
+            previous_latest_anchor_contract_hash=previous_latest_hash,
+            revision_application_id=revision_application_id,
+            latest_contract={
+                "symbol": state.symbol,
+                "symbol_revised_anchor_ms": rev_anchor,
+                "revision_id": revision.get("revision_id"),
+                "revision_payload_hash": revision.get("revision_payload_hash"),
+                "anchor_precedence_policy": revision.get("anchor_precedence_policy"),
+            },
+        )
+
+    if state.status.startswith("pending_"):
+        if rev_anchor is not None:
+            d["observation_anchor_ms"] = rev_anchor
+            d["anchor_contract_decision_at_ms"] = now_ms
+            d["latest_anchor_evidence_level"] = "official_schedule"
+            d["latest_max_evidence_class"] = "clean_or_recovery"
+            d["next_admission_check_at_ms"] = rev_anchor
+    elif is_depth_collection_active_status(state.status):
+        if rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
+            d["status"] = "active_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "fallback_anchor_replaced_by_official_schedule"
+            d["latest_max_evidence_class"] = "none"
+        elif rev_anchor == state.observation_anchor_ms:
+            d["latest_anchor_evidence_level"] = "official_schedule"
+    elif state.status.startswith("completed"):
+        if rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
+            d["status"] = "completed_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "post_completion_official_schedule_revision_mismatch"
+            d["latest_max_evidence_class"] = "none"
+
+    return EventSymbolState.from_dict(d)
+
+
 def record_depth_request(state: EventSymbolState, now_ms: int) -> EventSymbolState:
-    if state.status != "active":
+    if not is_depth_collection_active_status(state.status):
         return state
 
     req_at = state.first_depth_request_at_ms if state.first_depth_request_at_ms is not None else now_ms
@@ -356,7 +427,7 @@ def record_depth_request(state: EventSymbolState, now_ms: int) -> EventSymbolSta
 
 
 def record_depth_snapshot(state: EventSymbolState, snapshot: DepthSnapshot) -> EventSymbolState:
-    if state.status != "active":
+    if not is_depth_collection_active_status(state.status):
         return state
 
     fetched_at = snapshot.fetched_at_ms
@@ -478,7 +549,7 @@ def compute_snapshot_time_coverage(state: EventSymbolState, snapshots: list) -> 
 
 
 def finalize_observation_if_due(state: EventSymbolState, now_ms: int, snapshots: list) -> EventSymbolState:
-    if state.status != "active":
+    if not is_depth_collection_active_status(state.status):
         return state
 
     if now_ms < state.observation_window_end_ms:
@@ -486,6 +557,8 @@ def finalize_observation_if_due(state: EventSymbolState, now_ms: int, snapshots:
 
     cov = compute_snapshot_time_coverage(state, snapshots)
     status = "completed" if cov["research_result_valid"] else "expired_without_depth"
+    if state.observation_anchor_revision_contaminated:
+        status = "completed_anchor_revision_contaminated"
 
     if not snapshots:
         status = "expired_without_depth"
