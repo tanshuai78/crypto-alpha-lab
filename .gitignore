@@ -28,6 +28,7 @@ docs/production_artifacts/
 
 # Local runtime snapshots and operator-only context
 _project_context/
+graphify-out/
 
 # External Signal Shadow Lab runtime data
 data/external_signal_shadow/raw/
