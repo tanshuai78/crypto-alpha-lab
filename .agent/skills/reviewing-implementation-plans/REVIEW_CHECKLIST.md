@@ -4,11 +4,31 @@ Use this as a fast pre-flight checklist.
 
 ## Scope
 
+- [ ] State-mutating Plan has a bounded `Allowed Change Scope`.
+- [ ] Applicable implementation, verification, documentation, and runtime artifact paths are listed; if the full template is retained, inapplicable categories say `none`.
+- [ ] Compatible consumers that require no edits are listed under `Affected but unchanged` with verification evidence.
+- [ ] No unscoped mutating command such as `ruff check --fix .`, repository-wide auto-format, or `git clean -fdx`.
 - [ ] Title matches actual evidence and output.
 - [ ] Goal, tasks, outputs, and Done Definition agree.
 - [ ] Plan states what it proves and what it does not prove.
 - [ ] Research/proxy/shadow/live labels are accurate.
 - [ ] Next allowed decision is explicit.
+
+## Minimality
+
+- [ ] Each Task is necessary for an approved requirement, safety invariant, compatibility obligation, or verification gate.
+- [ ] Existing helpers and stdlib/native capabilities are reused where suitable.
+- [ ] No speculative registry, one-product factory, or new one-implementation interface without an approved boundary reason.
+- [ ] Ponytail does not remove validation, failure handling, restart recovery, idempotency, required SSOT config, or existing layer interfaces.
+
+## Topology and Contract Impact
+
+- [ ] Shared SSOT/public helper/contract changes use targeted Graphify query/path checks when the graph is current.
+- [ ] Graphify clues are verified at actual source lines; inferred/ambiguous edges are not blockers alone.
+- [ ] Changed JSON keys, schema fields, event types, CLI flags, and file paths are searched with `rg`.
+- [ ] Verified consumers requiring edits appear in `Allowed implementation paths` and Tasks.
+- [ ] Verified compatible consumers appear in `Affected but unchanged` with regression/integration tests.
+- [ ] A clean or stale Graphify result is not treated as proof that no consumers exist.
 
 ## Safety
 

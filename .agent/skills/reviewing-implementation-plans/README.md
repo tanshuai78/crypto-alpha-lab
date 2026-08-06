@@ -1,8 +1,16 @@
-# reviewing-implementation-plans v2
+# reviewing-implementation-plans v3
 
 This skill reviews implementation, refactor, replay, research, deployment, and trading-strategy plans before execution.
 
-Version 2 adds explicit red lines for market-data evidence semantics:
+Version 3 adds bounded execution and impact-analysis gates:
+
+- mandatory `Allowed Change Scope` for state-mutating plans;
+- Ponytail minimality below safety, approved Design, compatibility, existing architecture, and SSOT requirements;
+- targeted Graphify discovery followed by source verification;
+- `Affected but unchanged` coverage for compatible consumers;
+- `rg` fallback for schema, JSONL, CLI, and file-path dependencies.
+
+It retains the version 2 red lines for market-data evidence semantics:
 
 - partial exchange streams;
 - liquidation side preservation;

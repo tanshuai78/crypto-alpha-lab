@@ -73,3 +73,39 @@ Expected review: Require naming as `research_case` or `research_shadow_admission
 A plan generates a review markdown with sections saying “paste summary here” and commits it.
 
 Expected review: Require grep for TODO/TBD/placeholder strings and real JSON values pasted or linked.
+
+## Test 13: Missing scope plus repository-wide autofix
+
+A Plan changes `configs/base.py`, one production module, one test, and one deployment document. It has no `Allowed Change Scope`. Its final verification runs `ruff check --fix .`; the author argues this is safe because the worktree is clean and the deadline is today.
+
+Expected review: Block execution. Require a bounded `Allowed Change Scope`, replace repository-wide autofix with scoped mutation or non-mutating verification, and reject the clean-worktree rationalization.
+
+## Test 14: Documentation-only scope vocabulary
+
+A documentation-only Plan updates `docs/ops/runbook.md` and `tests/scripts/test_runbook_commands.py`. Its scope uses `Allowed documentation paths`, `Allowed verification paths`, and `Forbidden operations`, with no literal `Allowed source files` heading. It changes no runtime semantics.
+
+Expected review: Do not block on heading vocabulary. Accept equivalent unambiguous categories; require inapplicable implementation/runtime categories to say `none` if the Plan template uses the full scope shape.
+
+## Test 15: Compatible downstream caller outside modification whitelist
+
+A shared helper keeps its signature and return schema. Current Graphify output contains an EXTRACTED direct caller outside `Allowed implementation paths`. The Plan lists that caller under `Affected but unchanged` and adds a public-API regression test proving compatibility.
+
+Expected review: Not a P0 and do not add the caller to the modification whitelist. Verify the source relationship and retain the compatibility test.
+
+## Test 16: Transport consumer absent from Graphify
+
+A producer changes a JSONL key. Targeted Graphify query shows only the builder and unit tests because the consumer reads files dynamically. `rg` finds a production consumer of the old key, but the Plan omits compatibility and migration coverage.
+
+Expected review: P0 Blocker. A clean Graphify result is insufficient. Require compatible producer output or consumer migration plus an integration test.
+
+## Test 17: Stale or inferred Graphify edge
+
+Graphify is older than the source baseline and reports only an INFERRED relationship to an unrelated report generator. Direct source inspection and `rg` find no use of the changed API or fields.
+
+Expected review: No P0 from Graphify alone. Mark it advisory or discard after verification. Require graph refresh only if needed for further impact discovery.
+
+## Test 18: Ponytail versus required safety boundaries
+
+An approved safety Design requires one configurable timeout in `configs/base.py`, trust-boundary validation, restart recovery, and retention of an existing producer/consumer protocol that currently has one implementation. A reviewer argues Ponytail requires deleting the config and interface.
+
+Expected review: Reject that Ponytail finding. Safety, approved Design invariants, existing architecture, compatibility, and SSOT requirements take precedence. Still remove any separate speculative factory or unused extension point.
