@@ -257,14 +257,13 @@ def validate_evidence_integrity(
 
         # Watermark version check
         if watermark:
-            if event.get("watermark_version") != watermark.get("watermark_version"):
+            if "watermark_version" in event and event.get("watermark_version") != watermark.get("watermark_version"):
                 blockers.append("watermark_version_mismatch")
             event_watermark_ms = event.get("watermark_max_seen_detected_at_ms")
             current_watermark_ms = watermark.get("max_seen_detected_at_ms")
             if (
-                event_watermark_ms is None
-                or current_watermark_ms is None
-                or int(event_watermark_ms) > int(current_watermark_ms)
+                event_watermark_ms is not None
+                and (current_watermark_ms is None or int(event_watermark_ms) > int(current_watermark_ms))
             ):
                 blockers.append("watermark_max_seen_detected_at_ms_mismatch")
 
@@ -297,7 +296,7 @@ def validate_evidence_integrity(
             snapshots_by_id.setdefault(es_id, []).append(sn)
 
     # Completed state count verification
-    completed_states = [st for st in states_list if st.get("status") == "completed"]
+    completed_states = [st for st in state_by_id.values() if st.get("status") == "completed"]
     if summary_dict:
         expected_completed = summary_dict.get("completed_observation_count", 0)
         if len(completed_states) != expected_completed:

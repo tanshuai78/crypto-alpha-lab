@@ -67,6 +67,24 @@ def test_validator_accepts_event_watermark_before_current_watermark():
     assert result.formal_announcement_and_launch_count == 1
 
 
+def test_validator_accepts_stage1_5f_accepted_row_without_event_watermark_fields():
+    event = {
+        "event_symbol_id": "es1",
+        "symbol": "KOUSDT",
+        "source_article_id": "a1",
+        "live_depth_evidence_basis": "launch_time_only",
+    }
+    result = validate_evidence_integrity(
+        [event],
+        watermark={"max_seen_detected_at_ms": 2000, "watermark_version": 1},
+        states=[{"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 1}],
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "watermark_version_mismatch" not in result.blockers
+    assert "watermark_max_seen_detected_at_ms_mismatch" not in result.blockers
+
+
 def test_validator_blocks_missing_evidence_label():
     event = {
         "event_symbol_id": "es1",
@@ -146,6 +164,29 @@ def test_validator_blocks_summary_state_count_mismatch():
         summary={"completed_observation_count": 1},
     )
     assert "summary_state_count_mismatch" in result.blockers
+
+
+def test_validator_compares_summary_completed_count_against_latest_state_only():
+    states = [
+        {"event_symbol_id": "es1", "status": "active", "updated_at_ms": 1000},
+        {"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 1, "updated_at_ms": 2000},
+        {"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 1, "updated_at_ms": 3000},
+    ]
+    result = validate_evidence_integrity(
+        accepted_events=[
+            {
+                "event_symbol_id": "es1",
+                "evidence_label": "launch_time_only",
+                "watermark_max_seen_detected_at_ms": 1000,
+                "watermark_version": 1,
+            }
+        ],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=states,
+        snapshots=[{"event_symbol_id": "es1"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "summary_state_count_mismatch" not in result.blockers
 
 
 def test_validator_blocks_completed_state_without_snapshots():
