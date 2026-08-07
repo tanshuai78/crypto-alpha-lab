@@ -130,9 +130,11 @@ Use the corresponding workflow file under `.agent/workflows/` when the task matc
 - Refactoring: `.agent/workflows/refactor.md`
 - Non-trivial new feature, contract/schema change, major refactor, financial-safety change, or cross-module runtime fix design: `.agent/workflows/design-contract.md`
 - Approved Design to executable Implementation Plan: `.agent/workflows/implementation-plan.md`
+- Execution of a reviewed and user-approved Implementation Plan: `.agent/workflows/execute-approved-plan.md`
 
 When `design-contract.md` applies, it owns the Design and Plan handoff. After the Plan is approved,
-continue with the matching bugfix, feature, or refactor execution workflow without repeating its Design/Plan steps.
+execute it through `execute-approved-plan.md`; use the matching bugfix, feature, or refactor workflow only for
+task-specific diagnostic requirements, without repeating its Design/Plan steps.
 Use `feature.md` directly for a local feature that does not change contracts, schemas, financial-safety semantics,
 public behavior, persistence, deployment behavior, or cross-module runtime flow.
 
