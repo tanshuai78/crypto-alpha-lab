@@ -254,6 +254,10 @@ def test_formal_schedule_revision_contract_validates_required_transport_shape():
         revised_anchor_ms=2_000,
         superseded_anchor_ms=1_000,
         revision_id="rev-1",
+        revision_semantic_id="rev-1",
+        revision_application_id="rev-1",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="obs-1",
         revision_payload_hash="payload-hash",
         revision_available_at_ms=1_500,
         revision_reason="rescheduled",
@@ -262,7 +266,7 @@ def test_formal_schedule_revision_contract_validates_required_transport_shape():
 
     res = validate_schedule_revision_contract(row)
     assert row["event_type"] == "futures_contract_launch_schedule_revision"
-    assert row["formal_schedule_revision_contract_version"] == 1
+    assert row["formal_schedule_revision_contract_version"] == 2
     assert row["stable_schedule_identity"] == "binance|futures_contract_launch|orig-article|ABCUSDT"
     assert res["valid"] is True
 
@@ -275,6 +279,10 @@ def test_formal_schedule_revision_contract_blocks_missing_provenance():
         revised_anchor_ms=2_000,
         superseded_anchor_ms=1_000,
         revision_id="rev-1",
+        revision_semantic_id="rev-1",
+        revision_application_id="rev-1",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="obs-1",
         revision_payload_hash="payload-hash",
         revision_available_at_ms=1_500,
         revision_reason="rescheduled",
@@ -284,3 +292,97 @@ def test_formal_schedule_revision_contract_blocks_missing_provenance():
     res = validate_schedule_revision_contract(row)
     assert res["valid"] is False
     assert "revision_provenance_missing" in res["blockers"]
+
+
+def test_ko_rddt_and_aia_fixture_metadata_assertions():
+    ko_root = Path("tests/fixtures/external_signal_shadow/stage1_5f/ko_rddt_formal_v2_lineage")
+    ko_event = json.loads((ko_root / "ko_rddt_stage1_5d_event.json").read_text())
+    ko_meta = json.loads((ko_root / "ko_rddt_metadata.json").read_text())
+
+    assert ko_event["source_article_id"] == "307687ad279e42e6909ee1be8c472b50"
+    assert ko_event["symbols"] == ["KOUSDT", "RDDTUSDT"]
+    assert ko_event["formal_event_contract_version"] == 2
+    assert ko_event["source_contract_status"] == "formal_v2_valid"
+    assert ko_meta["data_quality"] == "server_observed_formal_v2_event_row"
+    assert ko_meta["not_a_raw_bapi_payload"] is True
+
+    aia_meta_file = Path("tests/fixtures/external_signal_shadow/stage1_5d/schedule_revision_producer/aia_postponement_metadata.json")
+    assert aia_meta_file.exists()
+    aia_meta = json.loads(aia_meta_file.read_text())
+    assert aia_meta["source_article_id"] == "a9f0566c85b54e30a63f1092e45d61f7"
+    assert aia_meta["producer_enablement_blocker"] is True
+
+
+def test_formal_schedule_revision_contract_explicit_intent_and_link_status():
+    import pytest
+
+    # Non-linked revision must raise AssertionError
+    with pytest.raises(AssertionError, match="only linked revisions"):
+        build_formal_schedule_revision_row(
+            source_article_id="rev_1",
+            supersedes_source_article_id="orig_1",
+            symbol="ABCUSDT",
+            revision_intent="rescheduled_with_new_anchor",
+            link_status="orphaned",
+            revised_anchor_ms=2000,
+            superseded_anchor_ms=1000,
+            revision_id="sem_1",
+            revision_semantic_id="sem_1",
+            revision_application_id="sem_1",
+            revision_payload_version_id="payload-v1",
+            revision_observation_id="obs-1",
+            revision_payload_hash="hash_1",
+            revision_available_at_ms=1500,
+            provenance={"payload_sha256": "hash_1", "parser_version": "v1"},
+        )
+
+    # Cancelled revision must have cancelled status and null revised anchor
+    cancelled = build_formal_schedule_revision_row(
+        source_article_id="rev_cancel",
+        supersedes_source_article_id="orig_1",
+        symbol="ABCUSDT",
+        revision_intent="cancelled",
+        link_status="linked",
+        revised_anchor_ms=None,
+        superseded_anchor_ms=1000,
+        revision_id="sem_cancel",
+        revision_semantic_id="sem_cancel",
+        revision_application_id="sem_cancel",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="obs-1",
+        revision_payload_hash="hash_cancel",
+        revision_available_at_ms=1500,
+        provenance={"payload_sha256": "hash_cancel", "parser_version": "v1"},
+    )
+    assert cancelled["symbol_official_schedule_statuses"]["ABCUSDT"] == "cancelled"
+    assert cancelled["symbol_revised_anchor_ms"]["ABCUSDT"] is None
+    assert cancelled["revision_application_id"] == "sem_cancel"
+
+    val = validate_schedule_revision_contract(cancelled)
+    assert val["valid"] is True
+
+
+def test_formal_schedule_revision_v2_rejects_missing_or_unequal_identity_fields():
+    row = build_formal_schedule_revision_row(
+        source_article_id="revision-article",
+        supersedes_source_article_id="orig-article",
+        symbol="ABCUSDT",
+        revised_anchor_ms=2_000,
+        revision_id="rev-1",
+        revision_semantic_id="rev-1",
+        revision_application_id="rev-1",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="obs-1",
+        revision_payload_hash="payload-hash",
+        revision_available_at_ms=1_500,
+        provenance={"payload_sha256": "payload-hash", "parser_version": "test"},
+    )
+    row["revision_application_id"] = "different"
+    result = validate_schedule_revision_contract(row)
+    assert result["valid"] is False
+    assert "revision_identity_mismatch" in result["blockers"]
+
+    row = dict(row, revision_application_id="rev-1", revision_payload_version_id="")
+    result = validate_schedule_revision_contract(row)
+    assert result["valid"] is False
+    assert "revision_payload_version_id_missing" in result["blockers"]

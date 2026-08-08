@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 FORMAL_EVENT_CONTRACT_VERSION_V2 = 2
-FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION = 1
+FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION = 2
 ANCHOR_CONTRACT_HASH_SCHEMA_VERSION = 1
 ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE = "official_schedule_priority_v1"
 
@@ -296,18 +296,50 @@ def build_formal_schedule_revision_row(
     source_article_id: str,
     supersedes_source_article_id: str,
     symbol: str,
-    revised_anchor_ms: int | None,
-    superseded_anchor_ms: int | None,
+    revised_anchor_ms: int | None = None,
+    superseded_anchor_ms: int | None = None,
+    revision_intent: str = "rescheduled_with_new_anchor",
+    link_status: str = "linked",
     revision_id: str,
+    revision_semantic_id: str,
+    revision_payload_version_id: str,
+    revision_application_id: str,
+    revision_observation_id: str,
     revision_payload_hash: str,
-    revision_available_at_ms: int,
-    revision_reason: str,
-    provenance: dict[str, Any],
+    raw_payload_sha256: str = "",
+    revision_available_at_ms: int = 0,
+    producer_decision_at_ms: int = 0,
+    linking_index_as_of_ms: int = 0,
+    revision_reason: str = "",
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a formal schedule revision transport row for Stage 1.5D -> 1.5F."""
+    assert link_status == "linked", "only linked revisions may build formal rows"
+
     sym = str(symbol or "").strip().upper()
     stable_identity = f"binance|futures_contract_launch|{supersedes_source_article_id}|{sym}" if supersedes_source_article_id and sym else ""
-    status = "rescheduled" if revised_anchor_ms is not None else "postponed_without_anchor"
+
+    status_map = {
+        "rescheduled_with_new_anchor": "rescheduled",
+        "postponed_without_anchor": "postponed_without_anchor",
+        "cancelled": "cancelled",
+    }
+    status = status_map.get(revision_intent, "rescheduled" if revised_anchor_ms is not None else "postponed_without_anchor")
+    if revision_intent == "cancelled":
+        revised_anchor_ms = None
+
+    identities = (revision_id, revision_semantic_id, revision_application_id)
+    if not all(identities) or len(set(identities)) != 1:
+        raise ValueError("revision_id, revision_semantic_id, and revision_application_id must be equal non-empty values")
+    if not revision_payload_version_id or not revision_observation_id:
+        raise ValueError("revision_payload_version_id and revision_observation_id are required")
+    if not revision_payload_hash or revision_payload_hash == "default_hash":
+        raise ValueError("revision_payload_hash must be a non-placeholder value")
+    if revision_intent == "rescheduled_with_new_anchor" and revised_anchor_ms is None:
+        raise ValueError("rescheduled revision requires revised_anchor_ms")
+    if revision_intent not in status_map:
+        raise ValueError("unsupported revision_intent")
+
     return {
         "event_type": "futures_contract_launch_schedule_revision",
         "formal_schedule_revision_contract_version": FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION,
@@ -321,9 +353,15 @@ def build_formal_schedule_revision_row(
         "symbol_official_schedule_revision_available_at_ms": {sym: revision_available_at_ms} if sym else {},
         "symbol_superseded_anchor_ms": {sym: superseded_anchor_ms} if sym else {},
         "revision_id": revision_id,
+        "revision_semantic_id": revision_semantic_id,
+        "revision_application_id": revision_application_id,
+        "revision_payload_version_id": revision_payload_version_id,
+        "revision_observation_id": revision_observation_id,
         "revision_payload_hash": revision_payload_hash,
-        "revision_reason": revision_reason,
-        "revision_link_status": "linked" if stable_identity else "ambiguous",
+        "raw_payload_sha256": raw_payload_sha256 or revision_payload_hash,
+        "revision_intent": revision_intent,
+        "revision_link_status": link_status,
+        "revision_reason": revision_reason or revision_intent,
         "anchor_precedence_policy": ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE,
         "revision_provenance": provenance or {},
     }
@@ -334,7 +372,8 @@ def validate_schedule_revision_contract(row: dict[str, Any]) -> dict[str, Any]:
     blockers = []
     if row.get("event_type") != "futures_contract_launch_schedule_revision":
         blockers.append("event_type_not_schedule_revision")
-    if row.get("formal_schedule_revision_contract_version") != FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION:
+    version = row.get("formal_schedule_revision_contract_version")
+    if version not in {1, FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION}:
         blockers.append("formal_schedule_revision_contract_version_invalid")
     symbols = [str(s).strip().upper() for s in (row.get("symbols") or []) if str(s).strip()]
     if len(symbols) != 1:
@@ -346,12 +385,30 @@ def validate_schedule_revision_contract(row: dict[str, Any]) -> dict[str, Any]:
         blockers.append("supersedes_source_article_id_missing")
     if not row.get("stable_schedule_identity"):
         blockers.append("stable_schedule_identity_missing")
-    if not row.get("revision_id"):
+    if not row.get("revision_id") and not row.get("revision_application_id"):
         blockers.append("revision_id_missing")
     if not row.get("revision_payload_hash"):
         blockers.append("revision_payload_hash_missing")
+    if row.get("revision_payload_hash") == "default_hash":
+        blockers.append("revision_payload_hash_placeholder")
+    if row.get("revision_link_status") != "linked":
+        blockers.append("revision_link_status_not_linked")
     if row.get("anchor_precedence_policy") != ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE:
         blockers.append("anchor_precedence_policy_invalid")
+    if version == FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION:
+        revision_ids = (
+            row.get("revision_id"),
+            row.get("revision_semantic_id"),
+            row.get("revision_application_id"),
+        )
+        if not all(revision_ids):
+            blockers.append("revision_identity_missing")
+        elif len(set(revision_ids)) != 1:
+            blockers.append("revision_identity_mismatch")
+        if not row.get("revision_payload_version_id"):
+            blockers.append("revision_payload_version_id_missing")
+        if not row.get("revision_observation_id"):
+            blockers.append("revision_observation_id_missing")
     if symbol:
         if symbol not in (row.get("symbol_official_schedule_statuses") or {}):
             blockers.append("symbol_official_schedule_status_missing")
@@ -361,6 +418,16 @@ def validate_schedule_revision_contract(row: dict[str, Any]) -> dict[str, Any]:
             blockers.append("symbol_official_schedule_revision_id_missing")
         if symbol not in (row.get("symbol_official_schedule_revision_available_at_ms") or {}):
             blockers.append("symbol_official_schedule_revision_available_at_ms_missing")
+        if row.get("revision_intent") == "cancelled" and (row.get("symbol_revised_anchor_ms") or {}).get(symbol) is not None:
+            blockers.append("cancelled_revision_has_revised_anchor")
+        status = (row.get("symbol_official_schedule_statuses") or {}).get(symbol)
+        revised_anchor = (row.get("symbol_revised_anchor_ms") or {}).get(symbol)
+        if status not in {"rescheduled", "postponed_without_anchor", "cancelled"}:
+            blockers.append("symbol_official_schedule_status_invalid")
+        if row.get("revision_intent") == "rescheduled_with_new_anchor" and revised_anchor is None:
+            blockers.append("rescheduled_revision_anchor_missing")
+        if row.get("revision_intent") in {"cancelled", "postponed_without_anchor"} and revised_anchor is not None:
+            blockers.append("non_rescheduled_revision_has_anchor")
     provenance = row.get("revision_provenance") or {}
     if not {"payload_sha256", "parser_version"}.issubset(provenance.keys()):
         blockers.append("revision_provenance_missing")

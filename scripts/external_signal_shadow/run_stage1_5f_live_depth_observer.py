@@ -52,7 +52,7 @@ def write_observer_root_contract_atomically(output_root: str, root_mode: str, re
         "root_contract_schema_version": 1,
         "root_mode": root_mode,
         "formal_event_contract_versions_allowed": [1] if root_mode == "v1_compatibility_diagnostic_only" else [2],
-        "formal_schedule_revision_contract_versions_allowed": [1],
+        "formal_schedule_revision_contract_versions_allowed": [1, 2],
         "anchor_precedence_policy": getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_ANCHOR_PRECEDENCE_POLICY", "official_schedule_priority_v1"),
         "created_at_ms": int(time.time() * 1000),
         "reason": reason,
@@ -175,6 +175,9 @@ def process_schedule_revision_event(
         ScheduleRevisionRegistry,
         compute_revision_application_id,
     )
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        validate_schedule_revision_contract,
+    )
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
         apply_anchor_contract_revision_to_state,
     )
@@ -188,19 +191,29 @@ def process_schedule_revision_event(
     revision_id = str(revision_event.get("revision_id") or "")
     revision_payload_hash = str(revision_event.get("revision_payload_hash") or "")
 
-    if (
-        revision_event.get("event_type") != "futures_contract_launch_schedule_revision"
-        or revision_event.get("formal_schedule_revision_contract_version") != 1
-        or not symbol
-        or not stable_identity
-        or not revision_id
-        or not revision_payload_hash
-    ):
+    contract_version = revision_event.get("formal_schedule_revision_contract_version")
+    if contract_version == 2:
+        validation = validate_schedule_revision_contract(revision_event)
+        app_id = str(revision_event.get("revision_application_id") or "")
+        malformed = not validation["valid"] or not symbol or not stable_identity or not app_id
+    elif contract_version == 1:
         app_id = compute_revision_application_id(
             stable_schedule_identity=stable_identity or "missing",
             revision_id=revision_id or "missing",
             revision_payload_hash=revision_payload_hash or "missing",
         )
+        malformed = (
+            revision_event.get("event_type") != "futures_contract_launch_schedule_revision"
+            or not symbol
+            or not stable_identity
+            or not revision_id
+            or not revision_payload_hash
+        )
+    else:
+        app_id = str(revision_event.get("revision_application_id") or "")
+        malformed = True
+
+    if malformed:
         registry.record_revision(
             revision_application_id=app_id,
             status="revision_blocked",
@@ -211,11 +224,6 @@ def process_schedule_revision_event(
         )
         return {"status": "revision_blocked", "revision_application_id": app_id}
 
-    app_id = compute_revision_application_id(
-        stable_schedule_identity=stable_identity,
-        revision_id=revision_id,
-        revision_payload_hash=revision_payload_hash,
-    )
     if registry.is_applied(app_id):
         return {"status": "revision_replay_noop", "revision_application_id": app_id}
     prior_status = registry.latest_status(app_id)
@@ -369,6 +377,16 @@ def build_accepted_row_from_state(state, watermark, now_ms: int) -> dict:
         "admission_watermark_at_first_seen_ms": state.admission_watermark_at_first_seen_ms,
         "announcement_capture_post_bootstrap_watermark": state.announcement_capture_post_bootstrap_watermark,
         "launch_anchor_post_bootstrap_watermark": state.launch_anchor_post_bootstrap_watermark,
+        "source_article_id": getattr(state, "source_article_id", ""),
+        "source_detail_url_normalized": getattr(state, "source_detail_url_normalized", ""),
+        "source_published_at_ms": getattr(state, "source_published_at_ms", None),
+        "formal_event_contract_version": getattr(state, "formal_event_contract_version", None),
+        "formal_event_consumable_by_stage1_5f": getattr(state, "formal_event_consumable_by_stage1_5f", None),
+        "source_contract_status": getattr(state, "source_contract_status", None),
+        "symbol_identity_validation_status": getattr(state, "symbol_identity_validation_status", None),
+        "launch_anchor_evidence_level": getattr(state, "launch_anchor_evidence_level", None),
+        "effective_observation_anchor_source": getattr(state, "effective_observation_anchor_source", None),
+        "launch_anchor_validation_status": getattr(state, "launch_anchor_validation_status", None),
         "source_anchor_contract_hash": state.source_anchor_contract_hash,
         "admission_anchor_contract_hash": state.admission_anchor_contract_hash,
         "latest_anchor_contract_hash": state.latest_anchor_contract_hash,

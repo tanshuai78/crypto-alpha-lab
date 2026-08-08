@@ -167,6 +167,13 @@ def test_serialize_retry_articles_fills_required_schema_defaults():
     assert article["event_type"] == "futures_contract_launch"
 
 
+def test_serialize_retry_articles_preserves_revision_detail_work_type():
+    serialized = serialize_retry_articles({
+        "revision": {"source_article_id": "revision", "detail_work_type": "launch_schedule_revision_detail"}
+    })
+    assert serialized["revision"]["detail_work_type"] == "launch_schedule_revision_detail"
+
+
 def test_never_attempted_defer_sla_breach_counter_increments_before_max_age():
     result = classify_never_attempted_defer_state(
         detail_fetch_attempt_count=0,
@@ -1023,5 +1030,4 @@ def test_v1_scheduler_state_loads_with_safe_defaults(tmp_path):
     assert art["last_bapi_detail_status"] is None
     assert art["last_bapi_parser_status"] is None
     assert art["launch_anchor_policy"] is None
-
 

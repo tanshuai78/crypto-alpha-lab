@@ -222,6 +222,60 @@ def reduce_latest_states_by_event_symbol_id(states: list[dict]) -> dict[str, dic
     return {es_id: item[1] for es_id, item in latest.items()}
 
 
+def _validate_formal_v2_lineage(
+    accepted_event: dict,
+    latest_st: dict | None,
+    completed_st: dict | None = None,
+) -> tuple[bool, str | None]:
+    is_v2_declared = (
+        accepted_event.get("formal_event_contract_version") == 2
+        or (latest_st and (latest_st.get("formal_event_contract_version") == 2 or latest_st.get("anchor_contract_version") == 2))
+        or (completed_st and (completed_st.get("formal_event_contract_version") == 2 or completed_st.get("anchor_contract_version") == 2))
+    )
+    if not is_v2_declared:
+        return True, None  # Legacy v1 fallback allowed
+
+    if not latest_st:
+        return False, "anchor_contract_lineage_state_missing"
+
+    required_pairs = (
+        ("anchor_precedence_policy", "official_schedule_priority_v1"),
+        ("source_anchor_contract_hash", None),
+        ("admission_anchor_contract_hash", None),
+    )
+    for field, expected in required_pairs:
+        accepted_value = accepted_event.get(field)
+        state_value = latest_st.get(field)
+        if not accepted_value or not state_value or accepted_value != state_value:
+            return False, "formal_v2_lineage_incomplete_or_mismatch"
+        if expected is not None and accepted_value != expected:
+            return False, "formal_v2_lineage_incomplete_or_mismatch"
+
+    v2_valid = (
+        accepted_event.get("formal_event_contract_version") == 2
+        and latest_st.get("anchor_contract_version") == 2
+        and accepted_event.get("source_contract_status") == "formal_v2_valid"
+        and accepted_event.get("launch_anchor_evidence_level") == "official_schedule"
+        and latest_st.get("latest_anchor_evidence_level") == "official_schedule"
+        and accepted_event.get("effective_observation_anchor_source") == "official_schedule_anchor"
+        and bool(accepted_event.get("source_article_id"))
+        and accepted_event.get("source_article_id") == latest_st.get("source_article_id")
+        and not latest_st.get("observation_anchor_revision_contaminated")
+        and latest_st.get("latest_max_evidence_class") == "clean_or_recovery"
+        and bool(latest_st.get("latest_anchor_contract_hash"))
+    )
+    if not v2_valid:
+        return False, "formal_v2_lineage_incomplete_or_mismatch"
+
+    if completed_st:
+        latest_hash = latest_st.get("latest_anchor_contract_hash")
+        comp_hash = completed_st.get("latest_anchor_contract_hash")
+        if not comp_hash or latest_hash != comp_hash:
+            return False, "formal_v2_lineage_incomplete_or_mismatch"
+
+    return True, None
+
+
 def validate_evidence_integrity(
     accepted_events: list[dict],
     watermark: dict,
@@ -242,7 +296,6 @@ def validate_evidence_integrity(
 
     state_by_id = reduce_latest_states_by_event_symbol_id(states_list)
 
-    # 2. Verify Accepted Events
     evidence_label_counts = {lbl: 0 for lbl in VALID_EVIDENCE_LABELS}
     for event in accepted_events:
         label = get_event_evidence_label(event)
@@ -255,7 +308,6 @@ def validate_evidence_integrity(
 
         evidence_label_counts[label] += 1
 
-        # Watermark version check
         if watermark:
             if "watermark_version" in event and event.get("watermark_version") != watermark.get("watermark_version"):
                 blockers.append("watermark_version_mismatch")
@@ -267,7 +319,6 @@ def validate_evidence_integrity(
             ):
                 blockers.append("watermark_max_seen_detected_at_ms_mismatch")
 
-        # 1.5G Anchor Lineage & Contamination Blockers
         es_id = event.get("event_symbol_id")
         latest_st = state_by_id.get(es_id) if es_id else None
         if not latest_st and es_id:
@@ -281,6 +332,10 @@ def validate_evidence_integrity(
                 blockers.append("anchor_revision_contaminated")
             if latest_st.get("validation_status") == "malformed" or event.get("validation_status") == "malformed":
                 blockers.append("malformed_anchor_contract")
+
+        v2_valid, v2_blocker = _validate_formal_v2_lineage(event, latest_st)
+        if not v2_valid and v2_blocker and v2_blocker not in blockers:
+            blockers.append(v2_blocker)
 
         if (
             event.get("effective_observation_anchor_source") == "exchangeinfo_onboard_date"
@@ -332,8 +387,10 @@ def validate_evidence_integrity(
             # Must join with completed state AND snapshots must exist
             if st.get("status") == "completed" and es_id in snapshots_by_id and snapshots_by_id[es_id]:
                 if label == "announcement_and_launch_time":
-                    formal_announcement_and_launch_count += 1
-                    formal_completed_event_symbol_ids.add(es_id)
+                    v2_pass, _ = _validate_formal_v2_lineage(event, st, completed_st=st)
+                    if v2_pass:
+                        formal_announcement_and_launch_count += 1
+                        formal_completed_event_symbol_ids.add(es_id)
 
     return EvidenceIntegrityResult(
         blockers=blockers,

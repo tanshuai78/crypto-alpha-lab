@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 from configs import base
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
@@ -765,3 +766,43 @@ def test_missing_identity_does_not_delete_or_merge_state():
     rebuilt, diag = rebuild_missing_stable_event_symbol_key_if_safe(s)
     assert rebuilt.event_symbol_id == "es_keep"
     assert rebuilt.status == "active"
+
+
+def test_ko_rddt_state_lineage_roundtrip():
+    fixture_path = Path("tests/fixtures/external_signal_shadow/stage1_5f/ko_rddt_formal_v2_lineage/ko_rddt_stage1_5d_event.json")
+    event_row = json.loads(fixture_path.read_text())
+    event_symbol_row = dict(event_row)
+    event_symbol_row["symbol"] = "KOUSDT"
+    event_symbol_row["event_symbol_id"] = "futures_contract_launch|307687ad279e42e6909ee1be8c472b50|KOUSDT"
+    event_symbol_row["detected_at_ms"] = 1722934800000
+
+    pending = create_pending_observation_state(
+        event_symbol_row=event_symbol_row,
+        status="pending_observation",
+        diagnostics=event_symbol_row,
+        now_ms=1722934800000,
+    )
+    assert pending.source_article_id == "307687ad279e42e6909ee1be8c472b50"
+    assert pending.source_detail_url_normalized == "https://www.binance.com/en/support/announcement/307687ad279e42e6909ee1be8c472b50"
+    assert pending.formal_event_contract_version == 2
+    assert pending.source_contract_status == "formal_v2_valid"
+    assert pending.launch_anchor_evidence_level == "official_schedule"
+    assert pending.effective_observation_anchor_source == "official_schedule_anchor"
+    assert pending.launch_anchor_validation_status == "valid_official"
+
+    promoted = promote_pending_to_active_observation(
+        pending_state=pending,
+        now_ms=1722934800000,
+        evidence_start_class="clean_start",
+    )
+
+    d = promoted.to_dict()
+    restored = EventSymbolState.from_dict(d)
+
+    assert restored.source_article_id == "307687ad279e42e6909ee1be8c472b50"
+    assert restored.source_detail_url_normalized == "https://www.binance.com/en/support/announcement/307687ad279e42e6909ee1be8c472b50"
+    assert restored.formal_event_contract_version == 2
+    assert restored.source_contract_status == "formal_v2_valid"
+    assert restored.launch_anchor_evidence_level == "official_schedule"
+    assert restored.effective_observation_anchor_source == "official_schedule_anchor"
+    assert restored.launch_anchor_validation_status == "valid_official"

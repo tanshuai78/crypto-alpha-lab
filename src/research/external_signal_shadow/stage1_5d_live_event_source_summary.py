@@ -160,6 +160,14 @@ def build_smoke_summary(
         "detail_http_manifest_mismatch_count": counters.get("detail_http_manifest_mismatch_count", 0),
         "bapi_payload_revision_count": counters.get("bapi_payload_revision_count", 0),
         "bapi_payload_hash_change_count": counters.get("bapi_payload_hash_change_count", 0),
+        "schedule_revision_emitted_count": counters.get("schedule_revision_emitted_count", 0),
+        "schedule_revision_diagnostic_count": counters.get("schedule_revision_diagnostic_count", 0),
+        "schedule_revision_index_collision_count": counters.get(
+            "schedule_revision_index_collision_count", 0
+        ),
+        "formal_launch_identity_index_rebuilt_count": counters.get(
+            "formal_launch_identity_index_rebuilt_count", 0
+        ),
         "bapi_detail_source_degraded": counters.get("bapi_detail_source_degraded", False),
         "support_detail_source_degraded": counters.get("support_detail_source_degraded", False),
         "all_detail_sources_degraded": counters.get("all_detail_sources_degraded", False),

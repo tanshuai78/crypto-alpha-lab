@@ -1,0 +1,68 @@
+{
+  "l1_reschedule": {
+    "title": "Postponement of AIAUSDT USD-M Perpetual Contract Launch",
+    "article_id": "rev_l1_001",
+    "supersedes_article_id": "orig_aia_001",
+    "symbol": "AIAUSDT",
+    "intent": "rescheduled_with_new_anchor",
+    "revised_anchor_ms": 1723000000000,
+    "superseded_anchor_ms": 1722900000000
+  },
+  "l2_url_reschedule": {
+    "title": "Update on Binance Futures Launch Schedule",
+    "article_id": "rev_l2_002",
+    "supersedes_url": "https://www.binance.com/en/support/announcement/orig_aia_001",
+    "symbol": "AIAUSDT",
+    "intent": "rescheduled_with_new_anchor",
+    "revised_anchor_ms": 1723000000000
+  },
+  "l3_old_anchor_reschedule": {
+    "title": "Rescheduling of Contract Launch",
+    "article_id": "rev_l3_003",
+    "symbol": "AIAUSDT",
+    "superseded_anchor_ms": 1722900000000,
+    "intent": "rescheduled_with_new_anchor",
+    "revised_anchor_ms": 1723000000000
+  },
+  "l4_symbol_only": {
+    "title": "AIAUSDT Schedule Update",
+    "article_id": "rev_l4_004",
+    "symbol": "AIAUSDT",
+    "intent": "rescheduled_with_new_anchor",
+    "revised_anchor_ms": 1723000000000
+  },
+  "cancelled": {
+    "title": "Cancellation of AIAUSDT Contract Launch",
+    "article_id": "rev_cancel_005",
+    "supersedes_article_id": "orig_aia_001",
+    "symbol": "AIAUSDT",
+    "intent": "cancelled",
+    "revised_anchor_ms": null
+  },
+  "multi_symbol_exact_per_symbol": {
+    "article_id": "rev_multi_006",
+    "supersedes_article_id": "orig_multi_001",
+    "symbols": ["FOOUSDT", "BARUSDT"],
+    "intent": "rescheduled_with_new_anchor",
+    "revised_anchor_ms": 1723000000000
+  },
+  "multi_symbol_all_symbols": {
+    "article_id": "rev_multi_007",
+    "supersedes_article_id": "orig_multi_001",
+    "statement": "All perpetual contracts mentioned in announcement orig_multi_001 are postponed",
+    "intent": "postponed_without_anchor"
+  },
+  "in_place_payload_edit": {
+    "article_id": "rev_edit_008",
+    "raw_payload_sha256_v1": "sha256_v1_payload",
+    "raw_payload_sha256_v2": "sha256_v2_payload"
+  },
+  "late_conflict": {
+    "article_id_a": "rev_conflict_a",
+    "article_id_b": "rev_conflict_b",
+    "symbol": "AIAUSDT",
+    "same_time_ms": 1722950000000,
+    "revised_anchor_a_ms": 1723000000000,
+    "revised_anchor_b_ms": 1723100000000
+  }
+}

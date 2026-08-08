@@ -1,100 +1,205 @@
 # Stage 1.5D Schedule Revision Producer Rules Design
 
-**日期:** 2026-08-04
+**日期:** 2026-08-04，2026-08-07 修订，2026-08-08 completion-audit 修订
 **关联主设计:** `docs/designs/2026-08-03-external-signal-shadow-lab-stage1-5d-1-5f-official-launch-time-priority-anchor-precedence-hotfix-design_CN.md`
-**关联实现计划:** `docs/plans/2026-08-03-external-signal-shadow-lab-stage1-5d-1-5f-official-schedule-priority-anchor-contract-v2-hotfix-implementation-plan_CN.md`
-**范围:** Stage 1.5D schedule revision producer classifier / linker / formal row emission rules
-**状态:** design revised after P0 review
+**关联实现计划:** `docs/plans/2026-08-07-external-signal-shadow-lab-stage1-5d-schedule-revision-producer-and-1-5f-lineage-closure-implementation-plan_CN.md`
+**范围:** Stage 1.5D schedule revision producer、Stage 1.5F/1.5G formal v2 lineage prerequisite、只读离线 salvage audit
+**状态:** completion audit found producer/lineage wiring incomplete; corrective plan must be approved before implementation resumes
 
 ---
 
-## 1. 当前结论
+## 1. Current Decision
 
 ```text
-decision = stage1_5d_schedule_revision_producer_rules_ready_for_implementation_plan_after_prerequisite_check
-scope = stage1_5d_revision_detection_linking_identity_and_formal_row_emission
-producer_policy_version = linked_only_formal_v1
-schedule_revision_consumer_prerequisites_verified = required_before_enablement
+decision = stage1_5d_schedule_revision_producer_rules_revised_pending_plan_approval
+producer_policy_version = linked_only_formal_v2
 schedule_revision_producer_supported = design_defined
-schedule_revision_producer_enabled = false_until_consumer_prerequisites_verified
+schedule_revision_producer_enabled = false
+schedule_revision_consumer_prerequisites_verified = required_before_enablement
+offline_salvage_mode = readonly_nonproduction_audit_only
 trade_signal_allowed = false
 paper_trading_allowed = false
 live_trading_allowed = false
 execution_engine_allowed = false
 alpha_interpretation_allowed = false
-execution_feasibility_claim_allowed = false
 ```
 
-本设计只定义 Stage 1.5D 自动 producer。它不假设 consumer 能力已经被事实验证。实施计划开始前必须先用代码、测试和 commit SHA 验证 1.5F / 1.5G 已能安全消费 schedule revision row。
+本设计先关闭 KOUSDT/RDDTUSDT 暴露的 formal v2 lineage drop，再实现自动 revision producer。任何一部分的不确定性都只能阻断 revision formal emission，不能阻断正常 formal v2 launch collection。
 
 ---
 
-## 2. Review 采纳结论
+## 2. Confirmed Facts And Root Cause
 
-```text
-partner1_p0 = all_adopted
-partner2_p0 = all_adopted
-partner1_p1 = adopted
-partner2_p1 = adopted_except_active_cancel_stop_snapshots
-implementation_plan_allowed = only_after_this_design_revision
-implementation_allowed = false
-```
-
-唯一不完全采纳项：`cancelled revision` 到达时，active observation 不立即停止 snapshot collection。原因是 Stage 1.5F 当前是 read-only evidence collector，停止会制造部分证据窗口；更安全的默认是继续只读采集到原窗口结束，同时将 lineage 标记为 contaminated，让 Stage 1.5G 判 invalid。
+1. 2026-08-06 的 KOUSDT/RDDTUSDT Stage 1.5D event 已是 `formal_event_contract_version = 2`、`source_contract_status = formal_v2_valid`、official-schedule anchor valid。
+2. Stage 1.5F 的 `flatten_event_symbols()` 保留原 event row，但 pending/active state 与 accepted-row builder 未完整持久化 source/anchor lineage，导致 1.5G 只能得到 `launch_time_only`。
+3. v2 anchor contract 已有 `source_anchor_contract_hash`、`admission_anchor_contract_hash`、`latest_anchor_contract_hash`、contract version、precedence policy、evidence class 与 contamination 字段；1.5G formal recognition 必须使用它们，而不是只检查若干 provenance 字符串。
+4. 现有 revision builder/consumer 仍混合 semantic identity 与 payload identity，且 current-poll in-memory linking、root-local index、in-place edit time 和 late-conflict transport 均未形成完整 contract。
+5. completion audit 确认：helper 可独立通过单元测试，但若 Stage 1.5D poll runner 未在 listing -> detail -> durable launch/index -> revision emission 的实际路径调用它，则 producer 未实现；runtime gate 不得仅因模块存在而宣称 producer supported/healthy。
+6. completion audit 确认：readonly salvage 若未读取并校验指定 source event、accepted row 与 latest state 的真实 JSONL 输入，就不得输出 pass；静态 manifest 不是 audit evidence。
 
 ---
 
-## 3. Consumer Prerequisite Gate
+## 3. Scope And Non-Goals
 
-Stage 1.5D 只有在以下硬证据齐全时，才允许设置：
+### 3.1 In Scope
 
-```text
-schedule_revision_consumer_prerequisites_verified = true
-schedule_revision_producer_enabled = true
-```
+- formal v2 launch lineage 在 1.5F state、accepted/reconcile artifact 与 1.5G review 中的端到端一致性。
+- Stage 1.5D listing pre-classifier、mandatory detail lifecycle、payload-version time registry、curated formal launch identity snapshot、linked-only revision transport。
+- Stage 1.5F semantic idempotency、cancellation/late-conflict fail-closed handling。
+- KO/RDDT 只读离线 lineage salvage audit。
 
-必须验证的证据：
+### 3.2 Explicit Non-Goals
 
-```text
-1. 1.5F schedule revision contract validator 文件和函数存在。
-2. 1.5F durable schedule revision registry 存在，并覆盖 replay/idempotency。
-3. 1.5F orphan/replay/crash recovery tests 存在且通过。
-4. 1.5F pending/active/completed lineage contamination tests 存在且通过。
-5. 1.5G latest observer_state lineage invalidation tests 存在且通过。
-6. 上述能力对应 commit SHA 已记录在 deployment checklist。
-```
-
-Runtime gate 必须区分 capability 与 health：
-
-```text
-schedule_revision_producer_supported = true
-schedule_revision_producer_enabled = false | true
-schedule_revision_producer_health = ready | degraded | blocked
-schedule_revision_consumer_prerequisites_verified = false | true
-```
-
-如果 revision index 损坏、schema 不兼容、detail endpoint 退化，必须暂停 revision formal emission，但 normal v2 launch collection 可以继续运行。
+- 不启用 paper/live/execution/alpha，不读取私有 API，不增加订单、仓位或账户依赖。
+- 不回写旧 root，不修改现有 accepted/state/snapshot JSONL，不以 salvage 制造 clean/formal evidence。
+- 不接受 title-only revision、L4 symbol-only linking、scheduler state、模糊语义匹配或任意 historical data scan 作为 formal linking evidence。
+- 不新增数据库、通用 migration framework、generic revision engine、人工审核 UI 或 conflict transport event type。
 
 ---
 
-## 4. 非目标
+## 4. Acceptance Invariants
 
-```text
-1. 不启用 paper/live/execution/alpha。
-2. 不把 spot/margin/earn/options/delisting/settlement/API maintenance 纳入 revision producer。
-3. 不允许 symbol-only supersedes inference。
-4. 不让 scheduler candidate 作为 formal linking evidence。
-5. 不要求本轮实现人工审核 UI。
-6. 不回写或改写旧 root。
-```
+| ID | Invariant |
+| --- | --- |
+| `INV-C1` | 一个 v2 source contract 必须在 1.5F admission、accepted、latest/completed state 与 1.5G formal recognition 中保持可验证的一致谱系。 |
+| `INV-C2` | Offline salvage 是非生产只读 audit；它不得改变 production formal count、clean pass、evidence label 或原 artifact。 |
+| `INV-P1` | 只有 detail-confirmed、L1/L2/L3 uniquely linked、contract-valid、point-in-time valid 的 revision 可 formal emit。 |
+| `INV-P2` | 同 poll launch 只有 event row 与 formal identity index 均已应用层持久化后才 linkable。 |
+| `INV-P3` | 跨 root linking 只使用 operator-explicit、版本化、带 manifest 的 curated identity snapshot；不得隐式扫描 `data/`。 |
+| `INV-P4` | `revision_available_at_ms` 永远等于该 raw payload version 的首次观测时间，并在 restart 后不变。 |
+| `INV-P5` | 新 revision contract row 必须令 `revision_id == revision_semantic_id == revision_application_id`。 |
+| `INV-P6` | 合法 late equal-time conflict 必须 transport 到 1.5F；1.5F 不得静默采用先到 revision。 |
+| `INV-P7` | 新 producer 只发 `formal_schedule_revision_contract_version = 2`；只有 version 1 artifact 可使用 legacy application-id fallback。 |
+| `INV-S1` | producer effective enablement 需要可验证的 consumer prerequisite attestation；缺失时 fail closed。 |
+| `INV-W1` | revision producer 必须由 Stage 1.5D production poll 的真实 listing/detail 生命周期调用；孤立 helper、fixture 或 summary 字段均不构成实现证据。 |
 
 ---
 
-## 5. Revision Intent Classifier
+## 5. Formal V2 Consumer Prerequisite Gate
 
-### 5.1 结构化输出
+### 5.1 Strict Production Lineage Gate
 
-Classifier 不能使用 full-article keyword hit 直接判定。输出必须是结构化 intent：
+当 accepted event 或 latest state 声明 `formal_event_contract_version = 2` 或 `anchor_contract_version = 2` 时，1.5G 只能在以下条件全部满足时将其计入 `formal_announcement_and_launch_count`：
+
+```text
+accepted.formal_event_contract_version == 2
+latest.anchor_contract_version == 2
+accepted.anchor_precedence_policy == latest.anchor_precedence_policy
+  == official_schedule_priority_v1
+accepted.source_contract_status == formal_v2_valid
+accepted.launch_anchor_evidence_level == official_schedule
+latest.latest_anchor_evidence_level == official_schedule
+accepted.effective_observation_anchor_source == official_schedule_anchor
+accepted.source_article_id is non-empty
+accepted.source_anchor_contract_hash is non-empty
+accepted.source_anchor_contract_hash == latest.source_anchor_contract_hash
+accepted.admission_anchor_contract_hash == latest.admission_anchor_contract_hash
+latest.observation_anchor_revision_contaminated is false
+latest.latest_max_evidence_class == clean_or_recovery
+```
+
+若存在单独 completed state，则还必须满足：
+
+```text
+latest.latest_anchor_contract_hash == completed.latest_anchor_contract_hash
+```
+
+任一缺失或不一致：
+
+```text
+formal_announcement_and_launch_count += 0
+blocker = formal_v2_lineage_incomplete_or_mismatch
+```
+
+旧 schema / legacy root 没有 v2 declaration 时维持现有兼容逻辑；新 schema 写出的 v2 state 缺字段则是 corruption，不得按 legacy 降级。
+
+### 5.2 State Schema Boundary
+
+`EventSymbolState` 增加显式 schema version。旧 state 缺 version/字段可按旧 schema 默认值读取；新 schema 的 v2 state 必须持久化完整 contract 字段。`from_dict()` 仍过滤未知字段，保证前后兼容而不掩盖新 schema 的缺失 lineage。
+
+### 5.3 Effective Producer Enablement
+
+```text
+configured_producer_enabled = config flag
+effective_producer_enabled = configured_producer_enabled
+  AND prerequisite_commit_sha == running_commit_sha
+  AND prerequisite_suite_passed == true
+  AND real_aia_fixture_verified == true
+```
+
+任何 prerequisite metadata 缺失、commit 不一致或 fixture 未验证时，`effective_producer_enabled = false`，runtime health 为 `blocked`；正常 launch collection 继续。
+
+---
+
+## 6. Offline Evidence Salvage Boundary
+
+KO/RDDT salvage 是一个独立 audit，不是 1.5G production review 的输入覆盖层。
+
+```text
+input = immutable local 1.5D event JSONL + immutable local 1.5F accepted/state JSONL
+operation = exact (event_id, symbol) lineage comparison
+output = formal_lineage_salvage_manifest.json + nonproduction audit report
+salvage_mode = readonly_lineage_reconciliation
+```
+
+允许证明：指定 1.5D event、每个 `(event_id, symbol)` accepted row 与 latest state 在 source event identity、article id、formal version、anchor policy、source/admission hash 上一致，或明确输出哪个输入/字段缺失或不一致。
+
+每次 audit 必须：
+
+```text
+1. 显式接收本地 1.5D event glob、1.5F accepted glob、1.5F observer-state glob；不得猜测或扫描其他 root。
+2. 仅选择 article 307687ad279e42e6909ee1be8c472b50 与 KOUSDT/RDDTUSDT。
+3. 对每个实际读取的文件和每个匹配 JSONL row 记录 SHA-256、路径、行号与解析结果。
+4. 对两 symbol 全部成功才输出 pass；无匹配、重复匹配、缺 state 或任一不一致必须输出 failed。
+5. 写 manifest 与 Markdown report 前后再次比较输入文件 SHA-256，证明没有写入输入。
+```
+
+不允许：
+
+```text
+- 改写 accepted/state/snapshot/watermark 或创建派生 state overlay
+- 改变 evidence_label
+- 改变 formal_announcement_and_launch_count
+- 将 clean_depth_evidence_pass 从 false 改为 true
+- 将 launch_time_only 解释为 announcement_and_launch_time
+```
+
+结果仅能是：
+
+```text
+stage1_5g_formal_lineage_salvage_audit_pass
+stage1_5g_formal_lineage_salvage_audit_failed
+```
+
+其报告必须明确 `nonproduction_audit_only = true`。该任务不需要复制整 root，也不需要 `cp -al`。
+
+---
+
+## 7. Revision Candidate And Mandatory Detail Lifecycle
+
+### 7.1 Listing Pre-Classifier
+
+增加只具有 scheduling authority 的函数：
+
+```python
+classify_schedule_revision_detail_candidate_from_listing(
+    title: str,
+    source_category: str,
+    source_article_id: str,
+) -> bool
+```
+
+它只允许在 futures-launch context 下，以 `postpone`、`reschedule`、`delay`、`cancel`、`not proceed`、`instead of` 等 bounded cue 进入：
+
+```text
+detail_work_type = launch_schedule_revision_detail
+```
+
+它不得决定 intent、supersedes、anchor 或 formal emission。plain launch、API maintenance、funding/settlement delay 必须不入队。
+
+### 7.2 Detail Classifier
+
+只有可信 BAPI detail 才能产生：
 
 ```text
 revision_intent =
@@ -105,90 +210,34 @@ revision_intent =
   ambiguous_revision_intent
 ```
 
-成为 formal candidate 的最低条件：
+detail HTTP failure/empty/202 是 pending retry；max-age exceeded 是 terminal diagnostic；ambiguous 是 diagnostic-only。
+
+### 7.3 Production Poll Integration Boundary
+
+producer 不是一个可选的 post-processing helper。配置的 producer effective enablement 为 true 时，Stage 1.5D 的**同一个 poll** 必须按以下实际调用顺序执行；任一边界未执行则 `producer_health = blocked`，不得 formal emit：
 
 ```text
-revision action phrase
-+ futures contract launch lifecycle context
-+ symbol mapping
-+ same logical_block_id
-+ mandatory detail payload parsed
+listing row
+  -> bounded pre-classifier
+  -> existing detail-retry scheduler work item (detail_work_type = launch_schedule_revision_detail)
+  -> trusted BAPI detail result
+  -> detail classifier / symbol and supersedes extraction
+  -> load only current durable index + explicit snapshot
+  -> point-in-time linker
+  -> all-or-none batch validation
+  -> append formal schedule revision rows or diagnostic JSONL
+  -> persist/rebuild restart state and counters
 ```
 
-`will launch at` 本身不是 revision 证据。它只有在同一 logical block 内同时出现 replacement/reschedule/postpone 语义，或明确指向旧 schedule，才可进入 revision intent。
-
-### 5.2 分类优先级
-
-同一 logical block 内按以下优先级分类：
-
-```text
-cancelled
-> rescheduled_with_new_anchor
-> postponed_without_anchor
-> ordinary_new_launch
-> out_of_scope
-```
-
-无法区分 postpone 与 cancel 时：
-
-```text
-revision_intent = ambiguous_revision_intent
-formal_emit_allowed = false
-```
-
-### 5.3 必须覆盖的反例
-
-```text
-ordinary "will launch SYMBOL at TIME" -> ordinary_new_launch, not revision
-"API maintenance delayed" -> out_of_scope
-"funding settlement delayed" -> out_of_scope
-same article postpone + new time -> rescheduled_with_new_anchor
-ambiguous postpone/cancel language -> ambiguous_revision_intent, diagnostic only
-```
+launch rows and revision rows share the existing `events/*.jsonl` transport, distinguished by `event_type`; no second runtime loop or polling process is introduced. `append_formal_schedule_revision()` is the only revision writer. The runner must pass the producer-supplied `revision_application_id` unchanged to Stage 1.5F through that transport.
 
 ---
 
-## 6. Mandatory Detail-Fetch Lifecycle
+## 8. Formal Launch Identity Index And Cross-Root Snapshot
 
-Revision candidate 必须进入 detail/BAPI pipeline。Title-only 信息只能生成 candidate，不能 formal emit。
+### 8.1 Index Rows
 
-```text
-list/title possible revision
--> revision_candidate_pending_detail
--> detail_work_type = launch_schedule_revision_detail
--> BAPI/detail fetch
--> detail parsed into intent/link/anchor evidence
--> formal launch identity index lookup
--> linked-only formal row or diagnostic
-```
-
-Detail 状态规则：
-
-```text
-detail not attempted -> no formal revision
-detail HTTP 202 / timeout / empty -> pending revision detail retry
-detail max age exceeded -> terminal_non_consumable revision diagnostic
-detail parsed but intent/link ambiguous -> diagnostic only
-detail parsed and linked -> eligible for formal contract validation
-```
-
-Scheduler 必须保留单文章 retry 上限，并避免 fresh revision 被旧 HTTP 202 backlog 饿死。
-
----
-
-## 7. Formal Launch Identity Index
-
-### 7.1 唯一 formal linking source
-
-Producer formal linking 只能查询版本化 identity index：
-
-```text
-stage1_5d_formal_launch_identity_index.jsonl
-```
-
-该 index 只能由通过共享 validator 的 formal v2 launch rows 构建。Scheduler state 只能用于 diagnostics，不得生成 `supersedes_source_article_id` 或 `stable_schedule_identity`。
-
-Index row 最少字段：
+唯一 formal linking source 是 validator-approved formal v2 launch identity row。每条 row 至少包括：
 
 ```text
 index_schema_version
@@ -202,438 +251,289 @@ formal_event_contract_version
 source_anchor_contract_hash
 official_schedule_anchor_ms
 source_published_at_ms
-first_observed_at_ms
+identity_first_observed_at_ms
+formal_row_durable_at_ms
 event_id
 payload_sha256
 ```
 
-### 7.2 Index 有效性
+不得把 scheduler state 转化为 index identity。
+
+### 8.2 Curated Snapshot Contract
+
+新 root 如需 14-day lookback，必须由 operator 显式提供：
 
 ```text
-index missing -> schedule_revision_producer_health = blocked
-index schema invalid -> schedule_revision_producer_health = blocked
-index hash invalid -> schedule_revision_producer_health = blocked
-explicit L1/L2 reference not found in index -> orphaned
-explicit L1/L2 reference resolves multiple rows -> ambiguous
+--formal-launch-identity-index-snapshot <approved-path>
 ```
 
-配置必须显式存在：
+snapshot manifest 必须有：
 
 ```text
-EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS = 14
+index_schema_version
+index_built_at_ms
+index_content_sha256
+source_root_ids
+source_root_commit_shas
+source_index_paths
 ```
 
-不允许在代码中用 silent fallback 掩盖该常量缺失。
+snapshot 只含已验证 source root 的 immutable index rows。无 snapshot 时，producer 可以只使用当前 root 已持久化 index；跨 root link 不可用并写 `orphaned`/coverage diagnostic。禁止递归或通配扫描任意 `data/` root。
 
----
-
-## 8. Poll 内查询时序
-
-Producer 的查询窗口必须是 point-in-time safe：
+### 8.3 Index Validity And Collision
 
 ```text
-state_query_window = prior polls durable formal launch identity index
-                   + current poll in-memory formal launch index built before revision processing
-```
-
-同一 poll 中的处理顺序：
-
-```text
-1. parse launch rows
-2. validate launch rows against formal v2 contract
-3. add valid launch rows to in-memory formal launch index
-4. parse revision candidates
-5. link revision candidates against durable index + current in-memory index
-6. append launch rows, revision rows, diagnostics, and batch state durably
-```
-
-如果实现无法保证该两阶段顺序，则同 poll 的 launch + revision 组合必须 diagnostic-only，不能 formal emit。
-
----
-
-## 9. Linking Evidence Rules
-
-每个 revision candidate 的每个 symbol 必须得到一个状态：
-
-```text
-linked
-orphaned
-ambiguous
-out_of_scope
-```
-
-第一版 automatic formal linking 只允许 L1/L2/L3：
-
-```text
-L1 explicit_source_article_id:
-  revision body 明确引用原始 articleCode/source_article_id，且 index 中唯一命中。
-
-L2 explicit_original_title_or_url:
-  revision body 明确包含原始公告 URL/title/canonical slug，且 index 中唯一命中。
-
-L3 unique_symbol_original_schedule_match:
-  revision body 给出 symbol + superseded_anchor_ms / old launch time，且 index 中唯一 formal v2 launch row 同时满足：
-    same symbol
-    same product family
-    same settlement asset
-    same contract type
-    same normalized_source_namespace
-    official_schedule_anchor_ms == superseded_anchor_ms
-    original_source_published_at_ms <= revision_available_at_ms
-    revision_available_at_ms - original_source_published_at_ms <= lookback_days
-```
-
-L4 禁用 automatic formal linking：
-
-```text
-L4 unique_symbol_pending_match_without_old_anchor = diagnostic_only
-formal_emit_allowed = false
-```
-
-原因：L4 本质是 symbol + lookback uniqueness，没有独立 supersession 证据，会把不同 lifecycle 错误关联。
-
----
-
-## 10. Formal Row Emission Contract
-
-### 10.1 Builder 输入必须显式
-
-`revision_link_status` 必须由 Producer 显式传入，builder 不得从 `stable_identity` 自行推导。
-
-```python
-build_formal_schedule_revision_row(
-    *,
-    source_article_id: str,
-    supersedes_source_article_id: str,
-    symbol: str,
-    revision_intent: Literal[
-        "rescheduled_with_new_anchor",
-        "postponed_without_anchor",
-        "cancelled",
-    ],
-    link_status: Literal["linked"],
-    revised_anchor_ms: int | None,
-    superseded_anchor_ms: int | None,
-    revision_semantic_id: str,
-    revision_payload_version_id: str,
-    revision_observation_id: str,
-    revision_payload_hash: str,
-    raw_payload_sha256: str,
-    revision_available_at_ms: int,
-    producer_decision_at_ms: int,
-    linking_index_as_of_ms: int,
-    provenance: dict,
-) -> dict
-```
-
-Required guard：
-
-```python
-assert link_status == "linked", "only linked revisions may build formal rows"
-```
-
-如果 `link_status != linked`，Producer 不得调用 builder，必须写 diagnostic。
-
-### 10.2 Intent 到 status 映射
-
-```text
-revision_intent = rescheduled_with_new_anchor:
-  symbol_official_schedule_statuses[symbol] = rescheduled
-  symbol_revised_anchor_ms[symbol] = parsed new anchor
-
-revision_intent = postponed_without_anchor:
-  symbol_official_schedule_statuses[symbol] = postponed_without_anchor
-  symbol_revised_anchor_ms[symbol] = null
-
-revision_intent = cancelled:
-  symbol_official_schedule_statuses[symbol] = cancelled
-  symbol_revised_anchor_ms[symbol] = null
-```
-
-Validator 必须校验：
-
-```text
-symbol_official_schedule_statuses[symbol] in {rescheduled, postponed_without_anchor, cancelled}
-rescheduled requires revised_anchor_ms not null
-postponed_without_anchor requires revised_anchor_ms null
-cancelled requires revised_anchor_ms null
-revision_link_status == linked
+index missing/schema/hash invalid -> producer health = blocked
+same source_article_id + symbol with different source_anchor_contract_hash -> collision
+same stable launch identity with multiple event_ids -> collision
+same index identity with different official anchor -> collision
+any collision -> `index_collision`; producer health = blocked; revision formal emission disabled; normal launch unaffected
 ```
 
 ---
 
-## 11. Time Semantics
+## 9. Durable Poll Ordering And Crash Recovery
 
-必须区分发布时间、首次观测时间和 payload 版本首次观测时间：
-
-```text
-revision_source_published_at_ms
-revision_first_observed_at_ms
-revision_payload_first_observed_at_ms
-revision_available_at_ms
-producer_decision_at_ms
-linking_index_as_of_ms
-```
-
-计算规则：
+`current_poll_launch_valid` 不等于 `current_poll_launch_linkable`。同 poll 的安全顺序是：
 
 ```text
-new revision article:
-  revision_available_at_ms = max(revision_source_published_at_ms, revision_first_observed_at_ms)
-
-existing article payload changed:
-  revision_available_at_ms = revision_payload_first_observed_at_ms
+1. parse and validate candidate launch rows
+2. append/close formal launch event rows
+3. append/close formal launch identity index rows
+4. rebuild/verify index from durable streams if prior crash left a gap
+5. expose only durable identities to revision linker
+6. classify detail-confirmed revision candidates
+7. emit validated revision rows and diagnostics
+8. persist/reconcile batch state
 ```
 
-所有 linking、ordering、point-in-time selection 和 lookback 计算必须使用 `revision_available_at_ms`。不得用原始 article publish time 替代，以避免 in-place edit 时间穿越。
-
-Lookback 基准：
+若 crash：
 
 ```text
-revision_available_at_ms - original_source_published_at_ms <= EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS
+before launch append -> dependent revision must never emit
+after launch append before index append -> restart rebuilds missing index, then may link later
+after first multi-symbol revision append -> restart emits only missing semantic rows
 ```
 
-超过 lookback 是 coverage loss，不是 parser failure。
+应用层 durable 定义为 append operation 成功并关闭文件；本设计不声明电源故障级 storage guarantee。
 
 ---
 
-## 12. Revision Identity Model
+## 10. Linking And Point-in-Time Rules
 
-不要把 semantic identity 与 payload version 混在一个 ID 内。
+允许 formal linking 的 L1/L2/L3：
 
 ```text
-revision_semantic_id = sha256(
-  source_article_id
-  | symbol
-  | revision_intent
-  | revised_anchor_ms
-  | supersedes_source_article_id
-)
-
-revision_payload_hash = sha256(canonical_revision_evidence_dict)
-raw_payload_sha256 = sha256(raw_bapi_article_detail_response_bytes)
-
-revision_payload_version_id = sha256(source_article_id | raw_payload_sha256)
-revision_observation_id = sha256(revision_semantic_id | revision_payload_version_id | revision_first_observed_at_ms)
-revision_application_id = revision_semantic_id
+L1: explicit original source_article_id, unique index hit
+L2: explicit original URL/title/canonical slug, unique index hit
+L3: symbol + explicit superseded official anchor, unique matching formal v2 identity
 ```
 
-Consumer 应按 `revision_application_id` 做语义应用，避免 HTML formatting 变化重复污染 state。
+每一 index hit 必须同时满足：
+
+```text
+original.identity_first_observed_at_ms <= revision_available_at_ms
+original.formal_row_durable_at_ms <= revision_available_at_ms
+revision_available_at_ms - original.identity_first_observed_at_ms <= lookback_days
+```
+
+`source_published_at_ms` 只保留为 provenance，不是 linking 的 point-in-time proof。
+
+L4 symbol-only uniqueness、缺 index、multiple index hit、outside lookback、invalid index 均不得 formal emit。
+
+---
+
+## 11. Payload-Version Time And Identity
+
+持久化 payload-version registry：
+
+```text
+source_article_id
+raw_payload_sha256
+payload_version_first_observed_at_ms
+source_published_at_ms
+last_observed_at_ms
+```
 
 规则：
 
 ```text
-same semantic_id + different raw_payload_sha256 + same parsed semantics -> payload_variant_diagnostic, do not reapply
-same source_article_id + changed semantic fields -> new semantic revision
-same raw_payload_sha256 replay -> exact duplicate
+first observation of (source_article_id, raw_payload_sha256):
+  payload_version_first_observed_at_ms = detected_at_ms
+same pair after restart:
+  retain first-observed time
+revision_available_at_ms = payload_version_first_observed_at_ms
 ```
+
+原始 publish time 永远不得回填或 backdate later payload edit。registry 必须是 current root 的 append-only JSONL/state artifact；restart 从该 artifact 重建，不能以默认 hash、当前时间或 source publication time 代替缺失 version record。
+
+```text
+revision_semantic_id = sha256(
+  source_article_id | symbol | revision_intent | revised_anchor_ms | supersedes_source_article_id
+)
+revision_payload_hash = sha256(canonical_revision_evidence_dict)
+revision_payload_version_id = sha256(source_article_id | raw_payload_sha256)
+revision_observation_id = sha256(
+  revision_semantic_id | revision_payload_version_id | revision_available_at_ms
+)
+revision_id = revision_semantic_id
+revision_application_id = revision_semantic_id
+formal_schedule_revision_contract_version = 2
+```
+
+新 contract row 缺少其中任一 required identity 或三者不相等时 validator 必须失败。v2 是 strict semantic transport；仅 `formal_schedule_revision_contract_version = 1` 的既有 artifact 可走 legacy application-id fallback。1.5F v2 production root 必须显式允许 `[1, 2]`，并在收到 v2 row 时拒绝缺失 strict 字段的 row，而不是回退。
 
 ---
 
-## 13. Multi-Symbol Batch Contract
+## 12. Formal Revision Row, Batch And Late Conflict
 
-multi-symbol revision article 使用 per-symbol formal rows，但 producer 必须维护 batch crash consistency。
+### 12.1 Explicit Builder Inputs
 
-Batch state 字段：
-
-```text
-revision_article_batch_id
-expected_revision_symbols
-linked_symbols
-orphaned_symbols
-ambiguous_symbols
-out_of_scope_symbols
-emitted_revision_semantic_ids
-emitted_revision_observation_ids
-batch_status
-```
-
-允许状态：
+builder 只接受 Producer 已确认的：
 
 ```text
-candidate_parsed
-linking_complete
-partially_emitted
-all_emit_actions_durable
-terminal_diagnostic
-```
-
-文本结构规则：
-
-```text
-exact_per_symbol_row:
-  linked symbols 可独立 formal emit；其他 symbols diagnostic。
-
-exact_all_symbols_statement:
-  必须知道 original complete symbol set，且所有目标 symbols linking 完成、状态一致、anchor 规则一致；否则整组 diagnostic-only。
-
-partial_revision:
-  只影响文本明确 revision 的 symbols。
-```
-
-Crash recovery 必须保证：
-
-```text
-crash after first row append -> restart emits only missing rows
-crash before batch terminal state write -> restart reconciles emitted rows from events stream
-exact_all_symbols_statement -> never partially mutates subset
-```
-
----
-
-## 14. Late Conflict Handling
-
-Append-only 环境不能撤回已写 revision。策略如下：
-
-```text
-1. 每条 independent official linked revision row 可以 formal emit。
-2. Stage 1.5F point-in-time selector 遇到同 stable_schedule_identity + same revision_available_at_ms + conflicting revised_anchor/status 时 fail closed。
-3. 对应 event_symbol_id 进入 pending_official_schedule_conflict 或 contaminated lineage，不得静默继续使用 first revision。
-```
-
-第一版不新增单独 `futures_contract_launch_schedule_revision_conflict` artifact。只有当 fail-closed counter 在 live 中出现，才考虑新增 conflict transport row。
-
----
-
-## 15. Diagnostics And Summary
-
-每条 orphaned / ambiguous / out_of_scope / payload_variant diagnostic 至少记录：
-
-```text
-diagnostic_type
-source_article_id
-symbol
 revision_intent
-candidate_original_article_ids
-link_evidence_levels
-matched_symbols
-matched_old_anchors
-lookback_calculations
-linking_index_hash
-producer_policy_version
+link_status = linked
+revision_semantic_id
+revision_application_id
+revision_id
+revision_payload_version_id
+revision_observation_id
 revision_available_at_ms
-producer_decision_at_ms
-raw_payload_sha256
-revision_payload_hash
 ```
 
-Summary/runtime gate 记录 sample-capped counters：
+`link_status != linked` 不得调用 builder。status 映射：
+
+```text
+rescheduled_with_new_anchor -> rescheduled + non-null anchor
+postponed_without_anchor -> postponed_without_anchor + null anchor
+cancelled -> cancelled + null anchor
+```
+
+### 12.2 Multi-Symbol Batch
+
+exact-per-symbol statement 可按已明确的 symbol 独立 emit。exact-all-symbols statement 必须所有目标 symbol 均完成同一规则的 valid link；否则一个 formal row 也不写。
+
+### 12.3 Late Equal-Time Conflict Transport
+
+若 revision B 自身仍为 official、linked、contract-valid、point-in-time-valid，即使与已 emit revision A 同 stable identity、同 `revision_available_at_ms`、不同 status/anchor，也必须写 formal B row，并标记 producer late-conflict diagnostic/counter。
+
+1.5F 收到 v2 row 后必须原样读取 transport row 的 `revision_application_id`；只有 `formal_schedule_revision_contract_version = 1` 的 legacy artifact 才能调用旧的 payload-hash application-id 算法。收到两者后必须进入：
+
+```text
+pending_official_schedule_conflict
+active_anchor_revision_contaminated
+completed_anchor_revision_contaminated
+```
+
+不得因 B 是 late conflict 而在 1.5D suppress transport。
+
+---
+
+## 13. 1.5F Cancellation And 1.5G Review Semantics
+
+```text
+pending + cancelled -> pending_cancelled; no promotion
+active + cancelled -> keep read-only snapshot collection to original end; contaminate lineage
+completed + cancelled -> do not reopen; contaminate/invalid lineage
+```
+
+1.5G 对 v2 evidence 必须使用 Section 5 的 strict lineage gate。conflict、contamination、missing state 或 hash mismatch 都不能得到 formal count。
+
+---
+
+## 14. Diagnostics, Runtime And Safety
+
+诊断至少记录 source article、symbol、intent、link evidence、index manifest/hash、payload/version time、durable/index time、producer decision 与 collision/conflict reason。summary/runtime gate 至少记录：
 
 ```text
 schedule_revision_candidate_count
+schedule_revision_detail_pending_count
 schedule_revision_linked_emit_count
 schedule_revision_orphaned_diagnostic_count
 schedule_revision_ambiguous_diagnostic_count
 schedule_revision_out_of_scope_count
 schedule_revision_payload_variant_count
 schedule_revision_late_conflict_count
-schedule_revision_detail_pending_count
-schedule_revision_detail_terminal_non_consumable_count
-schedule_revision_coverage_loss_outside_lookback_count
+schedule_revision_index_collision_count
+schedule_revision_producer_supported
+schedule_revision_producer_enabled
+schedule_revision_producer_effective_enabled
+schedule_revision_consumer_prerequisites_verified
+schedule_revision_producer_health
+```
+
+`health = blocked` 只禁止 revision formal emission，不改变 normal 1.5D runtime READY 或交易权限。
+
+`schedule_revision_producer_supported = true` 只表示当前 build 含有实现；`schedule_revision_producer_effective_enabled = true` 还必须证明 Section 5.3 prerequisite 已通过且 Section 7.3 的 runner integration health 为 `ready`。任何字段不得由默认 `ctx.get(..., false)` 伪造为已验证。
+
+---
+
+## 15. Required Evidence And Tests
+
+Fixtures:
+
+```text
+- KO/RDDT real observed formal-v2 event-row extract with provenance
+- real frozen AIA postponement BAPI fixture; absence remains producer-enable blocker
+- L1/L2/L3/L4, cancellation, exact-per-symbol, exact-all-symbols
+- in-place payload edit, restart payload replay, late equal-time conflict
+- cross-root curated identity snapshot and collision fixture
+```
+
+Required regressions include:
+
+```text
+test_formal_v2_lineage_requires_hash_state_and_contamination_consistency
+test_new_v2_state_missing_lineage_is_blocked_but_legacy_state_is_compatible
+test_accepted_reconcile_after_crash_preserves_normal_lineage
+test_salvage_audit_never_changes_production_formal_count_or_clean_pass
+test_aia_title_enters_revision_detail_queue
+test_preclassifier_never_formal_emits
+test_revision_cannot_link_to_non_durable_same_poll_launch
+test_crash_after_launch_append_before_index_append_rebuilds_index
+test_crash_before_launch_append_never_emits_dependent_revision
+test_cross_root_snapshot_requires_manifest_and_is_point_in_time_safe
+test_index_collision_blocks_revision_not_normal_launch
+test_in_place_edit_available_at_is_payload_version_first_seen
+test_restart_does_not_reset_payload_version_first_seen
+test_new_revision_row_requires_revision_application_id
+test_payload_variant_does_not_change_application_id
+test_late_equal_time_conflict_is_emitted_and_reaches_1_5f
+test_exact_all_symbols_statement_writes_zero_formal_rows_when_one_symbol_fails
+test_runner_preclassifier_enqueues_revision_detail_and_emits_linked_revision
+test_runner_keeps_normal_launch_when_revision_producer_is_blocked
+test_salvage_audit_fails_without_real_matching_input_rows
+test_v2_formal_count_rejects_missing_or_mismatched_policy_or_hash
 ```
 
 ---
 
-## 16. Cancellation Semantics In 1.5F/1.5G
+## 16. Rollout And Rollback
 
 ```text
-pending observation not started:
-  mark pending_cancelled / no promotion to active
-
-active observation:
-  continue read-only snapshot collection to original window end
-  mark schedule_lineage_contaminated = true
-  record revision_id / revision_semantic_id / revision_available_at_ms
-
-completed observation:
-  do not reopen
-  Stage 1.5G marks evidence invalid lineage if cancellation was point-in-time applicable
-```
-
-该策略保留证据，不产生交易行为，不扩大风险面。
-
----
-
-## 17. Fixtures And Tests Required Before Plan Completion
-
-Required fixtures：
-
-```text
-1. Real/frozen AIA postponement fixture with full provenance。
-2. Synthetic explicit L1 source_article_id reschedule fixture。
-3. Synthetic L2 original URL/title fixture。
-4. Synthetic L3 symbol + old official anchor exact match fixture。
-5. Synthetic L4 symbol-only unique pending fixture that must remain diagnostic-only。
-6. Synthetic cancelled fixture。
-7. Multi-symbol exact_per_symbol_row fixture。
-8. Multi-symbol exact_all_symbols_statement fixture。
-9. In-place payload edit fixture with later revision_payload_first_observed_at_ms。
-10. Late same-time conflict fixture。
-```
-
-Fixture metadata 必须包含：
-
-```text
-request_id
-fetched_at_ms
-http_status
-payload_sha256
-fixture_sha256
-request_manifest_path
-parser_version
-point_in_time_status
-raw_payload_sha256
-revision_payload_hash
-```
-
-Required tests：
-
-```text
-test_consumer_prerequisite_gate_blocks_producer_enablement_without_verified_evidence
-test_plain_will_launch_at_is_not_revision
-test_api_maintenance_delayed_is_out_of_scope
-test_funding_settlement_delayed_is_out_of_scope
-test_title_only_revision_candidate_never_formal_emits
-test_l4_symbol_only_unique_match_is_diagnostic_only
-test_explicit_article_reference_requires_index_unique_hit
-test_l3_requires_old_official_anchor_exact_match
-test_builder_rejects_non_linked_revision_link_status
-test_cancelled_revision_maps_cancelled_status_and_null_anchor
-test_validator_rejects_unknown_schedule_status
-test_revision_available_at_uses_payload_first_observed_for_in_place_edit
-test_same_semantic_different_payload_variant_does_not_reapply
-test_multi_symbol_batch_restart_emits_only_missing_rows
-test_exact_all_symbols_statement_never_partially_emits
-test_late_same_time_conflict_reaches_1_5f_fail_closed_selector
-test_runtime_gate_reports_supported_enabled_health_separately
-test_schedule_revision_lookback_config_required
+1. Deploy with configured_producer_enabled = false.
+2. Verify consumer gate, real AIA fixture, current commit attestation and runtime fields.
+3. Configure an explicit curated identity snapshot before any cross-root coverage claim.
+4. Enable only through a separately approved config change.
+5. If health becomes blocked/degraded, set effective producer emission to false; retain normal launch collection and diagnostics.
+6. Rollback is a new disabled root; never rewrite old roots.
 ```
 
 ---
 
-## 18. Resolved Design Questions
+## 17. Resolved Questions
 
 ```text
-Q1: current root or historical index?
-A1: versioned formal launch identity index only. Current root rows may enter the index after formal v2 validation; scheduler state cannot.
+Q1: Can same-poll in-memory launch identity link a revision?
+A1: No. It becomes linkable only after launch event and index row are durably written.
 
-Q2: diagnostics only or counters?
-A2: both. JSONL stores evidence; runtime gate/summary stores bounded counters and samples.
+Q2: Can salvage turn KO/RDDT into production formal evidence?
+A2: No. It is a separate readonly audit with a separate decision namespace.
 
-Q3: cancelled revision handling?
-A3: pending stops before activation; active continues read-only but contaminated; completed is invalidated by 1.5G lineage review.
-```
+Q3: How does a new root see a prior-root launch?
+A3: Only through an operator-explicit, manifest-verified curated identity snapshot.
 
----
-
-## 19. Safety Invariants
-
-```text
-1. Producer uncertainty never creates formal revision row.
-2. Non-linked revision never calls formal row builder.
-3. L4 symbol-only inference is diagnostic-only.
-4. Scheduler state is never formal linking evidence.
-5. Revision available time is payload-version point-in-time safe.
-6. Normal formal v2 launch collection continues even if revision producer is blocked.
-7. All paper/live/execution/alpha flags remain false.
+Q4: What is revision availability for a later article edit?
+A4: The first observation time of that exact raw payload version, persisted across restart.
 ```

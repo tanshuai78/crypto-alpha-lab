@@ -1,0 +1,7 @@
+{
+  "data_quality": "server_observed_formal_v2_event_row",
+  "source_root_id": "2026-08-06_server_live_root",
+  "source_row_sha256": "5661a5c6483a07cb4d454e89d9bbb46de2d04000eee1cbea2b9d44e31915f075",
+  "fixture_sha256": "5661a5c6483a07cb4d454e89d9bbb46de2d04000eee1cbea2b9d44e31915f075",
+  "not_a_raw_bapi_payload": true
+}

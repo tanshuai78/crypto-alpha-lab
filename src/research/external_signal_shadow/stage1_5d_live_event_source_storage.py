@@ -37,6 +37,8 @@ def build_stream_paths(output_root: str | Path, timestamp_ms: int) -> dict[str, 
         "detail_retry_scheduler_diagnostics": build_daily_path(root_path, "detail_retry_scheduler_diagnostics", timestamp_ms),
         "detail_retry_terminal_diagnostics": build_daily_path(root_path, "detail_retry_terminal_diagnostics", timestamp_ms),
         "bapi_parse_results": build_daily_path(root_path, "bapi_parse_results", timestamp_ms),
+        "formal_launch_identity_index": root_path / "formal_launch_identity_index.jsonl",
+        "revision_payload_versions": root_path / "revision_payload_versions.jsonl",
         "summary": root_path / "binance_futures_launch_smoke_summary.json",
     }
 
@@ -47,6 +49,47 @@ def append_jsonl(path: str | Path, row: dict) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
+
+
+def load_payload_version_first_observed(path: str | Path) -> dict[tuple[str, str], int]:
+    registry: dict[tuple[str, str], int] = {}
+    file_path = Path(path)
+    if not file_path.exists():
+        return registry
+    for line in file_path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+            key = (str(row["source_article_id"]), str(row["raw_payload_sha256"]))
+            observed_at_ms = int(row["payload_version_first_observed_at_ms"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if key[0] and key[1] and observed_at_ms > 0:
+            registry[key] = min(registry.get(key, observed_at_ms), observed_at_ms)
+    return registry
+
+
+def record_payload_version_first_observed(
+    path: str | Path,
+    *,
+    source_article_id: str,
+    payload_sha256: str,
+    observed_at_ms: int,
+    registry: dict[tuple[str, str], int] | None = None,
+) -> int:
+    key = (str(source_article_id), str(payload_sha256))
+    known = registry if registry is not None else load_payload_version_first_observed(path)
+    if key in known:
+        return known[key]
+    append_jsonl(
+        path,
+        {
+            "source_article_id": key[0],
+            "raw_payload_sha256": key[1],
+            "payload_version_first_observed_at_ms": int(observed_at_ms),
+        },
+    )
+    known[key] = int(observed_at_ms)
+    return known[key]
 
 
 def enforce_payload_budget(path: str | Path, max_bytes: int) -> dict:

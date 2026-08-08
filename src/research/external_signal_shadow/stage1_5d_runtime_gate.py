@@ -99,9 +99,7 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "run_id": str(ctx.get("run_id") or output_root.name),
         "events_stream_relative_path": str(ctx.get("events_stream_relative_path") or "events/*.jsonl"),
         "formal_event_contract_versions_supported": [getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_FORMAL_EVENT_CONTRACT_VERSION", 2)],
-        "formal_schedule_revision_contract_versions_supported": [
-            getattr(base, "EXTERNAL_SIGNAL_STAGE1_5_FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION", 1)
-        ],
+        "formal_schedule_revision_contract_versions_supported": [1, 2],
         "anchor_precedence_policy": getattr(
             base,
             "EXTERNAL_SIGNAL_STAGE1_5_ANCHOR_PRECEDENCE_POLICY",
@@ -126,6 +124,13 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "multi_symbol_candidate_set_pending_count": int(ctx.get("multi_symbol_candidate_set_pending_count") or 0),
         "multi_symbol_full_emit_count": int(ctx.get("multi_symbol_full_emit_count") or 0),
         "multi_symbol_emission_registry_count": int(ctx.get("multi_symbol_emission_registry_count") or 0),
+        # The runner owns attestation. Missing evidence must never become an
+        # optimistic producer health claim in this serializer.
+        "schedule_revision_producer_supported": bool(ctx.get("schedule_revision_producer_supported", False)),
+        "schedule_revision_producer_configured_enabled": bool(ctx.get("schedule_revision_producer_configured_enabled", False)),
+        "schedule_revision_producer_effective_enabled": bool(ctx.get("schedule_revision_producer_effective_enabled", False)),
+        "schedule_revision_producer_consumer_prerequisites_verified": bool(ctx.get("schedule_revision_producer_consumer_prerequisites_verified", False)),
+        "schedule_revision_producer_health": str(ctx.get("schedule_revision_producer_health", "attestation_missing")),
         "live_trading_enabled": bool(RiskLimits.live_trading_enabled),
     }
     for field in SAFETY_FALSE_FIELDS:

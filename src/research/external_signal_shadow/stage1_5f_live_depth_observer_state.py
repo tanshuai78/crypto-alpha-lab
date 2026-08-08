@@ -295,6 +295,14 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         launch_anchor_post_bootstrap_watermark=d.get("launch_anchor_post_bootstrap_watermark"),
         capacity_defer_count=d.get("capacity_defer_count", 0),
         anchor_resolution_attempt_count=d.get("anchor_resolution_attempt_count", 0),
+        source_detail_url_normalized=str(event_symbol_row.get("source_detail_url_normalized") or d.get("source_detail_url_normalized") or ""),
+        source_published_at_ms=event_symbol_row.get("source_published_at_ms") or d.get("source_published_at_ms"),
+        formal_event_contract_version=event_symbol_row.get("formal_event_contract_version") or d.get("formal_event_contract_version"),
+        formal_event_consumable_by_stage1_5f=event_symbol_row.get("formal_event_consumable_by_stage1_5f") if event_symbol_row.get("formal_event_consumable_by_stage1_5f") is not None else d.get("formal_event_consumable_by_stage1_5f"),
+        symbol_identity_validation_status=event_symbol_row.get("symbol_identity_validation_status") or d.get("symbol_identity_validation_status"),
+        launch_anchor_evidence_level=event_symbol_row.get("launch_anchor_evidence_level") or d.get("launch_anchor_evidence_level"),
+        effective_observation_anchor_source=d.get("effective_observation_anchor_source") or event_symbol_row.get("effective_observation_anchor_source"),
+        launch_anchor_validation_status=event_symbol_row.get("launch_anchor_validation_status") or d.get("launch_anchor_validation_status"),
         source_anchor_contract_hash=d.get("source_anchor_contract_hash", ""),
         admission_anchor_contract_hash=d.get("admission_anchor_contract_hash", ""),
         latest_anchor_contract_hash=d.get("latest_anchor_contract_hash", ""),
@@ -386,15 +394,38 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
             },
         )
 
+    status_for_sym = (revision.get("symbol_official_schedule_statuses") or {}).get(state.symbol)
+    rev_intent = revision.get("revision_intent") or ("cancelled" if status_for_sym == "cancelled" else "")
+    is_cancelled = rev_intent == "cancelled" or status_for_sym == "cancelled"
+    is_conflict = bool(revision.get("is_late_conflict")) or rev_intent == "late_conflict"
+
     if state.status.startswith("pending_"):
-        if rev_anchor is not None:
+        if is_cancelled:
+            d["status"] = "pending_cancelled"
+            d["pending_reason"] = "official_schedule_cancelled"
+            d["observation_anchor_ms"] = None
+        elif is_conflict:
+            d["status"] = "pending_official_schedule_conflict"
+            d["pending_reason"] = "late_conflict_official_schedule"
+            d["observation_anchor_ms"] = None
+        elif rev_anchor is not None:
             d["observation_anchor_ms"] = rev_anchor
             d["anchor_contract_decision_at_ms"] = now_ms
             d["latest_anchor_evidence_level"] = "official_schedule"
             d["latest_max_evidence_class"] = "clean_or_recovery"
             d["next_admission_check_at_ms"] = rev_anchor
     elif is_depth_collection_active_status(state.status):
-        if rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
+        if is_cancelled:
+            d["status"] = "active_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "official_schedule_cancelled"
+            d["latest_max_evidence_class"] = "none"
+        elif is_conflict:
+            d["status"] = "active_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "late_conflict_official_schedule"
+            d["latest_max_evidence_class"] = "none"
+        elif rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
             d["status"] = "active_anchor_revision_contaminated"
             d["observation_anchor_revision_contaminated"] = True
             d["anchor_revision_contamination_reason"] = "fallback_anchor_replaced_by_official_schedule"
@@ -402,7 +433,17 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
         elif rev_anchor == state.observation_anchor_ms:
             d["latest_anchor_evidence_level"] = "official_schedule"
     elif state.status.startswith("completed"):
-        if rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
+        if is_cancelled:
+            d["status"] = "completed_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "official_schedule_cancelled"
+            d["latest_max_evidence_class"] = "none"
+        elif is_conflict:
+            d["status"] = "completed_anchor_revision_contaminated"
+            d["observation_anchor_revision_contaminated"] = True
+            d["anchor_revision_contamination_reason"] = "late_conflict_official_schedule"
+            d["latest_max_evidence_class"] = "none"
+        elif rev_anchor is not None and rev_anchor != state.observation_anchor_ms:
             d["status"] = "completed_anchor_revision_contaminated"
             d["observation_anchor_revision_contaminated"] = True
             d["anchor_revision_contamination_reason"] = "post_completion_official_schedule_revision_mismatch"

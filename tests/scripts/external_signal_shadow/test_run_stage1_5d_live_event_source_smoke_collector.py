@@ -5678,6 +5678,10 @@ def test_append_formal_schedule_revision_writes_valid_row_and_blocks_invalid(tmp
         revised_anchor_ms=2_000,
         superseded_anchor_ms=1_000,
         revision_id="rev-1",
+        revision_semantic_id="rev-1",
+        revision_application_id="rev-1",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="obs-1",
         revision_payload_hash="payload-hash",
         revision_available_at_ms=1_500,
         revision_reason="rescheduled",
@@ -5695,3 +5699,155 @@ def test_append_formal_schedule_revision_writes_valid_row_and_blocks_invalid(tmp
     diagnostics = [json.loads(line) for line in (tmp_path / "diagnostics.jsonl").read_text().splitlines()]
     assert event_rows_after_invalid == [valid_row]
     assert diagnostics[-1]["diagnostic_type"] == "formal_schedule_revision_contract_invalid"
+
+
+def test_trusted_revision_detail_is_processed_by_runner_transport(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        process_trusted_schedule_revision_detail,
+    )
+
+    stream_paths = {
+        "events": tmp_path / "events.jsonl",
+        "detail_retry_terminal_diagnostics": tmp_path / "diagnostics.jsonl",
+        "formal_launch_identity_index": tmp_path / "formal_launch_identity_index.jsonl",
+    }
+    stream_paths["formal_launch_identity_index"].write_text(
+        json.dumps(
+            {
+                "supersedes_source_article_id": "a" * 32,
+                "symbol": "AIAUSDT",
+                "stable_schedule_identity": f"binance|futures_contract_launch|{'a' * 32}|AIAUSDT",
+                "original_source_published_at_ms": 1_000,
+                "formal_row_durable_at_ms": 1_100,
+            }
+        ) + "\n"
+    )
+
+    emitted_ids = set()
+    result = process_trusted_schedule_revision_detail(
+        stream_paths=stream_paths,
+        source_article_id="b" * 32,
+        title="Postponement of AIAUSDT perpetual contract launch",
+        detail_text=f"The launch is rescheduled. https://www.binance.com/en/support/announcement/{'a' * 32}",
+        symbols=["AIAUSDT"],
+        symbol_launch_times_ms={"AIAUSDT": 2_000},
+        payload_sha256="payload-hash",
+        available_at_ms=1_500,
+        producer_effective_enabled=True,
+        emitted_revision_semantic_ids=emitted_ids,
+    )
+
+    assert result == {"status": "revision_emitted", "emitted_count": 1}
+    rows = [json.loads(line) for line in stream_paths["events"].read_text().splitlines()]
+    assert rows[0]["formal_schedule_revision_contract_version"] == 2
+    assert rows[0]["revision_application_id"] == rows[0]["revision_semantic_id"]
+    replay = process_trusted_schedule_revision_detail(
+        stream_paths=stream_paths,
+        source_article_id="b" * 32,
+        title="Postponement of AIAUSDT perpetual contract launch",
+        detail_text=f"The launch is rescheduled. https://www.binance.com/en/support/announcement/{'a' * 32}",
+        symbols=["AIAUSDT"],
+        symbol_launch_times_ms={"AIAUSDT": 2_000},
+        payload_sha256="payload-hash",
+        available_at_ms=1_500,
+        producer_effective_enabled=True,
+        emitted_revision_semantic_ids=emitted_ids,
+    )
+    assert replay == {"status": "revision_replay_noop", "emitted_count": 0}
+    assert len(stream_paths["events"].read_text().splitlines()) == 1
+
+
+def test_schedule_revision_producer_attestation_requires_all_prerequisites(monkeypatch):
+    from configs import base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_schedule_revision_producer_attestation,
+    )
+
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", "abc123")
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+
+    ready = build_schedule_revision_producer_attestation(
+        current_commit_sha="abc123", integration_health="ready"
+    )
+    assert ready == {
+        "schedule_revision_producer_supported": True,
+        "schedule_revision_producer_configured_enabled": True,
+        "schedule_revision_producer_consumer_prerequisites_verified": True,
+        "schedule_revision_producer_effective_enabled": True,
+        "schedule_revision_producer_health": "ready",
+    }
+
+    blocked = build_schedule_revision_producer_attestation(
+        current_commit_sha="different", integration_health="ready"
+    )
+    assert blocked["schedule_revision_producer_consumer_prerequisites_verified"] is False
+    assert blocked["schedule_revision_producer_effective_enabled"] is False
+    assert blocked["schedule_revision_producer_health"] == "prerequisites_unmet"
+
+
+def test_runner_emits_revision_only_after_durable_launch_in_same_poll(tmp_path, monkeypatch):
+    original_id = "a" * 32
+    revision_id = "b" * 32
+    published_at_ms = int(time.time() * 1000)
+    original_title = "Binance Futures Will Launch USDⓈ-Margined AIAUSDT Perpetual Contract"
+    revision_title = "Postponement of AIAUSDT USDⓈ-Margined Perpetual Contract Launch"
+
+    def bapi_payload(article_id, title, body):
+        return {"code": "000000", "data": {"code": article_id, "title": title, "body": [{"text": body}]}}
+
+    fixture = tmp_path / "revision_fixture.json"
+    fixture.write_text(json.dumps({
+        "exchangeInfoPayload": {"symbols": [{
+            "symbol": "AIAUSDT", "status": "TRADING", "contractType": "PERPETUAL",
+            "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1_000,
+        }]},
+        "data": {"catalogs": [{"articles": [
+            {
+                "code": original_id,
+                "title": original_title,
+                "releaseDate": published_at_ms,
+                "bapiPayload": bapi_payload(
+                    original_id, original_title,
+                    "AIAUSDT\nPerpetual Contract\nLaunch Time\n2026-08-08 10:00 (UTC)",
+                ),
+            },
+            {
+                "code": revision_id,
+                "title": revision_title,
+                "releaseDate": published_at_ms + 1,
+                "bapiPayload": bapi_payload(
+                    revision_id, revision_title,
+                    f"The original announcement is https://www.binance.com/en/support/announcement/{original_id}. "
+                    "AIAUSDT\nPerpetual Contract\nLaunch Time\n2026-08-08 11:00 (UTC)",
+                ),
+            },
+        ]}]},
+    }))
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py", "--fixture-json", str(fixture),
+        "--stage1-5c1-summary", str(c1), "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root), "--max-polls", "1", "--poll-interval-sec", "0",
+    ]
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", "abc123")
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
+        lambda: "abc123",
+    )
+
+    with patch("sys.argv", args):
+        assert main() == 0
+
+    rows = _read_jsonl_files(output_root / "events")
+    assert [row["source_article_id"] for row in rows] == [original_id, revision_id]
+    assert rows[1]["formal_schedule_revision_contract_version"] == 2
+    assert rows[1]["revision_application_id"] == rows[1]["revision_semantic_id"]
+    summary = json.loads((output_root / "binance_futures_launch_smoke_summary.json").read_text())
+    assert summary["schedule_revision_emitted_count"] == 1
+    assert summary["schedule_revision_diagnostic_count"] == 0

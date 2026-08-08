@@ -2404,7 +2404,11 @@ def test_build_accepted_row_from_state_preserves_anchor_contract_lineage():
         observation_anchor_ms=10_000,
         observation_anchor_basis="official_schedule_anchor",
         observation_anchor_confidence="high",
-        observation_admitted_at_ms=10_100,
+        source_article_id="307687ad279e42e6909ee1be8c472b50",
+        formal_event_contract_version=2,
+        source_contract_status="formal_v2_valid",
+        launch_anchor_evidence_level="official_schedule",
+        effective_observation_anchor_source="official_schedule_anchor",
         source_anchor_contract_hash="source-hash",
         admission_anchor_contract_hash="admission-hash",
         latest_anchor_contract_hash="latest-hash",
@@ -2424,6 +2428,11 @@ def test_build_accepted_row_from_state_preserves_anchor_contract_lineage():
         now_ms=10_200,
     )
 
+    assert row["source_article_id"] == "307687ad279e42e6909ee1be8c472b50"
+    assert row["formal_event_contract_version"] == 2
+    assert row["source_contract_status"] == "formal_v2_valid"
+    assert row["launch_anchor_evidence_level"] == "official_schedule"
+    assert row["effective_observation_anchor_source"] == "official_schedule_anchor"
     assert row["source_anchor_contract_hash"] == "source-hash"
     assert row["admission_anchor_contract_hash"] == "admission-hash"
     assert row["latest_anchor_contract_hash"] == "latest-hash"
@@ -2514,6 +2523,54 @@ def test_schedule_revision_event_updates_matching_pending_state_and_registry(tmp
     )
     assert replay_res["status"] == "revision_replay_noop"
     assert states["es-gigadev"].anchor_contract_revision_count == 1
+
+
+def test_v2_schedule_revision_uses_producer_application_id_verbatim(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        process_schedule_revision_event,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+
+    state = EventSymbolState(
+        event_symbol_id="es-v2",
+        event_id="launch-v2",
+        symbol="GIGADEVUSDT",
+        source_article_id="orig-article",
+        stable_event_symbol_key="futures_contract_launch|orig-article|GIGADEVUSDT",
+        status="pending_launch_time_in_future",
+        observation_anchor_ms=1_000,
+    )
+    revision = build_formal_schedule_revision_row(
+        source_article_id="revision-article",
+        supersedes_source_article_id="orig-article",
+        symbol="GIGADEVUSDT",
+        revised_anchor_ms=2_000,
+        revision_id="producer-id",
+        revision_semantic_id="producer-id",
+        revision_application_id="producer-id",
+        revision_payload_version_id="payload-v1",
+        revision_observation_id="observation-v1",
+        revision_payload_hash="payload-hash",
+        revision_available_at_ms=1_500,
+        provenance={"payload_sha256": "payload-hash", "parser_version": "test"},
+    )
+    registry_file = tmp_path / "schedule_revision_registry.jsonl"
+    states = {state.event_symbol_id: state}
+
+    result = process_schedule_revision_event(
+        revision,
+        states=states,
+        state_file=str(tmp_path / "observer_state.jsonl"),
+        registry_file=registry_file,
+        now_ms=1_600,
+    )
+
+    assert result == {"status": "revision_applied", "revision_application_id": "producer-id"}
+    registry_rows = [json.loads(line) for line in registry_file.read_text().splitlines()]
+    assert {row["revision_application_id"] for row in registry_rows} == {"producer-id"}
 
 
 def test_schedule_revision_arriving_before_launch_is_orphaned(tmp_path):

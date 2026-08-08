@@ -10,7 +10,7 @@
 ```text
 decision = stage1_5d_1_5f_official_schedule_priority_v2_ready_for_server_deployment
 implementation_status = completed_locally_verified_committed_pending_server_deployment
-current_server_mode = 7d_official_schedule_anchor_contract_v2_hotfix
+current_server_mode = 7d_schedule_revision_producer_hotfix
 stage1_5g_next_action = run_after_new_12h_observation
 stage1_5h_allowed = design_only_until_more_evidence
 ```
@@ -23,7 +23,7 @@ stage1_5h_allowed = design_only_until_more_evidence
 3. Stage 1.5F 必须写入 observer_root_contract.json，root_mode = v2_production，且默认拒绝 v1/v2 混用。
 4. Stage 1.5F 必须使用 --stage1-5d-runtime-gate，并验证 anchor_precedence_policy = official_schedule_priority_v1。
 5. Stage 1.5G 必须验证 accepted/state/completed anchor lineage hash；fallback、contamination、malformed、lineage mismatch 一律 invalid。
-6. Stage 1.5D/1.5F 必须使用新的 official_schedule_anchor_contract_v2_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
+6. Stage 1.5D/1.5F 必须使用新的 schedule_revision_producer_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
 7. schedule_revision transport / consumer ready，但 automatic schedule revision producer classifier 仍是后续 follow-up，不作为本次部署 blocker。
 ```
 
@@ -67,7 +67,7 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 部署并维持 official_schedule_anchor_contract_v2_hotfix 1.5D/1.5F root 健康运行。
+P0: 部署并维持 schedule_revision_producer_hotfix 1.5D/1.5F root 健康运行。
 理由: 当前核心风险是 official schedule 与 exchangeInfo onboardDate 不一致时，1.5F 使用错误 anchor 或进入 pending_anchor_conflict。
 
 P1: 等待新 root 中出现 post-watermark futures_contract_launch event-symbol。
@@ -112,8 +112,8 @@ P4: Stage 1.5H 继续保持 design-only。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
@@ -123,8 +123,8 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 最新部署后应看到：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_official_schedule_anchor_contract_v2_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_official_schedule_anchor_contract_v2_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_schedule_revision_producer_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_schedule_revision_producer_hotfix
 ```
 
 ### 4.2 旧路径处理规则
@@ -158,7 +158,7 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 1. 不 rm -rf 旧 SKHYUSDT evidence root。
 2. 不在旧 root 上继续启动 1.5F。
 3. 不把旧 root 和新 root 的 events/depth_snapshots/request_manifest 混合审计。
-4. 新 1.5D/1.5F 部署必须使用 official_schedule_anchor_contract_v2_hotfix 后缀。
+4. 新 1.5D/1.5F 部署必须使用 schedule_revision_producer_hotfix 后缀。
 ```
 
 ## 5. Stage 1.5F 原理速记
@@ -229,16 +229,16 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-本章为当前 `official_schedule_anchor_contract_v2_hotfix` 主流程。旧 `title_symbol_launch_anchor_validation_gate_hotfix` root 只保留为历史排障对象，不再作为新部署目标。
+本章为当前 `schedule_revision_producer_hotfix` 主流程。旧 `title_symbol_launch_anchor_validation_gate_hotfix` root 只保留为历史排障对象，不再作为新部署目标。
 
 ```text
-current_deployment_scope = stage1_5d_1_5f_official_schedule_priority_anchor_contract_v2_hotfix
-root_suffix = 7d_official_schedule_anchor_contract_v2_hotfix
+current_deployment_scope = stage1_5d_schedule_revision_producer_hotfix
+root_suffix = 7d_schedule_revision_producer_hotfix
 formal_event_contract_version = 2
 anchor_precedence_policy = official_schedule_priority_v1
-formal_schedule_revision_contract_version = 1
+formal_schedule_revision_contract_version = 2
 schedule_revision_transport_and_consumer_ready = true
-automatic_schedule_revision_producer_ready = false
+schedule_revision_producer_default_enabled = false
 trade_signal_allowed = false
 paper_trading_allowed = false
 live_trading_allowed = false
@@ -260,6 +260,8 @@ git log --oneline -3
 PYTHONPATH=src:. .venv/bin/python -m pytest \
   tests/research/external_signal_shadow/test_stage1_5_launch_anchor_contract.py \
   tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
+  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
+  tests/research/external_signal_shadow/test_stage1_5d_schedule_revision_producer.py \
   tests/research/external_signal_shadow/test_stage1_5d_runtime_gate.py \
   tests/research/external_signal_shadow/test_stage1_5f_historical_anchor_rejection_hygiene.py \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
@@ -351,6 +353,8 @@ shasum -a 256 \
   configs/base.py \
   src/research/external_signal_shadow/stage1_5_launch_anchor_contract.py \
   src/research/external_signal_shadow/stage1_5_launch_event_contract.py \
+  src/research/external_signal_shadow/stage1_5d_schedule_revision_producer.py \
+  src/research/external_signal_shadow/stage1_5d_live_event_source_storage.py \
   scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
   scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
   src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
@@ -366,12 +370,15 @@ sha256sum \
   configs/base.py \
   src/research/external_signal_shadow/stage1_5_launch_anchor_contract.py \
   src/research/external_signal_shadow/stage1_5_launch_event_contract.py \
+  src/research/external_signal_shadow/stage1_5d_schedule_revision_producer.py \
+  src/research/external_signal_shadow/stage1_5d_live_event_source_storage.py \
   scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
   scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
   src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
   tests/research/external_signal_shadow/test_stage1_5_launch_anchor_contract.py \
+  tests/research/external_signal_shadow/test_stage1_5d_schedule_revision_producer.py \
   tests/research/external_signal_shadow/test_stage1_5d_runtime_gate.py \
   tests/research/external_signal_shadow/test_stage1_5f_schedule_revision_registry.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
@@ -397,13 +404,13 @@ tmux ls || true
 ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
 
 # 停止当前及历史 1.5F observer session。
-tmux kill-session -t stage1_5f_live_depth_7d_official_schedule_anchor_contract_v2_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_schedule_revision_producer_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_title_symbol_launch_anchor_validation_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5f_live_depth_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
 
 # 停止当前及历史 1.5D collector session。
-tmux kill-session -t stage1_5d_continuous_7d_official_schedule_anchor_contract_v2_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_title_symbol_launch_anchor_validation_gate_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
 tmux kill-session -t stage1_5d_continuous_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
@@ -425,14 +432,14 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-if tmux has-session -t stage1_5d_continuous_7d_official_schedule_anchor_contract_v2_hotfix 2>/dev/null; then
+if tmux has-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null; then
   echo "ERROR: Stage 1.5D v2 tmux session already exists; do not create a new empty root." >&2
   ps -efww | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' | grep -v grep || true
   exit 1
 fi
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_official_schedule_anchor_contract_v2_hotfix"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_schedule_revision_producer_hotfix"
 
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
   echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
@@ -440,7 +447,7 @@ if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
 fi
 mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_official_schedule_anchor_contract_v2_hotfix "
+tmux new -d -s stage1_5d_continuous_7d_schedule_revision_producer_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -492,7 +499,7 @@ if [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
   echo "=== output root files ===" >&2
   find "$STAGE1_5D_EVENTS_OUT" -maxdepth 2 -type f 2>/dev/null | sort | head -n 80 >&2 || true
   echo "=== tmux pane tail ===" >&2
-  tmux capture-pane -pt stage1_5d_continuous_7d_official_schedule_anchor_contract_v2_hotfix -S -200 2>&1 >&2 || true
+  tmux capture-pane -pt stage1_5d_continuous_7d_schedule_revision_producer_hotfix -S -200 2>&1 >&2 || true
   exit 1
 fi
 
@@ -509,12 +516,14 @@ cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
 正常: decision = stage1_5d_runtime_gate_ready。
 正常: consumable_by_stage1_5f = true。
 正常: formal_event_contract_versions_supported 包含 2。
-正常: formal_schedule_revision_contract_versions_supported 包含 1。
+正常: formal_schedule_revision_contract_versions_supported 包含 1 和 2。
 正常: anchor_precedence_policy = official_schedule_priority_v1。
 正常: shared_anchor_validator_enabled = true。
+正常: schedule_revision_producer_supported = true；初始部署 configured/effective enabled 均为 false。
 正常: fatal_blockers = []。
 正常: trade_signal_allowed / paper_trading_allowed / live_trading_allowed / execution_engine_allowed / alpha_interpretation_allowed 均为 false。
 异常: runtime gate 文件不存在、decision 非 ready、fatal_blockers 非空时，不得启动新 1.5F。
+初始部署正常: schedule_revision_producer_configured_enabled = false、schedule_revision_producer_effective_enabled = false；producer 关闭不得阻断 normal launch collection。
 ```
 
 ### 7.7 Bootstrap 新 Stage 1.5F watermark
@@ -541,13 +550,13 @@ export STAGE1_5D_EVENTS_OUT="$(
 if [ -z "$STAGE1_5D_EVENTS_OUT" ]; then
   export STAGE1_5D_EVENTS_OUT="$(
     find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d \
-      -name 'live_event_source_continuous_*_7d_official_schedule_anchor_contract_v2_hotfix' \
+      -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' \
       -exec sh -c 'test -f "$1/live_safety_gate_summary.json"' sh {} \; -print \
       | sort | tail -n 1
   )"
 fi
 STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_official_schedule_anchor_contract_v2_hotfix"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_schedule_revision_producer_hotfix"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 BOOTSTRAP_READY=1
@@ -609,8 +618,8 @@ bootstrap 只建立新 root 的启动边界，不产生正式 live depth evidenc
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
@@ -618,7 +627,7 @@ if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
   exit 1
 fi
 
-tmux new -d -s stage1_5f_live_depth_7d_official_schedule_anchor_contract_v2_hotfix "
+tmux new -d -s stage1_5f_live_depth_7d_schedule_revision_producer_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -641,8 +650,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -676,7 +685,7 @@ print("stage1_5f_events_glob_process_check", "ok")
 PY
 
 cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"fatal_blockers"' || true
+'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"schedule_revision_producer_supported"|"schedule_revision_producer_configured_enabled"|"schedule_revision_producer_effective_enabled"|"schedule_revision_producer_consumer_prerequisites_verified"|"schedule_revision_producer_health"|"fatal_blockers"' || true
 
 cat "$STAGE1_5F_OUT/observer_root_contract.json" 2>/dev/null | python3 -m json.tool | grep -E \
 '"root_mode"|"formal_event_contract_versions_allowed"|"formal_schedule_revision_contract_versions_allowed"|"anchor_precedence_policy"' || true
@@ -696,10 +705,10 @@ find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/
 正常首检：
 
 ```text
-1. tmux 中只有新的 official_schedule_anchor_contract_v2_hotfix 1.5D/1.5F session。
+1. tmux 中只有新的 schedule_revision_producer_hotfix 1.5D/1.5F session。
 2. 1.5D live_safety_gate_summary decision = stage1_5d_runtime_gate_ready。
 3. 1.5D formal_event_contract_versions_supported 包含 2。
-4. 1.5D formal_schedule_revision_contract_versions_supported 包含 1。
+4. 1.5D formal_schedule_revision_contract_versions_supported 包含 1 和 2。
 5. 1.5D anchor_precedence_policy = official_schedule_priority_v1。
 6. 1.5F observer_root_contract.root_mode = v2_production。
 7. 1.5F stage1_5d_runtime_gate_decision = stage1_5d_runtime_gate_ready。
@@ -719,8 +728,8 @@ find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
@@ -739,7 +748,7 @@ cat "$STAGE1_5F_OUT/observer_root_contract.json" 2>/dev/null || true
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null || true
 
 cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"request_success_rate"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"fatal_blockers"' || true
+'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"request_success_rate"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"schedule_revision_producer_supported"|"schedule_revision_producer_configured_enabled"|"schedule_revision_producer_effective_enabled"|"schedule_revision_producer_consumer_prerequisites_verified"|"schedule_revision_producer_health"|"fatal_blockers"' || true
 
 cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
 '"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"stage1_5d_runtime_gate_stale"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"active_observation_count"|"pending_launch_observation_count"|"pending_launch_time_in_future_count"|"pending_launch_anchor_missing_count"|"pending_anchor_conflict_count"|"pending_observation_capacity_count"|"post_watermark_events_accepted"|"schedule_revision_registry_orphan_count"|"schedule_revision_registry_ambiguous_count"|"last_heartbeat_at_ms"|"blocker"' || true
@@ -802,7 +811,7 @@ PY
 ```text
 anchor_contract_bad_count = 0。
 launch rows 必须为 formal_event_contract_version = 2。
-schedule revision rows 如出现，必须通过 formal_schedule_revision_contract_version = 1 validator。
+schedule revision rows 如出现，必须通过 formal_schedule_revision_contract_version = 2 validator。
 若 launch_checked = 0，表示当前新 root 尚无 post-bootstrap consumable event，等待新公告即可。
 ```
 
@@ -841,7 +850,7 @@ PY
 ```text
 root_mode = v2_production。
 formal_event_contract_versions_allowed = [2]。
-formal_schedule_revision_contract_versions_allowed = [1]。
+formal_schedule_revision_contract_versions_allowed 包含 [1, 2]。
 anchor_precedence_policy = official_schedule_priority_v1。
 block_new_event_admission = false。
 ```
@@ -958,8 +967,8 @@ find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null -exec tail -n 20 {} \
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
-export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_official_schedule_anchor_contract_v2_hotfix"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_schedule_revision_producer_hotfix"
 export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
 
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
@@ -985,8 +994,8 @@ date -u
 tmux ls
 ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep
 
-tmux kill-session -t stage1_5f_live_depth_7d_official_schedule_anchor_contract_v2_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_official_schedule_anchor_contract_v2_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5f_live_depth_7d_schedule_revision_producer_hotfix 2>/dev/null || true
+tmux kill-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null || true
 
 ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
 ```
@@ -1002,7 +1011,7 @@ cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m j
 
 ## 9. 新事件定位与排障
 
-本章只保留当前 `official_schedule_anchor_contract_v2_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
+本章只保留当前 `schedule_revision_producer_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
 
 ### 9.1 查看 1.5F watermark 时间
 
@@ -1199,7 +1208,7 @@ paper/live trading readiness。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_official_schedule_anchor_contract_v2_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
 

@@ -413,3 +413,132 @@ def test_exchangeinfo_fallback_blocks_clean_depth_evidence_pass():
         summary={"completed_observation_count": 1},
     )
     assert "exchangeinfo_fallback_anchor" in res.blockers
+
+
+def test_validator_requires_formal_v2_lineage_fields():
+    import pytest
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_evidence_integrity,
+    )
+
+    base_event = {
+        "event_symbol_id": "es_v2",
+        "symbol": "KOUSDT",
+        "source_article_id": "307687ad279e42e6909ee1be8c472b50",
+        "evidence_label": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "launch_anchor_evidence_level": "official_schedule",
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+    }
+    base_state = {
+        "event_symbol_id": "es_v2",
+        "status": "completed",
+        "depth_snapshot_count": 1,
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "launch_anchor_evidence_level": "official_schedule",
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "source_article_id": "307687ad279e42e6909ee1be8c472b50",
+        "anchor_contract_version": 2,
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+        "latest_anchor_contract_hash": "latest-hash",
+        "latest_anchor_evidence_level": "official_schedule",
+        "latest_max_evidence_class": "clean_or_recovery",
+        "observation_anchor_revision_contaminated": False,
+    }
+
+    # Clean v2 passes
+    res_clean = validate_evidence_integrity(
+        [dict(base_event)],
+        watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+        states=[dict(base_state)],
+        snapshots=[{"event_symbol_id": "es_v2"}],
+        summary={"completed_observation_count": 1},
+    )
+    assert "formal_v2_lineage_incomplete_or_mismatch" not in res_clean.blockers
+    assert res_clean.formal_announcement_and_launch_count == 1
+
+    # Every v2 lineage component is required and must agree across rows.
+    for field in (
+        "source_article_id",
+        "formal_event_contract_version",
+        "source_contract_status",
+        "launch_anchor_evidence_level",
+        "effective_observation_anchor_source",
+        "anchor_precedence_policy",
+        "source_anchor_contract_hash",
+        "admission_anchor_contract_hash",
+    ):
+        bad_event = dict(base_event)
+        bad_event[field] = "" if isinstance(base_event[field], str) else None
+        res_bad = validate_evidence_integrity(
+            [bad_event],
+            watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+            states=[dict(base_state)],
+            snapshots=[{"event_symbol_id": "es_v2"}],
+            summary={"completed_observation_count": 1},
+        )
+        assert "formal_v2_lineage_incomplete_or_mismatch" in res_bad.blockers
+        assert res_bad.formal_announcement_and_launch_count == 0
+
+    for field, value in (
+        ("anchor_contract_version", None),
+        ("anchor_precedence_policy", "wrong_policy"),
+        ("source_anchor_contract_hash", "wrong-source-hash"),
+        ("admission_anchor_contract_hash", "wrong-admission-hash"),
+        ("latest_anchor_evidence_level", "exchangeinfo_fallback"),
+        ("latest_max_evidence_class", "degraded"),
+        ("observation_anchor_revision_contaminated", True),
+    ):
+        bad_state = dict(base_state)
+        bad_state[field] = value
+        res_bad = validate_evidence_integrity(
+            [dict(base_event)],
+            watermark={"max_seen_detected_at_ms": 1000, "watermark_version": 1},
+            states=[bad_state],
+            snapshots=[{"event_symbol_id": "es_v2"}],
+            summary={"completed_observation_count": 1},
+        )
+        assert "formal_v2_lineage_incomplete_or_mismatch" in res_bad.blockers
+        assert res_bad.formal_announcement_and_launch_count == 0
+
+
+def test_formal_v2_lineage_requires_completed_hash_to_match_latest():
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        _validate_formal_v2_lineage,
+    )
+
+    event = {
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "launch_anchor_evidence_level": "official_schedule",
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "source_article_id": "article",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+    }
+    latest = {
+        "anchor_contract_version": 2,
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+        "latest_anchor_evidence_level": "official_schedule",
+        "latest_max_evidence_class": "clean_or_recovery",
+        "latest_anchor_contract_hash": "latest-hash",
+        "observation_anchor_revision_contaminated": False,
+    }
+    completed = dict(latest, latest_anchor_contract_hash="completed-hash")
+
+    assert _validate_formal_v2_lineage(event, latest, completed) == (
+        False,
+        "formal_v2_lineage_incomplete_or_mismatch",
+    )

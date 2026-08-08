@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -64,6 +65,8 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
     append_jsonl,
     build_stream_paths,
     enforce_payload_budget,
+    load_payload_version_first_observed,
+    record_payload_version_first_observed,
     write_detail_payload,
     write_detail_payload_append_only,
 )
@@ -74,6 +77,62 @@ from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
     build_stage1_5d_runtime_gate,
     write_stage1_5d_runtime_gate,
 )
+from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
+    build_revision_diagnostic,
+    classify_schedule_revision_candidates,
+    emit_schedule_revision_batch,
+    is_schedule_revision_listing_candidate,
+    load_emitted_revision_semantic_ids,
+    load_valid_formal_launch_identity_index,
+    rebuild_missing_formal_launch_identity_index,
+)
+
+
+def read_current_commit_sha() -> str:
+    """Return the checked-out commit, or an empty value when it cannot attest."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[2],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    return result.stdout.strip()
+
+
+def build_schedule_revision_producer_attestation(
+    *,
+    current_commit_sha: str,
+    integration_health: str,
+) -> dict:
+    """Compute the only gate evidence allowed to enable formal revisions."""
+    configured = bool(base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED)
+    prerequisite_commit = str(base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA).strip()
+    prerequisites_verified = bool(
+        prerequisite_commit
+        and current_commit_sha == prerequisite_commit
+        and base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED
+        and base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED
+    )
+    effective = configured and prerequisites_verified and integration_health == "ready"
+    if effective:
+        health = "ready"
+    elif not configured:
+        health = "producer_disabled"
+    elif not prerequisites_verified:
+        health = "prerequisites_unmet"
+    else:
+        health = integration_health or "integration_health_missing"
+    return {
+        "schedule_revision_producer_supported": True,
+        "schedule_revision_producer_configured_enabled": configured,
+        "schedule_revision_producer_consumer_prerequisites_verified": prerequisites_verified,
+        "schedule_revision_producer_effective_enabled": effective,
+        "schedule_revision_producer_health": health,
+    }
 
 
 def append_stage1_5d_diagnostic(stream_paths: dict, row: dict) -> None:
@@ -146,6 +205,103 @@ def append_formal_schedule_revision(stream_paths: dict, row: dict) -> dict | Non
     return row
 
 
+def process_trusted_schedule_revision_detail(
+    *,
+    stream_paths: dict,
+    source_article_id: str,
+    title: str,
+    detail_text: str,
+    symbols: list[str],
+    symbol_launch_times_ms: dict[str, int] | None,
+    payload_sha256: str,
+    available_at_ms: int,
+    producer_effective_enabled: bool,
+    formal_launch_identity_index_snapshot: str | None = None,
+    emitted_revision_semantic_ids: set[str] | None = None,
+) -> dict:
+    """Classify one trusted detail and emit only fully linked v2 revisions."""
+    candidates = classify_schedule_revision_candidates(detail_text, title=title)
+    if not candidates:
+        return {"status": "not_revision", "emitted_count": 0}
+
+    linked_articles = set(re.findall(r"(?:announcement(?:/detail)?/|articleCode=)([0-9a-fA-F]{32})", detail_text))
+    linked_articles.discard(source_article_id)
+    supersedes_source_article_id = next(iter(linked_articles), "") if len(linked_articles) == 1 else ""
+    index_rows, index_blockers = load_valid_formal_launch_identity_index(
+        stream_paths["formal_launch_identity_index"],
+        as_of_ms=available_at_ms,
+        snapshot_path=formal_launch_identity_index_snapshot,
+    )
+
+    launch_times = symbol_launch_times_ms or {}
+    candidate = dict(candidates[0])
+    candidate.update(
+        {
+            "source_article_id": source_article_id,
+            "symbols": [str(symbol).upper() for symbol in symbols if str(symbol).strip()],
+            "payload_sha256": payload_sha256,
+            "symbol_candidates": {
+                str(symbol).upper(): {
+                    "symbol": str(symbol).upper(),
+                    "supersedes_source_article_id": supersedes_source_article_id,
+                    "link_level_candidate": "L1_exact_article_id" if supersedes_source_article_id else "L4_symbol_only",
+                    "revised_anchor_ms": launch_times.get(str(symbol).upper()),
+                }
+                for symbol in symbols
+                if str(symbol).strip()
+            },
+        }
+    )
+    if index_blockers or not candidate["symbols"]:
+        append_stage1_5d_diagnostic(
+            stream_paths,
+            build_revision_diagnostic(candidate, {"link_status": "blocked", "blockers": index_blockers}, producer_decision_at_ms=available_at_ms),
+        )
+        return {
+            "status": "revision_diagnostic",
+            "emitted_count": 0,
+            "producer_health": "blocked_index_collision" if "index_collision" in index_blockers else "blocked_index",
+        }
+    if candidate["revision_intent"] == "rescheduled_with_new_anchor" and any(
+        entry.get("revised_anchor_ms") is None for entry in candidate["symbol_candidates"].values()
+    ):
+        append_stage1_5d_diagnostic(
+            stream_paths,
+            build_revision_diagnostic(candidate, {"link_status": "blocked", "reason": "revised_anchor_missing"}, producer_decision_at_ms=available_at_ms),
+        )
+        return {"status": "revision_diagnostic", "emitted_count": 0}
+
+    rows, batch_result = emit_schedule_revision_batch(
+        candidate,
+        index_rows,
+        available_at_ms=available_at_ms,
+        lookback_days=base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS,
+        emitted_ids=emitted_revision_semantic_ids,
+    )
+    if batch_result["batch_status"] == "already_emitted":
+        return {"status": "revision_replay_noop", "emitted_count": 0}
+    if not producer_effective_enabled or not rows:
+        reason = "producer_disabled_or_prerequisites_unmet" if not producer_effective_enabled else batch_result
+        append_stage1_5d_diagnostic(
+            stream_paths,
+            build_revision_diagnostic(candidate, {"link_status": "blocked", "reason": reason}, producer_decision_at_ms=available_at_ms),
+        )
+        return {"status": "revision_diagnostic", "emitted_count": 0}
+
+    emitted = [append_formal_schedule_revision(stream_paths, row) for row in rows]
+    if any(row is None for row in emitted):
+        append_stage1_5d_diagnostic(
+            stream_paths,
+            build_revision_diagnostic(candidate, {"link_status": "blocked", "reason": "formal_append_failed"}, producer_decision_at_ms=available_at_ms),
+        )
+        return {"status": "revision_diagnostic", "emitted_count": 0}
+    if emitted_revision_semantic_ids is not None:
+        emitted_revision_semantic_ids.update(
+            str(row["revision_semantic_id"]) for row in emitted if row is not None
+        )
+    return {"status": "revision_emitted", "emitted_count": len(emitted)}
+
+
 def record_formal_futures_launch_event(
     *,
     stream_paths: dict,
@@ -153,6 +309,13 @@ def record_formal_futures_launch_event(
     seen_event_ids: set,
     events_detected: list,
 ) -> dict | None:
+    from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
+        build_formal_launch_identity_index_rows,
+    )
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
+        append_jsonl,
+    )
+
     event_id = row.get("event_id")
     if event_id in seen_event_ids:
         return None
@@ -161,6 +324,19 @@ def record_formal_futures_launch_event(
         return None
     seen_event_ids.add(written["event_id"])
     events_detected.append(written)
+
+    # Poll Ordering Rule: append launch event first, then append identity index.
+    index_path = Path(stream_paths.get("formal_launch_identity_index", ""))
+    index_rows = build_formal_launch_identity_index_rows(
+        written,
+        source_root_id=str(index_path.parent.resolve()) if index_path else "",
+        commit_sha=read_current_commit_sha(),
+        durable_at_ms=int(time.time() * 1000),
+    )
+    if index_rows and "formal_launch_identity_index" in stream_paths:
+        for idx_row in index_rows:
+            append_jsonl(stream_paths["formal_launch_identity_index"], idx_row)
+
     return written
 
 
@@ -975,6 +1151,7 @@ def main():
         default="data/external_signal_shadow/stage1_5d/live_event_source_smoke/",
     )
     parser.add_argument("--output-summary", type=str)
+    parser.add_argument("--formal-launch-identity-index-snapshot", type=str)
 
     args = parser.parse_args()
 
@@ -1059,6 +1236,10 @@ def main():
 
     detail_retry_state = {}
     scheduler_state = load_detail_retry_scheduler_state(output_root)
+    payload_version_first_observed = load_payload_version_first_observed(
+        output_root / "revision_payload_versions.jsonl"
+    )
+    emitted_revision_semantic_ids = load_emitted_revision_semantic_ids(output_root / "events")
     persisted_articles = scheduler_state.get("articles", {})
     endpoint_health = scheduler_state.get("endpoint_health", {})
     if not isinstance(endpoint_health, dict):
@@ -1086,6 +1267,7 @@ def main():
             "source_published_at_ms": article["source_published_at_ms"],
             "detected_at_ms": article.get("detected_at_ms", startup_now_ms),
             "event_type": article.get("event_type") or "futures_contract_launch",
+            "detail_work_type": article.get("detail_work_type"),
             "first_detected_at_ms": article.get("first_detected_at_ms", startup_now_ms),
             "detail_http_request_count": article.get("detail_http_request_count", article.get("detail_fetch_attempt_count", 0)),
             "detail_retry_cycle_count": article.get("detail_retry_cycle_count", article.get("detail_fetch_attempt_count", 0)),
@@ -1172,6 +1354,18 @@ def main():
     bapi_symbol_validation_success_count = 0
     bapi_payload_revision_count = 0
     bapi_payload_hash_change_count = 0
+    schedule_revision_emitted_count = 0
+    schedule_revision_diagnostic_count = 0
+    schedule_revision_index_collision_count = 0
+    schedule_revision_integration_health = "initializing"
+    current_commit_sha = read_current_commit_sha()
+    schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
+        current_commit_sha=current_commit_sha,
+        integration_health="initializing",
+    )
+    schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
+        "schedule_revision_producer_effective_enabled"
+    ]
 
     candidate_validation_pending_count = 0
 
@@ -1203,6 +1397,18 @@ def main():
     fatal_blockers = []
     source_parent_url = "https://www.binance.com/en/support/announcement"
     output_root.mkdir(parents=True, exist_ok=True)
+    startup_stream_paths = build_stream_paths(output_root, startup_now_ms)
+    rebuilt_index_rows, index_rebuild_diagnostics = rebuild_missing_formal_launch_identity_index(
+        events_dir=output_root / "events",
+        index_path=startup_stream_paths["formal_launch_identity_index"],
+        source_root_id=str(output_root.resolve()),
+        commit_sha=current_commit_sha,
+    )
+    for diagnostic in index_rebuild_diagnostics:
+        append_stage1_5d_diagnostic(
+            startup_stream_paths,
+            {"diagnostic_type": "formal_launch_identity_index_rebuild", **diagnostic},
+        )
 
     # Write startup runtime gate (INITIALIZING)
     init_gate_context = {
@@ -1230,6 +1436,7 @@ def main():
         "symbol_parse_success_rate": 1.0,
         "symbol_validation_success_rate": 1.0,
         "scheduler_starved_expired_count": 0,
+        **schedule_revision_producer_attestation,
     }
     write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(init_gate_context))
 
@@ -1412,6 +1619,15 @@ def main():
                 source_parent_url="https://www.binance.com/en/support/announcement",
                 first_bar_queue=first_bar_queue,
             )
+            schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
+                current_commit_sha=current_commit_sha,
+                integration_health="ready",
+            )
+            schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
+                "schedule_revision_producer_effective_enabled"
+            ]
+            catalogs = payload.get("data", {}).get("catalogs", [])
+            raw_articles = catalogs[0].get("articles", []) if catalogs else []
             for ev in cycle_res["events"]:
                 raw_futures_launch_article_count += 1
                 if ev.get("symbols"):
@@ -1419,8 +1635,6 @@ def main():
                     symbol_parsed_event_count += 1
 
                 code = ev["source_article_id"]
-                catalogs = payload.get("data", {}).get("catalogs", [])
-                raw_articles = catalogs[0].get("articles", []) if catalogs else []
                 raw_art = next((art for art in raw_articles if art.get("code") == code), {})
 
                 if code not in seen_event_ids and code not in detail_retry_state:
@@ -1489,6 +1703,43 @@ def main():
                             "last_detail_failure_class": persisted.get("last_detail_failure_class"),
                             "detail_retryable": persisted.get("detail_retryable"),
                         }
+
+            # Revision titles are not launch events, but their trusted BAPI
+            # detail may supersede a prior launch. Reuse the existing queue.
+            for raw_art in raw_articles:
+                code = str(raw_art.get("code") or "")
+                if not code or code in detail_retry_state or not is_schedule_revision_listing_candidate(
+                    str(raw_art.get("title") or "")
+                ):
+                    continue
+                persisted = persisted_articles.get(code, {})
+                detail_retry_state[code] = {
+                    "raw": raw_art,
+                    "source_article_id": code,
+                    "title": str(raw_art.get("title") or persisted.get("title") or ""),
+                    "source_detail_url_normalized": persisted.get(
+                        "source_detail_url_normalized"
+                    ) or f"{source_parent_url.rstrip('/')}/{code}",
+                    "source_parent_url": source_parent_url,
+                    "source_published_at_ms": raw_art.get("releaseDate"),
+                    "detected_at_ms": now_ms,
+                    "event_type": "futures_contract_launch",
+                    "detail_work_type": "launch_schedule_revision_detail",
+                    "first_detected_at_ms": now_ms,
+                    "detail_http_request_count": 0,
+                    "detail_retry_cycle_count": 0,
+                    "detail_fetch_attempt_count": 0,
+                    "transient_detail_error_count": 0,
+                    "non_transient_detail_error_count": 0,
+                    "retry_count": 0,
+                    "last_retry_at_ms": 0,
+                    "next_detail_retry_at_ms": 0,
+                    "defer_count": 0,
+                    "source_published_at_ms_confidence": "medium",
+                    "symbol_extraction_source": "none",
+                    "pending_reason": "revision_detail_required",
+                    "detail_fetch_status": "pending",
+                }
 
 
             # Clean up first_bar_queue to remove empty symbol events
@@ -2141,6 +2392,16 @@ def main():
                     if bapi_is_trusted:
                         bapi_detail_success_count += 1
                         bapi_detail_trusted_payload_count += 1
+                        payload_version_available_at_ms = record_payload_version_first_observed(
+                            stream_paths["revision_payload_versions"],
+                            source_article_id=code,
+                            payload_sha256=str(bapi_write_res.get("raw_payload_sha256") or ""),
+                            # Each request needs its own arrival time. A poll-wide
+                            # timestamp can predate a launch made durable earlier
+                            # in the same poll.
+                            observed_at_ms=int(time.time() * 1000),
+                            registry=payload_version_first_observed,
+                        )
                         max_symbols = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SYMBOL_EXTRACTION_MAX_SYMBOLS", 30)
                         bapi_extraction = extract_symbol_candidates_from_bapi_article_payload(
                             bapi_res["payload"], max_symbols=max_symbols, title=state["raw"].get("title")
@@ -2169,6 +2430,34 @@ def main():
                             "parsed_at_ms": now_ms,
                         }
                         append_jsonl(stream_paths["bapi_parse_results"], bapi_parse_audit_row)
+
+                        revision_result = process_trusted_schedule_revision_detail(
+                            stream_paths=stream_paths,
+                            source_article_id=code,
+                            title=state["raw"].get("title") or "",
+                            detail_text=str(bapi_extraction.get("extracted_text") or ""),
+                            symbols=bapi_parsed_symbols,
+                            symbol_launch_times_ms=bapi_extraction.get("symbol_launch_times_ms"),
+                            payload_sha256=str(bapi_write_res.get("raw_payload_sha256") or ""),
+                            available_at_ms=payload_version_available_at_ms,
+                            producer_effective_enabled=schedule_revision_producer_effective_enabled,
+                            formal_launch_identity_index_snapshot=args.formal_launch_identity_index_snapshot,
+                            emitted_revision_semantic_ids=emitted_revision_semantic_ids,
+                        )
+                        state["schedule_revision_producer_status"] = revision_result["status"]
+                        if revision_result["status"] == "revision_emitted":
+                            schedule_revision_emitted_count += revision_result["emitted_count"]
+                        elif revision_result["status"] == "revision_diagnostic":
+                            schedule_revision_diagnostic_count += 1
+                            if revision_result.get("producer_health") == "blocked_index_collision":
+                                schedule_revision_index_collision_count += 1
+                                schedule_revision_integration_health = "blocked_index_collision"
+
+                        if state.get("detail_work_type") == "launch_schedule_revision_detail":
+                            state["detail_fetch_status"] = "success"
+                            state["detail_retryable"] = False
+                            detail_retry_state.pop(code, None)
+                            continue
 
                         if bapi_parsed_symbols:
                             bapi_symbol_parse_success_count += 1
@@ -3044,6 +3333,17 @@ def main():
 
             first_bar_queue = processed + remaining
 
+        schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
+            current_commit_sha=current_commit_sha,
+            integration_health=(
+                schedule_revision_integration_health
+                if schedule_revision_integration_health != "initializing"
+                else ("ready" if hb.get("poll_success") else "poll_failed")
+            ),
+        )
+        schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
+            "schedule_revision_producer_effective_enabled"
+        ]
         loop_gate_context = {
             "output_root": output_root,
             "run_id": output_root.name,
@@ -3068,6 +3368,7 @@ def main():
             "symbol_parse_success_rate": 1.0 if bapi_detail_trusted_payload_count == 0 else (bapi_symbol_parse_success_count / float(bapi_detail_trusted_payload_count)),
             "symbol_validation_success_rate": 1.0 if bapi_symbol_parse_success_count == 0 else (bapi_symbol_validation_success_count / float(bapi_symbol_parse_success_count)),
             "scheduler_starved_expired_count": detail_budget_starved_count,
+            **schedule_revision_producer_attestation,
         }
         write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(loop_gate_context))
 
@@ -3203,6 +3504,10 @@ def main():
             "detail_http_manifest_mismatch_count": detail_fetch_attempt_manifest_mismatch_count,
             "bapi_payload_revision_count": bapi_payload_revision_count,
             "bapi_payload_hash_change_count": bapi_payload_hash_change_count,
+            "schedule_revision_emitted_count": schedule_revision_emitted_count,
+            "schedule_revision_diagnostic_count": schedule_revision_diagnostic_count,
+            "schedule_revision_index_collision_count": schedule_revision_index_collision_count,
+            "formal_launch_identity_index_rebuilt_count": rebuilt_index_rows,
             "bapi_detail_source_degraded": source_health_diag["bapi_detail_source_degraded"],
             "support_detail_source_degraded": source_health_diag["support_detail_source_degraded"],
             "all_detail_sources_degraded": source_health_diag["all_detail_sources_degraded"],

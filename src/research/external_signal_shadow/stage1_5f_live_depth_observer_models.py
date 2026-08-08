@@ -147,6 +147,14 @@ class EventSymbolState:
     terminal_audit_row: dict | None = None
 
     # Lineage and Contamination Fields (Schema V3)
+    source_detail_url_normalized: str = ""
+    source_published_at_ms: int | None = None
+    formal_event_contract_version: int | None = None
+    formal_event_consumable_by_stage1_5f: bool | None = None
+    symbol_identity_validation_status: str | None = None
+    launch_anchor_evidence_level: str | None = None
+    effective_observation_anchor_source: str | None = None
+    launch_anchor_validation_status: str | None = None
     source_anchor_contract_hash: str = ""
     admission_anchor_contract_hash: str = ""
     latest_anchor_contract_hash: str = ""

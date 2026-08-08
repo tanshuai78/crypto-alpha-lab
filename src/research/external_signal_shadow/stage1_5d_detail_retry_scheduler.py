@@ -288,6 +288,7 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "detected_at_ms": state.get("detected_at_ms", 0),
             "first_detected_at_ms": state.get("first_detected_at_ms", 0),
             "event_type": state.get("event_type") or "futures_contract_launch",
+            "detail_work_type": state.get("detail_work_type"),
             "catalog_id": state.get("catalog_id"),
             "catalog_title": state.get("catalog_title"),
             "symbol_extraction_source": state.get("symbol_extraction_source") or "none",
@@ -382,6 +383,7 @@ def load_detail_retry_scheduler_state(output_root: Path) -> dict:
         art.setdefault("consumable_event_allowed", None)
         art.setdefault("symbol_launch_time_candidates_ms", None)
         art.setdefault("launch_time_conflict_ms", None)
+        art.setdefault("detail_work_type", None)
 
     return loaded
 

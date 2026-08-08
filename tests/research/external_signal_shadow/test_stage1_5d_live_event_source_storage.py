@@ -7,6 +7,8 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
     build_detail_payload_path,
     build_stream_paths,
     enforce_payload_budget,
+    load_payload_version_first_observed,
+    record_payload_version_first_observed,
     write_detail_payload,
     write_detail_payload_append_only,
 )
@@ -31,6 +33,19 @@ def test_append_jsonl_writes_one_row(tmp_path):
     path = tmp_path / "events.jsonl"
     append_jsonl(path, {"a": 1})
     assert json.loads(path.read_text().strip()) == {"a": 1}
+
+
+def test_payload_version_first_observed_survives_reload(tmp_path):
+    registry = tmp_path / "revision_payload_versions.jsonl"
+    first = record_payload_version_first_observed(
+        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=1_000
+    )
+    second = record_payload_version_first_observed(
+        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=2_000
+    )
+
+    assert first == second == 1_000
+    assert load_payload_version_first_observed(registry)[("a" * 32, "hash-a")] == 1_000
 
 
 def test_enforce_payload_budget_blocks_large_day(tmp_path):

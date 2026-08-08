@@ -648,9 +648,18 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         "latest_anchor_evidence_level",
         "admission_max_evidence_class",
         "latest_max_evidence_class",
+        "source_detail_url_normalized",
+        "source_published_at_ms",
+        "formal_event_contract_version",
+        "formal_event_consumable_by_stage1_5f",
+        "symbol_identity_validation_status",
+        "launch_anchor_evidence_level",
+        "effective_observation_anchor_source",
+        "launch_anchor_validation_status",
     ):
-        if anchor_diag.get(key) not in (None, ""):
-            d[key] = anchor_diag[key]
+        val = anchor_diag.get(key) if anchor_diag.get(key) not in (None, "") else (target_row.get(key) if target_row and target_row.get(key) not in (None, "") else None)
+        if val not in (None, ""):
+            d[key] = val
 
     retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
     d["next_anchor_resolution_at_ms"] = now_ms + retry_interval_ms

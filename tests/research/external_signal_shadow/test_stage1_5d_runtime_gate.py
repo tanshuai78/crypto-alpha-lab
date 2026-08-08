@@ -73,7 +73,7 @@ def test_stage1_5d_runtime_gate_ready_state():
     assert gate["events_stream_relative_path"] == "events/*.jsonl"
     assert gate["consumable_by_stage1_5f"] is True
     assert gate["formal_event_contract_versions_supported"] == [2]
-    assert gate["formal_schedule_revision_contract_versions_supported"] == [1]
+    assert gate["formal_schedule_revision_contract_versions_supported"] == [1, 2]
     assert gate["anchor_precedence_policy"] == "official_schedule_priority_v1"
     assert gate["shared_anchor_validator_enabled"] is True
     for field in (
@@ -85,6 +85,16 @@ def test_stage1_5d_runtime_gate_ready_state():
         "alpha_interpretation_allowed",
     ):
         assert gate[field] is False
+
+
+def test_stage1_5d_runtime_gate_requires_explicit_producer_attestation():
+    gate = build_stage1_5d_runtime_gate(_build_test_gate_context())
+
+    assert gate["schedule_revision_producer_supported"] is False
+    assert gate["schedule_revision_producer_configured_enabled"] is False
+    assert gate["schedule_revision_producer_consumer_prerequisites_verified"] is False
+    assert gate["schedule_revision_producer_effective_enabled"] is False
+    assert gate["schedule_revision_producer_health"] == "attestation_missing"
 
 
 def test_stage1_5d_runtime_gate_degraded_state():
