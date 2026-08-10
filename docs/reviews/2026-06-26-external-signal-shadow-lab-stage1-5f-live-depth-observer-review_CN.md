@@ -432,10 +432,11 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
+STAGE1_5D_START_READY=1
 if tmux has-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null; then
   echo "ERROR: Stage 1.5D v2 tmux session already exists; do not create a new empty root." >&2
   ps -efww | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' | grep -v grep || true
-  exit 1
+  STAGE1_5D_START_READY=0
 fi
 
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
@@ -443,11 +444,12 @@ export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_so
 
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
   echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
-  exit 1
+  STAGE1_5D_START_READY=0
 fi
-mkdir -p "$STAGE1_5D_EVENTS_OUT"
 
-tmux new -d -s stage1_5d_continuous_7d_schedule_revision_producer_hotfix "
+if [ "$STAGE1_5D_START_READY" = "1" ]; then
+  mkdir -p "$STAGE1_5D_EVENTS_OUT"
+  tmux new -d -s stage1_5d_continuous_7d_schedule_revision_producer_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
@@ -460,8 +462,8 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_l
   --live-public-readonly
 "
 
-sleep 2
-export ACTUAL_STAGE1_5D_EVENTS_OUT="$(
+  sleep 2
+  export ACTUAL_STAGE1_5D_EVENTS_OUT="$(
   ps -efww \
     | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' \
     | grep -v grep \
@@ -470,14 +472,19 @@ export ACTUAL_STAGE1_5D_EVENTS_OUT="$(
     | awk 'prev=="--output-root"{print; exit}{prev=$0}'
 )"
 
-if [ "$ACTUAL_STAGE1_5D_EVENTS_OUT" != "$STAGE1_5D_EVENTS_OUT" ]; then
-  echo "ERROR: Stage 1.5D actual output root mismatch." >&2
-  echo "EXPECTED=[$STAGE1_5D_EVENTS_OUT]" >&2
-  echo "ACTUAL=[$ACTUAL_STAGE1_5D_EVENTS_OUT]" >&2
-  exit 1
+  if [ "$ACTUAL_STAGE1_5D_EVENTS_OUT" != "$STAGE1_5D_EVENTS_OUT" ]; then
+    echo "ERROR: Stage 1.5D actual output root mismatch." >&2
+    echo "EXPECTED=[$STAGE1_5D_EVENTS_OUT]" >&2
+    echo "ACTUAL=[$ACTUAL_STAGE1_5D_EVENTS_OUT]" >&2
+    STAGE1_5D_START_READY=0
+  fi
 fi
 
-echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
+if [ "$STAGE1_5D_START_READY" = "1" ]; then
+  echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
+else
+  echo "STOP: Stage 1.5D was not started. Fix the error above; SSH remains open." >&2
+fi
 ```
 
 等待 startup gate 生成，再等 1 到 2 个 poll。`live_safety_gate_summary.json` 在 1.5D 进入主循环前就应先写入 `INITIALIZING`；如果 30 秒内不存在，优先检查 tmux pane 和进程命令行，不要继续启动 1.5F。
@@ -500,14 +507,14 @@ if [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
   find "$STAGE1_5D_EVENTS_OUT" -maxdepth 2 -type f 2>/dev/null | sort | head -n 80 >&2 || true
   echo "=== tmux pane tail ===" >&2
   tmux capture-pane -pt stage1_5d_continuous_7d_schedule_revision_producer_hotfix -S -200 2>&1 >&2 || true
-  exit 1
-fi
+  echo "STOP: Stage 1.5D runtime gate is missing. Fix the error above; SSH remains open." >&2
+else
+  sleep 90
 
-sleep 90
-
-cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
-  | python3 -m json.tool | grep -E \
+  cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
+    | python3 -m json.tool | grep -E \
 '"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"live_public_readonly"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"trade_signal_allowed"|"paper_trading_allowed"|"live_trading_allowed"|"execution_engine_allowed"|"alpha_interpretation_allowed"|"fatal_blockers"'
+fi
 ```
 
 判定标准：
@@ -624,10 +631,9 @@ export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasib
 
 if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
   echo "Missing STAGE1_5D_EVENTS_OUT or STAGE1_5F_OUT" >&2
-  exit 1
-fi
-
-tmux new -d -s stage1_5f_live_depth_7d_schedule_revision_producer_hotfix "
+  echo "STOP: Stage 1.5F was not started. Fix the error above; SSH remains open." >&2
+else
+  tmux new -d -s stage1_5f_live_depth_7d_schedule_revision_producer_hotfix "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
@@ -640,6 +646,7 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
   --output-root '$STAGE1_5F_OUT' \
   --live-public-readonly
 "
+fi
 ```
 
 注意：`--stage1-5d-events-glob` 必须让 Python 收到未转义的 `events/*.jsonl`。不要写成带反斜杠的 glob；带反斜杠会被 Python `glob.glob()` 当成字面量，匹配不到任何 `events/YYYY-MM-DD.jsonl`。

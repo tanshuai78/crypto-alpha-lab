@@ -105,8 +105,8 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
    - 不在每个 Task 完成后都全量更新图谱。
    - 仅当实际修改共享 SSOT、公共 Helper、Contract、Schema、CLI 或 transport boundary 时，使用精准查询：
      ```bash
-     .venv/bin/python -m graphify affected "<exact_symbol>"
-     .venv/bin/python -m graphify path "<producer>" "<consumer>"
+     graphify query "<exact_symbol>"
+     graphify path "<producer>" "<consumer>"
      ```
    - 对 JSON/JSONL 字段、CLI flag、事件类型和路径，再用 `rg` 检查真实消费者。Graphify 只发现候选影响；必须以源码验证，并运行 Plan 声明的兼容性回归。
 2. **全部 Task 代码修改与测试通过后**：
