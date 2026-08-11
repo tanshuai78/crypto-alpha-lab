@@ -1,6 +1,8 @@
 import argparse
+import ast
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -87,13 +89,400 @@ from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer im
     rebuild_missing_formal_launch_identity_index,
 )
 
+PROTECTED_TREE_MANIFEST = [
+    "scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_client.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_collector.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_evidence.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_first_bar.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_storage.py",
+    "src/research/external_signal_shadow/stage1_5d_live_event_source_summary.py",
+    "src/research/external_signal_shadow/stage1_5d_detail_retry_scheduler.py",
+    "src/research/external_signal_shadow/stage1_5d_schedule_revision_producer.py",
+    "src/research/external_signal_shadow/stage1_5_launch_anchor_contract.py",
+    "src/research/external_signal_shadow/stage1_5_launch_event_contract.py",
+    "src/research/external_signal_shadow/stage1_5d_runtime_gate.py",
+]
+
+CONSUMER_RUNTIME_MANIFEST = [
+    "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py",
+    "scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_budget.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_client.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_metrics.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_models.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_state.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_storage.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_summary.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_watermark.py",
+    "src/research/external_signal_shadow/stage1_5f_schedule_revision_registry.py",
+    "src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py",
+    "src/risk/limits.py",
+]
+
+ALLOWED_CONFIG_DELTA_ASSIGNMENTS = {
+    "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA": str,
+    "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED": bool,
+    "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED": bool,
+    "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED": bool,
+}
+
+
+def canonical_manifest_sha256(policy_version: str, paths: list[str]) -> str:
+    payload = policy_version + "\n" + "\n".join(sorted(paths)) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def canonical_root_id(path: str | Path) -> str:
+    canonical_path = str(Path(path).resolve())
+    return hashlib.sha256(canonical_path.encode("utf-8")).hexdigest()
+
+
+def canonical_root_contract_sha256(root_contract: dict) -> str:
+    payload = json.dumps(
+        root_contract,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def validate_configs_base_ast_delta(content_a: str, content_b: str) -> bool:
+    """Allow literal changes to exactly the four producer-attestation settings."""
+    try:
+        tree_a = ast.parse(content_a)
+        tree_b = ast.parse(content_b)
+    except SyntaxError:
+        return False
+
+    if len(tree_a.body) != len(tree_b.body):
+        return False
+
+    def allowed_assignments(tree: ast.Module) -> dict[str, int] | None:
+        positions: dict[str, int] = {}
+        for index, node in enumerate(tree.body):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name) or target.id not in ALLOWED_CONFIG_DELTA_ASSIGNMENTS:
+                continue
+            expected_type = ALLOWED_CONFIG_DELTA_ASSIGNMENTS[target.id]
+            if not isinstance(node.value, ast.Constant) or type(node.value.value) is not expected_type:
+                return None
+            if target.id in positions:
+                return None
+            positions[target.id] = index
+        if set(positions) != set(ALLOWED_CONFIG_DELTA_ASSIGNMENTS):
+            return None
+        return positions
+
+    positions_a = allowed_assignments(tree_a)
+    positions_b = allowed_assignments(tree_b)
+    if positions_a is None or positions_b is None or positions_a != positions_b:
+        return False
+
+    def normalize_assign(node: ast.AST):
+        if isinstance(node, ast.Assign):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                if name in ALLOWED_CONFIG_DELTA_ASSIGNMENTS:
+                    expected_type = ALLOWED_CONFIG_DELTA_ASSIGNMENTS[name]
+                    if isinstance(node.value, ast.Constant) and type(node.value.value) is expected_type:
+                        return ast.Assign(
+                            targets=[ast.Name(id=name, ctx=ast.Store())],
+                            value=ast.Constant(value="SENTINEL"),
+                        )
+        return node
+
+    new_body_a = [normalize_assign(n) for n in tree_a.body]
+    new_body_b = [normalize_assign(n) for n in tree_b.body]
+
+    tree_a.body = new_body_a
+    tree_b.body = new_body_b
+
+    return ast.dump(tree_a) == ast.dump(tree_b)
+
+
+def verify_git_ancestry_and_static_proof(
+    *,
+    repo_root: Path,
+    prerequisite_sha: str,
+    protected_manifest: list[str],
+    deadline_monotonic: float | None = None,
+) -> dict:
+    prereq = prerequisite_sha.strip()
+    if not prereq or len(prereq) != 40 or not all(c in "0123456789abcdefABCDEF" for c in prereq):
+        return {"valid": False, "reason": "invalid_prerequisite_sha_format"}
+
+    def run_git(args: list[str]) -> tuple[int, str]:
+        timeout_sec = 5.0
+        if deadline_monotonic is not None:
+            timeout_sec = deadline_monotonic - time.monotonic()
+            if timeout_sec <= 0:
+                return -1, "timeout"
+        try:
+            res = subprocess.run(
+                ["git"] + args,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"),
+                timeout=min(5.0, timeout_sec),
+            )
+            return res.returncode, res.stdout.strip()
+        except (subprocess.SubprocessError, OSError):
+            return -1, ""
+
+    code, toplevel = run_git(["rev-parse", "--show-toplevel"])
+    if code != 0 or Path(toplevel).resolve() != repo_root.resolve():
+        return {"valid": False, "reason": "git_toplevel_mismatch"}
+
+    code, fmt = run_git(["rev-parse", "--show-object-format"])
+    if code != 0 or fmt != "sha1":
+        return {"valid": False, "reason": "non_sha1_object_format"}
+
+    code, is_shallow = run_git(["rev-parse", "--is-shallow-repository"])
+    if code != 0 or is_shallow != "false":
+        return {"valid": False, "reason": "shallow_repository_rejected"}
+
+    code, head_sha = run_git(["rev-parse", "HEAD"])
+    if code != 0 or len(head_sha) != 40:
+        return {"valid": False, "reason": "cannot_read_head_sha"}
+
+    code, obj_type = run_git(["cat-file", "-t", prereq])
+    if code != 0 or obj_type != "commit":
+        return {"valid": False, "reason": "prerequisite_not_a_commit_object"}
+
+    code, _ = run_git(["merge-base", "--is-ancestor", prereq, head_sha])
+    if code != 0:
+        return {"valid": False, "reason": "prerequisite_not_ancestor_of_head"}
+
+    for commit in (prereq, head_sha):
+        for path in protected_manifest:
+            code, object_type = run_git(["cat-file", "-t", f"{commit}:{path}"])
+            if code != 0 or object_type != "blob":
+                return {"valid": False, "reason": "protected_manifest_path_not_tracked_blob"}
+
+    for path in protected_manifest:
+        resolved_path = (repo_root / path).resolve()
+        if not resolved_path.is_relative_to(repo_root.resolve()) or not resolved_path.is_file():
+            return {"valid": False, "reason": "protected_manifest_path_unavailable_at_runtime"}
+
+    code, diff_out = run_git(["diff", "--quiet", prereq, head_sha, "--"] + protected_manifest)
+    if code != 0:
+        return {"valid": False, "reason": "protected_manifest_modified_between_commits"}
+
+    code, cat_a = run_git(["show", f"{prereq}:configs/base.py"])
+    if code != 0:
+        return {"valid": False, "reason": "cannot_read_base_py_at_prerequisite"}
+
+    code, cat_b = run_git(["show", f"{head_sha}:configs/base.py"])
+    if code != 0:
+        return {"valid": False, "reason": "cannot_read_base_py_at_head"}
+
+    if not validate_configs_base_ast_delta(cat_a, cat_b):
+        return {"valid": False, "reason": "unapproved_config_ast_delta"}
+
+    code, status_out = run_git(["status", "--porcelain", "--"] + protected_manifest + ["configs/base.py"])
+    if code != 0 or status_out:
+        return {"valid": False, "reason": "protected_worktree_dirty"}
+
+    protected_dirs = [
+        "scripts/external_signal_shadow",
+        "src/research/external_signal_shadow",
+        "src/risk",
+        "configs",
+    ]
+    for ignored in (False, True):
+        args = ["ls-files", "--others", "--exclude-standard"]
+        if ignored:
+            args.append("-i")
+        code, python_paths = run_git(args + ["--"] + protected_dirs)
+        if code != 0:
+            return {"valid": False, "reason": "cannot_check_untracked_python_sources"}
+        if any(path.endswith(".py") for path in python_paths.splitlines()):
+            return {"valid": False, "reason": "untracked_python_source_present"}
+
+    return {
+        "valid": True,
+        "startup_head_sha": head_sha,
+        "reason": "static_proof_passed",
+    }
+
+
+def verify_stage1_5d_runtime_attestation(
+    repo_root: Path,
+    startup_head_sha: str,
+    protected_manifest: list[str],
+    deadline_monotonic: float,
+) -> dict:
+    def run_git(args: list[str]) -> tuple[int, str]:
+        timeout_sec = deadline_monotonic - time.monotonic()
+        if timeout_sec <= 0:
+            return -1, "timeout"
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"),
+                timeout=timeout_sec,
+            )
+            return result.returncode, result.stdout.strip()
+        except (subprocess.SubprocessError, OSError):
+            return -1, ""
+
+    code, head_sha = run_git(["rev-parse", "HEAD"])
+    if code != 0 or head_sha != startup_head_sha:
+        return {"valid": False, "reason": "startup_head_changed"}
+    code, status_out = run_git(["status", "--porcelain", "--"] + protected_manifest + ["configs/base.py"])
+    if code != 0 or status_out:
+        return {"valid": False, "reason": "protected_worktree_dirty"}
+    for path in protected_manifest:
+        resolved_path = (repo_root / path).resolve()
+        if not resolved_path.is_relative_to(repo_root.resolve()) or not resolved_path.is_file():
+            return {"valid": False, "reason": "protected_manifest_path_unavailable_at_runtime"}
+
+    protected_dirs = [
+        "scripts/external_signal_shadow",
+        "src/research/external_signal_shadow",
+        "src/risk",
+        "configs",
+    ]
+    for ignored in (False, True):
+        args = ["ls-files", "--others", "--exclude-standard"]
+        if ignored:
+            args.append("-i")
+        code, python_paths = run_git(args + ["--"] + protected_dirs)
+        if code != 0:
+            return {"valid": False, "reason": "cannot_check_untracked_python_sources"}
+        if any(path.endswith(".py") for path in python_paths.splitlines()):
+            return {"valid": False, "reason": "untracked_python_source_present"}
+    return {"valid": True, "reason": "runtime_attestation_passed"}
+
+
+def update_stage1_5d_runtime_attestation_latch(lifecycle: dict, result: dict) -> None:
+    if not lifecycle.get("runtime_attestation_compromised", False) and not result.get("valid", False):
+        lifecycle["runtime_attestation_compromised"] = True
+
+
+def verify_stage1_5f_consumer_proof(
+    *,
+    consumer_root_contract_path: str | Path,
+    consumer_summary_path: str | Path,
+    expected_d_output_root_id: str,
+    expected_d_startup_head_sha: str,
+    expected_consumer_manifest_sha256: str,
+    armed_consumer_state: dict | None = None,
+    now_ms: int | None = None,
+) -> dict:
+    if not consumer_root_contract_path or not consumer_summary_path:
+        return {"valid": False, "reason": "consumer_paths_unspecified"}
+
+    contract_p = Path(consumer_root_contract_path)
+    summary_p = Path(consumer_summary_path)
+
+    if not contract_p.is_file() or not summary_p.is_file():
+        return {"valid": False, "reason": "consumer_artifact_file_missing"}
+
+    try:
+        contract = json.loads(contract_p.read_text(encoding="utf-8"))
+        summary = json.loads(summary_p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"valid": False, "reason": "consumer_artifact_corrupt"}
+
+    if summary.get("stale", False):
+        return {"valid": False, "reason": "consumer_summary_stale"}
+
+    if now_ms is not None:
+        last_hb = summary.get("last_heartbeat_at_ms") or summary.get("created_at_ms") or 0
+        if now_ms - last_hb > 10_000:
+            return {"valid": False, "reason": "consumer_summary_heartbeat_expired"}
+
+    computed_contract_sha = canonical_root_contract_sha256(contract)
+    if summary.get("consumer_root_contract_sha256") != computed_contract_sha:
+        return {"valid": False, "reason": "consumer_root_contract_hash_mismatch"}
+
+    if contract.get("root_mode") != "v2_production":
+        return {"valid": False, "reason": "consumer_root_mode_not_v2_production"}
+    if contract.get("formal_event_contract_versions_allowed") != [2]:
+        return {"valid": False, "reason": "consumer_formal_event_versions_mismatch"}
+    if contract.get("formal_schedule_revision_contract_versions_allowed") != [1, 2]:
+        return {"valid": False, "reason": "consumer_formal_revision_versions_mismatch"}
+    if not contract.get("consumer_static_attestation_verified", False):
+        return {"valid": False, "reason": "consumer_contract_static_attestation_unverified"}
+
+    for field in (
+        "consumer_root_id",
+        "consumer_startup_commit_sha",
+        "consumer_runtime_manifest_sha256",
+    ):
+        if not summary.get(field) or summary.get(field) != contract.get(field):
+            return {"valid": False, "reason": f"{field}_cross_artifact_mismatch"}
+
+    if contract.get("consumer_startup_commit_sha") != expected_d_startup_head_sha:
+        return {"valid": False, "reason": "consumer_startup_commit_mismatch"}
+
+    if contract.get("consumer_runtime_manifest_sha256") != expected_consumer_manifest_sha256:
+        return {"valid": False, "reason": "consumer_runtime_manifest_mismatch"}
+
+    if not summary.get("consumer_static_attestation_verified", False):
+        return {"valid": False, "reason": "consumer_static_attestation_unverified"}
+
+    if not summary.get("consumer_runtime_attestation_verified", False):
+        return {"valid": False, "reason": "consumer_runtime_attestation_unverified"}
+
+    if summary.get("consumer_runtime_attestation_compromised", False):
+        return {"valid": False, "reason": "consumer_runtime_attestation_compromised"}
+
+    source_d_root = contract.get("source_stage1_5d_output_root_id")
+    source_d_events = contract.get("source_stage1_5d_events_root_id")
+    source_d_gate = contract.get("source_stage1_5d_runtime_gate_root_id")
+
+    if not (source_d_root and source_d_root == source_d_events == source_d_gate == expected_d_output_root_id):
+        return {"valid": False, "reason": "consumer_source_root_binding_mismatch"}
+
+    if summary.get("blocker"):
+        return {"valid": False, "reason": "consumer_blocker_present"}
+
+    if summary.get("block_new_event_admission", False):
+        return {"valid": False, "reason": "consumer_admission_blocked"}
+
+    consumer_root_id = contract.get("consumer_root_id")
+    consumer_process_id = summary.get("consumer_process_instance_id")
+
+    if armed_consumer_state is not None:
+        if consumer_root_id != armed_consumer_state.get("consumer_root_id"):
+            return {"valid": False, "reason": "armed_consumer_root_id_mismatch"}
+        if consumer_process_id != armed_consumer_state.get("consumer_process_instance_id"):
+            return {"valid": False, "reason": "armed_consumer_process_id_mismatch"}
+        if str(contract_p.resolve()) != armed_consumer_state.get("consumer_root_contract_path"):
+            return {"valid": False, "reason": "armed_consumer_contract_path_mismatch"}
+        if str(summary_p.resolve()) != armed_consumer_state.get("consumer_summary_path"):
+            return {"valid": False, "reason": "armed_consumer_summary_path_mismatch"}
+
+    return {
+        "valid": True,
+        "consumer_root_id": consumer_root_id,
+        "consumer_process_instance_id": consumer_process_id,
+        "consumer_root_contract_path": str(contract_p.resolve()),
+        "consumer_summary_path": str(summary_p.resolve()),
+        "reason": "consumer_proof_passed",
+    }
+
+
 
 def read_current_commit_sha() -> str:
     """Return the checked-out commit, or an empty value when it cannot attest."""
+    repo_root = Path(__file__).resolve().parents[2]
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=repo_root,
             check=True,
             capture_output=True,
             text=True,
@@ -105,15 +494,29 @@ def read_current_commit_sha() -> str:
 
 def build_schedule_revision_producer_attestation(
     *,
-    current_commit_sha: str,
     integration_health: str,
+    static_proof_result: dict | None = None,
+    consumer_proof_result: dict | None = None,
 ) -> dict:
     """Compute the only gate evidence allowed to enable formal revisions."""
     configured = bool(base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED)
     prerequisite_commit = str(base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA).strip()
+
+    current_commit_sha = read_current_commit_sha()
+    static_valid = bool(
+        static_proof_result
+        and static_proof_result.get("valid", False)
+        and static_proof_result.get("startup_head_sha") == current_commit_sha
+    )
+
+    consumer_valid = not configured
+    if configured:
+        consumer_valid = bool(consumer_proof_result and consumer_proof_result.get("valid", False))
+
     prerequisites_verified = bool(
         prerequisite_commit
-        and current_commit_sha == prerequisite_commit
+        and static_valid
+        and consumer_valid
         and base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED
         and base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED
     )
@@ -133,6 +536,7 @@ def build_schedule_revision_producer_attestation(
         "schedule_revision_producer_effective_enabled": effective,
         "schedule_revision_producer_health": health,
     }
+
 
 
 def append_stage1_5d_diagnostic(stream_paths: dict, row: dict) -> None:
@@ -309,11 +713,11 @@ def record_formal_futures_launch_event(
     seen_event_ids: set,
     events_detected: list,
 ) -> dict | None:
-    from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
-        build_formal_launch_identity_index_rows,
-    )
     from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
         append_jsonl,
+    )
+    from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
+        build_formal_launch_identity_index_rows,
     )
 
     event_id = row.get("event_id")
@@ -1152,8 +1556,11 @@ def main():
     )
     parser.add_argument("--output-summary", type=str)
     parser.add_argument("--formal-launch-identity-index-snapshot", type=str)
+    parser.add_argument("--stage1-5f-consumer-root-contract", type=str, default="")
+    parser.add_argument("--stage1-5f-consumer-summary", type=str, default="")
 
     args = parser.parse_args()
+
 
     output_root = Path(args.output_root)
     output_summary_path = (
@@ -1328,7 +1735,6 @@ def main():
     symbol_empty_event_count = 0
 
     # New scheduler counters
-    detail_budget_deferred_count = 0
     detail_budget_starved_count = 0
     detail_never_attempted_expired_count = 0
     detail_first_attempt_sla_breach_count = 0
@@ -1358,14 +1764,44 @@ def main():
     schedule_revision_diagnostic_count = 0
     schedule_revision_index_collision_count = 0
     schedule_revision_integration_health = "initializing"
-    current_commit_sha = read_current_commit_sha()
+    repo_root = Path(__file__).resolve().parents[2]
+    prereq_sha = str(base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA).strip()
+    static_proof_result = verify_git_ancestry_and_static_proof(
+        repo_root=repo_root,
+        prerequisite_sha=prereq_sha,
+        protected_manifest=PROTECTED_TREE_MANIFEST + CONSUMER_RUNTIME_MANIFEST,
+        deadline_monotonic=time.monotonic() + 10.0,
+    )
+    current_commit_sha = static_proof_result.get("startup_head_sha") or read_current_commit_sha()
+    stage1_5d_out_id = canonical_root_id(output_root)
+    consumer_manifest_sha = canonical_manifest_sha256("1.5F_v1", CONSUMER_RUNTIME_MANIFEST)
+    runtime_protected_manifest = PROTECTED_TREE_MANIFEST + CONSUMER_RUNTIME_MANIFEST
+    attestation_lifecycle = {
+        "producer_armed_once": False,
+        "runtime_attestation_compromised": False,
+    }
+
+    armed_consumer_state = None
+    consumer_proof_result = None
+    if base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED:
+        consumer_proof_result = verify_stage1_5f_consumer_proof(
+            consumer_root_contract_path=args.stage1_5f_consumer_root_contract,
+            consumer_summary_path=args.stage1_5f_consumer_summary,
+            expected_d_output_root_id=stage1_5d_out_id,
+            expected_d_startup_head_sha=current_commit_sha,
+            expected_consumer_manifest_sha256=consumer_manifest_sha,
+            armed_consumer_state=armed_consumer_state,
+            now_ms=int(time.time() * 1000),
+        )
     schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
-        current_commit_sha=current_commit_sha,
         integration_health="initializing",
+        static_proof_result=static_proof_result,
+        consumer_proof_result=consumer_proof_result,
     )
     schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
         "schedule_revision_producer_effective_enabled"
     ]
+
 
     candidate_validation_pending_count = 0
 
@@ -1452,6 +1888,15 @@ def main():
         if first_poll_started_at_ms is None:
             first_poll_started_at_ms = now_ms
         actual_poll_interval_sec = None
+
+        if base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED:
+            runtime_result = verify_stage1_5d_runtime_attestation(
+                repo_root,
+                current_commit_sha,
+                runtime_protected_manifest,
+                time.monotonic() + 1.0,
+            )
+            update_stage1_5d_runtime_attestation_latch(attestation_lifecycle, runtime_result)
 
         poll_schedule_drift_ms = None
         if last_poll_started_at_ms is not None:
@@ -1619,13 +2064,35 @@ def main():
                 source_parent_url="https://www.binance.com/en/support/announcement",
                 first_bar_queue=first_bar_queue,
             )
+            if base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED:
+                consumer_proof_result = verify_stage1_5f_consumer_proof(
+                    consumer_root_contract_path=args.stage1_5f_consumer_root_contract,
+                    consumer_summary_path=args.stage1_5f_consumer_summary,
+                    expected_d_output_root_id=stage1_5d_out_id,
+                    expected_d_startup_head_sha=current_commit_sha,
+                    expected_consumer_manifest_sha256=consumer_manifest_sha,
+                    armed_consumer_state=armed_consumer_state,
+                    now_ms=now_ms,
+                )
+                if attestation_lifecycle["producer_armed_once"] and not consumer_proof_result.get("valid"):
+                    attestation_lifecycle["runtime_attestation_compromised"] = True
+
             schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
-                current_commit_sha=current_commit_sha,
-                integration_health="ready",
+                integration_health=(
+                    "runtime_attestation_compromised"
+                    if attestation_lifecycle["runtime_attestation_compromised"]
+                    else "ready"
+                ),
+                static_proof_result=static_proof_result,
+                consumer_proof_result=consumer_proof_result,
             )
             schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
                 "schedule_revision_producer_effective_enabled"
             ]
+            if schedule_revision_producer_effective_enabled and not attestation_lifecycle["producer_armed_once"]:
+                armed_consumer_state = consumer_proof_result
+                attestation_lifecycle["producer_armed_once"] = True
+
             catalogs = payload.get("data", {}).get("catalogs", [])
             raw_articles = catalogs[0].get("articles", []) if catalogs else []
             for ev in cycle_res["events"]:
@@ -2609,8 +3076,6 @@ def main():
                 chosen_url = None
                 chosen_extraction_res = None
                 chosen_payload_sha256 = None
-                chosen_payload_size_bytes = 0
-                chosen_payload_path = None
                 is_trusted = False
                 immediate_terminal_failed = False
 
@@ -2827,8 +3292,6 @@ def main():
                         chosen_url = active_url
                         chosen_extraction_res = current_extraction_res
                         chosen_payload_sha256 = payload_sha256
-                        chosen_payload_size_bytes = payload_size_bytes
-                        chosen_payload_path = payload_path
                         if url_idx > 0:
                             detail_fetch_fallback_success_count += 1
                         break
@@ -3334,13 +3797,19 @@ def main():
             first_bar_queue = processed + remaining
 
         schedule_revision_producer_attestation = build_schedule_revision_producer_attestation(
-            current_commit_sha=current_commit_sha,
             integration_health=(
-                schedule_revision_integration_health
-                if schedule_revision_integration_health != "initializing"
-                else ("ready" if hb.get("poll_success") else "poll_failed")
+                "runtime_attestation_compromised"
+                if attestation_lifecycle["runtime_attestation_compromised"]
+                else (
+                    schedule_revision_integration_health
+                    if schedule_revision_integration_health != "initializing"
+                    else ("ready" if hb.get("poll_success") else "poll_failed")
+                )
             ),
+            static_proof_result=static_proof_result,
+            consumer_proof_result=consumer_proof_result,
         )
+
         schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
             "schedule_revision_producer_effective_enabled"
         ]

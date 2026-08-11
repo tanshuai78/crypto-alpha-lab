@@ -150,6 +150,8 @@ Organized by category:
 * **2026-07-19**: Finalized Master Assessment (`2026-07-19-event_source_master_assessment.md`). Approved Stage 1.6A (Futures Delisting) as top priority discovery route and Stage 1.6R (Security Incident) as Risk-Veto side route.
 * **2026-07-24**: Implemented and verified Stage 1.5F historical-anchor rejection hygiene hotfix (watermark schema v2, terminal ignored pre-bootstrap state tracking).
 * **2026-07-26**: Verified server 1.5D and 1.5F 7-day continuous run state; finalized unified project state (`current-project-state_CN.md`) and document index (`current-document-index_CN.md`).
+* **2026-08-10**: Approved Stage 1.5D/1.5F Git Ancestry Attestation design and completed implementation plan. Producer emits version 2 formal schedule revision events; consumer accepts `[1, 2]`; producer configuration remains default disabled (`EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False`).
+
 
 ---
 

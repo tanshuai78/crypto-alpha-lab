@@ -1,14 +1,184 @@
 import argparse
 import glob
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 from loguru import logger
 
 from configs import base
+from src.risk.limits import RiskLimits
+
+CONSUMER_PROCESS_INSTANCE_ID = str(uuid.uuid4())
+
+CONSUMER_RUNTIME_MANIFEST = [
+    "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py",
+    "scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_budget.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_client.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_loader.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_metrics.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_models.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_state.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_storage.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_summary.py",
+    "src/research/external_signal_shadow/stage1_5f_live_depth_observer_watermark.py",
+    "src/research/external_signal_shadow/stage1_5f_schedule_revision_registry.py",
+    "src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py",
+    "src/risk/limits.py",
+]
+
+
+def canonical_manifest_sha256(policy_version: str, paths: list[str]) -> str:
+    payload = policy_version + "\n" + "\n".join(sorted(paths)) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def canonical_root_id(path: str | Path) -> str:
+    canonical_path = str(Path(path).resolve())
+    return hashlib.sha256(canonical_path.encode("utf-8")).hexdigest()
+
+
+def canonical_root_contract_sha256(root_contract: dict) -> str:
+    payload = json.dumps(
+        root_contract,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def write_live_depth_observer_summary_atomically(summary_path: str | Path, summary_data: dict) -> None:
+    p = Path(summary_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp_p = p.with_suffix(".json.tmp")
+    with open(tmp_p, "w", encoding="utf-8") as f:
+        json.dump(summary_data, f, indent=2)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass
+    os.replace(tmp_p, p)
+
+
+def build_consumer_proof_facts(
+    *,
+    output_root: str | Path,
+    static_proof: dict,
+    source_binding_facts: dict | None = None,
+    runtime_attestation_compromised: bool = False,
+) -> dict:
+    source_binding_facts = source_binding_facts or {}
+    source_bound = all(source_binding_facts.get(key) for key in (
+        "source_stage1_5d_output_root_id",
+        "source_stage1_5d_events_root_id",
+        "source_stage1_5d_runtime_gate_root_id",
+    ))
+    return {
+        "consumer_process_instance_id": CONSUMER_PROCESS_INSTANCE_ID,
+        "consumer_root_id": canonical_root_id(output_root),
+        "consumer_startup_commit_sha": str(static_proof.get("startup_head_sha") or ""),
+        "consumer_runtime_manifest_sha256": str(static_proof.get("manifest_sha256") or ""),
+        "consumer_static_attestation_verified": bool(static_proof.get("valid", False) and source_bound),
+        "consumer_runtime_attestation_compromised": runtime_attestation_compromised,
+        **source_binding_facts,
+    }
+
+
+def verify_consumer_static_proof(
+    repo_root: Path,
+    deadline_monotonic: float | None = None,
+) -> dict:
+    def run_git(args: list[str]) -> tuple[int, str]:
+        timeout_sec = 5.0
+        if deadline_monotonic is not None:
+            timeout_sec = deadline_monotonic - time.monotonic()
+            if timeout_sec <= 0:
+                return -1, "timeout"
+        try:
+            res = subprocess.run(
+                ["git"] + args,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"),
+                timeout=min(5.0, timeout_sec),
+            )
+            return res.returncode, res.stdout.strip()
+        except (subprocess.SubprocessError, OSError):
+            return -1, ""
+
+    code, toplevel = run_git(["rev-parse", "--show-toplevel"])
+    if code != 0 or Path(toplevel).resolve() != repo_root.resolve():
+        return {"valid": False, "reason": "git_toplevel_mismatch"}
+
+    code, object_format = run_git(["rev-parse", "--show-object-format"])
+    if code != 0 or object_format != "sha1":
+        return {"valid": False, "reason": "non_sha1_object_format"}
+
+    code, is_shallow = run_git(["rev-parse", "--is-shallow-repository"])
+    if code != 0 or is_shallow != "false":
+        return {"valid": False, "reason": "shallow_repository_rejected"}
+
+    code, head_sha = run_git(["rev-parse", "HEAD"])
+    if code != 0 or len(head_sha) != 40:
+        return {"valid": False, "reason": "cannot_read_head_sha"}
+
+    if RiskLimits.live_trading_enabled or base.RISK_LIVE_TRADING_ENABLED:
+        return {"valid": False, "reason": "live_trading_enabled_invariant_violation"}
+
+    for path in CONSUMER_RUNTIME_MANIFEST:
+        resolved_path = (repo_root / path).resolve()
+        if not resolved_path.is_relative_to(repo_root.resolve()) or not resolved_path.is_file():
+            return {"valid": False, "reason": "consumer_manifest_path_unavailable_at_runtime"}
+
+    code, status_out = run_git(["status", "--porcelain", "--"] + CONSUMER_RUNTIME_MANIFEST + ["configs/base.py"])
+    if code != 0 or status_out:
+        return {"valid": False, "reason": "consumer_worktree_dirty"}
+
+    protected_dirs = [
+        "scripts/external_signal_shadow",
+        "src/research/external_signal_shadow",
+        "src/risk",
+        "configs",
+    ]
+    for ignored in (False, True):
+        args = ["ls-files", "--others", "--exclude-standard"]
+        if ignored:
+            args.append("-i")
+        code, python_paths = run_git(args + ["--"] + protected_dirs)
+        if code != 0:
+            return {"valid": False, "reason": "cannot_check_untracked_python_sources"}
+        if any(path.endswith(".py") for path in python_paths.splitlines()):
+            return {"valid": False, "reason": "untracked_python_source_present"}
+
+    return {
+        "valid": True,
+        "startup_head_sha": head_sha,
+        "manifest_sha256": canonical_manifest_sha256("1.5F_v1", CONSUMER_RUNTIME_MANIFEST),
+        "reason": "consumer_static_proof_passed",
+    }
+
+
+def verify_consumer_runtime_proof(
+    repo_root: Path,
+    startup_head_sha: str,
+    deadline_monotonic: float,
+) -> dict:
+    result = verify_consumer_static_proof(repo_root, deadline_monotonic)
+    if not result.get("valid", False):
+        return result
+    if result.get("startup_head_sha") != startup_head_sha:
+        return {"valid": False, "reason": "consumer_head_changed_after_startup"}
+    return result
+
 
 
 def parse_args():
@@ -42,7 +212,13 @@ def validate_root_mode_and_suffix(output_root: str, allow_v1_compat: bool) -> st
     return "v2_production"
 
 
-def write_observer_root_contract_atomically(output_root: str, root_mode: str, reason: str = "") -> dict:
+def write_observer_root_contract_atomically(
+    output_root: str,
+    root_mode: str,
+    reason: str = "",
+    *,
+    source_binding_facts: dict | None = None,
+) -> dict:
     root_dir = Path(output_root)
     root_dir.mkdir(parents=True, exist_ok=True)
     root_path = root_dir / "observer_root_contract.json"
@@ -57,10 +233,14 @@ def write_observer_root_contract_atomically(output_root: str, root_mode: str, re
         "created_at_ms": int(time.time() * 1000),
         "reason": reason,
     }
+    if source_binding_facts:
+        content.update(source_binding_facts)
+
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(content, f, indent=2)
     os.replace(tmp_path, root_path)
     return content
+
 
 
 
@@ -171,12 +351,12 @@ def process_schedule_revision_event(
     registry_file: str | Path,
     now_ms: int,
 ) -> dict:
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        validate_schedule_revision_contract,
+    )
     from research.external_signal_shadow.stage1_5f_schedule_revision_registry import (
         ScheduleRevisionRegistry,
         compute_revision_application_id,
-    )
-    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
-        validate_schedule_revision_contract,
     )
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
         apply_anchor_contract_revision_to_state,
@@ -588,6 +768,14 @@ def main():
     args = parse_args()
     output_root = args.output_root
     os.makedirs(output_root, exist_ok=True)
+    consumer_static_proof = verify_consumer_static_proof(Path(__file__).resolve().parents[2])
+    consumer_source_binding_facts = None
+    consumer_runtime_attestation_compromised = False
+    consumer_runtime_attestation_verified = False
+    consumer_proof_facts = build_consumer_proof_facts(
+        output_root=output_root,
+        static_proof=consumer_static_proof,
+    )
     try:
         root_mode = validate_root_mode_and_suffix(output_root, args.allow_formal_v1_compatibility)
     except ValueError as e:
@@ -616,9 +804,6 @@ def main():
         )
         write_watermark_atomic(os.path.join(output_root, "watermark.json"), watermark)
 
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
-            write_json,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
         )
@@ -643,7 +828,9 @@ def main():
             request_manifest_rows=[],
             heartbeat_rows=[],
         )
-        write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
+        write_live_depth_observer_summary_atomically(
+            os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict()
+        )
         logger.info("Watermark bootstrapped and summary written. Exiting.")
         sys.exit(0)
 
@@ -653,6 +840,7 @@ def main():
             output_root,
             root_mode,
             reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "runtime_start",
+            source_binding_facts=consumer_proof_facts,
         )
 
     # 2. Validate Stage 1.5D summary. A dedicated runtime gate, when provided,
@@ -665,9 +853,6 @@ def main():
             validate_stage1_5d_summary(args.stage1_5d_summary)
     except Exception as e:
         logger.error(f"Stage 1.5D summary validation failed: {e}")
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
-            write_json,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
         )
@@ -693,7 +878,9 @@ def main():
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5d_summary_invalid_or_unsafe"
-        write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict)
+        write_live_depth_observer_summary_atomically(
+            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+        )
         sys.exit(1)
 
     # 3. Validate Stage 1.5E summary safety check (Advisory C)
@@ -726,9 +913,6 @@ def main():
 
     if stage1_5e_context_missing:
         logger.error("Stage 1.5E summary missing. Cannot run observation mode.")
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
-            write_json,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
         )
@@ -754,14 +938,13 @@ def main():
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_context_missing_for_observation"
-        write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict)
+        write_live_depth_observer_summary_atomically(
+            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+        )
         sys.exit(1)
 
     if stage1_5e_context_suspicious:
         logger.error("Stage 1.5E summary is unsafe. Cannot run observation mode.")
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
-            write_json,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
         )
@@ -787,7 +970,9 @@ def main():
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_summary_invalid_or_unsafe"
-        write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict)
+        write_live_depth_observer_summary_atomically(
+            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+        )
         sys.exit(1)
 
     # 4. Load watermark
@@ -862,6 +1047,17 @@ def main():
 
         logger.info(f"Starting poll {poll_index} at {now_ms} ms")
         last_error_str = None
+        if not consumer_runtime_attestation_compromised:
+            consumer_runtime_proof = verify_consumer_runtime_proof(
+                Path(__file__).resolve().parents[2],
+                str(consumer_static_proof.get("startup_head_sha") or ""),
+                time.monotonic() + 1.0,
+            )
+            if consumer_runtime_proof.get("valid", False):
+                consumer_runtime_attestation_verified = True
+            else:
+                consumer_runtime_attestation_compromised = True
+                consumer_runtime_attestation_verified = False
 
         # 6.1 Refresh exchangeInfo cache
         mock_exinfo_payload = None
@@ -954,6 +1150,7 @@ def main():
 
         # Check Stage 1.5D runtime gate or historical safety gate
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+            derive_stage1_5d_root_from_events_glob,
             validate_historical_stage1_5d_safety_gate,
             validate_stage1_5d_runtime_gate,
         )
@@ -978,6 +1175,38 @@ def main():
                     now_ms=now_ms,
                 )
                 gate_valid = gate_res["valid"]
+
+        if gate_valid and stage1_5d_gate_mode == "runtime_gate":
+            events_root = derive_stage1_5d_root_from_events_glob(args.stage1_5d_events_glob)
+            gate_root = Path(gate_res.get("resolved_source_root") or "").resolve()
+            if events_root is not None and str(gate_root) != ".":
+                source_root_id = canonical_root_id(events_root)
+                consumer_source_binding_facts = {
+                    "source_stage1_5d_output_root_id": source_root_id,
+                    "source_stage1_5d_events_root_id": source_root_id,
+                    "source_stage1_5d_runtime_gate_root_id": canonical_root_id(gate_root),
+                }
+            consumer_proof_facts = build_consumer_proof_facts(
+                output_root=output_root,
+                static_proof=consumer_static_proof,
+                source_binding_facts=consumer_source_binding_facts,
+                runtime_attestation_compromised=consumer_runtime_attestation_compromised,
+            )
+            try:
+                current_contract = json.loads(root_contract_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                current_contract = {}
+            contract_is_current = (
+                current_contract.get("root_mode") == root_mode
+                and all(current_contract.get(key) == value for key, value in consumer_proof_facts.items())
+            )
+            if not contract_is_current:
+                write_observer_root_contract_atomically(
+                    output_root,
+                    root_mode,
+                    reason="runtime_source_binding_validated",
+                    source_binding_facts=consumer_proof_facts,
+                )
 
         block_new_event_admission = not gate_valid
         if not gate_valid:
@@ -1063,10 +1292,6 @@ def main():
 
             c_hash = event.get("multi_symbol_candidate_set_hash") or event.get("candidate_set_hash") or ""
             b_id = build_event_batch_id(event, candidate_set_hash=c_hash)
-            expected_stable_keys = [
-                flat.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat, flat.get("symbol", ""))
-                for flat in expected_siblings
-            ]
 
             update_batch_registry_status(
                 output_root=output_root,
@@ -1473,9 +1698,6 @@ def main():
         append_jsonl(hb_path, hb_row.to_dict())
 
         # 6.5 Write summary generator
-        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
-            write_json,
-        )
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
         )
@@ -1530,9 +1752,23 @@ def main():
                 "runtime_gate_diagnostic_count": runtime_gate_invalid_count,
                 "schedule_revision_registry_orphan_count": schedule_revision_registry_counts.get("revision_orphaned", 0),
                 "schedule_revision_registry_ambiguous_count": schedule_revision_registry_counts.get("revision_ambiguous", 0),
+                "consumer_process_instance_id": consumer_proof_facts["consumer_process_instance_id"],
+                "consumer_root_id": consumer_proof_facts["consumer_root_id"],
+                "consumer_startup_commit_sha": consumer_proof_facts["consumer_startup_commit_sha"],
+                "consumer_root_contract_sha256": canonical_root_contract_sha256(
+                    json.loads(root_contract_path.read_text(encoding="utf-8"))
+                ),
+                "consumer_runtime_manifest_sha256": consumer_proof_facts["consumer_runtime_manifest_sha256"],
+                "consumer_static_attestation_verified": consumer_proof_facts[
+                    "consumer_static_attestation_verified"
+                ],
+                "consumer_runtime_attestation_verified": consumer_runtime_attestation_verified,
+                "consumer_runtime_attestation_compromised": consumer_runtime_attestation_compromised,
             },
         )
-        write_json(os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict())
+        write_live_depth_observer_summary_atomically(
+            os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict()
+        )
 
         poll_index += 1
         sleep_sec = 0.01 if args.mock_response_dir else 60

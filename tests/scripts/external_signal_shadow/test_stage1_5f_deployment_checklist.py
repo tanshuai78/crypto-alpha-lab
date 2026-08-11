@@ -20,3 +20,14 @@ def test_stage1_5f_events_glob_expansion(tmp_path):
     matched = glob.glob(pattern)
     assert len(matched) == 1
     assert matched[0] == str(f1)
+
+
+def test_git_ancestry_attestation_deployment_checklist_content():
+    path = Path("docs/reviews/2026-08-10-external-signal-shadow-lab-stage1-5d-1-5f-git-ancestry-attestation-deployment-checklist_CN.md")
+    assert path.exists()
+    text = path.read_text()
+    assert "Section A: Current Disabled Deployment" in text
+    assert "Section B: Future Enablement Reference" in text
+    assert "events/*.jsonl" in text
+    assert "events/\\*.jsonl" not in text
+    assert "\nexit\n" not in text and "\nexit " not in text

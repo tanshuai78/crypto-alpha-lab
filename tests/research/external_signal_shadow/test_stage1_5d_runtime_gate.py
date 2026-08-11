@@ -112,8 +112,11 @@ def test_stage1_5d_runtime_gate_failed_state():
 
 
 def test_stage1_5d_runtime_gate_atomic_write(tmp_path):
+    import hashlib
     ctx = _build_test_gate_context(output_root=tmp_path)
     gate = build_stage1_5d_runtime_gate(ctx)
+    expected_root_id = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
+    assert gate["stage1_5d_output_root_id"] == expected_root_id
     written_path = write_stage1_5d_runtime_gate_atomic(tmp_path, gate)
     assert written_path.exists()
     assert written_path.name == "live_safety_gate_summary.json"

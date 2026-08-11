@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -131,11 +132,14 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "schedule_revision_producer_effective_enabled": bool(ctx.get("schedule_revision_producer_effective_enabled", False)),
         "schedule_revision_producer_consumer_prerequisites_verified": bool(ctx.get("schedule_revision_producer_consumer_prerequisites_verified", False)),
         "schedule_revision_producer_health": str(ctx.get("schedule_revision_producer_health", "attestation_missing")),
+        "stage1_5d_output_root_id": hashlib.sha256(str(Path(ctx.get("source_root") or ctx.get("output_root") or ".").resolve()).encode("utf-8")).hexdigest(),
+
         "live_trading_enabled": bool(RiskLimits.live_trading_enabled),
     }
     for field in SAFETY_FALSE_FIELDS:
         gate[field] = False
     return gate
+
 
 
 def write_stage1_5d_runtime_gate_atomic(output_root: str | Path, gate_summary: dict) -> Path:

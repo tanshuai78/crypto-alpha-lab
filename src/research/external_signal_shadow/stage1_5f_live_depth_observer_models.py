@@ -371,8 +371,17 @@ class LiveDepthObserverSummary:
     research_result_valid: bool = False
     blocker: str | None = None
     summary_generated_at_ms: int = 0
+    consumer_process_instance_id: str = ""
+    consumer_root_id: str = ""
+    consumer_startup_commit_sha: str = ""
+    consumer_root_contract_sha256: str = ""
+    consumer_runtime_manifest_sha256: str = ""
+    consumer_static_attestation_verified: bool = False
+    consumer_runtime_attestation_verified: bool = False
+    consumer_runtime_attestation_compromised: bool = False
 
     def to_dict(self) -> dict:
+
         return asdict(self)
 
     @classmethod

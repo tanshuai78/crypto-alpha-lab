@@ -5767,9 +5767,15 @@ def test_schedule_revision_producer_attestation_requires_all_prerequisites(monke
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", "abc123")
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
+        lambda: "abc123",
+    )
 
     ready = build_schedule_revision_producer_attestation(
-        current_commit_sha="abc123", integration_health="ready"
+        integration_health="ready",
+        static_proof_result={"valid": True, "startup_head_sha": "abc123"},
+        consumer_proof_result={"valid": True},
     )
     assert ready == {
         "schedule_revision_producer_supported": True,
@@ -5780,7 +5786,9 @@ def test_schedule_revision_producer_attestation_requires_all_prerequisites(monke
     }
 
     blocked = build_schedule_revision_producer_attestation(
-        current_commit_sha="different", integration_health="ready"
+        integration_health="ready",
+        static_proof_result={"valid": True, "startup_head_sha": "different"},
+        consumer_proof_result={"valid": True},
     )
     assert blocked["schedule_revision_producer_consumer_prerequisites_verified"] is False
     assert blocked["schedule_revision_producer_effective_enabled"] is False
@@ -5838,8 +5846,26 @@ def test_runner_emits_revision_only_after_durable_launch_in_same_poll(tmp_path, 
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
     monkeypatch.setattr(
         "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
+        lambda: head_sha,
+    )
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
         lambda: "abc123",
     )
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.verify_git_ancestry_and_static_proof",
+        lambda **kwargs: {"valid": True, "startup_head_sha": "abc123"},
+    )
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.verify_stage1_5f_consumer_proof",
+        lambda **kwargs: {"valid": True},
+    )
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.verify_stage1_5d_runtime_attestation",
+        lambda *_args: {"valid": True},
+    )
+
+
 
     with patch("sys.argv", args):
         assert main() == 0
@@ -5851,3 +5877,459 @@ def test_runner_emits_revision_only_after_durable_launch_in_same_poll(tmp_path, 
     summary = json.loads((output_root / "binance_futures_launch_smoke_summary.json").read_text())
     assert summary["schedule_revision_emitted_count"] == 1
     assert summary["schedule_revision_diagnostic_count"] == 0
+
+
+def test_task1_contract_and_safety_baseline_preflight():
+    from configs import base
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION,
+        build_formal_schedule_revision_row,
+    )
+    from src.risk.limits import RiskLimits
+
+    assert FORMAL_SCHEDULE_REVISION_CONTRACT_VERSION == 2
+    row = build_formal_schedule_revision_row(
+        source_article_id="art-1",
+        supersedes_source_article_id="art-0",
+        symbol="BTCUSDT",
+        revised_anchor_ms=2_000,
+        revision_id="rev-1",
+        revision_semantic_id="rev-1",
+        revision_application_id="rev-1",
+        revision_payload_version_id="pv-1",
+        revision_observation_id="ob-1",
+        revision_payload_hash="hash-1",
+        revision_available_at_ms=1_500,
+    )
+    assert row["formal_schedule_revision_contract_version"] == 2
+    assert base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED is False
+    assert RiskLimits.live_trading_enabled is False
+
+
+def test_validate_configs_base_ast_delta_accepts_valid_config_only_changes():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_configs_base_ast_delta,
+    )
+
+    base_code = """
+FOO = 123
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA = "1111111111111111111111111111111111111111"
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
+BAR = "hello"
+"""
+
+    valid_code = """
+FOO = 123
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA = "2222222222222222222222222222222222222222"
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED = True
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED = True
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = True
+BAR = "hello"
+"""
+
+    assert validate_configs_base_ast_delta(base_code, valid_code) is True
+
+
+def test_validate_configs_base_ast_delta_rejects_unapproved_or_dynamic_changes():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_configs_base_ast_delta,
+    )
+
+    base_code = """
+FOO = 123
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA = ""
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
+"""
+
+    # Rejects addition of new variables
+    invalid_add = base_code + "\nUNAPPROVED = 1"
+    assert validate_configs_base_ast_delta(base_code, invalid_add) is False
+
+    # Rejects non-literal assignment (expression/getenv)
+    invalid_dynamic = base_code.replace('EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False', 'EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = bool(os.getenv("ENABLED"))')
+    assert validate_configs_base_ast_delta(base_code, invalid_dynamic) is False
+
+    # Rejects modifying unrelated variable
+    invalid_modify_unrelated = base_code.replace("FOO = 123", "FOO = 456")
+    assert validate_configs_base_ast_delta(base_code, invalid_modify_unrelated) is False
+
+    duplicate_allowed = base_code + "\nEXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False"
+    assert validate_configs_base_ast_delta(base_code, duplicate_allowed) is False
+
+    moved_allowed = "\n".join(reversed(base_code.strip().splitlines()))
+    assert validate_configs_base_ast_delta(base_code, moved_allowed) is False
+
+
+def test_schedule_revision_attestation_derives_current_commit_and_never_falls_back(monkeypatch):
+    import inspect
+    from configs import base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_schedule_revision_producer_attestation,
+    )
+
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
+        lambda: "a" * 40,
+    )
+
+    assert "current_commit_sha" not in inspect.signature(
+        build_schedule_revision_producer_attestation
+    ).parameters
+    result = build_schedule_revision_producer_attestation(
+        integration_health="ready",
+        static_proof_result=None,
+        consumer_proof_result={"valid": True},
+    )
+    assert result["schedule_revision_producer_effective_enabled"] is False
+
+
+def test_startup_static_proof_helpers_in_temp_sha1_repo(tmp_path):
+    import subprocess
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        verify_git_ancestry_and_static_proof,
+    )
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    def run_git(*cmd):
+        res = subprocess.run(["git"] + list(cmd), cwd=repo_dir, capture_output=True, text=True, check=True)
+        return res.stdout.strip()
+
+    run_git("init")
+    run_git("config", "user.name", "Test")
+    run_git("config", "user.email", "test@example.com")
+
+    # Create dummy files
+    configs_dir = repo_dir / "configs"
+    configs_dir.mkdir()
+    base_file = configs_dir / "base.py"
+    base_content = """
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA = ""
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED = False
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
+"""
+    base_file.write_text(base_content)
+
+    scripts_dir = repo_dir / "scripts" / "external_signal_shadow"
+    scripts_dir.mkdir(parents=True)
+    runner_file = scripts_dir / "run_stage1_5d_live_event_source_smoke_collector.py"
+    runner_file.write_text("# runner")
+
+    src_dir = repo_dir / "src" / "research" / "external_signal_shadow"
+    src_dir.mkdir(parents=True)
+    (repo_dir / "src" / "risk").mkdir(parents=True)
+    (repo_dir / "src" / "risk" / "limits.py").write_text("RISK_LIVE_TRADING_ENABLED = False")
+
+    protected_manifest = [
+        "scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py"
+    ]
+    for p in protected_manifest:
+        fp = repo_dir / p
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        if not fp.exists():
+            fp.write_text("# dummy")
+
+    run_git("add", ".")
+    commit_a = run_git("commit-tree", run_git("write-tree"), "-m", "Commit A")
+    run_git("reset", "--hard", commit_a)
+
+    # Make config change for commit B
+    enable_content = f"""
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA = "{commit_a}"
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED = True
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED = True
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = True
+"""
+    base_file.write_text(enable_content)
+    run_git("add", "configs/base.py")
+    commit_b = run_git("commit-tree", run_git("write-tree"), "-p", commit_a, "-m", "Commit B")
+    run_git("reset", "--hard", commit_b)
+
+    res = verify_git_ancestry_and_static_proof(
+        repo_root=repo_dir,
+        prerequisite_sha=commit_a,
+        protected_manifest=protected_manifest,
+    )
+    assert res["valid"] is True
+    assert res["startup_head_sha"] == commit_b
+
+    missing_path = verify_git_ancestry_and_static_proof(
+        repo_root=repo_dir,
+        prerequisite_sha=commit_a,
+        protected_manifest=protected_manifest + ["src/research/external_signal_shadow/missing.py"],
+    )
+    assert missing_path == {"valid": False, "reason": "protected_manifest_path_not_tracked_blob"}
+
+    ignored_python = repo_dir / "src" / "research" / "external_signal_shadow" / "shadow.py"
+    ignored_python.write_text("# untracked import shadow")
+    untracked_python = verify_git_ancestry_and_static_proof(
+        repo_root=repo_dir,
+        prerequisite_sha=commit_a,
+        protected_manifest=protected_manifest,
+    )
+    assert untracked_python == {"valid": False, "reason": "untracked_python_source_present"}
+
+
+def test_stage1_5d_runtime_attestation_latches_after_untracked_python(tmp_path):
+    import subprocess
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        update_stage1_5d_runtime_attestation_latch,
+        verify_stage1_5d_runtime_attestation,
+    )
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    def run_git(*cmd):
+        return subprocess.run(
+            ["git", *cmd], cwd=repo_dir, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    run_git("init")
+    run_git("config", "user.name", "Test")
+    run_git("config", "user.email", "test@example.com")
+    runner_path = repo_dir / "scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py"
+    runner_path.parent.mkdir(parents=True)
+    runner_path.write_text("# runner")
+    (repo_dir / "configs").mkdir()
+    (repo_dir / "configs/base.py").write_text("RISK_LIVE_TRADING_ENABLED = False")
+    run_git("add", ".")
+    run_git("commit", "-m", "initial")
+    head_sha = run_git("rev-parse", "HEAD")
+    manifest = ["scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py"]
+
+    lifecycle = {"runtime_attestation_compromised": False}
+    healthy = verify_stage1_5d_runtime_attestation(repo_dir, head_sha, manifest, __import__("time").monotonic() + 1)
+    assert healthy["valid"] is True
+    update_stage1_5d_runtime_attestation_latch(lifecycle, healthy)
+    assert lifecycle["runtime_attestation_compromised"] is False
+
+    shadow = repo_dir / "scripts/external_signal_shadow/shadow.py"
+    shadow.write_text("# untracked")
+    compromised = verify_stage1_5d_runtime_attestation(repo_dir, head_sha, manifest, __import__("time").monotonic() + 1)
+    assert compromised == {"valid": False, "reason": "untracked_python_source_present"}
+    update_stage1_5d_runtime_attestation_latch(lifecycle, compromised)
+    shadow.unlink()
+    update_stage1_5d_runtime_attestation_latch(lifecycle, healthy)
+    assert lifecycle["runtime_attestation_compromised"] is True
+
+
+def test_verify_stage1_5f_consumer_proof_valid_and_reject_branches(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        canonical_root_contract_sha256,
+        verify_stage1_5f_consumer_proof,
+    )
+
+    out_id = "d_root_123"
+    head_sha = "a" * 40
+    manifest_sha = "m" * 64
+
+    contract_data = {
+        "root_mode": "v2_production",
+        "formal_event_contract_versions_allowed": [2],
+        "formal_schedule_revision_contract_versions_allowed": [1, 2],
+        "consumer_root_id": "f_root_456",
+        "consumer_startup_commit_sha": head_sha,
+        "consumer_runtime_manifest_sha256": manifest_sha,
+        "consumer_static_attestation_verified": True,
+        "source_stage1_5d_output_root_id": out_id,
+        "source_stage1_5d_events_root_id": out_id,
+        "source_stage1_5d_runtime_gate_root_id": out_id,
+    }
+    contract_sha = canonical_root_contract_sha256(contract_data)
+
+    summary_data = {
+        "consumer_process_instance_id": "proc-uuid-1",
+        "consumer_root_id": contract_data["consumer_root_id"],
+        "consumer_startup_commit_sha": head_sha,
+        "consumer_runtime_manifest_sha256": manifest_sha,
+        "consumer_root_contract_sha256": contract_sha,
+        "consumer_static_attestation_verified": True,
+        "consumer_runtime_attestation_verified": True,
+        "consumer_runtime_attestation_compromised": False,
+        "stale": False,
+        "last_heartbeat_at_ms": 100_000,
+        "blocker": None,
+        "block_new_event_admission": False,
+    }
+
+    contract_file = tmp_path / "observer_root_contract.json"
+    summary_file = tmp_path / "live_depth_observer_summary.json"
+
+    contract_file.write_text(json.dumps(contract_data))
+    summary_file.write_text(json.dumps(summary_data))
+
+    # Valid proof
+    res = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path=contract_file,
+        consumer_summary_path=summary_file,
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+        now_ms=101_000,
+    )
+    assert res["valid"] is True
+    assert res["reason"] == "consumer_proof_passed"
+
+    # Reject on hash mismatch
+    summary_bad_hash = dict(summary_data, consumer_root_contract_sha256="wrong")
+    summary_file.write_text(json.dumps(summary_bad_hash))
+    res_bad_hash = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path=contract_file,
+        consumer_summary_path=summary_file,
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+        now_ms=101_000,
+    )
+    assert res_bad_hash["valid"] is False
+    assert res_bad_hash["reason"] == "consumer_root_contract_hash_mismatch"
+
+    for field, bad_value in (
+        ("consumer_root_id", "wrong-root"),
+        ("consumer_startup_commit_sha", "b" * 40),
+        ("consumer_runtime_manifest_sha256", "x" * 64),
+    ):
+        summary_file.write_text(json.dumps({**summary_data, field: bad_value}))
+        mismatch = verify_stage1_5f_consumer_proof(
+            consumer_root_contract_path=contract_file,
+            consumer_summary_path=summary_file,
+            expected_d_output_root_id=out_id,
+            expected_d_startup_head_sha=head_sha,
+            expected_consumer_manifest_sha256=manifest_sha,
+            now_ms=101_000,
+        )
+        assert mismatch == {"valid": False, "reason": f"{field}_cross_artifact_mismatch"}
+
+    summary_file.write_text(json.dumps({**summary_data, "block_new_event_admission": True}))
+    blocked = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path=contract_file,
+        consumer_summary_path=summary_file,
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+        now_ms=101_000,
+    )
+    assert blocked == {"valid": False, "reason": "consumer_admission_blocked"}
+
+
+def test_task6_e0_e1_e2_lifecycle_proof_wiring(tmp_path, monkeypatch):
+    from configs import base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_schedule_revision_producer_attestation,
+        canonical_manifest_sha256,
+        canonical_root_contract_sha256,
+        canonical_root_id,
+        verify_stage1_5f_consumer_proof,
+    )
+
+    out_id = canonical_root_id(tmp_path)
+    head_sha = "a" * 40
+    manifest_sha = canonical_manifest_sha256("1.5F_v1", ["scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py"])
+
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", head_sha)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
+    monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
+        lambda: head_sha,
+    )
+
+    static_proof = {"valid": True, "startup_head_sha": head_sha}
+
+    # E0: Producer enabled but no F paths provided -> BOOTSTRAP_WAITING_FOR_CONSUMER
+    res_e0 = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path="",
+        consumer_summary_path="",
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+    )
+    assert res_e0["valid"] is False
+
+    att_e0 = build_schedule_revision_producer_attestation(
+        integration_health="ready",
+        static_proof_result=static_proof,
+        consumer_proof_result=res_e0,
+    )
+    assert att_e0["schedule_revision_producer_consumer_prerequisites_verified"] is False
+    assert att_e0["schedule_revision_producer_effective_enabled"] is False
+
+    # E1: F writes valid contract and summary -> Proof passes
+    contract_data = {
+        "root_mode": "v2_production",
+        "formal_event_contract_versions_allowed": [2],
+        "formal_schedule_revision_contract_versions_allowed": [1, 2],
+        "consumer_root_id": "f_root_1",
+        "consumer_startup_commit_sha": head_sha,
+        "consumer_runtime_manifest_sha256": manifest_sha,
+        "consumer_static_attestation_verified": True,
+        "source_stage1_5d_output_root_id": out_id,
+        "source_stage1_5d_events_root_id": out_id,
+        "source_stage1_5d_runtime_gate_root_id": out_id,
+    }
+    c_sha = canonical_root_contract_sha256(contract_data)
+    summary_data = {
+        "consumer_process_instance_id": "proc-e1",
+        "consumer_root_id": contract_data["consumer_root_id"],
+        "consumer_startup_commit_sha": head_sha,
+        "consumer_runtime_manifest_sha256": manifest_sha,
+        "consumer_root_contract_sha256": c_sha,
+        "consumer_static_attestation_verified": True,
+        "consumer_runtime_attestation_verified": True,
+        "consumer_runtime_attestation_compromised": False,
+        "stale": False,
+        "last_heartbeat_at_ms": 100_000,
+        "blocker": None,
+        "block_new_event_admission": False,
+    }
+
+    c_file = tmp_path / "observer_root_contract.json"
+    s_file = tmp_path / "live_depth_observer_summary.json"
+    c_file.write_text(json.dumps(contract_data))
+    s_file.write_text(json.dumps(summary_data))
+
+    res_e1 = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path=c_file,
+        consumer_summary_path=s_file,
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+        now_ms=101_000,
+    )
+    assert res_e1["valid"] is True
+
+    att_e1 = build_schedule_revision_producer_attestation(
+        integration_health="ready",
+        static_proof_result=static_proof,
+        consumer_proof_result=res_e1,
+    )
+    assert att_e1["schedule_revision_producer_consumer_prerequisites_verified"] is True
+    assert att_e1["schedule_revision_producer_effective_enabled"] is True
+
+    # E2: Sticky latch checks - Process restart of F causes mismatch against armed state
+    armed_state = dict(res_e1)
+    summary_restarted = dict(summary_data, consumer_process_instance_id="proc-e2-restarted")
+    s_file.write_text(json.dumps(summary_restarted))
+
+    res_e2_fail = verify_stage1_5f_consumer_proof(
+        consumer_root_contract_path=c_file,
+        consumer_summary_path=s_file,
+        expected_d_output_root_id=out_id,
+        expected_d_startup_head_sha=head_sha,
+        expected_consumer_manifest_sha256=manifest_sha,
+        armed_consumer_state=armed_state,
+        now_ms=101_000,
+    )
+    assert res_e2_fail["valid"] is False
+    assert res_e2_fail["reason"] == "armed_consumer_process_id_mismatch"

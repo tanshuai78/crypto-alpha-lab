@@ -293,4 +293,12 @@ def build_live_depth_observer_summary(
         research_result_valid=res_valid,
         blocker=blocker,
         summary_generated_at_ms=int(time.time() * 1000),
+        consumer_process_instance_id=str(runtime_gate_context.get("consumer_process_instance_id", "")),
+        consumer_root_id=str(runtime_gate_context.get("consumer_root_id", "")),
+        consumer_startup_commit_sha=str(runtime_gate_context.get("consumer_startup_commit_sha", "")),
+        consumer_root_contract_sha256=str(runtime_gate_context.get("consumer_root_contract_sha256", "")),
+        consumer_runtime_manifest_sha256=str(runtime_gate_context.get("consumer_runtime_manifest_sha256", "")),
+        consumer_static_attestation_verified=bool(runtime_gate_context.get("consumer_static_attestation_verified", False)),
+        consumer_runtime_attestation_verified=bool(runtime_gate_context.get("consumer_runtime_attestation_verified", False)),
+        consumer_runtime_attestation_compromised=bool(runtime_gate_context.get("consumer_runtime_attestation_compromised", False)),
     )

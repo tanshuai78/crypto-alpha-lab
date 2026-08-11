@@ -1251,57 +1251,17 @@ def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
     assert len(depth_rows) == 1
 
 
-def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
-    def mock_fetch_public_json(url, live_public_readonly=False):
-        if "exchangeInfo" in url:
-            return {
-                "ok": True,
-                "data": {"symbols": [{"symbol": "ABCUSDT"}]},
-                "manifest_row": {
-                    "requested_host": "fapi.binance.com",
-                    "requested_path": "/fapi/v1/exchangeInfo",
-                    "requested_url_hash": "mock_exinfo",
-                    "final_url_hash": "mock_exinfo",
-                    "http_status": 200,
-                    "payload_size_bytes": 100,
-                    "response_payload_hash": "mock_exinfo",
-                    "retry_count": 0,
-                    "error": None,
-                    "fetched_at_ms": 1000,
-                }
-            }
-        elif "depth" in url:
-            return {
-                "ok": True,
-                "data": {
-                    "bids": [["100.0", "10.0"]],
-                    "asks": [["101.0", "10.0"]],
-                    "T": 1000
-                },
-                "manifest_row": {
-                    "requested_host": "fapi.binance.com",
-                    "requested_path": "/fapi/v1/depth",
-                    "requested_url_hash": "mock_depth",
-                    "final_url_hash": "mock_depth",
-                    "http_status": 200,
-                    "payload_size_bytes": 100,
-                    "response_payload_hash": "mock_depth",
-                    "retry_count": 0,
-                    "error": None,
-                    "fetched_at_ms": 1000,
-                }
-            }
-        return {"ok": False, "error": "unknown_url"}
-
-    monkeypatch.setattr(
-        "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_public_json",
-        mock_fetch_public_json
-    )
-
+def test_live_depth_manifest_row_written_exactly_once(tmp_path):
     import time
     now_ms = int(time.time() * 1000)
     event_time = now_ms - 5000
     watermark_time = now_ms - 10000
+    mock_dir = tmp_path / "mock_responses"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+    (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({
+        "bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": now_ms,
+    }))
 
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
@@ -1359,7 +1319,7 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
         "--stage1-5d-summary", str(summary_d),
         "--stage1-5e-summary", str(summary_e),
         "--output-root", str(output_root),
-        "--live-public-readonly",
+        "--mock-response-dir", str(mock_dir),
         "--max-polls", "1",
     ]
     orig_argv = sys.argv
@@ -1381,66 +1341,52 @@ def test_live_depth_manifest_row_written_exactly_once(monkeypatch, tmp_path):
 
 def test_exchangeinfo_manifest_row_is_not_depth_symbol_specific(monkeypatch, tmp_path):
     def mock_fetch_public_json(url, live_public_readonly=False):
-        if "exchangeInfo" in url:
-            return {
-                "ok": True,
-                "data": {"symbols": [{"symbol": "ABCUSDT"}]},
-                "manifest_row": {
-                    "requested_host": "fapi.binance.com",
-                    "requested_path": "/fapi/v1/exchangeInfo",
-                    "requested_url_hash": "mock_exinfo",
-                    "final_url_hash": "mock_exinfo",
-                    "http_status": 200,
-                    "payload_size_bytes": 100,
-                    "response_payload_hash": "mock_exinfo",
-                    "retry_count": 0,
-                    "error": None,
-                    "fetched_at_ms": 1000,
-                }
-            }
-        elif "depth" in url:
-            return {
-                "ok": True,
-                "data": {
-                    "bids": [["100.0", "10.0"]],
-                    "asks": [["101.0", "10.0"]],
-                    "T": 1000
-                },
-                "manifest_row": {
-                    "requested_host": "fapi.binance.com",
-                    "requested_path": "/fapi/v1/depth",
-                    "requested_url_hash": "mock_depth",
-                    "final_url_hash": "mock_depth",
-                    "http_status": 200,
-                    "payload_size_bytes": 100,
-                    "response_payload_hash": "mock_depth",
-                    "retry_count": 0,
-                    "error": None,
-                    "fetched_at_ms": 1000,
-                }
-            }
-        return {"ok": False, "error": "unknown_url"}
+        requested_path = "/fapi/v1/exchangeInfo" if "exchangeInfo" in url else "/fapi/v1/depth"
+        return {
+            "ok": True,
+            "data": (
+                {"symbols": [{"symbol": "ABCUSDT"}]}
+                if "exchangeInfo" in url
+                else {"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}
+            ),
+            "manifest_row": {
+                "requested_host": "fapi.binance.com",
+                "requested_path": requested_path,
+                "requested_url_hash": "mock",
+                "final_url_hash": "mock",
+                "http_status": 200,
+                "payload_size_bytes": 100,
+                "response_payload_hash": "mock",
+                "retry_count": 0,
+                "error": None,
+                "fetched_at_ms": 1000,
+            },
+        }
 
     monkeypatch.setattr(
         "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_public_json",
-        mock_fetch_public_json
+        mock_fetch_public_json,
+    )
+    monkeypatch.setattr(
+        "scripts.external_signal_shadow.run_stage1_5f_live_depth_observer.time.sleep",
+        lambda _: None,
     )
 
     import time
     now_ms = int(time.time() * 1000)
     event_time = now_ms - 5000
     watermark_time = now_ms - 10000
-
     event_file = tmp_path / "events.jsonl"
     with open(event_file, "w") as f:
-        f.write(json.dumps({
+        f.write(json.dumps(_formal_event({
             "event_id": "e2",
             "event_type": "futures_contract_launch",
             "detected_at_ms": event_time,
             "symbols": ["ABCUSDT"],
+            "symbol_effective_launch_times_ms": {"ABCUSDT": event_time},
             "source_name": "s1",
-            "title": "t2"
-        }) + "\n")
+            "title": "t2",
+        })) + "\n")
 
     summary_d = tmp_path / "summary_d.json"
     with open(summary_d, "w") as f:
@@ -2761,3 +2707,194 @@ def test_schedule_revision_event_is_not_admitted_as_new_launch_by_runner(tmp_pat
     assert summary["schedule_revision_registry_orphan_count"] == 0
     assert summary["schedule_revision_registry_ambiguous_count"] == 0
     assert summary["anchor_contract_revision_count"] == 1
+
+
+def test_task1_root_contract_signature_and_safety_baseline_preflight(tmp_path):
+    import inspect
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        write_observer_root_contract_atomically,
+    )
+
+    sig = inspect.signature(write_observer_root_contract_atomically)
+    params = list(sig.parameters.values())
+    assert [p.name for p in params[:3]] == ["output_root", "root_mode", "reason"]
+
+    assert sig.parameters["reason"].default == ""
+    assert sig.parameters["source_binding_facts"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["source_binding_facts"].default is None
+
+
+    out = tmp_path / "out_v2"
+    contract = write_observer_root_contract_atomically(str(out), "v2_production")
+    assert contract["formal_event_contract_versions_allowed"] == [2]
+    assert contract["formal_schedule_revision_contract_versions_allowed"] == [1, 2]
+
+
+def test_task5_consumer_summary_models_and_atomic_writer(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        write_live_depth_observer_summary_atomically,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        LiveDepthObserverSummary,
+    )
+
+    old_dict = {
+        "decision": "stage1_5f_live_depth_observation_passed",
+        "bootstrap_watermark_allowed": True,
+        "live_depth_observation_allowed": True,
+        "stage1_5d_summary_path": "d.json",
+        "stage1_5e_summary_path": None,
+        "stage1_5e_context_missing": False,
+        "stage1_5e_context_suspicious": False,
+        "watermark_present": True,
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": 100,
+        "pre_watermark_events_ignored": 0,
+        "post_watermark_events_accepted": 1,
+        "active_observation_count": 1,
+        "completed_observation_count": 0,
+        "expired_observation_count": 0,
+        "failed_observation_count": 0,
+        "min_snapshot_count_required": 5,
+        "total_snapshots_collected": 10,
+        "request_success_rate": 1.0,
+        "total_requests_made": 10,
+        "failed_requests_count": 0,
+        "consecutive_network_errors": 0,
+        "max_consecutive_network_errors_seen": 0,
+        "last_heartbeat_at_ms": 1_000,
+        "heartbeat_count": 1,
+    }
+
+    # Deserializes legacy summary without new fields
+    obj = LiveDepthObserverSummary.from_dict(old_dict)
+    assert obj.consumer_process_instance_id == ""
+    assert obj.consumer_static_attestation_verified is False
+
+    # Serializes new fields
+    d = obj.to_dict()
+    d["consumer_process_instance_id"] = "proc-123"
+    d["consumer_static_attestation_verified"] = True
+    new_obj = LiveDepthObserverSummary.from_dict(d)
+    assert new_obj.consumer_process_instance_id == "proc-123"
+    assert new_obj.consumer_static_attestation_verified is True
+
+    # Atomic summary writer
+    sum_file = tmp_path / "summary.json"
+    write_live_depth_observer_summary_atomically(sum_file, d)
+    assert sum_file.exists()
+    assert not sum_file.with_suffix(".json.tmp").exists()
+    saved = json.loads(sum_file.read_text())
+    assert saved["consumer_process_instance_id"] == "proc-123"
+
+
+def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkeypatch):
+    """The production loop, not a helper-only test, publishes F proof facts."""
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+
+    d_root = tmp_path / "stage1_5d"
+    events_dir = d_root / "events"
+    events_dir.mkdir(parents=True)
+    (events_dir / "2026-08-10.jsonl").write_text("")
+    now_ms = int(__import__("time").time() * 1000)
+    gate_path = d_root / "live_safety_gate_summary.json"
+    gate_path.write_text(json.dumps({
+        "runtime_gate_schema_version": 1,
+        "decision": "stage1_5d_runtime_gate_ready",
+        "status": "READY",
+        "consumable_by_stage1_5f": True,
+        "fatal_blockers": [],
+        "source_root": str(d_root.resolve()),
+        "generated_at_ms": now_ms,
+        "live_trading_enabled": False,
+        "execution_feasibility_claim_allowed": False,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+    stage1_5e_summary = tmp_path / "stage1_5e.json"
+    stage1_5e_summary.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+    output_root = tmp_path / "stage1_5f"
+    output_root.mkdir()
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+    (output_root / "watermark.json").write_text(json.dumps(Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=now_ms - 1,
+        updated_at_ms=now_ms,
+    ).to_dict()))
+    writes = []
+    original_atomic_write = runner.write_live_depth_observer_summary_atomically
+    bound_contract_hashes = []
+    original_contract_write = runner.write_observer_root_contract_atomically
+
+    monkeypatch.setattr(
+        runner,
+        "verify_consumer_static_proof",
+        lambda _repo_root: {
+            "valid": True,
+            "startup_head_sha": "a" * 40,
+            "manifest_sha256": runner.canonical_manifest_sha256("1.5F_v1", runner.CONSUMER_RUNTIME_MANIFEST),
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "verify_consumer_runtime_proof",
+        lambda *_args: {"valid": True},
+    )
+
+    def capture_atomic_write(path, data):
+        writes.append(dict(data))
+        original_atomic_write(path, data)
+
+    def capture_contract_write(*args, **kwargs):
+        contract = original_contract_write(*args, **kwargs)
+        if contract.get("source_stage1_5d_output_root_id"):
+            bound_contract_hashes.append(runner.canonical_root_contract_sha256(contract))
+        return contract
+
+    monkeypatch.setattr(runner, "write_live_depth_observer_summary_atomically", capture_atomic_write)
+    monkeypatch.setattr(runner, "write_observer_root_contract_atomically", capture_contract_write)
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(events_dir / "*.jsonl"),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--stage1-5e-summary", str(stage1_5e_summary),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "2",
+            "--live-public-readonly",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    contract = json.loads((output_root / "observer_root_contract.json").read_text())
+    expected_d_root_id = runner.canonical_root_id(d_root)
+    assert contract["source_stage1_5d_output_root_id"] == expected_d_root_id
+    assert contract["source_stage1_5d_events_root_id"] == expected_d_root_id
+    assert contract["source_stage1_5d_runtime_gate_root_id"] == expected_d_root_id
+    assert contract["consumer_static_attestation_verified"] is True
+    assert len(bound_contract_hashes) == 1
+    assert writes
+    summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
+    assert summary["consumer_static_attestation_verified"] is True
+    assert summary["consumer_runtime_attestation_verified"] is True
+    assert summary["consumer_root_id"] == contract["consumer_root_id"]
+    assert summary["consumer_startup_commit_sha"] == contract["consumer_startup_commit_sha"]
+    assert summary["consumer_runtime_manifest_sha256"] == contract["consumer_runtime_manifest_sha256"]

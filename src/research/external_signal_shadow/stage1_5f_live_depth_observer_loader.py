@@ -162,14 +162,18 @@ def validate_stage1_5d_runtime_gate(
                 "gate_summary": gate_data,
             }
 
+    gate_root_path = Path(gate_data.get("source_root") or "").resolve()
     return {
         "valid": True,
         "decision": gate_data.get("decision"),
         "status": "READY",
         "reason": None,
         "stale": False,
+        "resolved_source_root": str(gate_root_path),
+        "gate_file": str(gate_file.resolve()),
         "gate_summary": gate_data,
     }
+
 
 
 def validate_historical_stage1_5d_safety_gate(
