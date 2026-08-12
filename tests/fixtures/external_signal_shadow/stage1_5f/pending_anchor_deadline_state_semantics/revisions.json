@@ -1,0 +1,237 @@
+[
+  {
+    "anchor_precedence_policy": "official_schedule_priority_v1",
+    "available_at_ms": 2000000,
+    "event_type": "futures_contract_launch_schedule_revision",
+    "formal_schedule_revision_contract_version": 2,
+    "raw_payload_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "revision_application_id": "rev_postpone_1_id",
+    "revision_id": "rev_postpone_1_id",
+    "revision_intent": "postponed_without_anchor",
+    "revision_link_status": "linked",
+    "revision_observation_id": "observation-rev_postpone_1_id",
+    "revision_payload_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "revision_payload_version_id": "payload-rev_postpone_1_id",
+    "revision_provenance": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "revision_reason": "postponed_without_anchor",
+    "revision_semantic_id": "rev_postpone_1_id",
+    "source_article_id": "rev_postpone_1",
+    "stable_schedule_identity": "binance|futures_contract_launch|45c2f20d589b420e80063ab75feb41f2|KUAISHOUUSDT",
+    "supersedes_source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+    "symbol_official_schedule_revision_available_at_ms": {
+      "KUAISHOUUSDT": 2000000
+    },
+    "symbol_official_schedule_revision_ids": {
+      "KUAISHOUUSDT": "rev_postpone_1_id"
+    },
+    "symbol_official_schedule_statuses": {
+      "KUAISHOUUSDT": "postponed_without_anchor"
+    },
+    "symbol_revised_anchor_ms": {
+      "KUAISHOUUSDT": null
+    },
+    "symbol_superseded_anchor_ms": {
+      "KUAISHOUUSDT": null
+    },
+    "symbols": [
+      "KUAISHOUUSDT"
+    ]
+  },
+  {
+    "anchor_precedence_policy": "official_schedule_priority_v1",
+    "available_at_ms": 2500000,
+    "event_type": "futures_contract_launch_schedule_revision",
+    "formal_schedule_revision_contract_version": 2,
+    "raw_payload_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "revision_application_id": "rev_advance_1_id",
+    "revision_id": "rev_advance_1_id",
+    "revision_intent": "rescheduled_with_new_anchor",
+    "revision_link_status": "linked",
+    "revision_observation_id": "observation-rev_advance_1_id",
+    "revision_payload_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "revision_payload_version_id": "payload-rev_advance_1_id",
+    "revision_provenance": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "revision_reason": "rescheduled_with_new_anchor",
+    "revision_semantic_id": "rev_advance_1_id",
+    "source_article_id": "rev_advance_1",
+    "stable_schedule_identity": "binance|futures_contract_launch|45c2f20d589b420e80063ab75feb41f2|MEITUANUSDT",
+    "supersedes_source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+    "symbol_official_schedule_revision_available_at_ms": {
+      "MEITUANUSDT": 2500000
+    },
+    "symbol_official_schedule_revision_ids": {
+      "MEITUANUSDT": "rev_advance_1_id"
+    },
+    "symbol_official_schedule_statuses": {
+      "MEITUANUSDT": "rescheduled"
+    },
+    "symbol_revised_anchor_ms": {
+      "MEITUANUSDT": 40000000
+    },
+    "symbol_superseded_anchor_ms": {
+      "MEITUANUSDT": null
+    },
+    "symbols": [
+      "MEITUANUSDT"
+    ]
+  },
+  {
+    "anchor_precedence_policy": "official_schedule_priority_v1",
+    "available_at_ms": 3000000,
+    "event_type": "futures_contract_launch_schedule_revision",
+    "formal_schedule_revision_contract_version": 2,
+    "raw_payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "revision_application_id": "rev_cancel_1_id",
+    "revision_id": "rev_cancel_1_id",
+    "revision_intent": "cancelled",
+    "revision_link_status": "linked",
+    "revision_observation_id": "observation-rev_cancel_1_id",
+    "revision_payload_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "revision_payload_version_id": "payload-rev_cancel_1_id",
+    "revision_provenance": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "revision_reason": "cancelled",
+    "revision_semantic_id": "rev_cancel_1_id",
+    "source_article_id": "rev_cancel_1",
+    "stable_schedule_identity": "binance|futures_contract_launch|45c2f20d589b420e80063ab75feb41f2|CSOPSKHYNIX2LUSDT",
+    "supersedes_source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+    "symbol_official_schedule_revision_available_at_ms": {
+      "CSOPSKHYNIX2LUSDT": 3000000
+    },
+    "symbol_official_schedule_revision_ids": {
+      "CSOPSKHYNIX2LUSDT": "rev_cancel_1_id"
+    },
+    "symbol_official_schedule_statuses": {
+      "CSOPSKHYNIX2LUSDT": "cancelled"
+    },
+    "symbol_revised_anchor_ms": {
+      "CSOPSKHYNIX2LUSDT": null
+    },
+    "symbol_superseded_anchor_ms": {
+      "CSOPSKHYNIX2LUSDT": null
+    },
+    "symbols": [
+      "CSOPSKHYNIX2LUSDT"
+    ]
+  },
+  {
+    "anchor_precedence_policy": "official_schedule_priority_v1",
+    "available_at_ms": 3500000,
+    "event_type": "futures_contract_launch_schedule_revision",
+    "formal_schedule_revision_contract_version": 2,
+    "raw_payload_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "revision_application_id": "rev_conflict_a_id",
+    "revision_id": "rev_conflict_a_id",
+    "revision_intent": "rescheduled_with_new_anchor",
+    "revision_link_status": "linked",
+    "revision_observation_id": "observation-rev_conflict_a_id",
+    "revision_payload_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "revision_payload_version_id": "payload-rev_conflict_a_id",
+    "revision_provenance": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "revision_reason": "rescheduled_with_new_anchor",
+    "revision_semantic_id": "rev_conflict_a_id",
+    "source_article_id": "rev_conflict_a",
+    "stable_schedule_identity": "binance|futures_contract_launch|45c2f20d589b420e80063ab75feb41f2|CSOPSAMSUNG2LUSDT",
+    "supersedes_source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+    "symbol_official_schedule_revision_available_at_ms": {
+      "CSOPSAMSUNG2LUSDT": 3500000
+    },
+    "symbol_official_schedule_revision_ids": {
+      "CSOPSAMSUNG2LUSDT": "rev_conflict_a_id"
+    },
+    "symbol_official_schedule_statuses": {
+      "CSOPSAMSUNG2LUSDT": "rescheduled"
+    },
+    "symbol_revised_anchor_ms": {
+      "CSOPSAMSUNG2LUSDT": 45000000
+    },
+    "symbol_superseded_anchor_ms": {
+      "CSOPSAMSUNG2LUSDT": null
+    },
+    "symbols": [
+      "CSOPSAMSUNG2LUSDT"
+    ]
+  },
+  {
+    "anchor_precedence_policy": "official_schedule_priority_v1",
+    "available_at_ms": 3500000,
+    "event_type": "futures_contract_launch_schedule_revision",
+    "formal_schedule_revision_contract_version": 2,
+    "raw_payload_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "revision_application_id": "rev_conflict_b_id",
+    "revision_id": "rev_conflict_b_id",
+    "revision_intent": "rescheduled_with_new_anchor",
+    "revision_link_status": "linked",
+    "revision_observation_id": "observation-rev_conflict_b_id",
+    "revision_payload_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "revision_payload_version_id": "payload-rev_conflict_b_id",
+    "revision_provenance": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "revision_reason": "rescheduled_with_new_anchor",
+    "revision_semantic_id": "rev_conflict_b_id",
+    "source_article_id": "rev_conflict_b",
+    "stable_schedule_identity": "binance|futures_contract_launch|45c2f20d589b420e80063ab75feb41f2|CSOPSAMSUNG2LUSDT",
+    "supersedes_source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+    "symbol_official_schedule_revision_available_at_ms": {
+      "CSOPSAMSUNG2LUSDT": 3500000
+    },
+    "symbol_official_schedule_revision_ids": {
+      "CSOPSAMSUNG2LUSDT": "rev_conflict_b_id"
+    },
+    "symbol_official_schedule_statuses": {
+      "CSOPSAMSUNG2LUSDT": "rescheduled"
+    },
+    "symbol_revised_anchor_ms": {
+      "CSOPSAMSUNG2LUSDT": 46000000
+    },
+    "symbol_superseded_anchor_ms": {
+      "CSOPSAMSUNG2LUSDT": null
+    },
+    "symbols": [
+      "CSOPSAMSUNG2LUSDT"
+    ]
+  }
+]

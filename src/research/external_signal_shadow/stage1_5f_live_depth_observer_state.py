@@ -253,13 +253,20 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
     d = dict(diagnostics)
     first_seen = d.get("first_seen_at_ms") or getattr(event_symbol_row, "first_seen_at_ms", None) or now_ms
     retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
-    deadline_ms = d.get("anchor_resolution_deadline_ms") or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
     legacy_wait_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LEGACY_SOURCE_REVISION_WAIT_MS", 24 * 60 * 60 * 1000)
     legacy_deadline_ms = d.get("legacy_source_revision_wait_deadline_ms") or (now_ms + legacy_wait_ms)
 
     anchor_ms = d.get("observation_anchor_ms")
-    next_check = d.get("next_admission_check_at_ms") or (anchor_ms if anchor_ms else now_ms + retry_interval_ms)
-    next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
+    if status == "pending_launch_time_in_future" and anchor_ms is not None:
+        deadline_ms = None
+        resolution_started_ms = None
+        next_check = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+        next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
+    else:
+        deadline_ms = d.get("anchor_resolution_deadline_ms") or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+        resolution_started_ms = d.get("anchor_resolution_started_at_ms") or now_ms
+        next_check = d.get("next_admission_check_at_ms") or (anchor_ms if anchor_ms else now_ms + retry_interval_ms)
+        next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
 
     return EventSymbolState(
         event_symbol_id=event_symbol_row["event_symbol_id"],
@@ -272,6 +279,7 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         pending_source_event_unvalidated=d.get("pending_source_event_unvalidated", False),
         required_source_revision=d.get("required_source_revision"),
         pending_reason=d.get("pending_reason") or status,
+        pending_terminal_reason=d.get("pending_terminal_reason", ""),
         legacy_source_revision_wait_started_at_ms=d.get("legacy_source_revision_wait_started_at_ms", now_ms),
         legacy_source_revision_wait_deadline_ms=legacy_deadline_ms,
         observation_anchor_ms=anchor_ms,
@@ -288,6 +296,7 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         announcement_capture_time_ms=d.get("announcement_capture_time_ms") or event_symbol_row.get("detected_at_ms"),
         next_admission_check_at_ms=next_check,
         next_anchor_resolution_at_ms=next_res,
+        anchor_resolution_started_at_ms=resolution_started_ms,
         anchor_resolution_deadline_ms=deadline_ms,
         bootstrap_watermark_max_seen_detected_at_ms=d.get("bootstrap_watermark_max_seen_detected_at_ms"),
         admission_watermark_at_first_seen_ms=d.get("admission_watermark_at_first_seen_ms"),
@@ -369,6 +378,9 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
         compute_latest_anchor_contract_hash,
     )
 
+    if state.status == "pending_cancelled":
+        return state
+
     revision_application_id = str(revision.get("revision_application_id") or "")
     applied_ids = list(getattr(state, "applied_schedule_revision_ids", []) or [])
     if revision_application_id and revision_application_id in applied_ids:
@@ -397,23 +409,49 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
     status_for_sym = (revision.get("symbol_official_schedule_statuses") or {}).get(state.symbol)
     rev_intent = revision.get("revision_intent") or ("cancelled" if status_for_sym == "cancelled" else "")
     is_cancelled = rev_intent == "cancelled" or status_for_sym == "cancelled"
-    is_conflict = bool(revision.get("is_late_conflict")) or rev_intent == "late_conflict"
+    is_conflict = bool(revision.get("is_late_conflict")) or rev_intent == "late_conflict" or status_for_sym == "official_schedule_conflict"
+    is_postponed_without_anchor = status_for_sym == "postponed_without_anchor"
+
+    is_new_application = bool(revision_application_id) and revision_application_id not in applied_ids
 
     if state.status.startswith("pending_"):
         if is_cancelled:
-            d["status"] = "pending_cancelled"
-            d["pending_reason"] = "official_schedule_cancelled"
+            d.update({
+                "status": "pending_cancelled",
+                "pending_reason": "official_schedule_cancelled",
+                "pending_terminal_reason": "",
+                "observation_anchor_ms": None,
+                "next_admission_check_at_ms": None,
+                "next_anchor_resolution_at_ms": None,
+                "anchor_resolution_started_at_ms": None,
+                "anchor_resolution_deadline_ms": None,
+            })
+        elif is_conflict or is_postponed_without_anchor:
+            new_status = "pending_anchor_conflict" if is_conflict else "pending_launch_anchor_missing"
+            new_reason = "official_schedule_conflict" if is_conflict else "postponed_without_anchor"
+            d["status"] = new_status
+            d["pending_reason"] = new_reason
+            d["pending_terminal_reason"] = ""
             d["observation_anchor_ms"] = None
-        elif is_conflict:
-            d["status"] = "pending_official_schedule_conflict"
-            d["pending_reason"] = "late_conflict_official_schedule"
-            d["observation_anchor_ms"] = None
+            d["next_admission_check_at_ms"] = None
+
+            if is_new_application or state.anchor_resolution_started_at_ms is None:
+                d["anchor_resolution_started_at_ms"] = now_ms
+                d["anchor_resolution_deadline_ms"] = now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
         elif rev_anchor is not None:
-            d["observation_anchor_ms"] = rev_anchor
-            d["anchor_contract_decision_at_ms"] = now_ms
-            d["latest_anchor_evidence_level"] = "official_schedule"
-            d["latest_max_evidence_class"] = "clean_or_recovery"
-            d["next_admission_check_at_ms"] = rev_anchor
+            new_status = "pending_launch_time_in_future" if now_ms < rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS else "pending_ready_for_admission"
+            d.update({
+                "status": new_status,
+                "pending_reason": new_status,
+                "pending_terminal_reason": "",
+                "observation_anchor_ms": rev_anchor,
+                "anchor_contract_decision_at_ms": now_ms,
+                "latest_anchor_evidence_level": "official_schedule",
+                "latest_max_evidence_class": "clean_or_recovery",
+                "next_admission_check_at_ms": rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS,
+                "anchor_resolution_started_at_ms": None,
+                "anchor_resolution_deadline_ms": None,
+            })
     elif is_depth_collection_active_status(state.status):
         if is_cancelled:
             d["status"] = "active_anchor_revision_contaminated"

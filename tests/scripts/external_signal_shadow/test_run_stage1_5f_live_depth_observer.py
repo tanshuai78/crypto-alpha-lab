@@ -2394,7 +2394,9 @@ def test_runner_active_state_selector_keeps_contaminated_active_collecting():
         select_completed_observation_states,
         select_depth_collection_active_states,
     )
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
 
     states = {
         "active": EventSymbolState(event_symbol_id="active", status="active", symbol="AUSDT"),
@@ -2419,7 +2421,9 @@ def test_schedule_revision_event_updates_matching_pending_state_and_registry(tmp
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         process_schedule_revision_event,
     )
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
 
     state = EventSymbolState(
         event_symbol_id="es-gigadev",
@@ -2478,7 +2482,9 @@ def test_v2_schedule_revision_uses_producer_application_id_verbatim(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         process_schedule_revision_event,
     )
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
 
     state = EventSymbolState(
         event_symbol_id="es-v2",
@@ -2564,7 +2570,9 @@ def test_ambiguous_schedule_revision_does_not_mutate_state(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         process_schedule_revision_event,
     )
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
 
     states = {
         "es-a": EventSymbolState(
@@ -2620,7 +2628,9 @@ def test_ambiguous_schedule_revision_does_not_mutate_state(tmp_path):
 
 def test_schedule_revision_event_is_not_admitted_as_new_launch_by_runner(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
-    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import EventSymbolState
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
 
     now_ms = 2_000_000
     output_root = tmp_path / "output"
@@ -2711,6 +2721,7 @@ def test_schedule_revision_event_is_not_admitted_as_new_launch_by_runner(tmp_pat
 
 def test_task1_root_contract_signature_and_safety_baseline_preflight(tmp_path):
     import inspect
+
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         write_observer_root_contract_atomically,
     )
@@ -2898,3 +2909,497 @@ def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkey
     assert summary["consumer_root_id"] == contract["consumer_root_id"]
     assert summary["consumer_startup_commit_sha"] == contract["consumer_startup_commit_sha"]
     assert summary["consumer_runtime_manifest_sha256"] == contract["consumer_runtime_manifest_sha256"]
+
+
+def test_pending_anchor_deadline_state_semantics_fixture_provenance():
+    import json
+    from pathlib import Path
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5f/pending_anchor_deadline_state_semantics")
+    metadata = json.loads((fixture_dir / "metadata.json").read_text(encoding="utf-8"))
+    launch = json.loads((fixture_dir / "launch_event.json").read_text(encoding="utf-8"))
+
+    assert metadata["fixture_provenance"] == "synthetic_offline_fixture_derived_from_server_evidence"
+    assert metadata["raw_bapi_payload_available"] is False
+    assert launch["source_contract_status"] == "formal_v2_valid"
+    assert set(launch["symbols"]) == {
+        "KUAISHOUUSDT", "MEITUANUSDT", "CSOPSKHYNIX2LUSDT", "CSOPSAMSUNG2LUSDT",
+    }
+
+
+def test_same_poll_launch_plus_postponed_without_anchor(tmp_path):
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
+        build_live_depth_observer_summary,
+    )
+
+    states = {
+        "es_postponed": EventSymbolState(
+            event_symbol_id="es_postponed",
+            event_id="e1",
+            symbol="KUAISHOUUSDT",
+            detected_at_ms=1000,
+            status="pending_launch_anchor_missing",
+            pending_reason="postponed_without_anchor",
+        )
+    }
+    # Pending cancelled state must be excluded from pending_launch_observation_count
+    cancelled_state = EventSymbolState(
+        event_symbol_id="es_cancel",
+        event_id="e2",
+        symbol="CANCELUSDT",
+        detected_at_ms=1000,
+        status="pending_cancelled",
+        pending_reason="official_schedule_cancelled",
+    )
+
+    filtered_pending = [s for s in list(states.values()) + [cancelled_state] if s.status.startswith("pending_") and s.status != "pending_cancelled"]
+
+    summary = build_live_depth_observer_summary(
+        decision="stage1_5f_observer_active",
+        bootstrap_watermark_allowed=True,
+        live_depth_observation_allowed=True,
+        stage1_5d_summary_path="s_d",
+        stage1_5e_summary_path="s_e",
+        stage1_5e_context_missing=False,
+        stage1_5e_context_suspicious=False,
+        watermark_present=True,
+        watermark_version=1,
+        max_seen_detected_at_ms=1000,
+        pre_watermark_events_ignored=0,
+        post_watermark_events_accepted=1,
+        active_states=[],
+        completed_states=[],
+        expired_states=[],
+        failed_states=[],
+        request_manifest_rows=[],
+        heartbeat_rows=[],
+        pending_states=filtered_pending,
+    )
+    summary_dict = summary.to_dict()
+    assert summary_dict["pending_launch_observation_count"] == 1
+    assert summary_dict["active_observation_count"] == 0
+
+
+def test_four_symbol_staggered_long_lead_integration_matrix():
+    import json
+    from pathlib import Path
+
+    from configs import base
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5f/pending_anchor_deadline_state_semantics")
+    launch_event = json.loads((fixture_dir / "launch_event.json").read_text(encoding="utf-8"))
+
+    first_seen_ms = launch_event["first_seen_at_ms"]  # 1_000_000
+    exchangeinfo_state = {
+        "available": True,
+        "symbols": set(launch_event["symbols"]),
+        "symbol_rows": {},
+    }
+    # Create 4 states
+    states = {}
+    for sym in launch_event["symbols"]:
+        sym_row = {
+            **launch_event,
+            "symbol": sym,
+            "event_symbol_id": f"es_{sym}",
+            "observation_anchor_ms": launch_event["symbol_effective_observation_anchor_ms"][sym],
+        }
+        states[sym] = create_pending_observation_state(
+            event_symbol_row=sym_row,
+            status="pending_launch_time_in_future",
+            diagnostics={"observation_anchor_ms": sym_row["observation_anchor_ms"], "source_contract_status": "formal_v2_valid"},
+            now_ms=first_seen_ms,
+        )
+
+    # 1. Assert all 4 symbols have status == pending_launch_time_in_future and anchor_resolution_deadline_ms is None
+    for sym, st in states.items():
+        assert st.status == "pending_launch_time_in_future"
+        assert st.anchor_resolution_deadline_ms is None
+
+    # 2. At first_seen + 6h + 1ms (1,000,000 + 6*3600*1000 + 1 = 22,600,001 ms), re-resolve all states
+    # Note: earliest anchor is at 58,600,000 ms, so 22,600,001 ms is still before anchor
+    now_past_6h = first_seen_ms + 6 * 60 * 60 * 1000 + 1
+    for sym, st in states.items():
+        updated = re_resolve_pending_anchor(st, [launch_event], exchangeinfo_state=exchangeinfo_state, now_ms=now_past_6h)
+        assert updated.status == "pending_launch_time_in_future", f"{sym} should survive 6h deadline"
+        assert updated.anchor_resolution_deadline_ms is None
+        assert updated.pending_terminal_reason == ""
+
+    # 3. Each Symbol becomes ready only at its own anchor plus the launch guard.
+    for sym, state in states.items():
+        ready_at_ms = launch_event["symbol_effective_observation_anchor_ms"][sym] + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+        updated = re_resolve_pending_anchor(state, [launch_event], exchangeinfo_state=exchangeinfo_state, now_ms=ready_at_ms)
+        assert updated.status == "pending_ready_for_admission", f"{sym} should become ready at its own anchor"
+        for sibling, sibling_state in states.items():
+            if sibling == sym:
+                continue
+            sibling_ready_at_ms = launch_event["symbol_effective_observation_anchor_ms"][sibling] + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+            if ready_at_ms < sibling_ready_at_ms:
+                sibling_updated = re_resolve_pending_anchor(
+                    sibling_state, [launch_event], exchangeinfo_state=exchangeinfo_state, now_ms=ready_at_ms,
+                )
+                assert sibling_updated.status == "pending_launch_time_in_future", f"{sibling} promoted early"
+
+
+
+def test_four_symbol_fixture_cancelled_state_is_excluded_by_runner_summary(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5f/pending_anchor_deadline_state_semantics")
+    launch = json.loads((fixture_dir / "launch_event.json").read_text(encoding="utf-8"))
+    revisions = json.loads((fixture_dir / "revisions.json").read_text(encoding="utf-8"))
+    now_ms = 5_000_000
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text("".join(json.dumps(row) + "\n" for row in [launch, *revisions]))
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": [
+        {
+            "symbol": symbol,
+            "status": "TRADING",
+            "contractType": "PERPETUAL",
+            "quoteAsset": "USDT",
+            "marginAsset": "USDT",
+            "onboardDate": launch["symbol_effective_observation_anchor_ms"][symbol],
+        }
+        for symbol in launch["symbols"]
+    ]}))
+    (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({
+        "bids": [["100.0", "10.0"]],
+        "asks": [["101.0", "10.0"]],
+        "T": now_ms,
+    }))
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps(Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=0,
+        updated_at_ms=0,
+    ).to_dict()))
+
+    monkeypatch.setattr(runner.time, "time", lambda: now_ms / 1000)
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(event_file),
+            "--stage1-5d-summary", str(summary_d),
+            "--stage1-5e-summary", str(summary_e),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    latest_states = {}
+    for line in (output_root / "observer_state.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        latest_states[row["symbol"]] = row
+    summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
+
+    assert latest_states["CSOPSKHYNIX2LUSDT"]["status"] == "pending_cancelled"
+    assert summary["pending_launch_observation_count"] == 3
+    assert summary["active_observation_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_status"),
+    [
+        ("same_poll_postpone", "pending_launch_anchor_missing"),
+        ("same_poll_advance_future", "pending_launch_time_in_future"),
+        ("same_poll_advance_due", "active"),
+        ("same_poll_advance_due_capacity", "pending_observation_capacity"),
+        ("same_poll_advance_due_exchange_hidden", "pending_exchangeinfo_symbol_not_visible_after_anchor"),
+        ("same_poll_advance_due_runtime_gate", None),
+        ("same_poll_cancel", "pending_cancelled"),
+        ("same_poll_equal_available_at_conflict", "pending_anchor_conflict"),
+    ],
+)
+@pytest.mark.parametrize("reverse_input_order", [False, True])
+def test_same_poll_schedule_revision_prevents_stale_launch_admission(
+    tmp_path, monkeypatch, case, expected_status, reverse_input_order,
+):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_formal_schedule_revision_row,
+        build_symbol_anchor_contract,
+    )
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+    from src.research.external_signal_shadow import stage1_5f_live_depth_observer_budget as budget
+    from src.research.external_signal_shadow import stage1_5f_live_depth_observer_loader as loader
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+
+    now_ms = 2_000_000
+    symbol = "CANCELUSDT"
+    source_article_id = "launch-cancelled-same-poll"
+    provenance = {
+        "payload_sha256": "a" * 64,
+        "parser_version": "test",
+        "raw_time_text": "1970-01-01 00:33 UTC",
+        "timezone_text": "UTC",
+        "node_path": "body[0]",
+        "logical_block_id": "launch-cancelled-same-poll",
+        "schedule_text_context": "Launch Time",
+        "mapping_method": "single_symbol_article_unique_futures_launch_time",
+    }
+    launch = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_id": "launch-cancelled-same-poll-event",
+            "event_type": "futures_contract_launch",
+            "source_article_id": source_article_id,
+            "stable_event_key": f"binance_{source_article_id}_{symbol}",
+            "detected_at_ms": now_ms - 2_000,
+            "symbols": [symbol],
+            "formal_event_consumable_by_stage1_5f": True,
+        },
+        symbol_contracts={
+            symbol: build_symbol_anchor_contract(
+                symbol=symbol,
+                official_schedule_anchor_ms=now_ms - 1_000,
+                exchangeinfo_onboard_date_ms=now_ms - 1_000,
+                anchor_contract_decision_at_ms=now_ms - 1_000,
+                official_schedule_revision_id="launch-revision-id",
+                official_schedule_available_at_ms=now_ms - 1_000,
+                mapping_confidence="exact_single_symbol",
+                provenance=provenance,
+            ),
+        },
+    )
+    revision_common = {
+        "supersedes_source_article_id": source_article_id,
+        "symbol": symbol,
+        "revision_available_at_ms": now_ms - 500,
+        "producer_decision_at_ms": now_ms - 500,
+        "linking_index_as_of_ms": now_ms - 500,
+        "revision_payload_version_id": "revision-payload-v1",
+        "revision_observation_id": "revision-observation-v1",
+        "provenance": provenance,
+    }
+    if case == "same_poll_postpone":
+        revisions = [build_formal_schedule_revision_row(
+            source_article_id="postponed-revision-article",
+            revision_intent="postponed_without_anchor",
+            revision_id="postponed-revision-id",
+            revision_semantic_id="postponed-revision-id",
+            revision_application_id="postponed-revision-id",
+            revision_payload_hash="b" * 64,
+            **revision_common,
+        )]
+    elif case in {
+        "same_poll_advance_future",
+        "same_poll_advance_due",
+        "same_poll_advance_due_capacity",
+        "same_poll_advance_due_exchange_hidden",
+        "same_poll_advance_due_runtime_gate",
+    }:
+        revisions = [build_formal_schedule_revision_row(
+            source_article_id="advanced-revision-article",
+            revision_intent="rescheduled_with_new_anchor",
+            revised_anchor_ms=now_ms + (60_000 if case.endswith("future") else -500),
+            revision_id="advanced-revision-id",
+            revision_semantic_id="advanced-revision-id",
+            revision_application_id="advanced-revision-id",
+            revision_payload_hash="c" * 64,
+            **revision_common,
+        )]
+    elif case == "same_poll_cancel":
+        revisions = [build_formal_schedule_revision_row(
+            source_article_id="cancelled-revision-article",
+            revision_intent="cancelled",
+            revision_id="cancelled-revision-id",
+            revision_semantic_id="cancelled-revision-id",
+            revision_application_id="cancelled-revision-id",
+            revision_payload_hash="d" * 64,
+            **revision_common,
+        )]
+    else:
+        revisions = [
+            build_formal_schedule_revision_row(
+                source_article_id="conflict-a-revision-article",
+                revision_intent="rescheduled_with_new_anchor",
+                revised_anchor_ms=now_ms + 60_000,
+                revision_id="conflict-a-revision-id",
+                revision_semantic_id="conflict-a-revision-id",
+                revision_application_id="conflict-a-revision-id",
+                revision_payload_hash="e" * 64,
+                **revision_common,
+            ),
+            build_formal_schedule_revision_row(
+                source_article_id="conflict-b-revision-article",
+                revision_intent="rescheduled_with_new_anchor",
+                revised_anchor_ms=now_ms + 120_000,
+                revision_id="conflict-b-revision-id",
+                revision_semantic_id="conflict-b-revision-id",
+                revision_application_id="conflict-b-revision-id",
+                revision_payload_hash="f" * 64,
+                **revision_common,
+            ),
+        ]
+
+    rows = [launch, *revisions]
+    if reverse_input_order:
+        rows.reverse()
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    exchangeinfo_symbols = [] if case == "same_poll_advance_due_exchange_hidden" else [{
+        "symbol": symbol,
+        "status": "TRADING",
+        "contractType": "PERPETUAL",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "onboardDate": now_ms - 1_000,
+    }]
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": exchangeinfo_symbols}))
+    (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({
+        "bids": [["100.0", "10.0"]],
+        "asks": [["101.0", "10.0"]],
+        "T": now_ms,
+    }))
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps(Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=now_ms - 10_000,
+        updated_at_ms=now_ms - 10_000,
+    ).to_dict()))
+
+    runtime_gate_path = None
+    if case == "same_poll_advance_due_runtime_gate":
+        runtime_gate_path = tmp_path / "live_safety_gate_summary.json"
+        runtime_gate_path.write_text(json.dumps({
+            "runtime_gate_schema_version": 1,
+            "decision": "stage1_5d_runtime_gate_initializing",
+            "source_root": str(tmp_path),
+            "events_stream_relative_path": "events/*.jsonl",
+            "generated_at_ms": now_ms,
+        }))
+
+    monkeypatch.setattr(runner.time, "time", lambda: now_ms / 1000)
+    if case == "same_poll_advance_due_capacity":
+        monkeypatch.setattr(budget, "can_start_new_observation", lambda *_args: False)
+
+    re_resolve_call_count = 0
+    original_re_resolve = loader.re_resolve_pending_anchor
+
+    def counting_re_resolve(*args, **kwargs):
+        nonlocal re_resolve_call_count
+        re_resolve_call_count += 1
+        return original_re_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(loader, "re_resolve_pending_anchor", counting_re_resolve)
+
+    def run_one_poll():
+        old_argv = sys.argv
+        try:
+            sys.argv = [
+                "run_stage1_5f_live_depth_observer.py",
+                "--fixture-events-jsonl", str(event_file),
+                "--stage1-5d-summary", str(summary_d),
+                "--stage1-5e-summary", str(summary_e),
+                "--output-root", str(output_root),
+                "--mock-response-dir", str(mock_dir),
+                "--max-polls", "1",
+            ]
+            if runtime_gate_path is not None:
+                sys.argv.extend(["--stage1-5d-runtime-gate", str(runtime_gate_path)])
+            with pytest.raises(SystemExit) as exc:
+                runner.main()
+            assert exc.value.code == 0
+        finally:
+            sys.argv = old_argv
+
+    run_one_poll()
+
+    state_file = output_root / "observer_state.jsonl"
+    states = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()] if state_file.exists() else []
+    if expected_status is None:
+        assert not any(state["status"] == "active" for state in states)
+        assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
+        assert not list((output_root / "depth_snapshots").glob("**/*.jsonl"))
+        return
+
+    assert states[-1]["status"] == expected_status
+    if expected_status == "active":
+        assert list((output_root / "events_accepted").glob("**/*.jsonl"))
+        assert list((output_root / "depth_snapshots").glob("**/*.jsonl"))
+    else:
+        assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
+        assert not list((output_root / "depth_snapshots").glob("**/*.jsonl"))
+
+    if case == "same_poll_cancel":
+        summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
+        assert summary["pending_launch_observation_count"] == 0
+        assert summary["active_observation_count"] == 0
+        assert re_resolve_call_count == 0
+
+        run_one_poll()
+        states = [json.loads(line) for line in (output_root / "observer_state.jsonl").read_text().splitlines() if line.strip()]
+        assert states[-1]["status"] == "pending_cancelled"
+        registry_rows = [
+            json.loads(line)
+            for line in (output_root / "schedule_revision_registry.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert sum(row["status"] == "revision_applied" for row in registry_rows) == 1
+        assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
+
+    if case == "same_poll_postpone":
+        first_deadline_ms = states[-1]["anchor_resolution_deadline_ms"]
+        run_one_poll()
+        reloaded_states = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+        assert reloaded_states[-1]["status"] == "pending_launch_anchor_missing"
+        assert reloaded_states[-1]["anchor_resolution_deadline_ms"] == first_deadline_ms
+        assert not list((output_root / "events_accepted").glob("**/*.jsonl"))

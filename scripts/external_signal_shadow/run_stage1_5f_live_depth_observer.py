@@ -1214,52 +1214,7 @@ def main():
             logger.warning(f"Stage 1.5D runtime gate invalid ({gate_res.get('reason')}). Blocking new event ingestion and watermark advancement.")
             events = []
 
-        # 6.2.1 Re-evaluate existing pending states
-        for pending_id, pending_state in ([] if block_new_event_admission else list(states.items())):
-
-            if not pending_state.status.startswith("pending_"):
-                continue
-
-            if (pending_state.next_anchor_resolution_at_ms is not None and now_ms >= pending_state.next_anchor_resolution_at_ms) or (
-                pending_state.next_admission_check_at_ms is not None and now_ms >= pending_state.next_admission_check_at_ms
-            ):
-                updated_pending = re_resolve_pending_anchor(pending_state, events, exchangeinfo_state, now_ms)
-                if updated_pending.status in ("pending_ready_for_admission", "eligible_clean_start", "eligible_recovery_only") or (
-                    updated_pending.observation_anchor_ms is not None and now_ms >= updated_pending.observation_anchor_ms
-                ):
-                    new_est_rate = estimate_requests_per_min(active_count + 1, 1, base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC, 0.2)
-                    if can_start_new_observation(active_count, new_est_rate):
-                        ev_start_class = updated_pending.evidence_start_class or ("clean_start" if updated_pending.observation_anchor_ms and now_ms - updated_pending.observation_anchor_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS else "recovery_start")
-                        promoted_state = promote_pending_to_active_observation(updated_pending, now_ms, evidence_start_class=ev_start_class)
-                        states[pending_id] = promoted_state
-                        active_states.append(promoted_state)
-                        active_count += 1
-                        post_watermark_accepted += 1
-                        append_jsonl(state_file, promoted_state.to_dict())
-
-                        target_event = {}
-                        for ev in events:
-                            if promoted_state.symbol in ev.get("symbols", []) or promoted_state.event_id == ev.get("event_id"):
-                                target_event = ev
-                                break
-                        accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
-                        append_jsonl(accepted_path, build_accepted_row_from_state(promoted_state, watermark, now_ms))
-
-                        if target_event:
-                            watermark = update_watermark_with_event(watermark, target_event)
-                            write_watermark_atomic(watermark_path, watermark)
-
-
-                    else:
-                        d = updated_pending.to_dict()
-                        d["capacity_defer_count"] = updated_pending.capacity_defer_count + 1
-                        states[pending_id] = EventSymbolState.from_dict(d)
-                        append_jsonl(state_file, d)
-                else:
-                    states[pending_id] = updated_pending
-                    append_jsonl(state_file, updated_pending.to_dict())
-
-        # 6.2.2 Classify and process incoming event batches
+        # 6.2.1 Register launches before applying same-poll schedule revisions.
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
             classify_event_symbol_revision_admission,
             upsert_pending_state_with_event_revision,
@@ -1271,24 +1226,19 @@ def main():
             update_batch_registry_status,
         )
 
+        current_poll_events = [] if block_new_event_admission else list(events)
+        revision_events = [e for e in current_poll_events if e.get("event_type") == "futures_contract_launch_schedule_revision"]
+        launch_events = [e for e in current_poll_events if e.get("event_type") != "futures_contract_launch_schedule_revision"]
+
+        # 6.2.2 Register incoming launch event batches without admission.
         event_batch_registry = load_latest_event_batch_registry(output_root)
+        phase_a_pending_ids = set()
 
-        for event in ([] if block_new_event_admission else events):
-            if block_new_event_admission:
-                break
-            if event.get("event_type") == "futures_contract_launch_schedule_revision":
-                process_schedule_revision_event(
-                    event,
-                    states=states,
-                    state_file=state_file,
-                    registry_file=Path(output_root) / "schedule_revision_registry.jsonl",
-                    now_ms=now_ms,
-                )
-                continue
-
+        for event in launch_events:
             expected_siblings = list(flatten_event_symbols(event))
             if not expected_siblings:
                 continue
+
 
             c_hash = event.get("multi_symbol_candidate_set_hash") or event.get("candidate_set_hash") or ""
             b_id = build_event_batch_id(event, candidate_set_hash=c_hash)
@@ -1453,6 +1403,7 @@ def main():
                 if status == "pending":
                     pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
                     states[event_symbol_id] = pending_state
+                    phase_a_pending_ids.add(event_symbol_id)
                     append_jsonl(state_file, pending_state.to_dict())
 
                     pending_path = build_daily_path(output_root, "events_pending", now_ms)
@@ -1473,35 +1424,23 @@ def main():
                     continue
 
                 if status == "eligible":
-                    new_est_rate = estimate_requests_per_min(
-                        active_count + 1,
-                        1,
-                        base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC,
-                        0.2
+                    pending_diag = dict(eligibility_diag)
+                    pending_diag.update({
+                        "pending_reason": "pending_ready_for_admission",
+                        "next_admission_check_at_ms": now_ms,
+                    })
+                    pending_state = create_pending_observation_state(
+                        flat_event,
+                        "pending_ready_for_admission",
+                        pending_diag,
+                        now_ms,
                     )
-                    if can_start_new_observation(active_count, new_est_rate):
-                        ev_start_class = eligibility_diag.get("evidence_start_class", "clean_start")
-                        pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
-                        new_state = promote_pending_to_active_observation(
-                            pending_state,
-                            now_ms,
-                            evidence_start_class=ev_start_class,
-                        )
-
-                        states[event_symbol_id] = new_state
-                        active_states.append(new_state)
-                        active_count += 1
-                        post_watermark_accepted += 1
-
-                        append_jsonl(state_file, new_state.to_dict())
-
-                        accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
-                        accepted_row = {**eligibility_diag, **build_accepted_row_from_state(new_state, watermark, now_ms)}
-                        append_jsonl(accepted_path, accepted_row)
-                        durable_keys_for_batch.append(stable_key)
-                    else:
-                        reason = "budget_exceeded"
-                        status = "rejected"
+                    states[event_symbol_id] = pending_state
+                    phase_a_pending_ids.add(event_symbol_id)
+                    append_jsonl(state_file, pending_state.to_dict())
+                    durable_keys_for_batch.append(stable_key)
+                    has_pending_siblings = True
+                    continue
 
                 if status == "rejected":
                     if reason == "pre_watermark":
@@ -1576,6 +1515,85 @@ def main():
                     durable_stable_keys=durable_keys_for_batch,
                     registry_map=event_batch_registry,
                 )
+
+        # 6.2.3 Apply revisions only after all same-poll launch states exist.
+        for rev_event in revision_events:
+            process_schedule_revision_event(
+                rev_event,
+                states=states,
+                state_file=state_file,
+                registry_file=Path(output_root) / "schedule_revision_registry.jsonl",
+                now_ms=now_ms,
+            )
+
+        # 6.2.4 Re-resolve and admit only explicit reducer-authorized states.
+        for pending_id, pending_state in ([] if block_new_event_admission else list(states.items())):
+            if not pending_state.status.startswith("pending_") or pending_state.status == "pending_cancelled":
+                continue
+            if pending_id in phase_a_pending_ids or revision_events or (
+                pending_state.next_anchor_resolution_at_ms is not None and now_ms >= pending_state.next_anchor_resolution_at_ms
+            ) or (
+                pending_state.next_admission_check_at_ms is not None and now_ms >= pending_state.next_admission_check_at_ms
+            ):
+                updated_pending = re_resolve_pending_anchor(pending_state, current_poll_events, exchangeinfo_state, now_ms)
+                admissible = {"pending_ready_for_admission", "eligible_clean_start", "eligible_recovery_only"}
+                if updated_pending.status in admissible:
+                    new_est_rate = estimate_requests_per_min(active_count + 1, 1, base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC, 0.2)
+                    if can_start_new_observation(active_count, new_est_rate):
+                        ev_start_class = updated_pending.evidence_start_class or ("clean_start" if updated_pending.observation_anchor_ms and now_ms - updated_pending.observation_anchor_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS else "recovery_start")
+                        promoted_state = promote_pending_to_active_observation(updated_pending, now_ms, evidence_start_class=ev_start_class)
+                        states[pending_id] = promoted_state
+                        active_states.append(promoted_state)
+                        active_count += 1
+                        post_watermark_accepted += 1
+                        append_jsonl(state_file, promoted_state.to_dict())
+                        accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
+                        append_jsonl(accepted_path, build_accepted_row_from_state(promoted_state, watermark, now_ms))
+                    else:
+                        d = updated_pending.to_dict()
+                        d["status"] = "pending_observation_capacity"
+                        d["pending_reason"] = "pending_observation_capacity"
+                        d["pending_terminal_reason"] = ""
+                        d["capacity_defer_count"] = updated_pending.capacity_defer_count + 1
+                        states[pending_id] = EventSymbolState.from_dict(d)
+                        append_jsonl(state_file, d)
+                else:
+                    states[pending_id] = updated_pending
+                    append_jsonl(state_file, updated_pending.to_dict())
+
+        # Commit only batches whose Phase-C states are no longer retryable pending.
+        for event in launch_events:
+            c_hash = event.get("multi_symbol_candidate_set_hash") or event.get("candidate_set_hash") or ""
+            b_id = build_event_batch_id(event, candidate_set_hash=c_hash)
+            batch_row = event_batch_registry.get(b_id, {})
+            if batch_row.get("status") != "siblings_partially_durable":
+                continue
+            sibling_rows = list(flatten_event_symbols(event))
+            sibling_states = [states.get(make_event_symbol_id(row, row["symbol"])) for row in sibling_rows]
+            if not sibling_states or any(
+                state is None or (state.status.startswith("pending_") and state.status != "pending_cancelled")
+                for state in sibling_states
+            ):
+                continue
+            durable_keys = [make_stable_event_symbol_key(row, row["symbol"]) for row in sibling_rows]
+            update_batch_registry_status(
+                output_root=output_root,
+                event_batch_id=b_id,
+                status="siblings_all_durable",
+                now_ms=now_ms,
+                durable_stable_keys=durable_keys,
+                registry_map=event_batch_registry,
+            )
+            watermark = update_watermark_with_event(watermark, event)
+            write_watermark_atomic(watermark_path, watermark)
+            update_batch_registry_status(
+                output_root=output_root,
+                event_batch_id=b_id,
+                status="watermark_committed",
+                now_ms=now_ms,
+                durable_stable_keys=durable_keys,
+                registry_map=event_batch_registry,
+            )
 
 
         # 6.3 Fetch public depth for active observations
@@ -1734,7 +1752,8 @@ def main():
             failed_states=failed_states,
             request_manifest_rows=request_manifest_rows,
             heartbeat_rows=heartbeat_rows,
-            pending_states=[s for s in states.values() if s.status.startswith("pending_")],
+            pending_states=[s for s in states.values() if s.status.startswith("pending_") and s.status != "pending_cancelled"],
+
             terminal_states=[s for s in states.values() if s.status in ("ignored_historical_anchor_pre_bootstrap", "rejected")],
             historical_anchor_newly_ignored_this_poll=historical_anchor_newly_ignored_this_poll,
             bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,

@@ -1,0 +1,163 @@
+{
+  "anchor_contract_decision_at_ms": 1000000,
+  "anchor_precedence_policy": "official_schedule_priority_v1",
+  "detail_payload_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "detected_at_ms": 1000000,
+  "event_all_symbols_clean_eligible": true,
+  "event_all_symbols_consumable_by_stage1_5f": true,
+  "event_anchor_aggregate_status": "all_official_valid",
+  "event_has_anchor_missing": false,
+  "event_has_fallback_anchor": false,
+  "event_has_official_conflict": false,
+  "event_id": "evt_45c2f20d589b420e80063ab75feb41f2",
+  "event_max_anchor_disagreement_ms": 0,
+  "event_type": "futures_contract_launch",
+  "first_seen_at_ms": 1000000,
+  "formal_event_consumable_by_stage1_5f": true,
+  "formal_event_contract_version": 2,
+  "latest_known_revision_id_at_decision": null,
+  "official_schedule_selection_as_of_ms": 1000000,
+  "source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+  "source_contract_status": "formal_v2_valid",
+  "stable_event_key": "45c2f20d589b420e80063ab75feb41f2",
+  "symbol_anchor_comparison_statuses": {
+    "CSOPSAMSUNG2LUSDT": "article_exchangeinfo_match",
+    "CSOPSKHYNIX2LUSDT": "article_exchangeinfo_match",
+    "KUAISHOUUSDT": "article_exchangeinfo_match",
+    "MEITUANUSDT": "article_exchangeinfo_match"
+  },
+  "symbol_anchor_disagreement_directions": {
+    "CSOPSAMSUNG2LUSDT": "none",
+    "CSOPSKHYNIX2LUSDT": "none",
+    "KUAISHOUUSDT": "none",
+    "MEITUANUSDT": "none"
+  },
+  "symbol_anchor_disagreement_ms": {
+    "CSOPSAMSUNG2LUSDT": 0,
+    "CSOPSKHYNIX2LUSDT": 0,
+    "KUAISHOUUSDT": 0,
+    "MEITUANUSDT": 0
+  },
+  "symbol_anchor_evidence_levels": {
+    "CSOPSAMSUNG2LUSDT": "official_schedule",
+    "CSOPSKHYNIX2LUSDT": "official_schedule",
+    "KUAISHOUUSDT": "official_schedule",
+    "MEITUANUSDT": "official_schedule"
+  },
+  "symbol_anchor_provenance": {
+    "CSOPSAMSUNG2LUSDT": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "CSOPSKHYNIX2LUSDT": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "KUAISHOUUSDT": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    },
+    "MEITUANUSDT": {
+      "logical_block_id": "fixture-launch-schedule",
+      "mapping_method": "exact_all_symbols_statement",
+      "node_path": "article.body.schedule",
+      "parser_version": "stage1_5f_fixture_v1",
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "raw_time_text": "1970-01-01 16:16 UTC",
+      "schedule_text_context": "Launch Time",
+      "timezone_text": "UTC"
+    }
+  },
+  "symbol_anchor_validation_statuses": {
+    "CSOPSAMSUNG2LUSDT": "valid_official",
+    "CSOPSKHYNIX2LUSDT": "valid_official",
+    "KUAISHOUUSDT": "valid_official",
+    "MEITUANUSDT": "valid_official"
+  },
+  "symbol_effective_launch_times_ms": {
+    "CSOPSAMSUNG2LUSDT": 61300000,
+    "CSOPSKHYNIX2LUSDT": 60400000,
+    "KUAISHOUUSDT": 58600000,
+    "MEITUANUSDT": 59500000
+  },
+  "symbol_effective_observation_anchor_ms": {
+    "CSOPSAMSUNG2LUSDT": 61300000,
+    "CSOPSKHYNIX2LUSDT": 60400000,
+    "KUAISHOUUSDT": 58600000,
+    "MEITUANUSDT": 59500000
+  },
+  "symbol_effective_observation_anchor_sources": {
+    "CSOPSAMSUNG2LUSDT": "official_schedule_anchor",
+    "CSOPSKHYNIX2LUSDT": "official_schedule_anchor",
+    "KUAISHOUUSDT": "official_schedule_anchor",
+    "MEITUANUSDT": "official_schedule_anchor"
+  },
+  "symbol_exchangeinfo_onboard_date_ms": {
+    "CSOPSAMSUNG2LUSDT": 61300000,
+    "CSOPSKHYNIX2LUSDT": 60400000,
+    "KUAISHOUUSDT": 58600000,
+    "MEITUANUSDT": 59500000
+  },
+  "symbol_extraction_source": "detail_contract_symbol",
+  "symbol_max_evidence_classes": {
+    "CSOPSAMSUNG2LUSDT": "clean_or_recovery",
+    "CSOPSKHYNIX2LUSDT": "clean_or_recovery",
+    "KUAISHOUUSDT": "clean_or_recovery",
+    "MEITUANUSDT": "clean_or_recovery"
+  },
+  "symbol_official_schedule_anchor_ms": {
+    "CSOPSAMSUNG2LUSDT": 61300000,
+    "CSOPSKHYNIX2LUSDT": 60400000,
+    "KUAISHOUUSDT": 58600000,
+    "MEITUANUSDT": 59500000
+  },
+  "symbol_official_schedule_revision_available_at_ms": {
+    "CSOPSAMSUNG2LUSDT": 1000000,
+    "CSOPSKHYNIX2LUSDT": 1000000,
+    "KUAISHOUUSDT": 1000000,
+    "MEITUANUSDT": 1000000
+  },
+  "symbol_official_schedule_revision_ids": {
+    "CSOPSAMSUNG2LUSDT": "launch-csopsamsung2lusdt",
+    "CSOPSKHYNIX2LUSDT": "launch-csopskhynix2lusdt",
+    "KUAISHOUUSDT": "launch-kuaishouusdt",
+    "MEITUANUSDT": "launch-meituanusdt"
+  },
+  "symbol_official_schedule_statuses": {
+    "CSOPSAMSUNG2LUSDT": "selected",
+    "CSOPSKHYNIX2LUSDT": "selected",
+    "KUAISHOUUSDT": "selected",
+    "MEITUANUSDT": "selected"
+  },
+  "symbol_source_anchor_contract_hashes": {
+    "CSOPSAMSUNG2LUSDT": "f4c5f7b6d77e6482147be26effedd51c80219387c3de328437b5b4ee3518a940",
+    "CSOPSKHYNIX2LUSDT": "f1377d17d6cf9991d4da7f6d054a7f2a7713123334b9006cf0d202f5c1cde5e0",
+    "KUAISHOUUSDT": "ef75c16e0b1f8001e125fe14dccf55eb6c35b63ca1c955ad67faf2aa02c7cd90",
+    "MEITUANUSDT": "4aa4a061ae87ad621d5c7d0eeb5456135af19d08428091b5d69943d0439182dd"
+  },
+  "symbol_validation_status": "validated",
+  "symbols": [
+    "KUAISHOUUSDT",
+    "MEITUANUSDT",
+    "CSOPSKHYNIX2LUSDT",
+    "CSOPSAMSUNG2LUSDT"
+  ]
+}

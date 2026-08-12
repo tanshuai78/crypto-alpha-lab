@@ -1,0 +1,8 @@
+{
+  "fixture_provenance": "synthetic_offline_fixture_derived_from_server_evidence",
+  "source_article_id": "45c2f20d589b420e80063ab75feb41f2",
+  "raw_bapi_payload_available": false,
+  "incident_runtime_artifacts_independently_verified": false,
+  "fixture_scope": "mechanism_regression_only",
+  "purpose": "pending-anchor deadline state semantics only"
+}

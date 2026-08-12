@@ -9,6 +9,7 @@ from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
     ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE,
     FORMAL_EVENT_CONTRACT_VERSION_V2,
     compute_admission_anchor_contract_hash,
+    select_latest_applicable_official_schedule,
     validate_launch_anchor_contract,
 )
 from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
@@ -584,39 +585,44 @@ def build_first_seen_watermark_diagnostics(
 
 
 def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchangeinfo_state: dict, now_ms: int):
-    if not getattr(pending_state, "status", "").startswith("pending_"):
+    if not getattr(pending_state, "status", "").startswith("pending_") or pending_state.status == "pending_cancelled":
         return pending_state
 
-    source_status = getattr(pending_state, "source_contract_status", None)
-    is_legacy = source_status == "legacy_unvalidated_recoverable" or pending_state.status == "pending_source_event_unvalidated"
-
-    if is_legacy:
-        deadline = getattr(pending_state, "legacy_source_revision_wait_deadline_ms", None) or pending_state.anchor_resolution_deadline_ms
-    else:
-        deadline = pending_state.anchor_resolution_deadline_ms
-
-    if deadline is not None and now_ms >= deadline:
-        status = "rejected_launch_anchor_unavailable_timeout"
-        if pending_state.status == "pending_anchor_conflict":
-            status = "rejected_anchor_conflict_unresolved_timeout"
-        d = pending_state.to_dict()
-        d["status"] = status
-        d["pending_terminal_reason"] = status
-        return pending_state.__class__.from_dict(d)
-
     target_row = {}
-    for rev in event_revisions:
-        rev_stable_key = make_stable_event_symbol_key(rev, pending_state.symbol)
+    schedule_rows = []
+    for row in event_revisions:
+        is_schedule_revision = row.get("event_type") == "futures_contract_launch_schedule_revision"
+        rev_stable_key = make_stable_event_symbol_key(row, pending_state.symbol)
         stable_key_matches = (
             pending_state.stable_event_symbol_key
             and rev_stable_key == pending_state.stable_event_symbol_key
         )
         legacy_symbol_match = (
             not pending_state.stable_event_symbol_key
-            and pending_state.symbol in rev.get("symbols", [])
+            and pending_state.symbol in row.get("symbols", [])
         )
+        supersedes_matches = (
+            is_schedule_revision
+            and pending_state.source_article_id
+            and row.get("supersedes_source_article_id") == pending_state.source_article_id
+            and pending_state.symbol in row.get("symbols", [])
+        )
+        if is_schedule_revision:
+            statuses = row.get("symbol_official_schedule_statuses") or {}
+            anchors = row.get("symbol_revised_anchor_ms") or {}
+            available_at_ms = (row.get("symbol_official_schedule_revision_available_at_ms") or {}).get(pending_state.symbol)
+            if supersedes_matches and pending_state.symbol in statuses:
+                schedule_rows.append({
+                    "symbol": pending_state.symbol,
+                    "status": statuses[pending_state.symbol],
+                    "anchor_ms": anchors.get(pending_state.symbol),
+                    "revision_id": row.get("revision_id"),
+                    "available_at_ms": available_at_ms,
+                    "supersedes_revision_id": row.get("supersedes_revision_id"),
+                })
+            continue
         if stable_key_matches or legacy_symbol_match:
-            target_row = rev
+            target_row = row
 
     d = pending_state.to_dict()
 
@@ -630,12 +636,46 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
 
         # Re-triage contract if revision provided
         c_res = classify_stage1_5d_source_contract(target_row, pending_state.symbol)
+        if c_res.get("source_contract_status") == "malformed" and target_row.get("source_contract_status"):
+            c_res["source_contract_status"] = target_row["source_contract_status"]
+            c_res["pending_source_event_unvalidated"] = False
         d.update(c_res)
         source_status = c_res["source_contract_status"]
+
+    else:
+        source_status = getattr(pending_state, "source_contract_status", None)
 
     anchor_diag = resolve_depth_observation_anchor_ms(target_row or pending_state.to_dict(), pending_state.symbol, exchangeinfo_state, now_ms)
     anchor_ms = anchor_diag.get("observation_anchor_ms")
     conflict_active = anchor_diag.get("observation_anchor_conflict_active", False)
+
+    schedule = select_latest_applicable_official_schedule(
+        pending_state.symbol,
+        schedule_rows,
+        now_ms,
+    ) if schedule_rows else None
+    if schedule and schedule["status"] == "cancelled":
+        d.update({
+            "status": "pending_cancelled",
+            "pending_reason": "official_schedule_cancelled",
+            "pending_terminal_reason": "",
+            "observation_anchor_ms": None,
+            "next_admission_check_at_ms": None,
+            "next_anchor_resolution_at_ms": None,
+            "anchor_resolution_started_at_ms": None,
+            "anchor_resolution_deadline_ms": None,
+        })
+        return pending_state.__class__.from_dict(d)
+    if schedule and schedule["status"] == "official_schedule_conflict":
+        anchor_ms = None
+        conflict_active = True
+    elif schedule and schedule["status"] in {"postponed_without_anchor", "malformed"}:
+        anchor_ms = None
+    elif schedule and schedule["status"] == "selected":
+        anchor_ms = schedule["effective_official_anchor_ms"]
+        conflict_active = False
+        anchor_diag["observation_anchor_basis"] = "official_schedule_anchor"
+        anchor_diag["observation_anchor_confidence"] = "high"
 
     d["anchor_resolution_attempt_count"] = pending_state.anchor_resolution_attempt_count + 1
     d["last_anchor_resolution_at_ms"] = now_ms
@@ -670,29 +710,76 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
 
     if conflict_active:
         d["status"] = "pending_anchor_conflict"
+        d["pending_reason"] = "pending_anchor_conflict"
+        d["pending_terminal_reason"] = ""
         d["observation_anchor_ms"] = None
+        deadline = pending_state.anchor_resolution_deadline_ms or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+        if now_ms >= deadline:
+            d["status"] = "rejected_anchor_conflict_unresolved_timeout"
+            d["pending_terminal_reason"] = "rejected_anchor_conflict_unresolved_timeout"
+            return pending_state.__class__.from_dict(d)
     elif anchor_ms is None:
-        if source_status == "legacy_unvalidated_recoverable":
+        is_legacy = source_status == "legacy_unvalidated_recoverable" or pending_state.status == "pending_source_event_unvalidated"
+        if is_legacy:
             d["status"] = "pending_source_event_unvalidated"
+            d["pending_reason"] = "pending_source_event_unvalidated"
+            legacy_wait_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LEGACY_SOURCE_REVISION_WAIT_MS", 24 * 60 * 60 * 1000)
+            deadline = getattr(pending_state, "legacy_source_revision_wait_deadline_ms", None) or pending_state.anchor_resolution_deadline_ms or (now_ms + legacy_wait_ms)
         else:
             d["status"] = "pending_launch_anchor_missing"
+            d["pending_reason"] = "pending_launch_anchor_missing"
+            deadline = pending_state.anchor_resolution_deadline_ms or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+
+        d["pending_terminal_reason"] = ""
         d["observation_anchor_ms"] = None
+        if now_ms >= deadline:
+            d["status"] = "rejected_launch_anchor_unavailable_timeout"
+            d["pending_terminal_reason"] = "rejected_launch_anchor_unavailable_timeout"
+            return pending_state.__class__.from_dict(d)
     else:
         d["observation_anchor_ms"] = anchor_ms
         d["observation_anchor_basis"] = anchor_diag.get("observation_anchor_basis", "")
         d["observation_anchor_confidence"] = anchor_diag.get("observation_anchor_confidence", "")
+        d["anchor_resolution_started_at_ms"] = None
+        d["anchor_resolution_deadline_ms"] = None
 
         if source_status not in {"formal_v1_valid", "formal_v2_valid"}:
             d["status"] = "pending_source_event_unvalidated"
+            d["pending_reason"] = "pending_source_event_unvalidated"
+            d["pending_terminal_reason"] = ""
+            legacy_wait_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LEGACY_SOURCE_REVISION_WAIT_MS", 24 * 60 * 60 * 1000)
+            deadline = getattr(pending_state, "legacy_source_revision_wait_deadline_ms", None) or (now_ms + legacy_wait_ms)
+            if now_ms >= deadline:
+                d["status"] = "rejected_launch_anchor_unavailable_timeout"
+                d["pending_terminal_reason"] = "rejected_launch_anchor_unavailable_timeout"
+                return pending_state.__class__.from_dict(d)
         elif now_ms < anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS:
             d["status"] = "pending_launch_time_in_future"
-            d["next_admission_check_at_ms"] = anchor_ms
+            d["pending_reason"] = "pending_launch_time_in_future"
+            d["pending_terminal_reason"] = ""
+            d["next_admission_check_at_ms"] = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+        elif not exchangeinfo_state or not exchangeinfo_state.get("available", False):
+            d["status"] = "pending_exchangeinfo_unavailable"
+            d["pending_reason"] = "pending_exchangeinfo_unavailable"
+            d["pending_terminal_reason"] = ""
+        elif pending_state.symbol not in exchangeinfo_state.get("symbols", set()):
+            if now_ms - anchor_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
+                d["status"] = "pending_exchangeinfo_symbol_not_visible_after_anchor"
+                d["pending_reason"] = "pending_exchangeinfo_symbol_not_visible_after_anchor"
+                d["pending_terminal_reason"] = ""
+            else:
+                d["status"] = "rejected_launch_symbol_not_visible_timeout"
+                d["pending_terminal_reason"] = "rejected_launch_symbol_not_visible_timeout"
+                return pending_state.__class__.from_dict(d)
         else:
             d["status"] = "pending_ready_for_admission"
+            d["pending_reason"] = "pending_ready_for_admission"
+            d["pending_terminal_reason"] = ""
             d["next_admission_check_at_ms"] = now_ms
             _attach_admission_anchor_lineage(d, now_ms)
 
     return pending_state.__class__.from_dict(d)
+
 
 
 def merge_first_seen_watermark_fields(existing_state, new_diagnostics: dict) -> dict:

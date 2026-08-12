@@ -10,7 +10,7 @@
 ```text
 decision = stage1_5d_1_5f_official_schedule_priority_v2_ready_for_server_deployment
 implementation_status = completed_locally_verified_committed_pending_server_deployment
-current_server_mode = 7d_schedule_revision_producer_hotfix
+current_server_mode = 7d_pending_anchor_deadline_state_semantics_hotfix
 stage1_5g_next_action = run_after_new_12h_observation
 stage1_5h_allowed = design_only_until_more_evidence
 ```
@@ -23,7 +23,7 @@ stage1_5h_allowed = design_only_until_more_evidence
 3. Stage 1.5F 必须写入 observer_root_contract.json，root_mode = v2_production，且默认拒绝 v1/v2 混用。
 4. Stage 1.5F 必须使用 --stage1-5d-runtime-gate，并验证 anchor_precedence_policy = official_schedule_priority_v1。
 5. Stage 1.5G 必须验证 accepted/state/completed anchor lineage hash；fallback、contamination、malformed、lineage mismatch 一律 invalid。
-6. Stage 1.5D/1.5F 必须使用新的 schedule_revision_producer_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
+6. Stage 1.5D/1.5F 必须使用新的 pending_anchor_deadline_state_semantics_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
 7. schedule_revision transport / consumer ready，但 automatic schedule revision producer classifier 仍是后续 follow-up，不作为本次部署 blocker。
 ```
 
@@ -67,7 +67,7 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 部署并维持 schedule_revision_producer_hotfix 1.5D/1.5F root 健康运行。
+P0: 部署并维持 pending_anchor_deadline_state_semantics_hotfix 1.5D/1.5F root 健康运行。
 理由: 当前核心风险是 official schedule 与 exchangeInfo onboardDate 不一致时，1.5F 使用错误 anchor 或进入 pending_anchor_conflict。
 
 P1: 等待新 root 中出现 post-watermark futures_contract_launch event-symbol。
@@ -112,8 +112,8 @@ P4: Stage 1.5H 继续保持 design-only。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
@@ -123,8 +123,8 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 最新部署后应看到：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_schedule_revision_producer_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_schedule_revision_producer_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_pending_anchor_deadline_state_semantics_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_pending_anchor_deadline_state_semantics_hotfix
 ```
 
 ### 4.2 旧路径处理规则
@@ -158,7 +158,7 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 1. 不 rm -rf 旧 SKHYUSDT evidence root。
 2. 不在旧 root 上继续启动 1.5F。
 3. 不把旧 root 和新 root 的 events/depth_snapshots/request_manifest 混合审计。
-4. 新 1.5D/1.5F 部署必须使用 schedule_revision_producer_hotfix 后缀。
+4. 新 1.5D/1.5F 部署必须使用 pending_anchor_deadline_state_semantics_hotfix 后缀。
 ```
 
 ## 5. Stage 1.5F 原理速记
@@ -229,66 +229,131 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-本章为当前 `schedule_revision_producer_hotfix` 主流程。旧 `title_symbol_launch_anchor_validation_gate_hotfix` root 只保留为历史排障对象，不再作为新部署目标。
+本章是当前 `pending_anchor_deadline_state_semantics_hotfix` 的唯一部署入口。它同时部署已完成的 Git Ancestry Attestation 与本次 1.5F pending-anchor 修补。
 
 ```text
-current_deployment_scope = stage1_5d_schedule_revision_producer_hotfix
-root_suffix = 7d_schedule_revision_producer_hotfix
+current_deployment_scope = stage1_5f_pending_anchor_deadline_state_semantics_hotfix
+root_suffix = 7d_pending_anchor_deadline_state_semantics_hotfix
+deployment_transport = git_commit_checkout
 formal_event_contract_version = 2
 anchor_precedence_policy = official_schedule_priority_v1
-formal_schedule_revision_contract_version = 2
-schedule_revision_transport_and_consumer_ready = true
 schedule_revision_producer_default_enabled = false
-trade_signal_allowed = false
-paper_trading_allowed = false
-live_trading_allowed = false
-execution_engine_allowed = false
-alpha_interpretation_allowed = false
-execution_feasibility_claim_allowed = false
+RISK_LIVE_TRADING_ENABLED = false
 ```
 
-### 7.1 本地部署前门禁
+### 7.1 部署原则与数据保护
 
-在本地执行，确认本次提交已存在且工作区没有未提交代码：
+```text
+1. 服务器代码只能通过 Git commit 部署；不再使用 rsync 覆盖 /root/crypto-alpha-lab 源码。
+2. 每次部署都新建一个 1.5D root 和一个匹配的 1.5F root；不得复用已有 output root。
+3. Git fetch / checkout 只更新受版本控制的源码。data/ 已被 .gitignore 忽略，不会被覆盖或删除。
+4. 严禁在服务器执行 git clean、git reset --hard、rsync --delete 或 rm -rf 来完成部署。
+5. 停止旧 tmux 只会停止进程；不会删除其 events、snapshots、state 或 1.5G 证据。
+6. 新 root 的 watermark 会隔离旧事件；历史 root 只读保留，不会被新 observer 补写。
+7. 后续 hotfix 继续复用本章的 Git、隔离 root、bootstrap 和检查流程；只替换经审查的 `ROOT_SUFFIX`、session 名、目标测试与新增验收字段。
+```
+
+**一次性前提：** Git Ancestry Attestation 要求服务器目录是带完整提交历史的非 shallow Git 工作树。若 `/root/crypto-alpha-lab/.git` 不存在，或 `git rev-parse --is-shallow-repository` 返回 `true`，不要继续本章；先单独完成服务器 Git 工作树迁移。不要把旧的 `rsync` 树直接当成已验证的 Git 部署树。
+
+### 7.2 本地提交与测试门禁
+
+在本地执行。只有工作区干净、测试通过、提交已推送后，才记录要部署的精确 SHA：
 
 ```bash
 cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 
 git status --short
-git log --oneline -3
+git diff --check
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
   tests/research/external_signal_shadow/test_stage1_5_launch_anchor_contract.py \
-  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_parser.py \
-  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
   tests/research/external_signal_shadow/test_stage1_5d_schedule_revision_producer.py \
-  tests/research/external_signal_shadow/test_stage1_5d_runtime_gate.py \
-  tests/research/external_signal_shadow/test_stage1_5f_historical_anchor_rejection_hygiene.py \
-  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_state.py \
-  tests/research/external_signal_shadow/test_stage1_5f_schedule_revision_registry.py \
-  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_decision.py \
-  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_integrity.py \
-  tests/scripts/external_signal_shadow/test_review_stage1_5g_live_depth_evidence.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py \
-  tests/scripts/external_signal_shadow/test_stage1_5f_deployment_checklist.py -q
+  tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py -q
 
-git diff --check
+# 工作区干净后，推送当前提交；DEPLOY_COMMIT 必须是本次实际部署的固定值。
+git push origin HEAD
+export DEPLOY_COMMIT="$(git rev-parse HEAD)"
+echo "DEPLOY_COMMIT=$DEPLOY_COMMIT"
+git show --no-patch --format='%H%n%s%n%ci' "$DEPLOY_COMMIT"
 ```
 
-判定标准：
+判定：`git status --short` 和 `git diff --check` 均无输出，pytest 通过，且 `git push` 成功。记录 `DEPLOY_COMMIT`，后续服务器必须 checkout 同一个 SHA，不能用不确定的“最新代码”。
 
-```text
-1. git status --short 为空，或只有明确不提交的本地临时文件。
-2. targeted Stage 1.5D/F/G suite 通过。
-3. git diff --check 无输出。
-4. 最新 commit SHA 已记录，后续服务器 SHA256 对比使用该源码状态。
+### 7.3 服务器 Git 工作树与精确提交检查
+
+在服务器同一个 SSH 窗口执行。下面的命令只读；错误只打印 `STOP`，不会关闭 SSH。
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+SERVER_GIT_READY=1
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "STOP: /root/crypto-alpha-lab is not a Git work tree. Complete the one-time Git migration first." >&2
+  SERVER_GIT_READY=0
+fi
+if [ "$SERVER_GIT_READY" = "1" ] && [ "$(git rev-parse --is-shallow-repository)" != "false" ]; then
+  echo "STOP: shallow Git history is not valid for ancestry attestation. Fetch full history before deployment." >&2
+  SERVER_GIT_READY=0
+fi
+if [ "$SERVER_GIT_READY" = "1" ] && ! git check-ignore -q data/external_signal_shadow; then
+  echo "STOP: data/ is not ignored by Git; do not checkout until this is corrected." >&2
+  SERVER_GIT_READY=0
+fi
+
+git remote -v 2>/dev/null || true
+git rev-parse --is-shallow-repository 2>/dev/null || true
+git status --short 2>/dev/null || true
+echo "SERVER_GIT_READY=$SERVER_GIT_READY"
 ```
 
-### 7.2 服务器部署前检查
+若 `SERVER_GIT_READY=0`，停止部署。Git 工作树迁移是一次性基础设施动作，必须保留 `data/`、旧 `.venv/` 和所有旧 root，另行验证后再回到本章。
 
-在服务器执行，确认磁盘、旧进程、旧 active observation 状态：
+### 7.4 使用 Git 部署代码，不同步数据
+
+将本地第 7.2 节记录的完整 SHA 粘贴到 `DEPLOY_COMMIT`。`git checkout` 前要求服务器源码工作区干净，避免覆盖服务器上未提交的人工改动。
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export DEPLOY_COMMIT="替换为第 7.2 节记录的 40 位 SHA"
+DEPLOY_READY=1
+
+if [ "${#DEPLOY_COMMIT}" -ne 40 ]; then
+  echo "STOP: DEPLOY_COMMIT must be the exact 40-character commit SHA." >&2
+  DEPLOY_READY=0
+fi
+if [ "$DEPLOY_READY" = "1" ] && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" != "false" ]; then
+  echo "STOP: non-shallow Git history is required." >&2
+  DEPLOY_READY=0
+fi
+if [ "$DEPLOY_READY" = "1" ]; then
+  git fetch origin --tags --prune
+  if ! git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null; then
+    echo "STOP: DEPLOY_COMMIT is absent from this server Git history." >&2
+    DEPLOY_READY=0
+  fi
+fi
+if [ "$DEPLOY_READY" = "1" ] && [ -n "$(git status --short)" ]; then
+  echo "STOP: server source worktree is dirty; inspect it instead of discarding it." >&2
+  git status --short
+  DEPLOY_READY=0
+fi
+if [ "$DEPLOY_READY" = "1" ]; then
+  git checkout --detach "$DEPLOY_COMMIT"
+  echo "SERVER_HEAD=$(git rev-parse HEAD)"
+  git status --short
+fi
+echo "DEPLOY_READY=$DEPLOY_READY"
+```
+
+判定：`DEPLOY_READY=1` 且 `SERVER_HEAD` 等于 `DEPLOY_COMMIT` 才能继续。此步骤不会修改 `data/`；不要执行 `git clean`，也不要再执行旧的 `rsync -avzP ... /root/crypto-alpha-lab/` 代码同步命令。
+
+### 7.5 启动前运行状态检查与停止旧会话
 
 ```bash
 cd /root/crypto-alpha-lab
@@ -302,305 +367,174 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 export ACTIVE_5F="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 echo "ACTIVE_5F=[$ACTIVE_5F]"
 if [ -n "$ACTIVE_5F" ] && [ -f "$ACTIVE_5F/live_depth_observer_summary.json" ]; then
-  cat "$ACTIVE_5F/live_depth_observer_summary.json" | python3 -m json.tool | grep -E \
-  '"decision"|"active_observation_count"|"pending_launch_observation_count"|"total_snapshots_collected"|"last_heartbeat_at_ms"|"blocker"'
+  python3 - "$ACTIVE_5F/live_depth_observer_summary.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+print({k: s.get(k) for k in (
+    "decision", "active_observation_count", "pending_launch_observation_count",
+    "total_snapshots_collected", "last_heartbeat_at_ms", "blocker",
+)})
+PY
 fi
 ```
 
-判定标准：
+判定：磁盘可用空间建议至少 `5G`。若旧 observer 的 `active_observation_count > 0`，先保留该 root 并记录摘要；继续部署会中断该 root 的后续采集，但不会删除已采集数据。
 
-```text
-1. / 可用空间建议 >= 5G；低于 3G 先清理旧 root，不要同步部署。
-2. 如果旧 1.5F active_observation_count > 0，应先记录 evidence；除非用户明确接受中断，否则不要直接 kill。
-3. 没有 active observation 时，可以进入新 root 部署。
-```
-
-### 7.3 本地同步到服务器
-
-本次使用 repo root 安全同步，并排除服务器 `data/`、`.venv/`、`.git/` 和缓存目录，避免破坏运行证据与虚拟环境。
+确认允许停止旧会话后，**手工填入** `tmux ls` 中的两个真实 session 名；不要使用“匹配到就全部 kill”的循环：
 
 ```bash
-cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
-export SERVER=root@47.82.4.85
+export OLD_5D_SESSION="替换为要停止的旧 1.5D tmux session"
+export OLD_5F_SESSION="替换为要停止的旧 1.5F tmux session"
 
-rsync -avzP \
-  --exclude='data' \
-  --exclude='.git' \
-  --exclude='.venv' \
-  --exclude='.ruff_cache' \
-  --exclude='.pytest_cache' \
-  --exclude='__pycache__' \
-  /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab/ \
-  "$SERVER:/root/crypto-alpha-lab/"
-```
-
-如果前面的 repo root 同步中断，且只需要补同步本次 design/plan，可单独执行：
-
-```bash
-rsync -avzP --relative \
-  docs/designs/2026-08-03-external-signal-shadow-lab-stage1-5d-1-5f-official-launch-time-priority-anchor-precedence-hotfix-design_CN.md \
-  docs/plans/2026-08-03-external-signal-shadow-lab-stage1-5d-1-5f-official-schedule-priority-anchor-contract-v2-hotfix-implementation-plan_CN.md \
-  "$SERVER:/root/crypto-alpha-lab/"
-```
-
-### 7.4 服务器 SHA256 和最小测试
-
-本地生成关键文件 SHA256：
-
-```bash
-cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
-shasum -a 256 \
-  configs/base.py \
-  src/research/external_signal_shadow/stage1_5_launch_anchor_contract.py \
-  src/research/external_signal_shadow/stage1_5_launch_event_contract.py \
-  src/research/external_signal_shadow/stage1_5d_schedule_revision_producer.py \
-  src/research/external_signal_shadow/stage1_5d_live_event_source_storage.py \
-  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
-  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
-  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
-```
-
-服务器对比同一批文件：
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-sha256sum \
-  configs/base.py \
-  src/research/external_signal_shadow/stage1_5_launch_anchor_contract.py \
-  src/research/external_signal_shadow/stage1_5_launch_event_contract.py \
-  src/research/external_signal_shadow/stage1_5d_schedule_revision_producer.py \
-  src/research/external_signal_shadow/stage1_5d_live_event_source_storage.py \
-  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
-  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
-  src/research/external_signal_shadow/stage1_5g_live_depth_evidence_review.py
-
-PYTHONPATH=src:. .venv/bin/python -m pytest \
-  tests/research/external_signal_shadow/test_stage1_5_launch_anchor_contract.py \
-  tests/research/external_signal_shadow/test_stage1_5d_schedule_revision_producer.py \
-  tests/research/external_signal_shadow/test_stage1_5d_runtime_gate.py \
-  tests/research/external_signal_shadow/test_stage1_5f_schedule_revision_registry.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
-  tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py \
-  tests/scripts/external_signal_shadow/test_stage1_5f_deployment_checklist.py -q
-```
-
-判定标准：
-
-```text
-1. 本地和服务器关键文件 SHA256 一致。
-2. 服务器最小 Stage 1.5D/F v2 suite 通过。
-3. 不通过时不要启动新 root。
-```
-
-### 7.5 停止旧 Stage 1.5D / 1.5F 进程
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-tmux ls || true
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
-
-# 停止当前及历史 1.5F observer session。
-tmux kill-session -t stage1_5f_live_depth_7d_schedule_revision_producer_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_title_symbol_launch_anchor_validation_gate_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5f_live_depth_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
-
-# 停止当前及历史 1.5D collector session。
-tmux kill-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_title_symbol_launch_anchor_validation_gate_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_multisymbol_all_or_none_admission_dedupe_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_bapi_table_runtime_gate_hotfix 2>/dev/null || true
-
-# 兜底：按当前 tmux 中真实 session 名停止所有 1.5D/1.5F 会话。
-for s in $(tmux ls 2>/dev/null | awk -F: '/stage1_5d|stage1_5f/ {print $1}'); do
-  echo "killing $s"
-  tmux kill-session -t "$s"
-done
+tmux kill-session -t "$OLD_5F_SESSION"
+tmux kill-session -t "$OLD_5D_SESSION"
 
 ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
 ```
 
-如果 `ps` 仍显示旧 collector/observer，先不要继续启动新进程。
+`ps` 仍显示旧 collector 或 observer 时，不得启动新进程。停止会话不执行任何数据删除。
 
-### 7.6 启动 Stage 1.5D official schedule v2 collector
+### 7.6 启动新的 Stage 1.5D collector
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-STAGE1_5D_START_READY=1
-if tmux has-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null; then
-  echo "ERROR: Stage 1.5D v2 tmux session already exists; do not create a new empty root." >&2
-  ps -efww | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' | grep -v grep || true
-  STAGE1_5D_START_READY=0
+export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export STAGE1_5D_SESSION="stage1_5d_continuous_${ROOT_SUFFIX}"
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${ROOT_SUFFIX}"
+
+D_START_READY=1
+if tmux has-session -t "$STAGE1_5D_SESSION" 2>/dev/null; then
+  echo "STOP: target Stage 1.5D tmux session already exists." >&2
+  D_START_READY=0
 fi
-
-RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_7d_schedule_revision_producer_hotfix"
-
 if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
-  echo "Refuse to overwrite existing STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT" >&2
-  STAGE1_5D_START_READY=0
+  echo "STOP: refuse to reuse existing Stage 1.5D root: $STAGE1_5D_EVENTS_OUT" >&2
+  D_START_READY=0
 fi
 
-if [ "$STAGE1_5D_START_READY" = "1" ]; then
+if [ "$D_START_READY" = "1" ]; then
   mkdir -p "$STAGE1_5D_EVENTS_OUT"
-  tmux new -d -s stage1_5d_continuous_7d_schedule_revision_producer_hotfix "
+  tmux new-session -d -s "$STAGE1_5D_SESSION" "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
-PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \
-  --stage1-5c1-summary data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json \
-  --stage1-5c-summary data/external_signal_shadow/stage1_5c/external_catalyst_replay_summary.json \
-  --output-root '$STAGE1_5D_EVENTS_OUT' \
-  --output-summary '$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json' \
-  --poll-interval-sec 60 \
-  --max-seconds 604800 \
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py \\
+  --stage1-5c1-summary data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json \\
+  --stage1-5c-summary data/external_signal_shadow/stage1_5c/external_catalyst_replay_summary.json \\
+  --output-root '$STAGE1_5D_EVENTS_OUT' \\
+  --output-summary '$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json' \\
+  --poll-interval-sec 60 \\
+  --max-seconds 604800 \\
   --live-public-readonly
 "
-
-  sleep 2
-  export ACTUAL_STAGE1_5D_EVENTS_OUT="$(
-  ps -efww \
-    | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' \
-    | grep -v grep \
-    | tail -n 1 \
-    | tr ' ' '\n' \
-    | awk 'prev=="--output-root"{print; exit}{prev=$0}'
-)"
-
-  if [ "$ACTUAL_STAGE1_5D_EVENTS_OUT" != "$STAGE1_5D_EVENTS_OUT" ]; then
-    echo "ERROR: Stage 1.5D actual output root mismatch." >&2
-    echo "EXPECTED=[$STAGE1_5D_EVENTS_OUT]" >&2
-    echo "ACTUAL=[$ACTUAL_STAGE1_5D_EVENTS_OUT]" >&2
-    STAGE1_5D_START_READY=0
-  fi
-fi
-
-if [ "$STAGE1_5D_START_READY" = "1" ]; then
-  echo "STAGE1_5D_EVENTS_OUT=$STAGE1_5D_EVENTS_OUT"
-else
-  echo "STOP: Stage 1.5D was not started. Fix the error above; SSH remains open." >&2
-fi
-```
-
-等待 startup gate 生成，再等 1 到 2 个 poll。`live_safety_gate_summary.json` 在 1.5D 进入主循环前就应先写入 `INITIALIZING`；如果 30 秒内不存在，优先检查 tmux pane 和进程命令行，不要继续启动 1.5F。
-
-```bash
-for i in $(seq 1 30); do
-  if [ -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
-    break
-  fi
-  sleep 1
-done
-
-if [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
-  echo "ERROR: Stage 1.5D runtime gate missing: $STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" >&2
-  echo "=== tmux ===" >&2
-  tmux ls 2>&1 >&2 || true
-  echo "=== process ===" >&2
-  ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep >&2 || true
-  echo "=== output root files ===" >&2
-  find "$STAGE1_5D_EVENTS_OUT" -maxdepth 2 -type f 2>/dev/null | sort | head -n 80 >&2 || true
-  echo "=== tmux pane tail ===" >&2
-  tmux capture-pane -pt stage1_5d_continuous_7d_schedule_revision_producer_hotfix -S -200 2>&1 >&2 || true
-  echo "STOP: Stage 1.5D runtime gate is missing. Fix the error above; SSH remains open." >&2
-else
-  sleep 90
-
-  cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
-    | python3 -m json.tool | grep -E \
-'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"live_public_readonly"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"trade_signal_allowed"|"paper_trading_allowed"|"live_trading_allowed"|"execution_engine_allowed"|"alpha_interpretation_allowed"|"fatal_blockers"'
-fi
-```
-
-判定标准：
-
-```text
-正常: decision = stage1_5d_runtime_gate_ready。
-正常: consumable_by_stage1_5f = true。
-正常: formal_event_contract_versions_supported 包含 2。
-正常: formal_schedule_revision_contract_versions_supported 包含 1 和 2。
-正常: anchor_precedence_policy = official_schedule_priority_v1。
-正常: shared_anchor_validator_enabled = true。
-正常: schedule_revision_producer_supported = true；初始部署 configured/effective enabled 均为 false。
-正常: fatal_blockers = []。
-正常: trade_signal_allowed / paper_trading_allowed / live_trading_allowed / execution_engine_allowed / alpha_interpretation_allowed 均为 false。
-异常: runtime gate 文件不存在、decision 非 ready、fatal_blockers 非空时，不得启动新 1.5F。
-初始部署正常: schedule_revision_producer_configured_enabled = false、schedule_revision_producer_effective_enabled = false；producer 关闭不得阻断 normal launch collection。
-```
-
-### 7.7 Bootstrap 新 Stage 1.5F watermark
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-mkdir -p data/external_signal_shadow/stage1_5e/execution_feasibility
-
-if [ ! -f data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json ]; then
-  cp "$(find data/external_signal_shadow/stage1_5e -type f -name execution_feasibility_audit_summary.json | sort | tail -n 1)" \
-    data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json
-fi
-
-export STAGE1_5D_EVENTS_OUT="$(
-  ps -efww \
-    | grep '.venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py' \
-    | grep -v grep \
-    | tail -n 1 \
-    | tr ' ' '\n' \
-    | awk 'prev=="--output-root"{print; exit}{prev=$0}'
-)"
-if [ -z "$STAGE1_5D_EVENTS_OUT" ]; then
-  export STAGE1_5D_EVENTS_OUT="$(
-    find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d \
-      -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' \
-      -exec sh -c 'test -f "$1/live_safety_gate_summary.json"' sh {} \; -print \
-      | sort | tail -n 1
-  )"
-fi
-STAGE1_5F_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_7d_schedule_revision_producer_hotfix"
-export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
-
-BOOTSTRAP_READY=1
-if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ ! -d "$STAGE1_5D_EVENTS_OUT" ]; then
-  echo "Missing STAGE1_5D_EVENTS_OUT" >&2
-  BOOTSTRAP_READY=0
-fi
-if [ -e "$STAGE1_5F_OUT" ]; then
-  echo "Refuse to overwrite existing STAGE1_5F_OUT=$STAGE1_5F_OUT" >&2
-  BOOTSTRAP_READY=0
-fi
-if [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
-  echo "Missing Stage 1.5D runtime gate" >&2
-  BOOTSTRAP_READY=0
-fi
-
-if [ "$BOOTSTRAP_READY" = "1" ]; then
-  python3 - <<'PY'
-import glob
-import os
-root = os.environ["STAGE1_5D_EVENTS_OUT"]
-hits = sorted(glob.glob(f"{root}/events/*.jsonl"))
-print("stage1_5d_events_glob_hit_count", len(hits))
-print("stage1_5d_events_glob_tail", hits[-5:])
-if not hits:
-    raise SystemExit("ERROR: Stage 1.5D events/*.jsonl has no hit; wait for collector first poll")
-PY
-  if [ $? -ne 0 ]; then
-    BOOTSTRAP_READY=0
-  fi
 fi
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
-echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+echo "D_START_READY=$D_START_READY"
+```
 
-if [ "$BOOTSTRAP_READY" != "1" ]; then
-  echo "STOP: fix the checks above before bootstrap. This command block did not close SSH." >&2
+等待至少两个 poll 后检查 runtime gate。失败只会停止后续操作，不会关闭 SSH：
+
+```bash
+D_GATE_READY=1
+sleep 130
+python3 - "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+if not p.is_file():
+    raise SystemExit(f"STOP: missing runtime gate: {p}")
+else:
+    g = json.loads(p.read_text())
+    view = {k: g.get(k) for k in (
+        "status", "decision", "consumable_by_stage1_5f", "successful_poll_count",
+        "failed_poll_count", "consecutive_failed_polls",
+        "formal_event_contract_versions_supported",
+        "formal_schedule_revision_contract_versions_supported",
+        "anchor_precedence_policy", "schedule_revision_producer_configured_enabled",
+        "schedule_revision_producer_effective_enabled", "fatal_blockers",
+    )}
+    print(view)
+    assert g.get("status") == "READY"
+    assert g.get("decision") == "stage1_5d_runtime_gate_ready"
+    assert g.get("consumable_by_stage1_5f") is True
+    assert g.get("fatal_blockers") in (None, [])
+PY
+if [ $? -ne 0 ]; then
+  D_GATE_READY=0
+fi
+echo "D_GATE_READY=$D_GATE_READY"
+```
+
+仅当 `D_GATE_READY=1` 时，才继续启动 1.5F。`schedule_revision_producer_configured_enabled` 和 `schedule_revision_producer_effective_enabled` 必须保持 `false`；producer 关闭不阻断普通 launch event 采集。
+
+### 7.7 Bootstrap 并启动新的 Stage 1.5F observer
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
+export STAGE1_5F_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_${ROOT_SUFFIX}"
+export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
+
+F_START_READY=1
+if [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
+  echo "STOP: Stage 1.5D runtime gate is missing." >&2
+  F_START_READY=0
+fi
+if [ "$F_START_READY" = "1" ]; then
+  python3 - "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" <<'PY'
+import json, sys
+g = json.load(open(sys.argv[1]))
+assert g.get("status") == "READY"
+assert g.get("decision") == "stage1_5d_runtime_gate_ready"
+assert g.get("consumable_by_stage1_5f") is True
+assert g.get("fatal_blockers") in (None, [])
+PY
+  if [ $? -ne 0 ]; then
+    echo "STOP: Stage 1.5D runtime gate is not admissible for Stage 1.5F." >&2
+    F_START_READY=0
+  fi
+fi
+if [ -e "$STAGE1_5F_OUT" ]; then
+  echo "STOP: refuse to reuse existing Stage 1.5F root: $STAGE1_5F_OUT" >&2
+  F_START_READY=0
+fi
+if tmux has-session -t "$STAGE1_5F_SESSION" 2>/dev/null; then
+  echo "STOP: target Stage 1.5F tmux session already exists." >&2
+  F_START_READY=0
+fi
+if [ ! -f "$STAGE1_5E_SUMMARY" ]; then
+  echo "STOP: required Stage 1.5E summary is missing: $STAGE1_5E_SUMMARY" >&2
+  F_START_READY=0
+fi
+
+if [ "$F_START_READY" = "1" ]; then
+  python3 - "$STAGE1_5D_EVENTS_OUT" <<'PY'
+import glob, sys
+hits = sorted(glob.glob(f"{sys.argv[1]}/events/*.jsonl"))
+print({"stage1_5d_events_glob_hit_count": len(hits), "tail": hits[-3:]})
+assert hits, "STOP: wait for Stage 1.5D to create events/*.jsonl"
+PY
+  if [ $? -ne 0 ]; then
+    F_START_READY=0
+  fi
+fi
+
+echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+echo "F_START_READY=$F_START_READY"
+```
+
+仅当 `F_START_READY=1` 且 Python 检查通过时，建立新 watermark。bootstrap 不会采集旧事件，也不会改写旧 root：
+
+```bash
+if [ "$F_START_READY" != "1" ]; then
+  echo "STOP: Stage 1.5F was not started; fix the checks above. SSH remains open." >&2
 else
   PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
     --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
@@ -609,416 +543,237 @@ else
     --output-root "$STAGE1_5F_OUT" \
     --bootstrap-watermark
 
-  cat "$STAGE1_5F_OUT/observer_root_contract.json" | python3 -m json.tool | grep -E \
-  '"root_mode"|"formal_event_contract_versions_allowed"|"formal_schedule_revision_contract_versions_allowed"|"anchor_precedence_policy"|"created_at_ms"'
-  cat "$STAGE1_5F_OUT/watermark.json" | python3 -m json.tool
-  cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" | python3 -m json.tool | grep -E \
-  '"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"max_seen_detected_at_ms"|"blocker"'
-fi
-```
-
-bootstrap 只建立新 root 的启动边界，不产生正式 live depth evidence。
-
-### 7.8 启动新 Stage 1.5F observer
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
-
-if [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ -z "$STAGE1_5F_OUT" ]; then
-  echo "Missing STAGE1_5D_EVENTS_OUT or STAGE1_5F_OUT" >&2
-  echo "STOP: Stage 1.5F was not started. Fix the error above; SSH remains open." >&2
-else
-  tmux new -d -s stage1_5f_live_depth_7d_schedule_revision_producer_hotfix "
+  tmux new-session -d -s "$STAGE1_5F_SESSION" "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
-STAGE1_5D_EVENTS_OUT='$STAGE1_5D_EVENTS_OUT' &&
-STAGE1_5E_SUMMARY='$STAGE1_5E_SUMMARY' &&
-STAGE1_5F_OUT='$STAGE1_5F_OUT' &&
-PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
-  --stage1-5d-events-glob '$STAGE1_5D_EVENTS_OUT/events/*.jsonl' \
-  --stage1-5d-runtime-gate '$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json' \
-  --stage1-5e-summary '$STAGE1_5E_SUMMARY' \
-  --output-root '$STAGE1_5F_OUT' \
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \\
+  --stage1-5d-events-glob '$STAGE1_5D_EVENTS_OUT/events/*.jsonl' \\
+  --stage1-5d-runtime-gate '$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json' \\
+  --stage1-5e-summary '$STAGE1_5E_SUMMARY' \\
+  --output-root '$STAGE1_5F_OUT' \\
   --live-public-readonly
 "
 fi
 ```
 
-注意：`--stage1-5d-events-glob` 必须让 Python 收到未转义的 `events/*.jsonl`。不要写成带反斜杠的 glob；带反斜杠会被 Python `glob.glob()` 当成字面量，匹配不到任何 `events/YYYY-MM-DD.jsonl`。
+注意：`--stage1-5d-events-glob` 必须传入未带反斜杠的 `events/*.jsonl`。传入 `events/\*.jsonl` 会使 Python 按字面量查找，1.5F 看不到任何事件文件。
 
-### 7.9 部署后首次检查
+### 7.8 首次部署检查
+
+等待约 90 秒后执行。该检查同时验证 Git commit、D/F root 绑定、attestation 与基础运行状态：
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+sleep 90
+python3 - "$STAGE1_5D_EVENTS_OUT" "$STAGE1_5F_OUT" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
 
-echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
-echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+root_d = Path(sys.argv[1]).resolve()
+root_f = Path(sys.argv[2]).resolve()
+gate = json.loads((root_d / "live_safety_gate_summary.json").read_text())
+contract = json.loads((root_f / "observer_root_contract.json").read_text())
+summary = json.loads((root_f / "live_depth_observer_summary.json").read_text())
+root_id = hashlib.sha256(str(root_d).encode()).hexdigest()
 
-date -u
-tmux ls
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep
+print({
+    "stage1_5d": {k: gate.get(k) for k in (
+        "status", "decision", "consumable_by_stage1_5f", "successful_poll_count",
+        "schedule_revision_producer_configured_enabled",
+        "schedule_revision_producer_effective_enabled",
+    )},
+    "stage1_5f_contract": {k: contract.get(k) for k in (
+        "root_mode", "source_stage1_5d_output_root_id",
+        "source_stage1_5d_events_root_id", "source_stage1_5d_runtime_gate_root_id",
+        "consumer_static_attestation_verified",
+    )},
+    "stage1_5f_summary": {k: summary.get(k) for k in (
+        "decision", "stage1_5d_runtime_gate_decision",
+        "consumer_runtime_attestation_verified",
+        "consumer_runtime_attestation_compromised", "block_new_event_admission",
+        "active_observation_count", "pending_launch_observation_count", "blocker",
+    )},
+})
 
-python3 - <<'PY'
-import glob
-import os
-import subprocess
-
-root = os.environ["STAGE1_5D_EVENTS_OUT"]
-pattern = f"{root}/events/*.jsonl"
-hits = sorted(glob.glob(pattern))
-print("stage1_5d_events_glob_pattern", pattern)
-print("stage1_5d_events_glob_hit_count", len(hits))
-print("stage1_5d_events_glob_tail", hits[-5:])
-if not hits:
-    raise SystemExit("ERROR: Stage 1.5F events glob matches zero files")
-
-ps = subprocess.check_output(
-    "ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep",
-    shell=True,
-    text=True,
-)
-if "\\*.jsonl" in ps:
-    raise SystemExit("ERROR: Stage 1.5F process uses escaped events glob; restart with events/*.jsonl")
-print("stage1_5f_events_glob_process_check", "ok")
+assert gate.get("status") == "READY"
+assert gate.get("decision") == "stage1_5d_runtime_gate_ready"
+assert all(contract.get(k) == root_id for k in (
+    "source_stage1_5d_output_root_id",
+    "source_stage1_5d_events_root_id",
+    "source_stage1_5d_runtime_gate_root_id",
+))
+assert contract.get("consumer_static_attestation_verified") is True
+assert summary.get("consumer_runtime_attestation_verified") is True
+assert summary.get("consumer_runtime_attestation_compromised") is False
+assert summary.get("block_new_event_admission") is False
 PY
 
-cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"schedule_revision_producer_supported"|"schedule_revision_producer_configured_enabled"|"schedule_revision_producer_effective_enabled"|"schedule_revision_producer_consumer_prerequisites_verified"|"schedule_revision_producer_health"|"fatal_blockers"' || true
-
-cat "$STAGE1_5F_OUT/observer_root_contract.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"root_mode"|"formal_event_contract_versions_allowed"|"formal_schedule_revision_contract_versions_allowed"|"anchor_precedence_policy"' || true
-
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"stage1_5d_runtime_gate_stale"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"active_observation_count"|"pending_launch_observation_count"|"post_watermark_events_accepted"|"schedule_revision_registry_orphan_count"|"schedule_revision_registry_ambiguous_count"|"last_heartbeat_at_ms"|"blocker"' || true
-
-wc -l "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5D_EVENTS_OUT"/request_manifest/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5F_OUT"/heartbeat/*.jsonl 2>/dev/null || true
-find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
-find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
-find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
+ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 ```
 
-正常首检：
-
-```text
-1. tmux 中只有新的 schedule_revision_producer_hotfix 1.5D/1.5F session。
-2. 1.5D live_safety_gate_summary decision = stage1_5d_runtime_gate_ready。
-3. 1.5D formal_event_contract_versions_supported 包含 2。
-4. 1.5D formal_schedule_revision_contract_versions_supported 包含 1 和 2。
-5. 1.5D anchor_precedence_policy = official_schedule_priority_v1。
-6. 1.5F observer_root_contract.root_mode = v2_production。
-7. 1.5F stage1_5d_runtime_gate_decision = stage1_5d_runtime_gate_ready。
-8. 1.5F cross_root_upstream_summary_dependency = false。
-9. 1.5F block_new_event_admission = false。
-10. stage1_5d_events_glob_hit_count > 0，且 stage1_5f_events_glob_process_check = ok。
-11. 没有新事件时 active_observation_count = 0、pending_launch_observation_count = 0 属于正常。
-```
+正常首检：1.5D 为 `READY` / `stage1_5d_runtime_gate_ready`；三个 `source_stage1_5d_*_root_id` 全部相同且绑定新 D root；1.5F runtime attestation 为 true、`block_new_event_admission=false`。若任一断言失败，停止新会话、保留所有新旧 root，定位后再重新部署。
 
 ## 8. 日常监控
 
-### 8.1 一键设置路径
+### 8.1 当前 root 快速定位
 
-每次 SSH 新窗口先执行：
+每次新的 SSH 窗口先执行。优先从运行进程提取 root；没有进程时才回退到最新同后缀目录：
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export STAGE1_5D_EVENTS_OUT="$(ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
+export STAGE1_5F_OUT="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
+
+if [ -z "$STAGE1_5D_EVENTS_OUT" ]; then
+  export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name "live_event_source_continuous_*_${ROOT_SUFFIX}" | sort | tail -n 1)"
+fi
+if [ -z "$STAGE1_5F_OUT" ]; then
+  export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name "live_depth_observer_*_${ROOT_SUFFIX}" | sort | tail -n 1)"
+fi
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 ```
 
-### 8.2 进程、摘要和 request 计数检查
+### 8.2 一条命令看健康状态
 
 ```bash
-date -u
-tmux ls
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep
+python3 - "$STAGE1_5D_EVENTS_OUT" "$STAGE1_5F_OUT" <<'PY'
+import json, sys
+from pathlib import Path
 
-cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null || true
-cat "$STAGE1_5D_EVENTS_OUT/binance_futures_launch_smoke_summary.json" 2>/dev/null || true
-cat "$STAGE1_5F_OUT/observer_root_contract.json" 2>/dev/null || true
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null || true
+def load(root, name):
+    p = Path(root) / name
+    return json.loads(p.read_text()) if p.is_file() else {"missing": str(p)}
 
-cat "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"consumable_by_stage1_5f"|"successful_poll_count"|"failed_poll_count"|"consecutive_failed_polls"|"request_success_rate"|"formal_event_contract_versions_supported"|"formal_schedule_revision_contract_versions_supported"|"anchor_precedence_policy"|"shared_anchor_validator_enabled"|"schedule_revision_producer_supported"|"schedule_revision_producer_configured_enabled"|"schedule_revision_producer_effective_enabled"|"schedule_revision_producer_consumer_prerequisites_verified"|"schedule_revision_producer_health"|"fatal_blockers"' || true
-
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"stage1_5d_gate_mode"|"stage1_5d_runtime_gate_decision"|"stage1_5d_runtime_gate_stale"|"stage1_5d_runtime_gate_invalid_count"|"cross_root_upstream_summary_dependency"|"block_new_event_admission"|"active_observation_count"|"pending_launch_observation_count"|"pending_launch_time_in_future_count"|"pending_launch_anchor_missing_count"|"pending_anchor_conflict_count"|"pending_observation_capacity_count"|"post_watermark_events_accepted"|"schedule_revision_registry_orphan_count"|"schedule_revision_registry_ambiguous_count"|"last_heartbeat_at_ms"|"blocker"' || true
-
-wc -l "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5D_EVENTS_OUT"/request_manifest/*.jsonl 2>/dev/null || true
-wc -l "$STAGE1_5F_OUT"/heartbeat/*.jsonl 2>/dev/null || true
-find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
-find "$STAGE1_5F_OUT/events_rejected" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
-find "$STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
-find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null | xargs wc -l 2>/dev/null || true
-
-tail -n 3 "$STAGE1_5D_EVENTS_OUT"/heartbeats/*.jsonl 2>/dev/null || true
-tail -n 3 "$STAGE1_5D_EVENTS_OUT"/events/*.jsonl 2>/dev/null || true
+g = load(sys.argv[1], "live_safety_gate_summary.json")
+s = load(sys.argv[2], "live_depth_observer_summary.json")
+print({
+    "stage1_5d": {k: g.get(k) for k in (
+        "status", "decision", "successful_poll_count", "failed_poll_count",
+        "consecutive_failed_polls", "consumable_by_stage1_5f", "fatal_blockers",
+    )},
+    "stage1_5f": {k: s.get(k) for k in (
+        "decision", "post_watermark_events_accepted", "active_observation_count",
+        "pending_launch_observation_count", "pending_launch_time_in_future_count",
+        "pending_launch_anchor_missing_count", "pending_anchor_conflict_count",
+        "pending_observation_capacity_count", "block_new_event_admission", "blocker",
+    )},
+})
+PY
 ```
 
-### 8.3 Stage 1.5D v2 event contract 批量检查
+正常：1.5D `decision=stage1_5d_runtime_gate_ready`、连续失败为 `0`；1.5F `block_new_event_admission=false`、`blocker=null`。没有新事件时，accepted、active、pending 均为 `0` 是正常结果。
+
+### 8.3 事件流和 root 绑定快速检查
 
 ```bash
-PYTHONPATH=src:. python3 - <<'PY'
+python3 - "$STAGE1_5D_EVENTS_OUT" "$STAGE1_5F_OUT" <<'PY'
+import glob
+import hashlib
 import json
-import os
+import sys
 from pathlib import Path
-from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
-    validate_launch_anchor_contract,
-    validate_schedule_revision_contract,
+
+root_d = Path(sys.argv[1]).resolve()
+root_f = Path(sys.argv[2]).resolve()
+events = sorted(glob.glob(str(root_d / "events" / "*.jsonl")))
+contract = json.loads((root_f / "observer_root_contract.json").read_text())
+root_id = hashlib.sha256(str(root_d).encode()).hexdigest()
+keys = (
+    "source_stage1_5d_output_root_id",
+    "source_stage1_5d_events_root_id",
+    "source_stage1_5d_runtime_gate_root_id",
 )
-
-root = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
-launch_checked = 0
-revision_checked = 0
-bad = []
-for p in sorted((root / "events").glob("*.jsonl")):
-    for lineno, line in enumerate(p.read_text().splitlines(), 1):
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if row.get("event_type") == "futures_contract_launch_schedule_revision":
-            revision_checked += 1
-            res = validate_schedule_revision_contract(row)
-            if not res.get("valid"):
-                bad.append({"path": str(p), "lineno": lineno, "event_type": row.get("event_type"), "blockers": res.get("blockers")})
-            continue
-        launch_checked += 1
-        for sym in row.get("symbols") or [None]:
-            res = validate_launch_anchor_contract(row, sym, compatibility_mode=False)
-            if not res.get("valid"):
-                bad.append({"path": str(p), "lineno": lineno, "symbol": sym, "blockers": res.get("blockers")})
-print("launch_checked", launch_checked)
-print("revision_checked", revision_checked)
-print("anchor_contract_bad_count", len(bad))
-for item in bad[:20]:
-    print(json.dumps(item, ensure_ascii=False))
+print({
+    "events_glob_hit_count": len(events),
+    "events_glob_tail": events[-3:],
+    "root_binding_ok": all(contract.get(k) == root_id for k in keys),
+    "root_binding_values": {k: contract.get(k) for k in keys},
+})
 PY
+
+ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 ```
 
-正常判读：
+必须看到 `events_glob_hit_count > 0` 和 `root_binding_ok=true`。进程命令行中不得出现字面量 `events/\*.jsonl`。
 
-```text
-anchor_contract_bad_count = 0。
-launch rows 必须为 formal_event_contract_version = 2。
-schedule revision rows 如出现，必须通过 formal_schedule_revision_contract_version = 2 validator。
-若 launch_checked = 0，表示当前新 root 尚无 post-bootstrap consumable event，等待新公告即可。
-```
+### 8.4 新公告的状态语义检查
 
-### 8.4 Stage 1.5F root contract / version isolation 检查
+设置公告内的一个或多个 symbol；逗号、空格和分号均可分隔。命令只显示每个 symbol 的最后一条 durable state，避免刷屏：
 
 ```bash
-python3 - <<'PY'
+export SYMBOLS="替换为目标，例如 AAAUSDT BBBUSDT"
+
+python3 - "$STAGE1_5F_OUT" <<'PY'
 import json
 import os
+import sys
 from pathlib import Path
-root = Path(os.environ["STAGE1_5F_OUT"])
-contract_path = root / "observer_root_contract.json"
-summary_path = root / "live_depth_observer_summary.json"
-print("observer_root_contract_exists", contract_path.exists())
-if contract_path.exists():
-    c = json.loads(contract_path.read_text())
-    print(json.dumps({
-        "root_mode": c.get("root_mode"),
-        "formal_event_contract_versions_allowed": c.get("formal_event_contract_versions_allowed"),
-        "formal_schedule_revision_contract_versions_allowed": c.get("formal_schedule_revision_contract_versions_allowed"),
-        "anchor_precedence_policy": c.get("anchor_precedence_policy"),
-    }, indent=2, ensure_ascii=False))
-if summary_path.exists():
-    s = json.loads(summary_path.read_text())
-    print(json.dumps({
-        "decision": s.get("decision"),
-        "block_new_event_admission": s.get("block_new_event_admission"),
-        "blocker": s.get("blocker"),
-        "runtime_gate_diagnostic_count": s.get("runtime_gate_diagnostic_count"),
-    }, indent=2, ensure_ascii=False))
+
+symbols = {s for raw in os.environ.get("SYMBOLS", "").replace(";", ",").split(",") for s in raw.split() if s}
+latest = {}
+p = Path(sys.argv[1]) / "observer_state.jsonl"
+for line in p.read_text().splitlines() if p.is_file() else []:
+    row = json.loads(line)
+    if row.get("symbol") in symbols:
+        latest[row["symbol"]] = row
+for symbol in sorted(symbols):
+    row = latest.get(symbol, {})
+    print(symbol, {k: row.get(k) for k in (
+        "status", "pending_reason", "pending_terminal_reason", "rejected_reason",
+        "observation_anchor_ms", "anchor_resolution_deadline_ms",
+        "next_anchor_resolution_at_ms", "next_admission_check_at_ms",
+    )})
 PY
 ```
 
-正常判读：
+本 hotfix 的重点判读：
 
 ```text
-root_mode = v2_production。
-formal_event_contract_versions_allowed = [2]。
-formal_schedule_revision_contract_versions_allowed 包含 [1, 2]。
-anchor_precedence_policy = official_schedule_priority_v1。
-block_new_event_admission = false。
+有效 future anchor：
+status = pending_launch_time_in_future
+anchor_resolution_deadline_ms = null
+next_anchor_resolution_at_ms 非 null
+next_admission_check_at_ms = observation_anchor_ms + guard
+
+官方取消 revision：
+status = pending_cancelled
+pending_reason = official_schedule_cancelled
+pending_terminal_reason = ""
+observation_anchor_ms / next_anchor_resolution_at_ms / next_admission_check_at_ms 均为 null
+且该 symbol 不计入 pending_launch_observation_count。
+
+缺失或冲突 anchor：仍按既有 fail-closed 规则在 6h deadline 后进入相应 terminal rejection。
 ```
 
-### 8.5 新事件定位：单 symbol 或 multi-symbol
+### 8.5 停止当前新 root
 
-单 symbol：
-
-```bash
-export ARTICLE_ID="替换为 source_article_id"
-export SYMBOLS="GRVTUSDT"
-```
-
-multi-symbol：
-
-```bash
-export ARTICLE_ID="替换为 source_article_id"
-export SYMBOLS="PYPLUSDT GSUSDT SMHUSDT"
-```
-
-定位命令：
-
-```bash
-python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-article = os.environ.get("ARTICLE_ID", "")
-symbols = [
-    s.strip()
-    for raw in os.environ.get("SYMBOLS", "").replace(";", ",").split(",")
-    for s in raw.split()
-    if s.strip()
-]
-root_d = Path(os.environ["STAGE1_5D_EVENTS_OUT"])
-root_f = Path(os.environ["STAGE1_5F_OUT"])
-needles = [article] + symbols
-
-def row_hits(paths):
-    hits = []
-    for p in paths:
-        if not p.exists():
-            continue
-        for lineno, line in enumerate(p.read_text().splitlines(), 1):
-            if any(n and n in line for n in needles):
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    row = {"raw": line[:500]}
-                hits.append((str(p), lineno, row))
-    return hits
-
-stage1_5d_events = row_hits(sorted((root_d / "events").glob("*.jsonl")))
-stage1_5f_accepted = row_hits(sorted((root_f / "events_accepted").glob("*.jsonl")))
-stage1_5f_rejected = row_hits(sorted((root_f / "events_rejected").glob("*.jsonl")))
-stage1_5f_state = row_hits([root_f / "observer_state.jsonl"])
-
-print(json.dumps({
-    "article": article,
-    "symbols": symbols,
-    "stage1_5d_event_hits": len(stage1_5d_events),
-    "stage1_5f_accepted_hits": len(stage1_5f_accepted),
-    "stage1_5f_rejected_hits": len(stage1_5f_rejected),
-    "stage1_5f_state_hits": len(stage1_5f_state),
-}, indent=2, ensure_ascii=False))
-
-for label, hits in [
-    ("stage1_5d_last_event", stage1_5d_events[-3:]),
-    ("stage1_5f_last_accepted", stage1_5f_accepted[-3:]),
-    ("stage1_5f_last_rejected", stage1_5f_rejected[-3:]),
-    ("stage1_5f_last_state", stage1_5f_state[-5:]),
-]:
-    print("===", label, "===")
-    for p, lineno, row in hits:
-        print(json.dumps({
-            "path": p,
-            "lineno": lineno,
-            "event_type": row.get("event_type"),
-            "source_article_id": row.get("source_article_id"),
-            "symbols": row.get("symbols"),
-            "symbol": row.get("symbol"),
-            "status": row.get("status"),
-            "pending_reason": row.get("pending_reason"),
-            "rejected_reason": row.get("rejected_reason") or row.get("rejection_reason"),
-            "formal_event_contract_version": row.get("formal_event_contract_version"),
-            "source_contract_status": row.get("source_contract_status"),
-            "anchor_precedence_policy": row.get("anchor_precedence_policy"),
-            "observation_anchor_ms": row.get("observation_anchor_ms"),
-            "effective_observation_anchor_ms": row.get("effective_observation_anchor_ms"),
-            "latest_anchor_contract_hash": row.get("latest_anchor_contract_hash"),
-        }, ensure_ascii=False))
-PY
-```
-
-### 8.6 新事件 active observation 检查
-
-当 `post_watermark_events_accepted > 0` 或 `active_observation_count > 0` 后执行：
-
-```bash
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"decision"|"active_observation_count"|"completed_observation_count"|"total_snapshots_collected"|"request_success_rate"|"failed_requests_count"|"active_expected_snapshot_count"|"active_unique_snapshot_bucket_count"|"active_missing_snapshot_bucket_count"|"active_out_of_window_snapshot_row_count"|"active_anchor_revision_contaminated_count"|"completed_anchor_revision_contaminated_count"|"first_depth_request_at_ms"|"first_healthy_snapshot_at_ms"|"first_valid_book_latency_ms"' || true
-
-find "$STAGE1_5F_OUT/events_accepted" -type f 2>/dev/null -exec tail -n 20 {} \;
-find "$STAGE1_5F_OUT/observer_state.jsonl" -type f 2>/dev/null -exec tail -n 20 {} \;
-find "$STAGE1_5F_OUT/depth_snapshots" -type f 2>/dev/null | sort | tail -n 20
-find "$STAGE1_5F_OUT/request_manifest" -type f 2>/dev/null -exec tail -n 20 {} \;
-```
-
-### 8.7 12h 完成后 Stage 1.5G review
-
-不要把本地 pytest 临时生成的 1.5G review 提交到 `docs/reviews/`。生产 review 优先写入本次 `STAGE1_5G_OUT` 目录，确认后再决定是否复制到 `docs/reviews/`。
+停止仅停止进程，所有 output root 和历史数据均保留：
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
-export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_schedule_revision_producer_hotfix"
-export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
-
-PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
-  --stage1-5f-output-root "$STAGE1_5F_OUT" \
-  --output-root "$STAGE1_5G_OUT" \
-  --output-summary "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
-  --output-review "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review.md"
-
-cat "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
-  | python3 -m json.tool | grep -E \
-'"decision"|"allowed_next_action"|"clean_depth_evidence_pass"|"quarantined_depth_evidence_pass"|"quarantine_candidate"|"formal_announcement_and_launch_count"|"book_availability_ratio"|"invalid_book_row_count"|"anchor_contract_lineage_mismatch"|"anchor_revision_contaminated"|"malformed_anchor_contract"|"blockers"'
-```
-
-### 8.8 停止新 root
-
-正常结束或需要重新部署时：
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-date -u
-tmux ls
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep
-
-tmux kill-session -t stage1_5f_live_depth_7d_schedule_revision_producer_hotfix 2>/dev/null || true
-tmux kill-session -t stage1_5d_continuous_7d_schedule_revision_producer_hotfix 2>/dev/null || true
+export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+tmux kill-session -t "stage1_5f_live_depth_${ROOT_SUFFIX}" 2>/dev/null || true
+tmux kill-session -t "stage1_5d_continuous_${ROOT_SUFFIX}" 2>/dev/null || true
 
 ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
 ```
 
-停止前若 `active_observation_count > 0`，先记录：
-
-```bash
-cat "$STAGE1_5F_OUT/live_depth_observer_summary.json" 2>/dev/null | python3 -m json.tool | grep -E \
-'"active_observation_count"|"total_snapshots_collected"|"active_expected_snapshot_count"|"active_unique_snapshot_bucket_count"|"last_heartbeat_at_ms"'
-```
-
-
+停止前若 `active_observation_count > 0`，先保存第 8.2 节输出；之后需要新的代码部署时，重复第 7 章并创建新的 root，不删除本 root。
 
 ## 9. 新事件定位与排障
 
-本章只保留当前 `schedule_revision_producer_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
+本章只保留当前 `pending_anchor_deadline_state_semantics_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
 
 ### 9.1 查看 1.5F watermark 时间
 
@@ -1215,7 +970,7 @@ paper/live trading readiness。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_schedule_revision_producer_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
 

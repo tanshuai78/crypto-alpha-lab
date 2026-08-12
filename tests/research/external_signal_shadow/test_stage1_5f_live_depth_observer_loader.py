@@ -1115,6 +1115,69 @@ def test_re_resolve_pending_anchor_ignores_revision_with_same_symbol_but_differe
     assert result.observation_anchor_ms is None
 
 
+@pytest.mark.parametrize("reverse_input_order", [False, True])
+def test_re_resolve_pending_anchor_same_timestamp_revisions_fail_closed(reverse_input_order):
+    """The authoritative selector, not JSONL order, resolves equal-time revisions."""
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+
+    symbol = "ABCUSDT"
+    source_article_id = "launch-article"
+    now_ms = 10_000
+    pending = EventSymbolState(
+        event_symbol_id="es1",
+        event_id="launch-event",
+        symbol=symbol,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v1_valid",
+        source_article_id=source_article_id,
+        stable_event_symbol_key=f"futures_contract_launch|{source_article_id}|{symbol}",
+        observation_anchor_ms=20_000,
+        next_anchor_resolution_at_ms=now_ms,
+    )
+    launch = _formalize_launch_event({
+        "event_id": "launch-event",
+        "event_type": "futures_contract_launch",
+        "source_article_id": source_article_id,
+        "symbols": [symbol],
+        "symbol_effective_launch_times_ms": {symbol: 20_000},
+    }, symbol)
+    common = {
+        "supersedes_source_article_id": source_article_id,
+        "symbol": symbol,
+        "revision_available_at_ms": now_ms - 1,
+        "producer_decision_at_ms": now_ms - 1,
+        "linking_index_as_of_ms": now_ms - 1,
+        "revision_payload_hash": "a" * 64,
+        "revision_payload_version_id": "payload-v1",
+        "revision_observation_id": "observation-v1",
+    }
+    postponed = build_formal_schedule_revision_row(
+        source_article_id="postponed-article",
+        revision_intent="postponed_without_anchor",
+        revision_id="postponed-revision",
+        revision_semantic_id="postponed-revision",
+        revision_application_id="postponed-revision",
+        **common,
+    )
+    cancelled = build_formal_schedule_revision_row(
+        source_article_id="cancelled-article",
+        revision_intent="cancelled",
+        revision_id="cancelled-revision",
+        revision_semantic_id="cancelled-revision",
+        revision_application_id="cancelled-revision",
+        **{**common, "revision_payload_hash": "b" * 64},
+    )
+
+    rows = [launch, cancelled, postponed] if reverse_input_order else [launch, postponed, cancelled]
+    result = re_resolve_pending_anchor(pending, rows, {"symbol_rows": {}}, now_ms=now_ms)
+
+    assert result.status == "pending_anchor_conflict"
+    assert result.pending_reason == "pending_anchor_conflict"
+    assert result.observation_anchor_ms is None
+
+
 def test_historical_classification_requires_immutable_bootstrap_watermark():
     assert historical_anchor_classification_allowed(Watermark(max_seen_detected_at_ms=1000)) is False
     assert historical_anchor_classification_allowed(Watermark(
@@ -1679,3 +1742,163 @@ def test_v2_eligibility_emits_admission_and_latest_anchor_hashes():
     assert diag["source_anchor_contract_hash"] == row["symbol_source_anchor_contract_hashes"][symbol]
     assert diag["admission_anchor_contract_hash"]
     assert diag["latest_anchor_contract_hash"] == diag["admission_anchor_contract_hash"]
+
+
+def test_pending_anchor_deadline_state_semantics_fixture_provenance():
+    import json
+    from pathlib import Path
+
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        validate_launch_anchor_contract,
+        validate_schedule_revision_contract,
+    )
+
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5f/pending_anchor_deadline_state_semantics")
+    metadata = json.loads((fixture_dir / "metadata.json").read_text(encoding="utf-8"))
+    launch = json.loads((fixture_dir / "launch_event.json").read_text(encoding="utf-8"))
+    revisions = json.loads((fixture_dir / "revisions.json").read_text(encoding="utf-8"))
+
+    assert metadata["fixture_provenance"] == "synthetic_offline_fixture_derived_from_server_evidence"
+    assert metadata["raw_bapi_payload_available"] is False
+    assert launch["source_contract_status"] == "formal_v2_valid"
+    assert set(launch["symbols"]) == {
+        "KUAISHOUUSDT", "MEITUANUSDT", "CSOPSKHYNIX2LUSDT", "CSOPSAMSUNG2LUSDT",
+    }
+    assert all(validate_launch_anchor_contract(launch, symbol)["valid"] for symbol in launch["symbols"])
+    assert all(validate_schedule_revision_contract(row)["valid"] for row in revisions)
+
+
+def test_future_formal_anchor_survives_expired_stale_resolution_deadline():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    state = EventSymbolState(
+        event_symbol_id="es_ks",
+        event_id="evt1",
+        symbol="KUAISHOUUSDT",
+        detected_at_ms=1_000_000,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v2_valid",
+        observation_anchor_ms=2_000_000,
+        anchor_resolution_deadline_ms=1_100_000,
+        anchor_resolution_started_at_ms=1_000_000,
+    )
+    launch_row = {
+        "event_id": "evt1",
+        "event_type": "futures_contract_launch",
+        "source_contract_status": "formal_v1_valid",
+        "formal_event_contract_version": 1,
+        "symbols": ["KUAISHOUUSDT"],
+        "symbol_validation_status": "validated",
+        "symbol_extraction_source": "detail_contract_symbol",
+        "symbol_effective_launch_times_ms": {"KUAISHOUUSDT": 2_000_000},
+        "launch_anchor_validation_status": "valid",
+    }
+    updated = re_resolve_pending_anchor(state, [launch_row], exchangeinfo_state={}, now_ms=1_100_001)
+    assert updated.status == "pending_launch_time_in_future"
+    assert updated.anchor_resolution_deadline_ms is None
+    assert updated.anchor_resolution_started_at_ms is None
+    assert updated.next_anchor_resolution_at_ms > 1_100_001
+    assert updated.pending_terminal_reason == ""
+
+
+def test_pending_cancelled_is_not_reresolved():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    state = EventSymbolState(
+        event_symbol_id="es_ks",
+        event_id="evt1",
+        symbol="KUAISHOUUSDT",
+        detected_at_ms=1_000_000,
+        status="pending_cancelled",
+        pending_reason="official_schedule_cancelled",
+        source_contract_status="formal_v2_valid",
+    )
+    launch_row = {
+        "event_id": "evt1",
+        "event_type": "futures_contract_launch",
+        "source_contract_status": "formal_v1_valid",
+        "formal_event_contract_version": 1,
+        "symbols": ["KUAISHOUUSDT"],
+        "symbol_validation_status": "validated",
+        "symbol_extraction_source": "detail_contract_symbol",
+        "symbol_effective_launch_times_ms": {"KUAISHOUUSDT": 2_000_000},
+    }
+    assert re_resolve_pending_anchor(state, [launch_row], {}, now_ms=9_999_999) == state
+
+
+@pytest.mark.parametrize(
+    ("status", "source_contract_status"),
+    [
+        ("pending_anchor_conflict", "legacy_unvalidated_recoverable"),
+        ("pending_source_event_unvalidated", "legacy_unvalidated_recoverable"),
+        ("pending_cancelled", "legacy_unvalidated_recoverable"),
+        ("pending_launch_anchor_missing", "malformed"),
+    ],
+)
+def test_stale_anchor_never_promotes(status, source_contract_status):
+    state = EventSymbolState(
+        event_symbol_id=f"es-{status}",
+        event_id="stale-event",
+        symbol="ABCUSDT",
+        status=status,
+        source_contract_status=source_contract_status,
+        observation_anchor_ms=1,
+        next_anchor_resolution_at_ms=1,
+    )
+
+    result = re_resolve_pending_anchor(state, [], {}, now_ms=10_000)
+
+    assert result.status != "active"
+    assert result.observation_started_at_ms is None
+
+
+def test_future_formal_anchor_reresolution_is_idempotent_and_advances_refresh_schedule():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    state = EventSymbolState(
+        event_symbol_id="es_ks",
+        event_id="evt1",
+        symbol="KUAISHOUUSDT",
+        detected_at_ms=1_000_000,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v1_valid",
+        observation_anchor_ms=2_000_000,
+        next_anchor_resolution_at_ms=1_300_000,
+    )
+    launch_row = {
+        "event_id": "evt1",
+        "event_type": "futures_contract_launch",
+        "source_contract_status": "formal_v1_valid",
+        "formal_event_contract_version": 1,
+        "symbols": ["KUAISHOUUSDT"],
+        "symbol_validation_status": "validated",
+        "symbol_extraction_source": "detail_contract_symbol",
+        "symbol_effective_launch_times_ms": {"KUAISHOUUSDT": 2_000_000},
+        "launch_anchor_validation_status": "valid",
+    }
+
+
+    call1 = re_resolve_pending_anchor(state, [launch_row], {}, now_ms=1_300_000)
+    call2 = re_resolve_pending_anchor(call1, [launch_row], {}, now_ms=1_600_000)
+
+    assert call1.status == call2.status == "pending_launch_time_in_future"
+    assert call1.observation_anchor_ms == call2.observation_anchor_ms == 2_000_000
+    assert call1.anchor_resolution_deadline_ms is None and call2.anchor_resolution_deadline_ms is None
+    assert call1.anchor_resolution_started_at_ms is None and call2.anchor_resolution_started_at_ms is None
+    assert call1.next_anchor_resolution_at_ms == 1_300_000 + 5 * 60 * 1000
+    assert call2.next_anchor_resolution_at_ms == 1_600_000 + 5 * 60 * 1000

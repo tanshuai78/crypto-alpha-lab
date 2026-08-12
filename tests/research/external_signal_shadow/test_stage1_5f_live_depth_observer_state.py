@@ -806,3 +806,155 @@ def test_ko_rddt_state_lineage_roundtrip():
     assert restored.launch_anchor_evidence_level == "official_schedule"
     assert restored.effective_observation_anchor_source == "official_schedule_anchor"
     assert restored.launch_anchor_validation_status == "valid_official"
+
+
+def test_pending_anchor_deadline_state_semantics_fixture_provenance():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        validate_launch_anchor_contract,
+        validate_schedule_revision_contract,
+    )
+
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5f/pending_anchor_deadline_state_semantics")
+    metadata = json.loads((fixture_dir / "metadata.json").read_text(encoding="utf-8"))
+    launch = json.loads((fixture_dir / "launch_event.json").read_text(encoding="utf-8"))
+    revisions = json.loads((fixture_dir / "revisions.json").read_text(encoding="utf-8"))
+
+    assert metadata["fixture_provenance"] == "synthetic_offline_fixture_derived_from_server_evidence"
+    assert metadata["raw_bapi_payload_available"] is False
+    assert launch["source_contract_status"] == "formal_v2_valid"
+    assert set(launch["symbols"]) == {
+        "KUAISHOUUSDT", "MEITUANUSDT", "CSOPSKHYNIX2LUSDT", "CSOPSAMSUNG2LUSDT",
+    }
+    for symbol in launch["symbols"]:
+        assert validate_launch_anchor_contract(launch, symbol)["valid"]
+    assert all(validate_schedule_revision_contract(row)["valid"] for row in revisions)
+
+
+def test_formal_future_anchor_has_no_resolution_deadline_but_keeps_refresh_schedule():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+    event_symbol_row = {
+        "event_symbol_id": "es_ks",
+        "event_id": "evt1",
+        "symbol": "KUAISHOUUSDT",
+        "detected_at_ms": 1_000_000,
+        "source_contract_status": "formal_v2_valid",
+    }
+    state = create_pending_observation_state(
+        event_symbol_row=event_symbol_row,
+        status="pending_launch_time_in_future",
+        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v2_valid"},
+        now_ms=1_000_000,
+    )
+    assert state.status == "pending_launch_time_in_future"
+    assert state.anchor_resolution_started_at_ms is None
+    assert state.anchor_resolution_deadline_ms is None
+    assert state.next_anchor_resolution_at_ms > 1_000_000
+    assert state.next_admission_check_at_ms == 2_000_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+    assert state.pending_terminal_reason == ""
+
+
+def test_cancelled_revision_is_non_admissible_sink_with_clean_audit_fields():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+        create_pending_observation_state,
+    )
+    event_symbol_row = {
+        "event_symbol_id": "es_ks",
+        "event_id": "evt1",
+        "symbol": "KUAISHOUUSDT",
+        "detected_at_ms": 1_000_000,
+        "source_contract_status": "formal_v2_valid",
+    }
+    pending_future_state = create_pending_observation_state(
+        event_symbol_row=event_symbol_row,
+        status="pending_launch_time_in_future",
+        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v2_valid"},
+        now_ms=1_000_000,
+    )
+    cancelled_revision = {
+        "revision_id": "rev_cancel_1_id",
+        "revision_semantic_id": "rev_cancel_1_id",
+        "revision_application_id": "rev_cancel_1_id",
+        "symbol_official_schedule_statuses": {"KUAISHOUUSDT": "cancelled"},
+        "symbol_revised_anchor_ms": {},
+    }
+    updated = apply_anchor_contract_revision_to_state(pending_future_state, cancelled_revision, now_ms=1_100_000)
+    assert updated.status == "pending_cancelled"
+    assert updated.pending_reason == "official_schedule_cancelled"
+    assert updated.pending_terminal_reason == ""
+    assert updated.observation_anchor_ms is None
+    assert updated.next_admission_check_at_ms is None
+    assert updated.next_anchor_resolution_at_ms is None
+    assert updated.anchor_resolution_started_at_ms is None
+    assert updated.anchor_resolution_deadline_ms is None
+
+
+def test_pending_cancelled_cannot_be_revived_by_later_reschedule():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+    )
+
+    cancelled = EventSymbolState(
+        event_symbol_id="es_cancelled",
+        event_id="evt1",
+        symbol="KUAISHOUUSDT",
+        detected_at_ms=1_000_000,
+        status="pending_cancelled",
+        pending_reason="official_schedule_cancelled",
+        pending_terminal_reason="",
+        applied_schedule_revision_ids=["rev_cancel_1"],
+    )
+    reschedule = {
+        "revision_id": "rev_reschedule_2",
+        "revision_semantic_id": "rev_reschedule_2",
+        "revision_application_id": "rev_reschedule_2",
+        "symbol_official_schedule_statuses": {"KUAISHOUUSDT": "rescheduled"},
+        "symbol_revised_anchor_ms": {"KUAISHOUUSDT": 2_000_000},
+    }
+
+    updated = apply_anchor_contract_revision_to_state(cancelled, reschedule, now_ms=1_100_000)
+
+    assert updated.status == "pending_cancelled"
+    assert updated.pending_reason == "official_schedule_cancelled"
+    assert updated.observation_anchor_ms is None
+    assert updated.next_admission_check_at_ms is None
+    assert updated.next_anchor_resolution_at_ms is None
+    assert updated.applied_schedule_revision_ids == ["rev_cancel_1"]
+
+
+def test_unresolved_episode_deadline_tracking_and_no_sliding_deadline():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+        create_pending_observation_state,
+    )
+    event_symbol_row = {
+        "event_symbol_id": "es_ks",
+        "event_id": "evt1",
+        "symbol": "KUAISHOUUSDT",
+        "detected_at_ms": 1_000_000,
+        "source_contract_status": "formal_v2_valid",
+    }
+    pending_future_state = create_pending_observation_state(
+        event_symbol_row=event_symbol_row,
+        status="pending_launch_time_in_future",
+        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v2_valid"},
+        now_ms=1_000_000,
+    )
+    unresolved_revision = {
+        "revision_id": "rev_postpone_1_id",
+        "revision_semantic_id": "rev_postpone_1_id",
+        "revision_application_id": "rev_postpone_1_id",
+        "symbol_official_schedule_statuses": {"KUAISHOUUSDT": "postponed_without_anchor"},
+        "symbol_revised_anchor_ms": {},
+    }
+    updated_1 = apply_anchor_contract_revision_to_state(pending_future_state, unresolved_revision, now_ms=1_100_000)
+    assert updated_1.status == "pending_launch_anchor_missing"
+    assert updated_1.anchor_resolution_started_at_ms == 1_100_000
+    assert updated_1.anchor_resolution_deadline_ms == 1_100_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
+
+    # Re-apply same application ID at later time
+    updated_2 = apply_anchor_contract_revision_to_state(updated_1, unresolved_revision, now_ms=1_200_000)
+    assert updated_2.anchor_resolution_started_at_ms == 1_100_000
+    assert updated_2.anchor_resolution_deadline_ms == 1_100_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
