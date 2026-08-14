@@ -329,7 +329,7 @@ echo "SERVER_GIT_READY=$SERVER_GIT_READY"
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export DEPLOY_COMMIT="替换为第 7.2 节记录的 40 位 SHA"
+export DEPLOY_COMMIT="483fcc98b9741e4458f0bbe970ce587c42aaee75"
 DEPLOY_READY=1
 
 if [ "${#DEPLOY_COMMIT}" -ne 40 ]; then
@@ -564,43 +564,6 @@ fi
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 echo "F_START_READY=$F_START_READY"
 ```
-
-#### SSH 断线恢复（不要盲目重跑 bootstrap）
-
-SSH 断线会丢失 `STAGE1_5D_EVENTS_OUT`、`STAGE1_5F_OUT` 和 `F_START_READY` 等当前 shell 变量；这不代表 1.5D gate 或已创建的 watermark 失效。重新登录后，先定位实际运行/已创建的 root，再按状态恢复：
-
-```bash
-cd /root/crypto-alpha-lab
-source .venv/bin/activate
-
-export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
-export STAGE1_5D_EVENTS_OUT="$(
-  ps -efww | awk '
-    /[r]un_stage1_5d_live_event_source_smoke_collector.py/ {
-      for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)
-    }
-  ' | tail -n 1
-)"
-export STAGE1_5F_OUT="$(
-  ps -efww | awk '
-    /[r]un_stage1_5f_live_depth_observer.py/ {
-      for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)
-    }
-  ' | tail -n 1
-)"
-
-echo "RECOVERED_5D=[$STAGE1_5D_EVENTS_OUT]"
-echo "RECOVERED_5F=[$STAGE1_5F_OUT]"
-tmux ls 2>&1 || true
-```
-
-恢复决策：
-
-1. 若 `RECOVERED_5F` 非空且对应 1.5F 进程存在：observer 已启动，只执行第 7.8 节首次检查；不得重新 bootstrap 或启动第二个 session。
-2. 若 1.5F 进程不存在，但你已知本次 bootstrap 创建的 `STAGE1_5F_OUT`：手工重新 export 该路径，确认 `watermark.json` 可被 `python3 -m json.tool` 解析；gate 仍为 READY、storage guard 仍为 `ready` 时，只重跑下面的 tmux 启动命令，不重跑 `--bootstrap-watermark`。
-3. 若 bootstrap root 的 watermark 缺失或 JSON 无法解析：保留该 root 供排查，不要删除或复用；生成新的 `STAGE1_5F_RUN_ID`，从本节首段重新进行 preflight 和 bootstrap。
-
-`F_START_READY=0` 在重连后通常是 `STAGE1_5D_EVENTS_OUT` 未恢复导致的预检失败。恢复变量后重新运行本节首段即可获得新的门禁结论；该变量不是 durable state。
 
 仅当 `F_START_READY=1` 且 Python 检查通过时，建立新 watermark。bootstrap 不会采集旧事件，也不会改写旧 root：
 
