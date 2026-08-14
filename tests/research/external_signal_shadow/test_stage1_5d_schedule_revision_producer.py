@@ -1,13 +1,10 @@
-import json
 import hashlib
-from pathlib import Path
-import pytest
+import json
+import shutil
 
 from research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
-    build_formal_launch_identity_index_rows,
     classify_revision_intent,
     is_schedule_revision_listing_candidate,
-    classify_schedule_revision_candidates,
     link_schedule_revision_candidate,
     load_valid_formal_launch_identity_index,
 )
@@ -232,12 +229,22 @@ def test_restart_rebuilds_missing_current_root_identity_index(tmp_path):
     events_dir = tmp_path / "events"
     events_dir.mkdir()
     (events_dir / "2026-08-07.jsonl").write_text(json.dumps(launch_row) + "\n")
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    storage_guard = StorageGuard(
+        output_root=tmp_path,
+        stage="1.5D",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(
+            100 * 1024**3, 50 * 1024**3, 50 * 1024**3
+        ),
+    )
 
     rebuilt, diagnostics = rebuild_missing_formal_launch_identity_index(
         events_dir=events_dir,
         index_path=tmp_path / "formal_launch_identity_index.jsonl",
         source_root_id="current-root",
         commit_sha="abc123",
+        storage_guard=storage_guard,
     )
 
     assert diagnostics == []

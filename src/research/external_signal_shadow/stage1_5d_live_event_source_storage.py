@@ -1,24 +1,26 @@
 import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
+from typing import Any
+
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 
 
-def build_detail_payload_path(root: str | Path, timestamp_ms: int, source_article_id: str, suffix: str = "json") -> Path:
-    dt = datetime.datetime.fromtimestamp(timestamp_ms / 1000.0, tz=datetime.timezone.utc)
-    date_str = dt.strftime("%Y-%m-%d")
-
-    if suffix not in ("json", "html", "txt"):
-        raise ValueError(f"Unsupported storage suffix: {suffix}")
+def build_detail_payload_path(
+    root: str | Path,
+    source_article_id: str,
+    detail_fetch_variant: str,
+    raw_payload_sha256: str,
+) -> Path:
+    if not detail_fetch_variant or not all(c.isalnum() or c in ("-", "_") for c in detail_fetch_variant):
+        raise ValueError("detail_fetch_variant_invalid")
 
     is_safe = bool(source_article_id) and all(c.isalnum() or c in ('-', '_') for c in source_article_id)
-    if is_safe:
-        safe_id = source_article_id
-    else:
-        safe_id = hashlib.sha256(source_article_id.encode("utf-8")).hexdigest()
+    safe_id = source_article_id if is_safe else hashlib.sha256(source_article_id.encode("utf-8")).hexdigest()
 
-    return Path(root) / "raw_payloads" / "announcement_detail" / date_str / f"{safe_id}.{suffix}"
-
+    return Path(root) / "raw_payloads" / "announcement_detail" / safe_id / f"{detail_fetch_variant}.{raw_payload_sha256}.bin"
 
 
 def build_daily_path(root: str | Path, stream_name: str, timestamp_ms: int) -> Path:
@@ -27,9 +29,9 @@ def build_daily_path(root: str | Path, stream_name: str, timestamp_ms: int) -> P
     return Path(root) / stream_name / f"{date_str}.jsonl"
 
 
-def build_stream_paths(output_root: str | Path, timestamp_ms: int) -> dict[str, Path]:
+def build_stream_paths(output_root: str | Path, timestamp_ms: int, *, storage_guard: Any = None) -> dict[str, Any]:
     root_path = Path(output_root)
-    return {
+    res = {
         "events": build_daily_path(root_path, "events", timestamp_ms),
         "raw_payloads": build_daily_path(root_path, "raw_payloads", timestamp_ms),
         "heartbeats": build_daily_path(root_path, "heartbeats", timestamp_ms),
@@ -41,14 +43,36 @@ def build_stream_paths(output_root: str | Path, timestamp_ms: int) -> dict[str, 
         "revision_payload_versions": root_path / "revision_payload_versions.jsonl",
         "summary": root_path / "binance_futures_launch_smoke_summary.json",
     }
+    if storage_guard is not None:
+        res["storage_guard"] = storage_guard
+    return res
 
 
 
-def append_jsonl(path: str | Path, row: dict) -> None:
-    file_path = Path(path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+def append_jsonl(path: str | Path, row: dict, *, storage_guard: Any) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
+    file_path = Path(path).resolve()
+    serialized_bytes = (json.dumps(row) + "\n").encode("utf-8")
+
+    def _append_action():
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "ab") as f:
+            f.write(serialized_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="normal_data",
+        transient_peak_bytes=len(serialized_bytes),
+        persistent_delta_bytes=len(serialized_bytes),
+        write_func=_append_action,
+    )
+
+    require_storage_write(storage_guard, res)
+
+    return {"written": True, "storage_blocker": None}
 
 
 def load_payload_version_first_observed(path: str | Path) -> dict[tuple[str, str], int]:
@@ -70,12 +94,16 @@ def load_payload_version_first_observed(path: str | Path) -> dict[tuple[str, str
 
 def record_payload_version_first_observed(
     path: str | Path,
-    *,
     source_article_id: str,
     payload_sha256: str,
     observed_at_ms: int,
     registry: dict[tuple[str, str], int] | None = None,
+    *,
+    storage_guard: Any,
 ) -> int:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     key = (str(source_article_id), str(payload_sha256))
     known = registry if registry is not None else load_payload_version_first_observed(path)
     if key in known:
@@ -87,91 +115,77 @@ def record_payload_version_first_observed(
             "raw_payload_sha256": key[1],
             "payload_version_first_observed_at_ms": int(observed_at_ms),
         },
+        storage_guard=storage_guard,
     )
     known[key] = int(observed_at_ms)
     return known[key]
 
 
-def enforce_payload_budget(path: str | Path, max_bytes: int) -> dict:
-    file_path = Path(path)
-    if file_path.exists():
-        size = file_path.stat().st_size
-        if size > max_bytes:
-            return {
-                "storage_budget_passed": False,
-                "blocker": "max_raw_payload_bytes_per_day_exceeded",
-            }
-    return {"storage_budget_passed": True, "blocker": None}
 
-
-def write_detail_payload(root: str | Path, timestamp_ms: int, source_article_id: str, payload: object) -> dict:
-    if isinstance(payload, bytes):
-        text_content = payload.decode("utf-8", errors="replace")
-        suffix = "txt"
-    elif isinstance(payload, str):
-        text_content = payload
-        stripped = payload.strip()
-        if stripped.startswith("<") or "<html>" in payload.lower() or "<!doctype" in payload.lower():
-            suffix = "html"
-        else:
-            suffix = "txt"
-    else:
-        text_content = json.dumps(payload, sort_keys=True)
-        suffix = "json"
-
-    path = build_detail_payload_path(root, timestamp_ms, source_article_id, suffix)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    encoded_bytes = text_content.encode("utf-8")
-    with open(path, "wb") as f:
-        f.write(encoded_bytes)
-
-    sha256_hash = hashlib.sha256(encoded_bytes).hexdigest()
-    rel_path = path.relative_to(Path(root))
-
-    return {
-        "payload_path": str(rel_path),
-        "payload_size_bytes": len(encoded_bytes),
-        "payload_sha256": sha256_hash,
-    }
+def enforce_payload_budget(root: str | Path, max_bytes: int) -> dict:
+    raw_dir = Path(root) / "raw_payloads" / "announcement_detail"
+    total_bytes = 0
+    if raw_dir.exists():
+        for dirpath, _, filenames in os.walk(raw_dir):
+            for f in filenames:
+                try:
+                    total_bytes += (Path(dirpath) / f).stat().st_size
+                except OSError:
+                    pass
+    if total_bytes > max_bytes:
+        return {
+            "storage_budget_passed": False,
+            "blocker": "max_raw_payload_bytes_exceeded",
+            "total_bytes": total_bytes,
+        }
+    return {"storage_budget_passed": True, "blocker": None, "total_bytes": total_bytes}
 
 
 def write_detail_payload_append_only(
     root: str | Path,
-    timestamp_ms: int,
     source_article_id: str,
     detail_fetch_variant: str,
     raw_bytes: bytes,
+    *,
+    storage_guard: Any,
+    timestamp_ms: int = 0,
     parsed_payload: object | None = None,
     content_type: str | None = None,
     http_status: int | None = None,
 ) -> dict:
-    if not detail_fetch_variant or not all(c.isalnum() or c in ("-", "_") for c in detail_fetch_variant):
-        raise ValueError("detail_fetch_variant_invalid")
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
 
-    is_safe = bool(source_article_id) and all(c.isalnum() or c in ("-", "_") for c in source_article_id)
-    safe_id = source_article_id if is_safe else hashlib.sha256(source_article_id.encode("utf-8")).hexdigest()
+
+
+    if isinstance(raw_bytes, str):
+        raw_bytes = raw_bytes.encode("utf-8")
+    elif isinstance(raw_bytes, dict):
+        if parsed_payload is None:
+            parsed_payload = raw_bytes
+        raw_bytes = json.dumps(raw_bytes).encode("utf-8")
 
     raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    target_path = build_detail_payload_path(root, source_article_id, detail_fetch_variant, raw_sha256)
 
-    suffix = "json"
-    if content_type and "html" in content_type.lower():
-        suffix = "html"
-    elif raw_bytes.strip().startswith(b"<") or b"<html>" in raw_bytes.lower():
-        suffix = "html"
-    elif not raw_bytes.strip().startswith(b"{") and not raw_bytes.strip().startswith(b"["):
-        suffix = "txt"
+    persistent_delta = 0 if target_path.exists() else len(raw_bytes)
+    transient_peak = len(raw_bytes)
 
-    filename = f"{timestamp_ms}.{detail_fetch_variant}.{raw_sha256[:16]}.{suffix}"
-    dir_path = Path(root) / "raw_payloads" / "announcement_detail" / safe_id
-    dir_path.mkdir(parents=True, exist_ok=True)
-    target_path = dir_path / filename
+    def _write_action():
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if not target_path.exists():
+            temp_path = target_path.parent / f".{target_path.name}.atomic.tmp"
+            temp_path.write_bytes(raw_bytes)
+            temp_path.replace(target_path)
 
-    if not target_path.exists():
-        temp_path = dir_path / f"{filename}.tmp.{timestamp_ms}"
-        with open(temp_path, "wb") as f:
-            f.write(raw_bytes)
-        temp_path.replace(target_path)
+    res = storage_guard.reserve_and_write(
+        artifact_class="normal_data",
+        transient_peak_bytes=transient_peak,
+        persistent_delta_bytes=persistent_delta,
+        write_func=_write_action,
+    )
+
+    require_storage_write(storage_guard, res)
 
     canonical_sha256 = None
     if parsed_payload is not None:
@@ -181,10 +195,52 @@ def write_detail_payload_append_only(
         except Exception:
             canonical_sha256 = None
 
-    rel_path = target_path.relative_to(Path(root))
+    try:
+        rel_path = str(target_path.relative_to(Path(root)))
+    except ValueError:
+        rel_path = str(target_path)
+
     return {
-        "payload_path": str(rel_path),
+        "raw_payload_persisted": True,
+        "payload_path": rel_path,
         "payload_size_bytes": len(raw_bytes),
         "raw_payload_sha256": raw_sha256,
+        "payload_sha256": raw_sha256,
         "canonical_json_sha256": canonical_sha256,
+        "storage_blocker": None,
     }
+
+
+
+def write_detail_payload(
+    root: str | Path,
+    timestamp_ms: int,
+    source_article_id: str,
+    raw_payload: str | bytes | dict,
+    detail_fetch_variant: str = "bapi_article_detail_query",
+    *,
+    storage_guard: Any,
+    http_status: int | None = None,
+) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
+    parsed = None
+    if isinstance(raw_payload, dict):
+        parsed = raw_payload
+        raw_b = json.dumps(raw_payload).encode("utf-8")
+    elif isinstance(raw_payload, str):
+        raw_b = raw_payload.encode("utf-8")
+    else:
+        raw_b = raw_payload
+
+    return write_detail_payload_append_only(
+        root=root,
+        source_article_id=str(source_article_id),
+        detail_fetch_variant=detail_fetch_variant,
+        raw_bytes=raw_b,
+        timestamp_ms=timestamp_ms,
+        parsed_payload=parsed,
+        storage_guard=storage_guard,
+        http_status=http_status,
+    )

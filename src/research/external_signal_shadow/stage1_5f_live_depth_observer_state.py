@@ -1,40 +1,26 @@
-import datetime
 import hashlib
 import json
 import os
-import shutil
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from configs import base
-from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
-    make_event_symbol_id,
-    make_stable_event_symbol_key,
-)
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
     DepthSnapshot,
     EventSymbolState,
 )
-from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
-    get_stable_event_key,
-)
 
 
 def make_acceptance_id(state: EventSymbolState) -> str:
-    stable_key = state.stable_event_symbol_key or state.event_symbol_id
-    anchor = state.observation_anchor_ms or state.observation_window_start_ms or 0
-    return hashlib.sha256(f"{stable_key}|{anchor}".encode("utf-8")).hexdigest()
+    return f"acc_{state.event_symbol_id}"
 
 
-def make_terminal_hygiene_id(
-    stable_event_symbol_key: str,
-    terminal_status: str,
-    normalized_anchor_class: str,
-    bootstrap_root_id: str,
-) -> str:
-    payload = f"{stable_event_symbol_key}|{terminal_status}|{normalized_anchor_class}|{bootstrap_root_id}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def make_terminal_hygiene_id(stable_event_symbol_key: str, terminal_status: str, normalized_anchor_class: str, bootstrap_root_id: str) -> str:
+    raw = f"{stable_event_symbol_key}|{terminal_status}|{normalized_anchor_class}|{bootstrap_root_id}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def build_terminal_ignored_state(
@@ -44,71 +30,42 @@ def build_terminal_ignored_state(
     now_ms: int,
     diagnostics: dict,
 ) -> EventSymbolState:
-    sym = str(flat_event.get("symbol") or "").strip().upper()
-    source_article_id = str(flat_event.get("source_article_id") or "").strip()
-    event_id = str(flat_event.get("event_id") or "").strip()
-    detected_at_ms = flat_event.get("detected_at_ms")
-
-    if (not source_article_id and not event_id) or not sym or not detected_at_ms:
-        raise ValueError("terminal ignored state requires source_article_id or event_id, symbol, detected_at_ms")
-
-    stable_key = flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, sym)
-    anchor_class = diagnostics.get("normalized_anchor_class", "all_pre_bootstrap")
+    stable_key = flat_event.get("stable_event_symbol_key", "")
     boot_root_id = diagnostics.get("bootstrap_root_id", "")
-    terminal_hygiene_id = make_terminal_hygiene_id(stable_key, terminal_status, anchor_class, boot_root_id)
-    payload_hash = str(
-        flat_event.get("detail_payload_hash")
-        or flat_event.get("payload_hash")
-        or flat_event.get("raw_payload_hash")
-        or ""
-    )
+    norm_class = diagnostics.get("normalized_anchor_class", "")
+    term_id = make_terminal_hygiene_id(stable_key, terminal_status, norm_class, boot_root_id)
+    payload_hash = flat_event.get("detail_payload_hash") or flat_event.get("payload_hash") or ""
 
-    d = dict(diagnostics)
+    src_art_id = flat_event.get("source_article_id") or ""
+    ev_id = flat_event.get("event_id") or ""
+
     return EventSymbolState(
-        event_symbol_id=flat_event.get("event_symbol_id") or make_event_symbol_id(flat_event, sym),
-        event_id=event_id,
-        symbol=sym,
-        detected_at_ms=int(detected_at_ms),
+        event_symbol_id=flat_event["event_symbol_id"],
+        event_id=ev_id,
+        symbol=flat_event.get("symbol", ""),
+        detected_at_ms=flat_event.get("detected_at_ms", now_ms),
         status=terminal_status,
-        terminal_hygiene_id=terminal_hygiene_id,
+        terminal_hygiene_id=term_id,
         terminal_status=terminal_status,
         terminal_reason=terminal_reason,
         terminal_at_ms=now_ms,
         consumable_by_stage1_5g=False,
-        source_article_id=source_article_id,
-        stable_event_symbol_key=stable_key,
-        stable_event_key=flat_event.get("stable_event_key") or get_stable_event_key(flat_event),
-        first_seen_at_ms=d.get("first_seen_at_ms") or int(detected_at_ms),
-        announcement_capture_time_ms=d.get("announcement_capture_time_ms") or int(detected_at_ms),
-        bootstrap_watermark_max_seen_detected_at_ms=d.get("bootstrap_watermark_max_seen_detected_at_ms"),
-        admission_watermark_at_first_seen_ms=d.get("admission_watermark_at_first_seen_ms"),
-        announcement_capture_post_bootstrap_watermark=d.get("announcement_capture_post_bootstrap_watermark"),
-        launch_anchor_post_bootstrap_watermark=d.get("launch_anchor_post_bootstrap_watermark"),
-        observation_anchor_candidates=d.get("normalized_anchor_candidates") or d.get("observation_anchor_candidates", {}),
         source_event_payload_hash=payload_hash,
         latest_event_payload_hash=payload_hash,
-        terminal_audit_type="historical_anchor_hygiene_diagnostics",
+        source_article_id=src_art_id,
+        stable_event_symbol_key=stable_key,
     )
 
 
 def build_historical_anchor_hygiene_diagnostic(state: EventSymbolState, diagnostic_at_ms: int) -> dict:
     return {
-        "audit_metadata_version": 2,
-        "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
-        "terminal_hygiene_id": state.terminal_hygiene_id,
         "event_symbol_id": state.event_symbol_id,
-        "event_id": state.event_id,
-        "source_article_id": state.source_article_id,
-        "stable_event_symbol_key": state.stable_event_symbol_key,
-        "stable_event_key": state.stable_event_key,
         "symbol": state.symbol,
-        "detected_at_ms": state.detected_at_ms,
+        "terminal_hygiene_id": state.terminal_hygiene_id,
         "terminal_status": state.terminal_status,
         "terminal_reason": state.terminal_reason,
-        "terminal_at_ms": state.terminal_at_ms or diagnostic_at_ms,
+        "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
         "diagnostic_at_ms": diagnostic_at_ms,
-        "observation_anchor_candidates": state.observation_anchor_candidates,
-        "bootstrap_watermark_max_seen_detected_at_ms": state.bootstrap_watermark_max_seen_detected_at_ms,
         "consumable_by_stage1_5g": False,
     }
 
@@ -123,130 +80,168 @@ def build_rejected_event_symbol_row(
     eligibility_diag: dict,
     basis_diag: dict,
 ) -> dict:
-    sym = str(flat_event.get("symbol") or "").strip().upper()
-    source_article_id = str(flat_event.get("source_article_id") or "").strip()
-    event_id = str(flat_event.get("event_id") or "").strip()
-    detected_at_ms = flat_event.get("detected_at_ms")
-    event_symbol_id = flat_event.get("event_symbol_id")
-
-    if not event_symbol_id or not sym or (not source_article_id and not event_id) or not detected_at_ms or not rejected_reason:
-        raise ValueError("rejected event symbol row requires event_symbol_id, symbol, source_article_id or event_id, detected_at_ms, rejected_reason")
-
-    e_diag = dict(eligibility_diag or {})
-    b_diag = dict(basis_diag or {})
-
-    anchor_age_ms = e_diag.get("selected_anchor_age_ms") or e_diag.get("event_age_ms")
-
-    row = {
-        "audit_metadata_version": 2,
-        "event_symbol_id": event_symbol_id,
-        "event_id": event_id,
-        "source_article_id": source_article_id,
-        "stable_event_key": flat_event.get("stable_event_key") or get_stable_event_key(flat_event),
-        "stable_event_symbol_key": flat_event.get("stable_event_symbol_key") or make_stable_event_symbol_key(flat_event, sym),
-        "symbol": sym,
-        "event_type": flat_event.get("event_type", ""),
-        "title": flat_event.get("title", ""),
-        "detected_at_ms": detected_at_ms,
-        "available_at_ms": flat_event.get("available_at_ms"),
-        "source_published_at_ms": flat_event.get("source_published_at_ms"),
-        "source_detail_url_normalized": flat_event.get("source_detail_url_normalized", ""),
+    if not flat_event.get("event_symbol_id"):
+        raise ValueError("event_symbol_id_required")
+    res = {
+        "event_symbol_id": flat_event["event_symbol_id"],
+        "event_id": flat_event.get("event_id", ""),
+        "source_article_id": flat_event.get("source_article_id", ""),
+        "symbol": flat_event.get("symbol", ""),
+        "terminal_hygiene_id": terminal_hygiene_id,
         "rejected_reason": rejected_reason,
         "rejection_reason": rejected_reason,
-        "status": "rejected",
-        "depth_observation_started": False,
         "rejected_at_ms": now_ms,
-        "terminal_hygiene_id": terminal_hygiene_id,
+        "detected_at_ms": flat_event.get("detected_at_ms", now_ms),
+        "consumable_by_stage1_5g": True,
         "watermark_max_seen_detected_at_ms": watermark_max_seen_detected_at_ms,
         "watermark_version": watermark_version,
-        "consumable_by_stage1_5g": True,
     }
-    row.update(e_diag)
-    row.update(b_diag)
-
-    row["rejected_reason"] = rejected_reason
-    row["rejection_reason"] = rejected_reason
-    if anchor_age_ms is not None:
-        row["event_age_ms"] = anchor_age_ms
-        row["selected_anchor_age_ms"] = anchor_age_ms
-
-    return row
+    if eligibility_diag:
+        res.update(eligibility_diag)
+    if basis_diag:
+        res.update(basis_diag)
+    return res
 
 
-def load_latest_state_by_event_symbol_id(observer_state_jsonl: str | os.PathLike) -> dict:
-    observer_state_jsonl_str = str(observer_state_jsonl)
-    tmp_file = observer_state_jsonl_str + ".compacted.tmp"
-    if os.path.exists(tmp_file):
+def is_depth_collection_active_status(status: str) -> bool:
+    return status in {"active", "active_anchor_revision_contaminated"}
+
+
+def make_stable_event_symbol_key(event_row: dict, symbol: str) -> str:
+    src_article_id = (event_row.get("source_article_id") or "").strip()
+    sym = symbol.strip().upper()
+    event_type = event_row.get("event_type") or "futures_contract_launch"
+    return f"{event_type}|{src_article_id}|{sym}"
+
+
+
+def load_latest_state_by_event_symbol_id(
+    observer_state_jsonl: str | os.PathLike,
+    *,
+    fail_on_malformed: bool = False,
+) -> dict[str, EventSymbolState] | dict[str, Any]:
+    path = Path(observer_state_jsonl)
+    tmp_file = path.parent / f".{path.name}.compact.tmp"
+    if tmp_file.exists():
         try:
             logger.info(f"Advisory B: Discarding temp state file {tmp_file} on startup.")
-            os.remove(tmp_file)
+            tmp_file.unlink(missing_ok=True)
         except Exception as e:
             logger.warning(f"Failed to remove temp state file: {e}")
 
-    latest = {}
-    if not os.path.exists(observer_state_jsonl_str):
-        return latest
+    if not path.exists():
+        return {} if not fail_on_malformed else {"integrity_passed": True, "latest": {}, "malformed_row": None}
 
-    with open(observer_state_jsonl_str, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+    latest: dict[str, EventSymbolState] = {}
+    malformed_row = None
+    malformed_error = None
+
+    with open(path, "r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, start=1):
+            line_str = line.strip()
+            if not line_str:
                 continue
             try:
-                data = json.loads(line)
-                state = EventSymbolState.from_dict(data)
-                latest[state.event_symbol_id] = state
+                data = json.loads(line_str)
+                st = EventSymbolState.from_dict(data)
+                if st.event_symbol_id:
+                    latest[st.event_symbol_id] = st
             except Exception as e:
-                logger.warning(f"Failed to parse state row: {e}")
+                logger.warning(f"Failed to parse EventSymbolState at line {line_num}: {e}")
+                malformed_row = line_str
+                malformed_error = str(e)
+                if fail_on_malformed:
+                    break
+
+    if malformed_row is not None and fail_on_malformed:
+        return {
+            "integrity_passed": False,
+            "latest": latest,
+            "malformed_row": malformed_row,
+            "error": malformed_error,
+        }
+
     return latest
 
 
-def compact_observer_state_jsonl(observer_state_jsonl: str | os.PathLike) -> None:
-    observer_state_jsonl_str = str(observer_state_jsonl)
-    latest = load_latest_state_by_event_symbol_id(observer_state_jsonl_str)
+def compact_observer_state_jsonl(
+    observer_state_jsonl: str | os.PathLike,
+    *,
+    storage_guard: Any,
+) -> dict[str, Any]:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
+    path = Path(observer_state_jsonl)
+    if not path.exists():
+        return {"integrity_passed": True, "compacted": False, "blocker": None}
+
+    # Phase A: Physical-last scan & malformed check
+    scan_res = load_latest_state_by_event_symbol_id(path, fail_on_malformed=True)
+    if isinstance(scan_res, dict) and scan_res.get("integrity_passed") is False:
+        logger.error(f"Checkpoint integrity failure in {path}: preserve file and fail closed.")
+        return {
+            "integrity_passed": False,
+            "compacted": False,
+            "blocker": "blocked_checkpoint_integrity",
+            "malformed_row": scan_res.get("malformed_row"),
+        }
+
+    latest = scan_res if isinstance(scan_res, dict) and "latest" not in scan_res else scan_res.get("latest", scan_res)
     if not latest:
-        return
+        return {"integrity_passed": True, "compacted": False, "blocker": None}
 
-    dir_name = os.path.dirname(os.path.abspath(observer_state_jsonl_str))
-    os.makedirs(dir_name, exist_ok=True)
+    # Phase B: Incremental line-by-line byte calculation (no giant joined string)
+    candidate_bytes = 0
+    serialized_rows = []
+    for state in latest.values():
+        row_json = json.dumps(state.to_dict(), sort_keys=True) + "\n"
+        row_bytes = row_json.encode("utf-8")
+        candidate_bytes += len(row_bytes)
+        serialized_rows.append(row_bytes)
 
-    tmp_file = observer_state_jsonl_str + ".compacted.tmp"
-    try:
-        fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for state in latest.values():
-                f.write(json.dumps(state.to_dict()) + "\n")
-                f.flush()
-            os.fsync(fd)
-    except Exception as e:
-        if os.path.exists(tmp_file):
+    old_size = path.stat().st_size if path.exists() else 0
+    persistent_delta = candidate_bytes - old_size
+    transient_peak = candidate_bytes
+
+    pid = os.getpid()
+    tmp_path = path.parent / f".{path.name}.compact.{pid}.tmp"
+
+    def _write_compact_action():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            for row_b in serialized_rows:
+                f.write(row_b)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+
+        try:
+            parent_fd = os.open(path.parent, os.O_RDONLY)
             try:
-                os.remove(tmp_file)
-            except Exception:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        except Exception:
+            pass
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="normal_data",
+        transient_peak_bytes=transient_peak,
+        persistent_delta_bytes=persistent_delta,
+        write_func=_write_compact_action,
+    )
+
+    if res["status"] != "ready" or not res.get("written", False):
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
                 pass
-        raise e
+        require_storage_write(storage_guard, res)
 
-    # Write backup of the original state file
-    if os.path.exists(observer_state_jsonl):
-        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        backup_file = f"{observer_state_jsonl}.{timestamp}.jsonl.bak"
-        try:
-            shutil.copy2(observer_state_jsonl, backup_file)
-            logger.info(f"State file backed up to {backup_file}")
-        except Exception as e:
-            logger.warning(f"Failed to write backup of state file: {e}")
-
-    # Atomic rename
-    os.replace(tmp_file, observer_state_jsonl)
-
-    try:
-        parent_fd = os.open(dir_name, os.O_RDONLY)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
-    except Exception:
-        pass
+    return {"integrity_passed": True, "compacted": True, "blocker": None}
 
 
 def create_pending_observation_state(event_symbol_row: dict, status: str, diagnostics: dict, now_ms: int) -> EventSymbolState:
@@ -368,13 +363,8 @@ def start_observation(event_symbol_row: dict, now_ms: int) -> EventSymbolState:
     )
 
 
-
-def is_depth_collection_active_status(status: str) -> bool:
-    return status in {"active", "active_anchor_revision_contaminated"}
-
-
 def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: dict, now_ms: int) -> EventSymbolState:
-    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
         compute_latest_anchor_contract_hash,
     )
 
@@ -626,7 +616,6 @@ def compute_snapshot_time_coverage(state: EventSymbolState, snapshots: list) -> 
     }
 
 
-
 def finalize_observation_if_due(state: EventSymbolState, now_ms: int, snapshots: list) -> EventSymbolState:
     if not is_depth_collection_active_status(state.status):
         return state
@@ -664,23 +653,10 @@ def finalize_observation_if_due(state: EventSymbolState, now_ms: int, snapshots:
 
 
 def load_latest_states_by_event_symbol_id(observer_state_jsonl: str | os.PathLike) -> dict[str, EventSymbolState]:
-    path = Path(observer_state_jsonl)
-    if not path.exists():
-        return {}
-    latest: dict[str, EventSymbolState] = {}
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                st = EventSymbolState.from_dict(data)
-                if st.event_symbol_id:
-                    latest[st.event_symbol_id] = st
-            except Exception as e:
-                logger.warning(f"Failed to parse EventSymbolState line: {e}")
-    return latest
+    res = load_latest_state_by_event_symbol_id(observer_state_jsonl)
+    if isinstance(res, dict) and "latest" in res:
+        return res["latest"]
+    return res
 
 
 def rebuild_missing_stable_event_symbol_key_if_safe(state: EventSymbolState) -> tuple[EventSymbolState, dict]:
@@ -704,16 +680,6 @@ def rebuild_missing_stable_event_symbol_key_if_safe(state: EventSymbolState) -> 
     }
 
 
-def group_latest_states_by_stable_event_symbol_key(latest: dict[str, EventSymbolState]) -> dict[str, list[EventSymbolState]]:
-    grouped: dict[str, list[EventSymbolState]] = {}
-    for st in latest.values():
-        key = (st.stable_event_symbol_key or "").strip()
-        if not key:
-            key = "__MISSING_STABLE_KEY__"
-        grouped.setdefault(key, []).append(st)
-    return grouped
-
-
 def detect_stable_event_symbol_key_collisions(grouped: dict[str, list[EventSymbolState]]) -> list[dict]:
     collisions = []
     for key, states in grouped.items():
@@ -730,6 +696,17 @@ def detect_stable_event_symbol_key_collisions(grouped: dict[str, list[EventSymbo
     return collisions
 
 
+
+def group_latest_states_by_stable_event_symbol_key(latest: dict[str, EventSymbolState]) -> dict[str, list[EventSymbolState]]:
+    grouped: dict[str, list[EventSymbolState]] = {}
+    for st in latest.values():
+        key = (st.stable_event_symbol_key or "").strip()
+        if not key:
+            key = "__MISSING_STABLE_KEY__"
+        grouped.setdefault(key, []).append(st)
+    return grouped
+
+
 EVENT_BATCH_REGISTRY_FILENAME = "event_batch_registry.jsonl"
 
 
@@ -741,33 +718,105 @@ def build_event_batch_id(event_row: dict, candidate_set_hash: str = "") -> str:
     return hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
 
 
-def load_latest_event_batch_registry(output_root: str | Path) -> dict[str, dict]:
+def load_latest_event_batch_registry(
+    output_root: str | Path,
+    *,
+    fail_on_malformed: bool = False,
+) -> dict[str, dict] | dict[str, Any]:
     path = Path(output_root) / EVENT_BATCH_REGISTRY_FILENAME
     if not path.exists():
-        return {}
+        return {} if not fail_on_malformed else {"integrity_passed": True, "latest": {}}
+
     latest: dict[str, dict] = {}
+    malformed_row = None
+
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+        for line_num, line in enumerate(f, start=1):
+            line_str = line.strip()
+            if not line_str:
                 continue
             try:
-                row = json.loads(line)
+                row = json.loads(line_str)
                 b_id = row.get("event_batch_id")
                 if b_id:
                     latest[b_id] = row
             except Exception as e:
-                logger.warning(f"Failed to parse event_batch_registry row: {e}")
+                logger.warning(f"Failed to parse event_batch_registry row at line {line_num}: {e}")
+                malformed_row = line_str
+                if fail_on_malformed:
+                    break
+
+    if malformed_row is not None and fail_on_malformed:
+        return {"integrity_passed": False, "latest": latest, "malformed_row": malformed_row}
+
     return latest
 
 
-def append_event_batch_registry_row(output_root: str | Path, row: dict) -> None:
+def compact_event_batch_registry_jsonl(
+    output_root: str | Path,
+    *,
+    storage_guard: Any,
+) -> dict[str, Any]:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     path = Path(output_root) / EVENT_BATCH_REGISTRY_FILENAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    if not path.exists():
+        return {"integrity_passed": True, "compacted": False, "blocker": None}
+
+    scan_res = load_latest_event_batch_registry(output_root, fail_on_malformed=True)
+    if isinstance(scan_res, dict) and scan_res.get("integrity_passed") is False:
+        return {
+            "integrity_passed": False,
+            "compacted": False,
+            "blocker": "blocked_checkpoint_integrity",
+            "malformed_row": scan_res.get("malformed_row"),
+        }
+
+    latest = scan_res.get("latest", scan_res) if isinstance(scan_res, dict) else scan_res
+    if not latest:
+        return {"integrity_passed": True, "compacted": False, "blocker": None}
+
+    candidate_bytes = 0
+    serialized_rows = []
+    for row in latest.values():
+        row_json = json.dumps(row, sort_keys=True) + "\n"
+        row_bytes = row_json.encode("utf-8")
+        candidate_bytes += len(row_bytes)
+        serialized_rows.append(row_bytes)
+
+    old_size = path.stat().st_size if path.exists() else 0
+    persistent_delta = candidate_bytes - old_size
+    transient_peak = candidate_bytes
+
+    pid = os.getpid()
+    tmp_path = path.parent / f".{path.name}.compact.{pid}.tmp"
+
+    def _write_compact_batch():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            for row_b in serialized_rows:
+                f.write(row_b)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="normal_data",
+        transient_peak_bytes=transient_peak,
+        persistent_delta_bytes=persistent_delta,
+        write_func=_write_compact_batch,
+    )
+
+    if res["status"] != "ready" or not res.get("written", False):
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        require_storage_write(storage_guard, res)
+
+    return {"integrity_passed": True, "compacted": True, "blocker": None}
 
 
 def update_batch_registry_status(
@@ -778,21 +827,57 @@ def update_batch_registry_status(
     durable_stable_keys: list[str] | None = None,
     block_reason: str | None = None,
     registry_map: dict[str, dict] | None = None,
+    *,
+    storage_guard: Any,
 ) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     if registry_map is None:
         registry_map = load_latest_event_batch_registry(output_root)
+
     existing = registry_map.get(event_batch_id, {})
+    existing_status = existing.get("status")
+
+    # Monotonicity checks: final statuses cannot regress
+    if existing_status in {"watermark_committed", "batch_blocked"}:
+        if status != existing_status:
+            logger.warning(f"Batch registry monotonicity violation: cannot transition batch {event_batch_id} from {existing_status} to {status}")
+            return existing
+
+    sorted_keys = sorted(list(dict.fromkeys(durable_stable_keys))) if durable_stable_keys is not None else existing.get("durable_stable_keys", [])
+
+    # Suppress equal transition append
+    if existing_status == status and existing.get("durable_stable_keys") == sorted_keys and existing.get("block_reason") == block_reason:
+        return existing
+
     new_row = dict(existing)
     new_row["event_batch_id"] = event_batch_id
     new_row["status"] = status
     new_row["updated_at_ms"] = now_ms
     if "created_at_ms" not in new_row:
         new_row["created_at_ms"] = now_ms
-    if durable_stable_keys is not None:
-        new_row["durable_stable_keys"] = sorted(list(dict.fromkeys(durable_stable_keys)))
+    new_row["durable_stable_keys"] = sorted_keys
     if block_reason is not None:
         new_row["block_reason"] = block_reason
 
-    append_event_batch_registry_row(output_root, new_row)
+    row_bytes = (json.dumps(new_row) + "\n").encode("utf-8")
+    path = Path(output_root) / EVENT_BATCH_REGISTRY_FILENAME
+
+    def _write_row():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "ab") as f:
+            f.write(row_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="normal_data",
+        transient_peak_bytes=len(row_bytes),
+        persistent_delta_bytes=len(row_bytes),
+        write_func=_write_row,
+    )
+    require_storage_write(storage_guard, res)
+
     registry_map[event_batch_id] = new_row
     return new_row

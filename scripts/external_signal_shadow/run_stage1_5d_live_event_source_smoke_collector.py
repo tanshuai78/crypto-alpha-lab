@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from configs import base
 from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
@@ -19,6 +20,11 @@ from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
 from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
     coerce_legacy_launch_event_to_formal,
     validate_formal_launch_event,
+)
+from src.research.external_signal_shadow.stage1_5_storage_guard import (
+    StorageWriteBlocked,
+    require_storage_write,
+    terminal_write_set_peak_bytes,
 )
 from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
     ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES,
@@ -545,7 +551,7 @@ def append_stage1_5d_diagnostic(stream_paths: dict, row: dict) -> None:
         diagnostics_path = stream_paths.get("diagnostics")
     if diagnostics_path is None:
         return
-    append_jsonl(diagnostics_path, row)
+    append_jsonl(diagnostics_path, row, storage_guard=stream_paths["storage_guard"])
 
 
 def append_formal_futures_launch_event(stream_paths: dict, row: dict) -> dict | None:
@@ -584,7 +590,7 @@ def append_formal_futures_launch_event(stream_paths: dict, row: dict) -> dict | 
             },
         )
         return None
-    append_jsonl(stream_paths["events"], row)
+    append_jsonl(stream_paths["events"], row, storage_guard=stream_paths["storage_guard"])
     return row
 
 
@@ -605,8 +611,9 @@ def append_formal_schedule_revision(stream_paths: dict, row: dict) -> dict | Non
             },
         )
         return None
-    append_jsonl(stream_paths["events"], row)
+    append_jsonl(stream_paths["events"], row, storage_guard=stream_paths["storage_guard"])
     return row
+
 
 
 def process_trusted_schedule_revision_detail(
@@ -739,7 +746,8 @@ def record_formal_futures_launch_event(
     )
     if index_rows and "formal_launch_identity_index" in stream_paths:
         for idx_row in index_rows:
-            append_jsonl(stream_paths["formal_launch_identity_index"], idx_row)
+            append_jsonl(stream_paths["formal_launch_identity_index"], idx_row, storage_guard=stream_paths["storage_guard"])
+
 
     return written
 
@@ -1510,6 +1518,84 @@ def build_detail_retry_scheduler_diagnostic_row(
     }
 
 
+def write_smoke_summary_atomically(
+    summary_path: str | Path,
+    summary_data: dict,
+    *,
+    storage_guard: Any,
+) -> None:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
+    path = Path(summary_path)
+    tmp_path = path.with_suffix(".json.tmp")
+    serialized = json.dumps(summary_data, indent=2).encode("utf-8")
+    old_size = path.stat().st_size if path.exists() else 0
+
+    def _write_action() -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+
+    result = storage_guard.reserve_and_write(
+        artifact_class=(
+            "terminal_control_plane"
+            if summary_data.get("storage_blocker")
+            else "ordinary_control_plane"
+        ),
+        transient_peak_bytes=len(serialized),
+        persistent_delta_bytes=max(0, len(serialized) - old_size),
+        write_func=_write_action,
+    )
+    require_storage_write(storage_guard, result)
+
+
+def _build_storage_failure_artifacts(
+    output_root: str | Path,
+    storage_blocker: str,
+    storage_guard_status: str,
+) -> tuple[dict, dict, dict]:
+    storage_blocker = str(storage_blocker)[:512]
+    storage_guard_status = str(storage_guard_status)[:128]
+    terminal_gate = build_stage1_5d_runtime_gate({
+        "output_root": output_root,
+        "fatal_blockers": [storage_blocker],
+        "storage_budget_passed": False,
+    })
+    terminal_summary = {
+        "decision": "stage1_5d_smoke_invalid",
+        "blockers": [storage_blocker],
+        "storage_blocker": storage_blocker,
+        "storage_guard_status": storage_guard_status,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }
+    terminal_diagnostic = {
+        "diagnostic_type": "storage_write_blocked",
+        "stage": "1.5D",
+        "storage_blocker": storage_blocker,
+        "storage_guard_status": storage_guard_status,
+    }
+    return terminal_gate, terminal_summary, terminal_diagnostic
+
+
+def _storage_failure_write_set_peak(
+    terminal_gate: dict,
+    terminal_summary: dict,
+    terminal_diagnostic: dict,
+) -> int:
+    return terminal_write_set_peak_bytes([
+        json.dumps(terminal_gate, indent=2, sort_keys=True).encode("utf-8"),
+        json.dumps(terminal_summary, indent=2).encode("utf-8"),
+        json.dumps(terminal_diagnostic, indent=2).encode("utf-8"),
+    ])
+
+
 def classify_detail_attempt_result(fetch_res: dict) -> str:
     if fetch_res.get("error") == "empty_detail_payload":
         return "http_200_empty_untrusted_payload"
@@ -1532,7 +1618,7 @@ def classify_detail_attempt_result(fetch_res: dict) -> str:
         return "non_transient_error"
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live-public-readonly", action="store_true")
     parser.add_argument("--fixture-json", type=str)
@@ -1569,6 +1655,48 @@ def main():
         else output_root / "binance_futures_launch_smoke_summary.json"
     )
 
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    startup_gate, startup_summary, startup_diagnostic = _build_storage_failure_artifacts(
+        output_root,
+        "x" * 512,
+        "x" * 128,
+    )
+    storage_guard = StorageGuard(
+        output_root=output_root,
+        stage="1.5D",
+        terminal_write_set_peak_bytes=_storage_failure_write_set_peak(
+            startup_gate,
+            startup_summary,
+            startup_diagnostic,
+        ),
+    )
+    process_instance_id = f"proc_{os.getpid()}_{int(time.time())}"
+    storage_guard.cleanup_owned_temp_files(process_instance_id)
+
+    startup_res = storage_guard.validate_startup()
+    if startup_res["status"] != "ready":
+        storage_blocker = str(startup_res.get("storage_blocker") or startup_res["status"])
+        terminal_gate, terminal_summary, terminal_diagnostic = _build_storage_failure_artifacts(
+            output_root,
+            storage_blocker,
+            startup_res["status"],
+        )
+        for path, artifact in (
+            (output_root / "live_safety_gate_summary.json", terminal_gate),
+            (output_summary_path, terminal_summary),
+            (output_root / "storage_failure_diagnostic.json", terminal_diagnostic),
+        ):
+            try:
+                if path.name == "live_safety_gate_summary.json":
+                    write_stage1_5d_runtime_gate(output_root, artifact, storage_guard=storage_guard)
+                else:
+                    write_smoke_summary_atomically(path, artifact, storage_guard=storage_guard)
+            except RuntimeError as exc:
+                print(f"StorageGuard terminal evidence write failed: {exc}")
+        print(f"StorageGuard startup validation failed: {startup_res['storage_blocker']}")
+        sys.exit(1)
+
+
     # 1. Safety Check: must have live-public-readonly or fixture-json BEFORE checking evidence files
     if not args.live_public_readonly and not args.fixture_json:
         invalid_summary = {
@@ -1586,9 +1714,11 @@ def main():
             "execution_engine_allowed": False,
             "alpha_interpretation_allowed": False,
         }
-        output_summary_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_summary_path, "w", encoding="utf-8") as f:
-            json.dump(invalid_summary, f, indent=2)
+        write_smoke_summary_atomically(
+            output_summary_path,
+            invalid_summary,
+            storage_guard=storage_guard,
+        )
         print("Error: missing --live-public-readonly or --fixture-json")
         return 2
 
@@ -1612,9 +1742,11 @@ def main():
             "execution_engine_allowed": False,
             "alpha_interpretation_allowed": False,
         }
-        output_summary_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_summary_path, "w", encoding="utf-8") as f:
-            json.dump(invalid_summary, f, indent=2)
+        write_smoke_summary_atomically(
+            output_summary_path,
+            invalid_summary,
+            storage_guard=storage_guard,
+        )
         print("Error: upstream evidence invalid")
         return 0
 
@@ -1833,12 +1965,13 @@ def main():
     fatal_blockers = []
     source_parent_url = "https://www.binance.com/en/support/announcement"
     output_root.mkdir(parents=True, exist_ok=True)
-    startup_stream_paths = build_stream_paths(output_root, startup_now_ms)
+    startup_stream_paths = build_stream_paths(output_root, startup_now_ms, storage_guard=storage_guard)
     rebuilt_index_rows, index_rebuild_diagnostics = rebuild_missing_formal_launch_identity_index(
         events_dir=output_root / "events",
         index_path=startup_stream_paths["formal_launch_identity_index"],
         source_root_id=str(output_root.resolve()),
         commit_sha=current_commit_sha,
+        storage_guard=storage_guard,
     )
     for diagnostic in index_rebuild_diagnostics:
         append_stage1_5d_diagnostic(
@@ -1874,7 +2007,11 @@ def main():
         "scheduler_starved_expired_count": 0,
         **schedule_revision_producer_attestation,
     }
-    write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(init_gate_context))
+    write_stage1_5d_runtime_gate(
+        output_root,
+        build_stage1_5d_runtime_gate(init_gate_context),
+        storage_guard=storage_guard,
+    )
 
     while True:
         if args.max_polls is not None and poll_count >= args.max_polls:
@@ -1905,7 +2042,8 @@ def main():
             poll_schedule_drift_ms = actual_interval_ms - (args.poll_interval_sec * 1000)
         last_poll_started_at_ms = now_ms
 
-        stream_paths = build_stream_paths(output_root, now_ms)
+        stream_paths = build_stream_paths(output_root, now_ms, storage_guard=storage_guard)
+
 
         exchangeinfo_by_symbol_cache = None
         ex_ok_cache = None
@@ -1944,7 +2082,7 @@ def main():
                     "error": None if ex_ok else "fixture_exchangeinfo_missing",
                     "fetched_at_ms": int(time.time() * 1000),
                 }
-                append_jsonl(stream_paths["request_manifest"], ex_manifest)
+                append_jsonl(stream_paths["request_manifest"], ex_manifest, storage_guard=storage_guard)
                 request_manifest.append(ex_manifest)
 
                 exchangeinfo_by_symbol_cache = ex_by_sym
@@ -1985,7 +2123,7 @@ def main():
                     ex_manifest["error"] = ex_res.get("error")
             except Exception as e:
                 ex_manifest["error"] = str(e)
-            append_jsonl(stream_paths["request_manifest"], ex_manifest)
+            append_jsonl(stream_paths["request_manifest"], ex_manifest, storage_guard=storage_guard)
             request_manifest.append(ex_manifest)
 
             exchangeinfo_by_symbol_cache = ex_by_sym
@@ -2051,7 +2189,7 @@ def main():
             "error": fetch_err,
             "fetched_at_ms": now_ms,
         }
-        append_jsonl(stream_paths["request_manifest"], manifest_row)
+        append_jsonl(stream_paths["request_manifest"], manifest_row, storage_guard=storage_guard)
         request_manifest.append(manifest_row)
 
         if payload:
@@ -2280,7 +2418,7 @@ def main():
                 scheduler_diag["detail_retry_overdue_selected_count"] > 0
                 or scheduler_diag["detail_retry_overdue_deferred_count"] > 0
             ):
-                append_jsonl(stream_paths["detail_retry_scheduler_diagnostics"], scheduler_diag)
+                append_jsonl(stream_paths["detail_retry_scheduler_diagnostics"], scheduler_diag, storage_guard=storage_guard)
                 detail_retry_overdue_selected_total += scheduler_diag["detail_retry_overdue_selected_count"]
                 detail_retry_overdue_deferred_total += scheduler_diag["detail_retry_overdue_deferred_count"]
                 detail_retry_overdue_retry_cycle_total += scheduler_diag["detail_retry_overdue_selected_count"]
@@ -2368,7 +2506,7 @@ def main():
                         terminal_diag = dict(norm_event)
                         terminal_diag["consumable_by_stage1_5f"] = False
                         terminal_diag["diagnostic_stream"] = "detail_retry_terminal_diagnostics"
-                        append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], terminal_diag)
+                        append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], terminal_diag, storage_guard=storage_guard)
                     elif event_id not in seen_event_ids:
                         record_formal_futures_launch_event(
                             stream_paths=stream_paths,
@@ -2651,7 +2789,7 @@ def main():
                                     "parser_version": PARSER_VERSION,
                                     "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
                                 }
-                                append_jsonl(stream_paths["request_manifest"], deferred_manifest)
+                                append_jsonl(stream_paths["request_manifest"], deferred_manifest, storage_guard=storage_guard)
                                 request_manifest.append(deferred_manifest)
                         else:
                             if not state.get("first_deferred_at_ms"):
@@ -2809,6 +2947,7 @@ def main():
                         raw_bytes=bapi_raw_bytes,
                         parsed_payload=bapi_res.get("payload"),
                         http_status=bapi_res.get("http_status"),
+                        storage_guard=stream_paths["storage_guard"],
                     )
 
                     bapi_manifest = {
@@ -2837,7 +2976,7 @@ def main():
                         "parser_version": PARSER_VERSION,
                         "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
                     }
-                    append_jsonl(stream_paths["request_manifest"], bapi_manifest)
+                    append_jsonl(stream_paths["request_manifest"], bapi_manifest, storage_guard=storage_guard)
                     request_manifest.append(bapi_manifest)
 
                     bapi_attempt_result = classify_detail_attempt_result(bapi_res) if not bapi_is_trusted else "success"
@@ -2868,7 +3007,9 @@ def main():
                             # in the same poll.
                             observed_at_ms=int(time.time() * 1000),
                             registry=payload_version_first_observed,
+                            storage_guard=storage_guard,
                         )
+
                         max_symbols = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SYMBOL_EXTRACTION_MAX_SYMBOLS", 30)
                         bapi_extraction = extract_symbol_candidates_from_bapi_article_payload(
                             bapi_res["payload"], max_symbols=max_symbols, title=state["raw"].get("title")
@@ -2896,7 +3037,7 @@ def main():
                             "candidate_provenance": bapi_extraction.get("candidate_provenance") or [],
                             "parsed_at_ms": now_ms,
                         }
-                        append_jsonl(stream_paths["bapi_parse_results"], bapi_parse_audit_row)
+                        append_jsonl(stream_paths["bapi_parse_results"], bapi_parse_audit_row, storage_guard=storage_guard)
 
                         revision_result = process_trusted_schedule_revision_detail(
                             stream_paths=stream_paths,
@@ -3198,7 +3339,7 @@ def main():
                                 "parser_version": PARSER_VERSION,
                                 "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
                             }
-                            append_jsonl(stream_paths["request_manifest"], detail_manifest)
+                            append_jsonl(stream_paths["request_manifest"], detail_manifest, storage_guard=storage_guard)
                             request_manifest.append(detail_manifest)
 
                             detail_retry_state.pop(code, None)
@@ -3213,7 +3354,13 @@ def main():
                     payload_path = None
 
                     if current_res["ok"] and is_url_valid:
-                        write_res = write_detail_payload(output_root, now_ms, code, current_res["payload"])
+                        write_res = write_detail_payload(
+                            output_root,
+                            now_ms,
+                            code,
+                            current_res["payload"],
+                            storage_guard=storage_guard,
+                        )
                         payload_sha256 = write_res["payload_sha256"]
                         payload_size_bytes = write_res["payload_size_bytes"]
                         payload_path = write_res["payload_path"]
@@ -3252,7 +3399,7 @@ def main():
                         "parser_version": PARSER_VERSION,
                         "symbol_extraction_version": SYMBOL_EXTRACTION_VERSION,
                     }
-                    append_jsonl(stream_paths["request_manifest"], detail_manifest)
+                    append_jsonl(stream_paths["request_manifest"], detail_manifest, storage_guard=storage_guard)
                     request_manifest.append(detail_manifest)
 
                     # Update health based on this request
@@ -3700,9 +3847,11 @@ def main():
                 output_root,
                 scheduler_state,
                 metadata_version=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION,
+                storage_guard=storage_guard,
             )
 
-            append_jsonl(stream_paths["raw_payloads"], {"timestamp_ms": now_ms, "payload": payload})
+
+            append_jsonl(stream_paths["raw_payloads"], {"timestamp_ms": now_ms, "payload": payload}, storage_guard=storage_guard)
 
             hb = cycle_res["heartbeat"]
 
@@ -3724,7 +3873,8 @@ def main():
         hb["configured_poll_interval_sec"] = args.poll_interval_sec
         hb["actual_poll_interval_sec"] = actual_poll_interval_sec
         hb["poll_schedule_drift_ms"] = poll_schedule_drift_ms
-        append_jsonl(stream_paths["heartbeats"], hb)
+        append_jsonl(stream_paths["heartbeats"], hb, storage_guard=storage_guard)
+
         heartbeats.append(hb)
 
         # 4. Check First Futures Bar for events in queue (only if live/readonly)
@@ -3781,7 +3931,7 @@ def main():
                     "error": kline_err,
                     "fetched_at_ms": int(time.time() * 1000),
                 }
-                append_jsonl(stream_paths["request_manifest"], k_manifest)
+                append_jsonl(stream_paths["request_manifest"], k_manifest, storage_guard=storage_guard)
                 request_manifest.append(k_manifest)
 
                 if kline_res is not None:
@@ -3832,6 +3982,7 @@ def main():
             "source_format_drift_active": source_format_drift_count > 0,
             "schema_parse_error_active": schema_parse_error_count > 0,
             "storage_budget_passed": storage_budget_passed,
+            **storage_guard.status_snapshot(),
             "detail_endpoint_degraded_active": is_detail_source_degraded(endpoint_health, "bapi_article_detail_query", int(time.time() * 1000)),
             "bapi_trusted_payload_rate": 1.0 if bapi_detail_request_count == 0 else (bapi_detail_trusted_payload_count / float(bapi_detail_request_count)),
             "symbol_parse_success_rate": 1.0 if bapi_detail_trusted_payload_count == 0 else (bapi_symbol_parse_success_count / float(bapi_detail_trusted_payload_count)),
@@ -3839,7 +3990,11 @@ def main():
             "scheduler_starved_expired_count": detail_budget_starved_count,
             **schedule_revision_producer_attestation,
         }
-        write_stage1_5d_runtime_gate(output_root, build_stage1_5d_runtime_gate(loop_gate_context))
+        write_stage1_5d_runtime_gate(
+            output_root,
+            build_stage1_5d_runtime_gate(loop_gate_context),
+            storage_guard=storage_guard,
+        )
 
         if args.max_polls is not None and poll_count >= args.max_polls:
             break
@@ -3985,12 +4140,44 @@ def main():
 
 
 
-    output_summary_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    write_smoke_summary_atomically(
+        output_summary_path,
+        summary,
+        storage_guard=storage_guard,
+    )
 
     print(f"Summary written to {output_summary_path}")
     return 0
+
+
+def _write_runtime_storage_terminal_evidence(error: StorageWriteBlocked) -> None:
+    output_root = Path(error.storage_guard.output_root)
+    terminal_gate, terminal_summary, terminal_diagnostic = _build_storage_failure_artifacts(
+        output_root,
+        error.storage_blocker,
+        error.result.get("storage_guard_status") or error.result.get("status"),
+    )
+    for path, artifact in (
+        (output_root / "live_safety_gate_summary.json", terminal_gate),
+        (output_root / "binance_futures_launch_smoke_summary.json", terminal_summary),
+        (output_root / "storage_failure_diagnostic.json", terminal_diagnostic),
+    ):
+        try:
+            if path.name == "live_safety_gate_summary.json":
+                write_stage1_5d_runtime_gate(output_root, artifact, storage_guard=error.storage_guard)
+            else:
+                write_smoke_summary_atomically(path, artifact, storage_guard=error.storage_guard)
+        except RuntimeError as terminal_error:
+            print(f"StorageGuard terminal evidence write failed: {terminal_error}")
+
+
+def main():
+    try:
+        return _main()
+    except StorageWriteBlocked as error:
+        _write_runtime_storage_terminal_evidence(error)
+        print(f"StorageGuard runtime write blocked: {error.storage_blocker}")
+        return 1
 
 
 if __name__ == "__main__":

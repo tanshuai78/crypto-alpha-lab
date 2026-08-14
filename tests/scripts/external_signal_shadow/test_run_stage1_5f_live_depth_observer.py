@@ -1,8 +1,15 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
+
+
+def _make_f_storage_guard(output_root):
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    return StorageGuard(output_root=output_root, stage="1.5F")
 
 
 def _formal_event(row: dict) -> dict:
@@ -1586,9 +1593,10 @@ def test_reconcile_missing_accepted_row_backfills_active_state_once(tmp_path):
         launch_anchor_post_bootstrap_watermark=True,
     )
     watermark = Watermark(1, 5_000, [], [], [], 5_000)
+    storage_guard = _make_f_storage_guard(output_root)
 
-    reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_200)
-    rows_again = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_300)
+    reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_200, storage_guard=storage_guard)
+    rows_again = reconcile_missing_accepted_rows(str(output_root), {"es1": state}, watermark, now_ms=20_300, storage_guard=storage_guard)
 
     accepted_files = list((output_root / "events_accepted").glob("**/*.jsonl"))
     assert len(accepted_files) == 1
@@ -1622,9 +1630,10 @@ def test_reconcile_missing_terminal_ignored_rows_backfills_once(tmp_path):
         terminal_at_ms=1784850000000,
         consumable_by_stage1_5g=False,
     )
+    storage_guard = _make_f_storage_guard(output_root)
 
-    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784850000000)
-    rows_again = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784851000000)
+    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784850000000, storage_guard=storage_guard)
+    rows_again = reconcile_missing_terminal_ignored_rows(str(output_root), {"volatile-id": state}, now_ms=1784851000000, storage_guard=storage_guard)
 
     diag_files = list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl"))
     assert len(diag_files) == 1
@@ -1663,8 +1672,9 @@ def test_capped_terminal_state_does_not_trigger_diagnostic_backfill(tmp_path):
         diagnostic_sample_reserved=False,
         diagnostic_emitted=False,
     )
+    storage_guard = _make_f_storage_guard(output_root)
 
-    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"capped-id": state}, now_ms=1784850000000)
+    rows = reconcile_missing_terminal_ignored_rows(str(output_root), {"capped-id": state}, now_ms=1784850000000, storage_guard=storage_guard)
 
     assert rows == []
     assert list((output_root / "historical_anchor_hygiene_diagnostics").glob("**/*.jsonl")) == []
@@ -1683,6 +1693,7 @@ def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, 
 
     output_root = tmp_path / "output"
     output_root.mkdir()
+    storage_guard = _make_f_storage_guard(output_root)
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_MAX_REJECTION_HYGIENE_DIAGNOSTIC_SAMPLES_PER_TYPE", 2)
     for idx in range(2):
         append_jsonl(
@@ -1691,6 +1702,7 @@ def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, 
                 "diagnostic_type": "historical_anchor_pre_bootstrap_ignored",
                 "terminal_hygiene_id": f"term-{idx}",
             },
+            storage_guard=storage_guard,
         )
 
     counts = load_terminal_hygiene_diagnostic_sample_counts(str(output_root))
@@ -1704,6 +1716,7 @@ def test_terminal_hygiene_diagnostic_sample_counts_load_existing_rows(tmp_path, 
         "historical_anchor_pre_bootstrap_ignored",
         1784851000000,
         counts,
+        storage_guard=storage_guard,
     )
 
     assert emitted is False
@@ -1720,6 +1733,7 @@ def test_terminal_hygiene_reconciliation_rebuilds_state_from_diagnostic_artifact
 
     output_root = tmp_path / "output"
     output_root.mkdir()
+    storage_guard = _make_f_storage_guard(output_root)
     state_file = output_root / "observer_state.jsonl"
     diag_row = {
         "audit_metadata_version": 2,
@@ -1740,10 +1754,16 @@ def test_terminal_hygiene_reconciliation_rebuilds_state_from_diagnostic_artifact
         "bootstrap_watermark_max_seen_detected_at_ms": 1784822376255,
         "consumable_by_stage1_5g": False,
     }
-    append_jsonl(build_daily_path(str(output_root), "historical_anchor_hygiene_diagnostics", 1784850000000), diag_row)
+    append_jsonl(
+        build_daily_path(str(output_root), "historical_anchor_hygiene_diagnostics", 1784850000000),
+        diag_row,
+        storage_guard=storage_guard,
+    )
 
     states = {}
-    result = reconcile_terminal_hygiene_artifacts(str(output_root), str(state_file), states, now_ms=1784851000000)
+    result = reconcile_terminal_hygiene_artifacts(
+        str(output_root), str(state_file), states, now_ms=1784851000000, storage_guard=storage_guard
+    )
 
     assert result["terminal_ignored_state_rebuilt_count"] == 1
     rows = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
@@ -1764,6 +1784,7 @@ def test_terminal_hygiene_reconciliation_rebuilds_rejected_state_from_audit_arti
 
     output_root = tmp_path / "output"
     output_root.mkdir()
+    storage_guard = _make_f_storage_guard(output_root)
     state_file = output_root / "observer_state.jsonl"
     rejected_row = {
         "audit_metadata_version": 2,
@@ -1782,10 +1803,16 @@ def test_terminal_hygiene_reconciliation_rebuilds_rejected_state_from_audit_arti
         "terminal_hygiene_id": "term-rejected",
         "consumable_by_stage1_5g": True,
     }
-    append_jsonl(build_daily_path(str(output_root), "events_rejected", 1784850000000), rejected_row)
+    append_jsonl(
+        build_daily_path(str(output_root), "events_rejected", 1784850000000),
+        rejected_row,
+        storage_guard=storage_guard,
+    )
 
     states = {}
-    result = reconcile_terminal_hygiene_artifacts(str(output_root), str(state_file), states, now_ms=1784851000000)
+    result = reconcile_terminal_hygiene_artifacts(
+        str(output_root), str(state_file), states, now_ms=1784851000000, storage_guard=storage_guard
+    )
 
     assert result["rejected_state_rebuilt_count"] == 1
     rows = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
@@ -2305,9 +2332,15 @@ def test_v2_root_writes_observer_root_contract_before_watermark(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
         write_observer_root_contract_atomically,
     )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     output_root = tmp_path / "test_root"
-    write_observer_root_contract_atomically(str(output_root), "v2_production", reason="test")
+    write_observer_root_contract_atomically(
+        str(output_root),
+        "v2_production",
+        reason="test",
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5F"),
+    )
 
     root_contract_file = output_root / "observer_root_contract.json"
     assert root_contract_file.exists()
@@ -2456,6 +2489,7 @@ def test_schedule_revision_event_updates_matching_pending_state_and_registry(tmp
         state_file=str(state_file),
         registry_file=registry_file,
         now_ms=1_500,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
 
     assert res["status"] == "revision_applied"
@@ -2470,6 +2504,7 @@ def test_schedule_revision_event_updates_matching_pending_state_and_registry(tmp
         state_file=str(state_file),
         registry_file=registry_file,
         now_ms=1_600,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
     assert replay_res["status"] == "revision_replay_noop"
     assert states["es-gigadev"].anchor_contract_revision_count == 1
@@ -2518,6 +2553,7 @@ def test_v2_schedule_revision_uses_producer_application_id_verbatim(tmp_path):
         state_file=str(tmp_path / "observer_state.jsonl"),
         registry_file=registry_file,
         now_ms=1_600,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
 
     assert result == {"status": "revision_applied", "revision_application_id": "producer-id"}
@@ -2548,6 +2584,7 @@ def test_schedule_revision_arriving_before_launch_is_orphaned(tmp_path):
         state_file=str(tmp_path / "observer_state.jsonl"),
         registry_file=registry_file,
         now_ms=1_500,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
 
     assert res["status"] == "revision_orphaned"
@@ -2560,6 +2597,7 @@ def test_schedule_revision_arriving_before_launch_is_orphaned(tmp_path):
         state_file=str(tmp_path / "observer_state.jsonl"),
         registry_file=registry_file,
         now_ms=1_600,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
     replay_rows = [json.loads(line) for line in registry_file.read_text().splitlines()]
     assert replay_res["status"] == "revision_orphaned_replay_noop"
@@ -2606,6 +2644,7 @@ def test_ambiguous_schedule_revision_does_not_mutate_state(tmp_path):
         state_file=str(tmp_path / "observer_state.jsonl"),
         registry_file=tmp_path / "schedule_revision_registry.jsonl",
         now_ms=1_500,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
 
     assert res["status"] == "revision_ambiguous"
@@ -2620,6 +2659,7 @@ def test_ambiguous_schedule_revision_does_not_mutate_state(tmp_path):
         state_file=str(tmp_path / "observer_state.jsonl"),
         registry_file=registry_file,
         now_ms=1_600,
+        storage_guard=_make_f_storage_guard(tmp_path),
     )
     replay_row_count = len([line for line in registry_file.read_text().splitlines() if line.strip()])
     assert replay_res["status"] == "revision_ambiguous_replay_noop"
@@ -2731,12 +2771,18 @@ def test_task1_root_contract_signature_and_safety_baseline_preflight(tmp_path):
     assert [p.name for p in params[:3]] == ["output_root", "root_mode", "reason"]
 
     assert sig.parameters["reason"].default == ""
+    assert sig.parameters["storage_guard"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["storage_guard"].default is inspect.Parameter.empty
     assert sig.parameters["source_binding_facts"].kind == inspect.Parameter.KEYWORD_ONLY
     assert sig.parameters["source_binding_facts"].default is None
 
 
     out = tmp_path / "out_v2"
-    contract = write_observer_root_contract_atomically(str(out), "v2_production")
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    contract = write_observer_root_contract_atomically(
+        str(out), "v2_production", storage_guard=StorageGuard(output_root=out, stage="1.5F")
+    )
     assert contract["formal_event_contract_versions_allowed"] == [2]
     assert contract["formal_schedule_revision_contract_versions_allowed"] == [1, 2]
 
@@ -2792,11 +2838,142 @@ def test_task5_consumer_summary_models_and_atomic_writer(tmp_path):
 
     # Atomic summary writer
     sum_file = tmp_path / "summary.json"
-    write_live_depth_observer_summary_atomically(sum_file, d)
+    write_live_depth_observer_summary_atomically(
+        sum_file,
+        d,
+        storage_guard=_make_f_storage_guard(tmp_path),
+    )
     assert sum_file.exists()
     assert not sum_file.with_suffix(".json.tmp").exists()
     saved = json.loads(sum_file.read_text())
     assert saved["consumer_process_instance_id"] == "proc-123"
+
+
+def test_live_depth_summary_writer_requires_guard_and_reserves_storage_blocker_terminally(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        write_live_depth_observer_summary_atomically,
+    )
+
+    class CapturingGuard:
+        def __init__(self):
+            self.artifact_classes = []
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            self.artifact_classes.append(artifact_class)
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        write_live_depth_observer_summary_atomically(tmp_path / "missing-guard.json", {}, storage_guard=None)
+
+    guard = CapturingGuard()
+    write_live_depth_observer_summary_atomically(tmp_path / "ordinary.json", {}, storage_guard=guard)
+    write_live_depth_observer_summary_atomically(
+        tmp_path / "terminal.json",
+        {"storage_blocker": "root_budget_exceeded_for_normal_data"},
+        storage_guard=guard,
+    )
+    assert guard.artifact_classes == ["ordinary_control_plane", "terminal_control_plane"]
+
+
+def test_startup_storage_block_writes_terminal_f_summary(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+
+    class BlockedStartupGuard:
+        instances = []
+
+        def __init__(self, output_root, stage, terminal_write_set_peak_bytes):
+            self.output_root = output_root
+            self.artifact_classes = []
+            self.terminal_write_set_peak_bytes = terminal_write_set_peak_bytes
+            self.__class__.instances.append(self)
+
+        def cleanup_owned_temp_files(self, _process_instance_id):
+            return None
+
+        def validate_startup(self):
+            return {"status": "blocked_start_free_space", "storage_blocker": "storage_start_free_space"}
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            self.artifact_classes.append(artifact_class)
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    monkeypatch.setattr(
+        "src.research.external_signal_shadow.stage1_5_storage_guard.StorageGuard",
+        BlockedStartupGuard,
+    )
+    output_root = tmp_path / "out"
+    old_argv = sys.argv
+    try:
+        sys.argv = ["run_stage1_5f_live_depth_observer.py", "--output-root", str(output_root)]
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+    finally:
+        sys.argv = old_argv
+
+    assert exc.value.code == 1
+    summary_path = output_root / "live_depth_observer_summary.json"
+    diagnostic_path = output_root / "storage_failure_diagnostic.json"
+    summary = json.loads(summary_path.read_text())
+    assert summary["storage_blocker"] == "storage_start_free_space"
+    assert summary["block_new_event_admission"] is True
+    from configs import base
+
+    assert summary_path.stat().st_size <= base.EXTERNAL_SIGNAL_STAGE1_5F_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
+    assert diagnostic_path.exists()
+    assert BlockedStartupGuard.instances[0].artifact_classes == ["terminal_control_plane", "terminal_control_plane"]
+    assert BlockedStartupGuard.instances[0].terminal_write_set_peak_bytes <= base.EXTERNAL_SIGNAL_STAGE1_5F_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
+
+
+def test_f_constructs_storage_guard_before_output_root_creation(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+
+    class StartupGuard:
+        def __init__(self, output_root, stage, terminal_write_set_peak_bytes):
+            assert not Path(output_root).exists()
+            self.output_root = Path(output_root)
+
+        def cleanup_owned_temp_files(self, _process_instance_id):
+            return None
+
+        def validate_startup(self):
+            return {"status": "blocked_start_free_space", "storage_blocker": "storage_start_free_space"}
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    monkeypatch.setattr("src.research.external_signal_shadow.stage1_5_storage_guard.StorageGuard", StartupGuard)
+    output_root = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["run_stage1_5f_live_depth_observer.py", "--output-root", str(output_root)])
+
+    with pytest.raises(SystemExit) as exc:
+        runner.main()
+
+    assert exc.value.code == 1
+
+
+def test_runtime_storage_block_writes_terminal_f_summary(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageWriteBlocked
+
+    class TerminalGuard:
+        def __init__(self, output_root, stage):
+            self.output_root = Path(output_root)
+            self.stage = stage
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    output_root = tmp_path / "out"
+    guard = TerminalGuard(output_root, "1.5F")
+    monkeypatch.setattr(runner, "_main", lambda: (_ for _ in ()).throw(StorageWriteBlocked(guard, {"storage_blocker": "root_budget_exceeded_for_normal_data"})))
+
+    with pytest.raises(SystemExit) as exc:
+        runner.main()
+    assert exc.value.code == 1
+    summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
+    assert summary["storage_blocker"] == "root_budget_exceeded_for_normal_data"
+    assert summary["block_new_event_admission"] is True
+    assert json.loads((output_root / "storage_failure_diagnostic.json").read_text())["diagnostic_type"] == "storage_write_blocked"
 
 
 def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkeypatch):
@@ -2865,9 +3042,9 @@ def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkey
         lambda *_args: {"valid": True},
     )
 
-    def capture_atomic_write(path, data):
+    def capture_atomic_write(path, data, *, storage_guard):
         writes.append(dict(data))
-        original_atomic_write(path, data)
+        original_atomic_write(path, data, storage_guard=storage_guard)
 
     def capture_contract_write(*args, **kwargs):
         contract = original_contract_write(*args, **kwargs)
@@ -2908,6 +3085,12 @@ def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkey
     assert summary["consumer_runtime_attestation_verified"] is True
     assert summary["consumer_root_id"] == contract["consumer_root_id"]
     assert summary["consumer_startup_commit_sha"] == contract["consumer_startup_commit_sha"]
+    assert summary["storage_guard_status"] == "ready"
+    assert summary["storage_blocker"] is None
+    assert summary["storage_root_bytes"] >= 0
+    assert summary["storage_root_max_bytes"] > summary["storage_root_bytes"]
+    assert summary["storage_terminal_write_set_peak_bytes"] > 0
+    assert summary["storage_emergency_blocker_reserve_bytes"] > 0
     assert summary["consumer_runtime_manifest_sha256"] == contract["consumer_runtime_manifest_sha256"]
 
 

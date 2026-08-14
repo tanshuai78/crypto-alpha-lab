@@ -14,6 +14,15 @@ from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark
 
 
 def test_watermark_write_is_atomic(tmp_path):
+    import shutil
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    guard = StorageGuard(
+        output_root=tmp_path,
+        stage="1.5F",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
     target_path = tmp_path / "watermark.json"
     w = Watermark(
         watermark_version=1,
@@ -23,13 +32,28 @@ def test_watermark_write_is_atomic(tmp_path):
         seen_stable_event_keys=[],
         updated_at_ms=2000,
     )
-    write_watermark_atomic(str(target_path), w)
+    res = write_watermark_atomic(str(target_path), w, storage_guard=guard)
+    assert res["written"] is True
     assert os.path.exists(target_path)
 
     # Reload and check
     loaded = load_watermark(str(target_path))
     assert loaded.max_seen_detected_at_ms == 1000
     assert loaded.seen_event_ids == ["e1"]
+
+
+def test_watermark_writer_requires_guard(tmp_path):
+    w = Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=1000,
+        seen_event_ids=["e1"],
+        seen_source_article_ids=[],
+        seen_stable_event_keys=[],
+        updated_at_ms=2000,
+    )
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        write_watermark_atomic(str(tmp_path / "watermark.json"), w, storage_guard=None)
+
 
 
 def test_corrupted_watermark_makes_observer_invalid(tmp_path):

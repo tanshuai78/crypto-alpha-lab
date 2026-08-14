@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
     build_stage1_5d_runtime_gate,
     get_stage1_5d_runtime_gate_filename,
@@ -87,6 +89,39 @@ def test_stage1_5d_runtime_gate_ready_state():
         assert gate[field] is False
 
 
+def test_runtime_gate_serializes_normal_storage_guard_telemetry():
+    gate = build_stage1_5d_runtime_gate(_build_test_gate_context(
+        storage_guard_status="ready",
+        storage_free_bytes=9 * 1024**3,
+        storage_root_bytes=123,
+        storage_root_scanned_at_ms=100_000,
+        storage_root_max_bytes=1024**3,
+        storage_terminal_write_set_peak_bytes=1024,
+        storage_emergency_blocker_reserve_bytes=4096,
+        storage_blocker=None,
+    ))
+
+    assert {key: gate[key] for key in (
+        "storage_guard_status",
+        "storage_free_bytes",
+        "storage_root_bytes",
+        "storage_root_scanned_at_ms",
+        "storage_root_max_bytes",
+        "storage_terminal_write_set_peak_bytes",
+        "storage_emergency_blocker_reserve_bytes",
+        "storage_blocker",
+    )} == {
+        "storage_guard_status": "ready",
+        "storage_free_bytes": 9 * 1024**3,
+        "storage_root_bytes": 123,
+        "storage_root_scanned_at_ms": 100_000,
+        "storage_root_max_bytes": 1024**3,
+        "storage_terminal_write_set_peak_bytes": 1024,
+        "storage_emergency_blocker_reserve_bytes": 4096,
+        "storage_blocker": None,
+    }
+
+
 def test_stage1_5d_runtime_gate_requires_explicit_producer_attestation():
     gate = build_stage1_5d_runtime_gate(_build_test_gate_context())
 
@@ -117,7 +152,32 @@ def test_stage1_5d_runtime_gate_atomic_write(tmp_path):
     gate = build_stage1_5d_runtime_gate(ctx)
     expected_root_id = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
     assert gate["stage1_5d_output_root_id"] == expected_root_id
-    written_path = write_stage1_5d_runtime_gate_atomic(tmp_path, gate)
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    storage_guard = StorageGuard(output_root=tmp_path, stage="1.5D")
+    written_path = write_stage1_5d_runtime_gate_atomic(tmp_path, gate, storage_guard=storage_guard)
     assert written_path.exists()
     assert written_path.name == "live_safety_gate_summary.json"
-    assert write_stage1_5d_runtime_gate(tmp_path, gate).exists()
+    assert write_stage1_5d_runtime_gate(tmp_path, gate, storage_guard=storage_guard).exists()
+
+
+def test_runtime_gate_writer_requires_guard_and_reserves_by_gate_status(tmp_path):
+    class CapturingGuard:
+        def __init__(self):
+            self.artifact_classes = []
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            self.artifact_classes.append(artifact_class)
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    ready_gate = build_stage1_5d_runtime_gate(_build_test_gate_context(output_root=tmp_path))
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        write_stage1_5d_runtime_gate_atomic(tmp_path, ready_gate, storage_guard=None)
+
+    guard = CapturingGuard()
+    write_stage1_5d_runtime_gate_atomic(tmp_path, ready_gate, storage_guard=guard)
+    failed_gate = build_stage1_5d_runtime_gate(
+        _build_test_gate_context(output_root=tmp_path, fatal_blockers=["storage_root_budget"])
+    )
+    write_stage1_5d_runtime_gate_atomic(tmp_path, failed_gate, storage_guard=guard)
+    assert guard.artifact_classes == ["ordinary_control_plane", "terminal_control_plane"]

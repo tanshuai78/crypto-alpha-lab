@@ -5,10 +5,12 @@ Durable append-only registry for Stage 1.5F schedule revisions.
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from research.external_signal_shadow.stage1_5_launch_anchor_contract import canonical_json_bytes
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 
 
 def compute_revision_application_id(*, stable_schedule_identity: str, revision_id: str, revision_payload_hash: str) -> str:
@@ -60,8 +62,12 @@ class ScheduleRevisionRegistry:
         stable_schedule_identity: str,
         revision_id: str,
         revision_payload_hash: str,
+        storage_guard: Any,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> dict:
+        if storage_guard is None:
+            raise TypeError("storage_guard_required")
+
         row = {
             "revision_application_id": revision_application_id,
             "status": status,
@@ -70,9 +76,27 @@ class ScheduleRevisionRegistry:
             "revision_payload_hash": revision_payload_hash,
             "details": details or {},
         }
-        with open(self.registry_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=True) + "\n")
+        serialized_bytes = (json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8")
+
+        def _write_action():
+            self.registry_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.registry_file, "ab") as f:
+                f.write(serialized_bytes)
+                f.flush()
+                os.fsync(f.fileno())
+
+        res = storage_guard.reserve_and_write(
+            artifact_class="normal_data",
+            transient_peak_bytes=len(serialized_bytes),
+            persistent_delta_bytes=len(serialized_bytes),
+            write_func=_write_action,
+        )
+
+        require_storage_write(storage_guard, res)
+
         self.records.append(row)
         self.latest_status_by_id[revision_application_id] = status
         if status == "revision_applied":
             self.applied_ids.add(revision_application_id)
+
+        return {"written": True, "storage_blocker": None}

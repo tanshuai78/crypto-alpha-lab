@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from configs import base
 from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
     validate_launch_anchor_contract,
 )
@@ -200,6 +199,7 @@ def rebuild_missing_formal_launch_identity_index(
     index_path: Path | str,
     source_root_id: str,
     commit_sha: str,
+    storage_guard: Any,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Recover missing current-root identity rows from durable launch events."""
     from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import append_jsonl
@@ -235,7 +235,7 @@ def rebuild_missing_formal_launch_identity_index(
                 key = (index_row["supersedes_source_article_id"], index_row["symbol"])
                 if key in existing_keys:
                     continue
-                append_jsonl(index_path, index_row)
+                append_jsonl(index_path, index_row, storage_guard=storage_guard)
                 existing_keys.add(key)
                 rebuilt += 1
     return rebuilt, diagnostics

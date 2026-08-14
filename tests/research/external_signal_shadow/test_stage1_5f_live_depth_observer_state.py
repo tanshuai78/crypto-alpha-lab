@@ -207,19 +207,29 @@ def test_terminal_observation_is_not_restarted():
 
 
 def test_startup_compacts_observer_state_to_latest_row_per_event_symbol(tmp_path):
+    import shutil
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    guard = StorageGuard(
+        output_root=tmp_path,
+        stage="1.5F",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
     state_file = tmp_path / "observer_state.jsonl"
     # Write duplicate rows for same event_symbol_id
     rows = [
         {"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "active"},
         {"event_symbol_id": "id2", "symbol": "ETHUSDT", "status": "active"},
-        {"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "completed"}, # latest for id1
+        {"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "completed"},  # latest for id1
     ]
     with open(state_file, "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
 
-    # Compact
-    compact_observer_state_jsonl(str(state_file))
+    # Compact with mandatory guard
+    res = compact_observer_state_jsonl(str(state_file), storage_guard=guard)
+    assert res["compacted"] is True
 
     # Reload and check
     latest = load_latest_state_by_event_symbol_id(str(state_file))
@@ -228,18 +238,36 @@ def test_startup_compacts_observer_state_to_latest_row_per_event_symbol(tmp_path
     assert latest["id2"].status == "active"
 
 
-def test_state_compaction_writes_backup_before_replace(tmp_path):
+def test_state_compaction_does_not_write_bak_backup(tmp_path):
+    import shutil
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    guard = StorageGuard(
+        output_root=tmp_path,
+        stage="1.5F",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
     state_file = tmp_path / "observer_state.jsonl"
     with open(state_file, "w") as f:
         f.write(json.dumps({"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "active"}) + "\n")
 
-    compact_observer_state_jsonl(str(state_file))
+    compact_observer_state_jsonl(str(state_file), storage_guard=guard)
 
-    # Check if a .bak file exists in the directory
+    # Check that NO .bak file exists in the directory (INV-04)
     files = os.listdir(tmp_path)
     bak_files = [f for f in files if f.endswith(".bak")]
-    assert len(bak_files) == 1
-    assert "observer_state" in bak_files[0]
+    assert len(bak_files) == 0
+
+
+def test_checkpoint_writer_requires_guard(tmp_path):
+    import pytest
+    state_file = tmp_path / "observer_state.jsonl"
+    state_file.write_text(json.dumps({"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "active"}) + "\n")
+
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        compact_observer_state_jsonl(str(state_file), storage_guard=None)
+
 
 
 def test_create_pending_launch_state_survives_state_reload(tmp_path):
@@ -666,7 +694,13 @@ def test_compaction_and_collision_detection_produce_same_result(tmp_path):
     latest1 = load_latest_states_by_event_symbol_id(p)
     collisions1 = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest1))
 
-    compact_observer_state_jsonl(p)
+    import shutil
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    guard = StorageGuard(output_root=tmp_path, stage="1.5F", disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3))
+    compact_observer_state_jsonl(p, storage_guard=guard)
+
     latest2 = load_latest_states_by_event_symbol_id(p)
     collisions2 = detect_stable_event_symbol_key_collisions(group_latest_states_by_stable_event_symbol_key(latest2))
 

@@ -1,7 +1,11 @@
 import json
 import logging
+import os
 from pathlib import Path
+from typing import Any
+
 from configs import base
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 
 logger = logging.getLogger(__name__)
 
@@ -389,14 +393,65 @@ def load_detail_retry_scheduler_state(output_root: Path) -> dict:
 
 
 
-def write_detail_retry_scheduler_state(output_root: Path, state: dict, *, metadata_version: int = 2) -> None:
+def write_detail_retry_scheduler_state(
+    output_root: Path,
+    state: dict,
+    *,
+    storage_guard: Any,
+    metadata_version: int = 2,
+) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
+
+
     output_root.mkdir(parents=True, exist_ok=True)
     path = output_root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME
-    tmp_path = path.with_suffix(".json.tmp")
     serializable = dict(state)
     serializable["metadata_version"] = metadata_version
-    tmp_path.write_text(json.dumps(serializable, sort_keys=True), encoding="utf-8")
-    tmp_path.replace(path)
+
+    serialized_bytes = (json.dumps(serializable, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    old_size = path.stat().st_size if path.exists() else 0
+    persistent_delta = len(serialized_bytes) - old_size
+    transient_peak = len(serialized_bytes)
+
+    pid = os.getpid()
+    tmp_path = output_root / f".{DETAIL_RETRY_SCHEDULER_STATE_FILENAME}.atomic.{pid}.tmp"
+
+    def _write_action():
+        with open(tmp_path, "wb") as f:
+            f.write(serialized_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+
+        try:
+            parent_fd = os.open(output_root, os.O_RDONLY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        except Exception:
+            pass
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="ordinary_control_plane",
+        transient_peak_bytes=transient_peak,
+        persistent_delta_bytes=persistent_delta,
+        write_func=_write_action,
+    )
+
+    if res["status"] != "ready" or not res.get("written", False):
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        require_storage_write(storage_guard, res)
+
+    return {"written": True, "storage_blocker": None}
+
 
 
 

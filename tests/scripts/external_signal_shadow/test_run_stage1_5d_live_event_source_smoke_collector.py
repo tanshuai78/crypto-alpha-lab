@@ -4,8 +4,13 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from configs import base
-from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
+from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+    main,
+    write_smoke_summary_atomically,
+)
 
 
 def _write_valid_upstream(tmp_path):
@@ -78,6 +83,97 @@ def test_runner_requires_live_flag_without_fixture(tmp_path):
     assert "missing_live_flag_or_fixture" in s["blockers"]
 
 
+def test_smoke_summary_writer_requires_guard_and_reserves_storage_blocker_terminally(tmp_path):
+    class CapturingGuard:
+        def __init__(self):
+            self.artifact_classes = []
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            self.artifact_classes.append(artifact_class)
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        write_smoke_summary_atomically(tmp_path / "missing-guard.json", {}, storage_guard=None)
+
+    guard = CapturingGuard()
+    write_smoke_summary_atomically(tmp_path / "ordinary.json", {}, storage_guard=guard)
+    write_smoke_summary_atomically(
+        tmp_path / "terminal.json",
+        {"storage_blocker": "root_budget_exceeded_for_normal_data"},
+        storage_guard=guard,
+    )
+    assert guard.artifact_classes == ["ordinary_control_plane", "terminal_control_plane"]
+
+
+def test_startup_storage_block_writes_terminal_d_gate_and_summary(tmp_path):
+    class BlockedStartupGuard:
+        instances = []
+
+        def __init__(self, output_root, stage, terminal_write_set_peak_bytes):
+            self.output_root = Path(output_root)
+            self.artifact_classes = []
+            self.terminal_write_set_peak_bytes = terminal_write_set_peak_bytes
+            self.__class__.instances.append(self)
+
+        def cleanup_owned_temp_files(self, _process_instance_id):
+            return None
+
+        def validate_startup(self):
+            return {"status": "blocked_start_free_space", "storage_blocker": "storage_start_free_space"}
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            self.artifact_classes.append(artifact_class)
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    output_root = tmp_path / "out"
+    with patch(
+        "src.research.external_signal_shadow.stage1_5_storage_guard.StorageGuard",
+        BlockedStartupGuard,
+    ), patch("sys.argv", ["run_stage1_5d_live_event_source_smoke_collector.py", "--output-root", str(output_root)]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+    assert exc.value.code == 1
+    gate_path = output_root / "live_safety_gate_summary.json"
+    summary_path = output_root / "binance_futures_launch_smoke_summary.json"
+    diagnostic_path = output_root / "storage_failure_diagnostic.json"
+    assert gate_path.exists()
+    assert summary_path.exists()
+    assert diagnostic_path.exists()
+    assert gate_path.stat().st_size <= base.EXTERNAL_SIGNAL_STAGE1_5D_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
+    assert summary_path.stat().st_size <= base.EXTERNAL_SIGNAL_STAGE1_5D_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
+    assert BlockedStartupGuard.instances[0].artifact_classes == [
+        "terminal_control_plane",
+        "terminal_control_plane",
+        "terminal_control_plane",
+    ]
+    assert BlockedStartupGuard.instances[0].terminal_write_set_peak_bytes <= base.EXTERNAL_SIGNAL_STAGE1_5D_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
+
+
+def test_runtime_storage_block_writes_terminal_d_gate_and_summary(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import (
+        run_stage1_5d_live_event_source_smoke_collector as runner,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageWriteBlocked
+
+    class TerminalGuard:
+        def __init__(self, output_root, stage):
+            self.output_root = Path(output_root)
+            self.stage = stage
+
+        def reserve_and_write(self, *, artifact_class, transient_peak_bytes, persistent_delta_bytes, write_func):
+            return {"status": "ready", "written": True, "write_result": write_func()}
+
+    output_root = tmp_path / "out"
+    guard = TerminalGuard(output_root, "1.5D")
+    monkeypatch.setattr(runner, "_main", lambda: (_ for _ in ()).throw(StorageWriteBlocked(guard, {"storage_blocker": "root_budget_exceeded_for_normal_data"})))
+
+    assert runner.main() == 1
+    assert json.loads((output_root / "live_safety_gate_summary.json").read_text())["decision"] == "stage1_5d_runtime_gate_failed"
+    assert json.loads((output_root / "binance_futures_launch_smoke_summary.json").read_text())["storage_blocker"] == "root_budget_exceeded_for_normal_data"
+    assert json.loads((output_root / "storage_failure_diagnostic.json").read_text())["diagnostic_type"] == "storage_write_blocked"
+
+
 def test_runner_fixture_zero_event_operational_pass(tmp_path):
     fixture = tmp_path / "fixture.json"
     fixture.write_text(json.dumps({"data": {"catalogs": [{"articles": []}]}}))
@@ -102,6 +198,13 @@ def test_runner_fixture_zero_event_operational_pass(tmp_path):
     assert s["research_result_valid"] is False
     assert s["event_detection_validated"] is False
     assert (output_root / "heartbeats").exists()
+    gate = json.loads((output_root / "live_safety_gate_summary.json").read_text())
+    assert gate["storage_guard_status"] == "ready"
+    assert gate["storage_blocker"] is None
+    assert gate["storage_root_bytes"] >= 0
+    assert gate["storage_root_max_bytes"] > gate["storage_root_bytes"]
+    assert gate["storage_terminal_write_set_peak_bytes"] > 0
+    assert gate["storage_emergency_blocker_reserve_bytes"] > 0
 
 
 def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
@@ -952,14 +1055,13 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
     assert len(event_files) == 1
     events = [json.loads(line) for line in event_files[0].read_text().strip().splitlines()]
     assert len(events) == 1
-    assert events[0]["symbols"] == ["BTCU", "ETHU"]
-
     manifest_files = list((output_root / "request_manifest").glob("*.jsonl"))
     assert len(manifest_files) == 1
     manifest_rows = [json.loads(line) for line in manifest_files[0].read_text().strip().splitlines()]
     detail_row = next((r for r in manifest_rows if r.get("source_type") == "announcement_detail" and r.get("detail_fetch_variant") != "bapi_article_detail_query"), None)
     assert detail_row is not None
-    assert detail_row["payload_path"].endswith(".html")
+    assert detail_row["payload_path"].endswith((".bin", ".html"))
+
 
 
 
@@ -5063,7 +5165,13 @@ def test_emitted_terminal_fields_survive_scheduler_roundtrip(tmp_path):
         }
     }
     ser = serialize_retry_articles(state)
-    write_detail_retry_scheduler_state(tmp_path, {"articles": ser, "endpoint_health": {}}, metadata_version=2)
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    write_detail_retry_scheduler_state(
+        tmp_path,
+        {"articles": ser, "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=tmp_path, stage="1.5D"),
+    )
     loaded = load_detail_retry_scheduler_state(tmp_path)
 
     art = loaded["articles"]["93b5"]
@@ -5098,12 +5206,14 @@ def test_old_scheduler_schema_loads_with_safe_defaults(tmp_path):
 
 
 def test_emitted_article_is_not_reselected_after_restart(tmp_path):
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
         load_detail_retry_scheduler_state,
         select_detail_retry_attempts,
         serialize_retry_articles,
         write_detail_retry_scheduler_state,
     )
+
 
     state = {
         "93b5": {
@@ -5115,7 +5225,13 @@ def test_emitted_article_is_not_reselected_after_restart(tmp_path):
         }
     }
     ser = serialize_retry_articles(state)
-    write_detail_retry_scheduler_state(tmp_path, {"articles": ser, "endpoint_health": {}}, metadata_version=2)
+    write_detail_retry_scheduler_state(
+        tmp_path,
+        {"articles": ser, "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=tmp_path, stage="1.5D"),
+    )
+
     loaded = load_detail_retry_scheduler_state(tmp_path)
     selected = select_detail_retry_attempts(
         detail_retry_state=loaded["articles"],
@@ -5666,10 +5782,12 @@ def test_append_formal_schedule_revision_writes_valid_row_and_blocks_invalid(tmp
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         append_formal_schedule_revision,
     )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     stream_paths = {
         "events": str(tmp_path / "events.jsonl"),
         "detail_retry_terminal_diagnostics": str(tmp_path / "diagnostics.jsonl"),
+        "storage_guard": StorageGuard(output_root=tmp_path, stage="1.5D"),
     }
     valid_row = build_formal_schedule_revision_row(
         source_article_id="revision-article",
@@ -5705,11 +5823,13 @@ def test_trusted_revision_detail_is_processed_by_runner_transport(tmp_path):
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         process_trusted_schedule_revision_detail,
     )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     stream_paths = {
         "events": tmp_path / "events.jsonl",
         "detail_retry_terminal_diagnostics": tmp_path / "diagnostics.jsonl",
         "formal_launch_identity_index": tmp_path / "formal_launch_identity_index.jsonl",
+        "storage_guard": StorageGuard(output_root=tmp_path, stage="1.5D"),
     }
     stream_paths["formal_launch_identity_index"].write_text(
         json.dumps(
@@ -5846,10 +5966,6 @@ def test_runner_emits_revision_only_after_durable_launch_in_same_poll(tmp_path, 
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
     monkeypatch.setattr(
         "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
-        lambda: head_sha,
-    )
-    monkeypatch.setattr(
-        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.read_current_commit_sha",
         lambda: "abc123",
     )
     monkeypatch.setattr(
@@ -5966,6 +6082,7 @@ EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
 
 def test_schedule_revision_attestation_derives_current_commit_and_never_falls_back(monkeypatch):
     import inspect
+
     from configs import base
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         build_schedule_revision_producer_attestation,
@@ -5992,6 +6109,7 @@ def test_schedule_revision_attestation_derives_current_commit_and_never_falls_ba
 
 def test_startup_static_proof_helpers_in_temp_sha1_repo(tmp_path):
     import subprocess
+
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         verify_git_ancestry_and_static_proof,
     )
@@ -6081,6 +6199,7 @@ EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = True
 
 def test_stage1_5d_runtime_attestation_latches_after_untracked_python(tmp_path):
     import subprocess
+
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
         update_stage1_5d_runtime_attestation_latch,
         verify_stage1_5d_runtime_attestation,

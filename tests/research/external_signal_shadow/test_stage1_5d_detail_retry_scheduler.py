@@ -1,19 +1,17 @@
-from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-    select_detail_retry_attempts,
-    compute_detail_transient_backoff_ms,
-    serialize_retry_articles,
-    classify_never_attempted_defer_state,
-    load_detail_retry_scheduler_state,
-    write_detail_retry_scheduler_state,
-    update_detail_endpoint_health,
-    update_detail_endpoint_health_by_source,
-    is_detail_source_degraded,
-    classify_detail_source_failure,
-    summarize_detail_retry_overdue_state,
-)
-
 from pathlib import Path
 
+from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+    classify_detail_source_failure,
+    classify_never_attempted_defer_state,
+    is_detail_source_degraded,
+    load_detail_retry_scheduler_state,
+    select_detail_retry_attempts,
+    serialize_retry_articles,
+    summarize_detail_retry_overdue_state,
+    update_detail_endpoint_health,
+    update_detail_endpoint_health_by_source,
+    write_detail_retry_scheduler_state,
+)
 
 
 def test_never_attempted_article_is_selected_before_old_transient_backlog():
@@ -201,7 +199,20 @@ def test_never_attempted_max_age_becomes_budget_starved_not_parser_failure():
     assert result["detail_fetch_status"] == "budget_starved"
 
 
+def create_test_guard(root: Path):
+    import shutil
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    return StorageGuard(
+        output_root=root,
+        stage="1.5D",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
+
+
 def test_detail_retry_scheduler_state_round_trips(tmp_path):
+    guard = create_test_guard(tmp_path)
     state = {
         "articles": {
             "old": {
@@ -228,7 +239,8 @@ def test_detail_retry_scheduler_state_round_trips(tmp_path):
         },
     }
 
-    write_detail_retry_scheduler_state(tmp_path, state, metadata_version=1)
+    res = write_detail_retry_scheduler_state(tmp_path, state, storage_guard=guard, metadata_version=1)
+    assert res["written"] is True
     loaded = load_detail_retry_scheduler_state(tmp_path)
 
     assert loaded["metadata_version"] == 1
@@ -236,7 +248,14 @@ def test_detail_retry_scheduler_state_round_trips(tmp_path):
     assert loaded["endpoint_health"]["detail_endpoint_degraded_until_ms"] == 62000
 
 
+def test_detail_retry_scheduler_writer_requires_guard(tmp_path):
+    import pytest
+    with pytest.raises(TypeError, match="storage_guard_required"):
+        write_detail_retry_scheduler_state(tmp_path, {}, storage_guard=None)
+
+
 def test_old_202_backoff_survives_restart_and_new_article_gets_attempt(tmp_path):
+    guard = create_test_guard(tmp_path)
     write_detail_retry_scheduler_state(
         tmp_path,
         {
@@ -272,6 +291,7 @@ def test_old_202_backoff_survives_restart_and_new_article_gets_attempt(tmp_path)
             },
             "endpoint_health": {},
         },
+        storage_guard=guard,
         metadata_version=1,
     )
 
@@ -287,6 +307,7 @@ def test_old_202_backoff_survives_restart_and_new_article_gets_attempt(tmp_path)
 
 
 def test_pending_detail_article_survives_restart_after_it_disappears_from_catalog_list(tmp_path):
+    guard = create_test_guard(tmp_path)
     write_detail_retry_scheduler_state(
         tmp_path,
         {
@@ -310,6 +331,7 @@ def test_pending_detail_article_survives_restart_after_it_disappears_from_catalo
             },
             "endpoint_health": {},
         },
+        storage_guard=guard,
         metadata_version=1,
     )
 
@@ -325,6 +347,7 @@ def test_pending_detail_article_survives_restart_after_it_disappears_from_catalo
         detail_budget_per_poll=1,
         endpoint_degraded_until_ms=0,
     ) == ["missing_from_catalog"]
+
 
 
 def test_endpoint_degraded_after_recent_202_empty_rate_crosses_threshold():
@@ -1030,4 +1053,3 @@ def test_v1_scheduler_state_loads_with_safe_defaults(tmp_path):
     assert art["last_bapi_detail_status"] is None
     assert art["last_bapi_parser_status"] is None
     assert art["launch_anchor_policy"] is None
-

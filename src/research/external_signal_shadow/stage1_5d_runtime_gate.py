@@ -1,8 +1,10 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from configs import base
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 from src.risk.limits import RiskLimits
 
 STAGE1_5D_RUNTIME_GATE_FILENAME = "live_safety_gate_summary.json"
@@ -136,21 +138,66 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
 
         "live_trading_enabled": bool(RiskLimits.live_trading_enabled),
     }
+    for field in (
+        "storage_guard_status",
+        "storage_guard_checked_at_ms",
+        "storage_free_bytes",
+        "storage_root_bytes",
+        "storage_root_scanned_at_ms",
+        "storage_root_max_bytes",
+        "storage_terminal_write_set_peak_bytes",
+        "storage_emergency_blocker_reserve_bytes",
+        "storage_blocker",
+    ):
+        if field in ctx:
+            gate[field] = ctx[field]
     for field in SAFETY_FALSE_FIELDS:
         gate[field] = False
     return gate
 
 
 
-def write_stage1_5d_runtime_gate_atomic(output_root: str | Path, gate_summary: dict) -> Path:
+def write_stage1_5d_runtime_gate_atomic(
+    output_root: str | Path,
+    gate_summary: dict,
+    *,
+    storage_guard: Any,
+) -> Path:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     root = Path(output_root)
-    root.mkdir(parents=True, exist_ok=True)
     gate_file = root / STAGE1_5D_RUNTIME_GATE_FILENAME
     tmp_file = gate_file.with_suffix(".json.tmp")
-    tmp_file.write_text(json.dumps(gate_summary, indent=2, sort_keys=True), encoding="utf-8")
-    tmp_file.replace(gate_file)
+    serialized = json.dumps(gate_summary, indent=2, sort_keys=True).encode("utf-8")
+    old_size = gate_file.stat().st_size if gate_file.exists() else 0
+
+    def _write_action() -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        with open(tmp_file, "wb") as handle:
+            handle.write(serialized)
+            handle.flush()
+        tmp_file.replace(gate_file)
+        return gate_file
+
+    result = storage_guard.reserve_and_write(
+        artifact_class=(
+            "terminal_control_plane"
+            if gate_summary.get("decision") == "stage1_5d_runtime_gate_failed"
+            else "ordinary_control_plane"
+        ),
+        transient_peak_bytes=len(serialized),
+        persistent_delta_bytes=max(0, len(serialized) - old_size),
+        write_func=_write_action,
+    )
+    require_storage_write(storage_guard, result)
     return gate_file
 
 
-def write_stage1_5d_runtime_gate(output_root: str | Path, gate_summary: dict) -> Path:
-    return write_stage1_5d_runtime_gate_atomic(output_root, gate_summary)
+def write_stage1_5d_runtime_gate(
+    output_root: str | Path,
+    gate_summary: dict,
+    *,
+    storage_guard: Any,
+) -> Path:
+    return write_stage1_5d_runtime_gate_atomic(output_root, gate_summary, storage_guard=storage_guard)

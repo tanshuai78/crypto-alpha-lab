@@ -8,10 +8,16 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from configs import base
+from src.research.external_signal_shadow.stage1_5_storage_guard import (
+    StorageWriteBlocked,
+    require_storage_write,
+    terminal_write_set_peak_bytes,
+)
 from src.risk.limits import RiskLimits
 
 CONSUMER_PROCESS_INSTANCE_ID = str(uuid.uuid4())
@@ -54,18 +60,75 @@ def canonical_root_contract_sha256(root_contract: dict) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def write_live_depth_observer_summary_atomically(summary_path: str | Path, summary_data: dict) -> None:
+def write_live_depth_observer_summary_atomically(
+    summary_path: str | Path,
+    summary_data: dict,
+    *,
+    storage_guard: Any,
+) -> None:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     p = Path(summary_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     tmp_p = p.with_suffix(".json.tmp")
-    with open(tmp_p, "w", encoding="utf-8") as f:
-        json.dump(summary_data, f, indent=2)
-        f.flush()
-        try:
-            os.fsync(f.fileno())
-        except OSError:
-            pass
-    os.replace(tmp_p, p)
+    serialized = json.dumps(summary_data, indent=2).encode("utf-8")
+    old_size = p.stat().st_size if p.exists() else 0
+
+    def _write_action() -> None:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_p, "wb") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_p, p)
+
+    result = storage_guard.reserve_and_write(
+        artifact_class=(
+            "terminal_control_plane"
+            if summary_data.get("storage_blocker")
+            else "ordinary_control_plane"
+        ),
+        transient_peak_bytes=len(serialized),
+        persistent_delta_bytes=max(0, len(serialized) - old_size),
+        write_func=_write_action,
+    )
+    require_storage_write(storage_guard, result)
+
+
+def _build_storage_failure_summary(storage_blocker: str, storage_guard_status: str) -> dict:
+    return {
+        "decision": "stage1_5f_observer_failed",
+        "blocker": str(storage_blocker)[:512],
+        "storage_blocker": str(storage_blocker)[:512],
+        "storage_guard_status": str(storage_guard_status)[:128],
+        "block_new_event_admission": True,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }
+
+
+def _storage_failure_write_set_peak(terminal_summary: dict) -> int:
+    terminal_diagnostic = {
+        "diagnostic_type": "storage_write_blocked",
+        "stage": "1.5F",
+        "storage_blocker": terminal_summary["storage_blocker"],
+        "storage_guard_status": terminal_summary["storage_guard_status"],
+    }
+    return terminal_write_set_peak_bytes([
+        json.dumps(terminal_summary, indent=2).encode("utf-8"),
+        json.dumps(terminal_diagnostic, indent=2).encode("utf-8"),
+    ])
+
+
+def _build_storage_failure_diagnostic(terminal_summary: dict) -> dict:
+    return {
+        "diagnostic_type": "storage_write_blocked",
+        "stage": "1.5F",
+        "storage_blocker": terminal_summary["storage_blocker"],
+        "storage_guard_status": terminal_summary["storage_guard_status"],
+    }
 
 
 def build_consumer_proof_facts(
@@ -217,10 +280,13 @@ def write_observer_root_contract_atomically(
     root_mode: str,
     reason: str = "",
     *,
+    storage_guard: Any,
     source_binding_facts: dict | None = None,
 ) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     root_dir = Path(output_root)
-    root_dir.mkdir(parents=True, exist_ok=True)
     root_path = root_dir / "observer_root_contract.json"
     tmp_path = root_dir / "observer_root_contract.json.tmp"
 
@@ -236,27 +302,57 @@ def write_observer_root_contract_atomically(
     if source_binding_facts:
         content.update(source_binding_facts)
 
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(content, f, indent=2)
-    os.replace(tmp_path, root_path)
+    serialized_bytes = json.dumps(content, indent=2).encode("utf-8")
+    old_size = root_path.stat().st_size if root_path.exists() else 0
+
+    def _write_action():
+        root_dir.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            f.write(serialized_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, root_path)
+
+    result = storage_guard.reserve_and_write(
+        artifact_class="ordinary_control_plane",
+        transient_peak_bytes=len(serialized_bytes),
+        persistent_delta_bytes=max(0, len(serialized_bytes) - old_size),
+        write_func=_write_action,
+    )
+    require_storage_write(storage_guard, result)
     return content
 
 
 
 
-def emit_sample_capped_diagnostic(output_root: str, subfolder: str, row: dict, diag_type: str, now_ms: int, counts_map: dict) -> bool:
-    max_cap = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_REJECTION_HYGIENE_DIAGNOSTIC_SAMPLES_PER_TYPE
+def emit_sample_capped_diagnostic(
+    output_root: str,
+    subfolder: str,
+    row: dict,
+    diag_type: str,
+    now_ms: int,
+    counts_map: dict,
+    *,
+    storage_guard: Any,
+    max_cap: int | None = None,
+) -> bool:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+    if max_cap is None:
+        max_cap = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_REJECTION_HYGIENE_DIAGNOSTIC_SAMPLES_PER_TYPE
     curr = counts_map.get(diag_type, 0)
     if curr >= max_cap:
         return False
+
     counts_map[diag_type] = curr + 1
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
         append_jsonl,
         build_daily_path,
     )
     diag_path = build_daily_path(output_root, subfolder, now_ms)
-    append_jsonl(diag_path, row)
+    append_jsonl(diag_path, row, storage_guard=storage_guard)
     return True
+
 
 
 def load_terminal_hygiene_diagnostic_sample_counts(output_root: str) -> dict:
@@ -283,11 +379,14 @@ def load_all_events(fixture_path: str, glob_pattern: str):
 
 def load_all_jsonl_from_subdirs(root: str, stream_name: str) -> list:
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import read_jsonl
-    pattern = os.path.join(root, stream_name, "**", "*.jsonl")
+    pattern1 = os.path.join(root, stream_name, "*.jsonl")
+    pattern2 = os.path.join(root, stream_name, "**", "*.jsonl")
+    matched_paths = sorted(list(set(glob.glob(pattern1) + glob.glob(pattern2, recursive=True))))
     rows = []
-    for filepath in sorted(glob.glob(pattern, recursive=True)):
+    for filepath in matched_paths:
         rows.extend(read_jsonl(filepath))
     return rows
+
 
 
 def load_all_snapshots_for_event_symbol(root: str, event_symbol_id: str) -> list:
@@ -350,7 +449,11 @@ def process_schedule_revision_event(
     state_file: str,
     registry_file: str | Path,
     now_ms: int,
+    storage_guard: Any,
 ) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
         validate_schedule_revision_contract,
     )
@@ -400,6 +503,7 @@ def process_schedule_revision_event(
             stable_schedule_identity=stable_identity,
             revision_id=revision_id,
             revision_payload_hash=revision_payload_hash,
+            storage_guard=storage_guard,
             details={"reason": "malformed_schedule_revision_event"},
         )
         return {"status": "revision_blocked", "revision_application_id": app_id}
@@ -417,6 +521,7 @@ def process_schedule_revision_event(
             stable_schedule_identity=stable_identity,
             revision_id=revision_id,
             revision_payload_hash=revision_payload_hash,
+            storage_guard=storage_guard,
             details={"source_article_id": revision_event.get("source_article_id")},
         )
 
@@ -442,6 +547,7 @@ def process_schedule_revision_event(
             stable_schedule_identity=stable_identity,
             revision_id=revision_id,
             revision_payload_hash=revision_payload_hash,
+            storage_guard=storage_guard,
             details={"reason": "no_matching_launch_state"},
         )
         return {"status": "revision_orphaned", "revision_application_id": app_id}
@@ -455,6 +561,7 @@ def process_schedule_revision_event(
             stable_schedule_identity=stable_identity,
             revision_id=revision_id,
             revision_payload_hash=revision_payload_hash,
+            storage_guard=storage_guard,
             details={"matching_event_symbol_ids": sorted(distinct_matches)},
         )
         return {"status": "revision_ambiguous", "revision_application_id": app_id}
@@ -462,16 +569,18 @@ def process_schedule_revision_event(
     target_state = next(iter(distinct_matches.values()))
     updated_state = apply_anchor_contract_revision_to_state(target_state, revision_with_id, now_ms)
     states[updated_state.event_symbol_id] = updated_state
-    append_jsonl(state_file, updated_state.to_dict())
+    append_jsonl(state_file, updated_state.to_dict(), storage_guard=storage_guard)
     registry.record_revision(
         revision_application_id=app_id,
         status="revision_applied",
         stable_schedule_identity=stable_identity,
         revision_id=revision_id,
         revision_payload_hash=revision_payload_hash,
+        storage_guard=storage_guard,
         details={"event_symbol_id": updated_state.event_symbol_id},
     )
     return {"status": "revision_applied", "revision_application_id": app_id}
+
 
 
 def load_schedule_revision_registry_status_counts(registry_file: str | Path) -> dict[str, int]:
@@ -585,7 +694,11 @@ def build_accepted_row_from_state(state, watermark, now_ms: int) -> dict:
     }
 
 
-def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, now_ms: int) -> list[dict]:
+def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, now_ms: int, *, storage_guard: Any) -> list[dict]:
+
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
         make_acceptance_id,
     )
@@ -612,7 +725,7 @@ def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, n
         state_with_id = state.__class__.from_dict(d)
         row = build_accepted_row_from_state(state_with_id, watermark, now_ms)
         accepted_path = build_daily_path(output_root, "events_accepted", row["accepted_at_ms"])
-        append_jsonl(accepted_path, row)
+        append_jsonl(accepted_path, row, storage_guard=storage_guard)
         existing_acceptance_ids.add(acceptance_id)
         existing_event_symbol_ids.add(state.event_symbol_id)
         backfilled.append(row)
@@ -620,7 +733,10 @@ def reconcile_missing_accepted_rows(output_root: str, states: dict, watermark, n
     return backfilled
 
 
-def reconcile_missing_terminal_ignored_rows(output_root: str, states: dict, now_ms: int) -> list[dict]:
+def reconcile_missing_terminal_ignored_rows(output_root: str, states: dict, now_ms: int, *, storage_guard: Any) -> list[dict]:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
         build_historical_anchor_hygiene_diagnostic,
     )
@@ -655,6 +771,7 @@ def reconcile_missing_terminal_ignored_rows(output_root: str, states: dict, now_
             "historical_anchor_pre_bootstrap_ignored",
             now_ms,
             counts_map,
+            storage_guard=storage_guard,
         )
         if emitted:
             if hygiene_id:
@@ -665,7 +782,10 @@ def reconcile_missing_terminal_ignored_rows(output_root: str, states: dict, now_
     return reconciled
 
 
-def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, states: dict, now_ms: int) -> dict:
+def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, states: dict, now_ms: int, *, storage_guard: Any) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
+
     from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
         EventSymbolState,
     )
@@ -723,7 +843,7 @@ def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, stat
         states[event_symbol_id] = state
         by_event_symbol_id[event_symbol_id] = state
         by_hygiene_id[hygiene_id] = state
-        append_jsonl(state_file, state.to_dict())
+        append_jsonl(state_file, state.to_dict(), storage_guard=storage_guard)
         rebuilt_ignored += 1
 
     rejected_rows = load_all_jsonl_from_subdirs(output_root, "events_rejected")
@@ -755,7 +875,7 @@ def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, stat
         states[event_symbol_id] = state
         by_event_symbol_id[event_symbol_id] = state
         by_hygiene_id[hygiene_id] = state
-        append_jsonl(state_file, state.to_dict())
+        append_jsonl(state_file, state.to_dict(), storage_guard=storage_guard)
         rebuilt_rejected += 1
 
     return {
@@ -764,10 +884,44 @@ def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, stat
     }
 
 
-def main():
+
+def _main():
     args = parse_args()
     output_root = args.output_root
-    os.makedirs(output_root, exist_ok=True)
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    startup_summary = _build_storage_failure_summary("x" * 512, "x" * 128)
+    storage_guard = StorageGuard(
+        output_root=output_root,
+        stage="1.5F",
+        terminal_write_set_peak_bytes=_storage_failure_write_set_peak(startup_summary),
+    )
+    process_instance_id = f"proc_{os.getpid()}_{int(time.time())}"
+    storage_guard.cleanup_owned_temp_files(process_instance_id)
+
+    startup_res = storage_guard.validate_startup()
+    if startup_res["status"] != "ready":
+        storage_blocker = str(startup_res.get("storage_blocker") or startup_res["status"])
+        terminal_summary = _build_storage_failure_summary(storage_blocker, startup_res["status"])
+        try:
+            write_live_depth_observer_summary_atomically(
+                os.path.join(output_root, "live_depth_observer_summary.json"),
+                terminal_summary,
+                storage_guard=storage_guard,
+            )
+        except RuntimeError as exc:
+            logger.error(f"StorageGuard terminal evidence write failed: {exc}")
+        try:
+            write_live_depth_observer_summary_atomically(
+                os.path.join(output_root, "storage_failure_diagnostic.json"),
+                _build_storage_failure_diagnostic(terminal_summary),
+                storage_guard=storage_guard,
+            )
+        except RuntimeError as exc:
+            logger.error(f"StorageGuard terminal evidence write failed: {exc}")
+        logger.error(f"StorageGuard startup validation failed: {startup_res['storage_blocker']}")
+        sys.exit(1)
+
     consumer_static_proof = verify_consumer_static_proof(Path(__file__).resolve().parents[2])
     consumer_source_binding_facts = None
     consumer_runtime_attestation_compromised = False
@@ -790,6 +944,7 @@ def main():
             output_root,
             root_mode,
             reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "bootstrap_watermark",
+            storage_guard=storage_guard,
         )
 
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
@@ -802,7 +957,8 @@ def main():
             output_root=output_root,
             now_ms=int(time.time() * 1000),
         )
-        write_watermark_atomic(os.path.join(output_root, "watermark.json"), watermark)
+        write_watermark_atomic(os.path.join(output_root, "watermark.json"), watermark, storage_guard=storage_guard)
+
 
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
             build_live_depth_observer_summary,
@@ -829,7 +985,9 @@ def main():
             heartbeat_rows=[],
         )
         write_live_depth_observer_summary_atomically(
-            os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict()
+            os.path.join(output_root, "live_depth_observer_summary.json"),
+            summary.to_dict(),
+            storage_guard=storage_guard,
         )
         logger.info("Watermark bootstrapped and summary written. Exiting.")
         sys.exit(0)
@@ -840,6 +998,7 @@ def main():
             output_root,
             root_mode,
             reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "runtime_start",
+            storage_guard=storage_guard,
             source_binding_facts=consumer_proof_facts,
         )
 
@@ -879,7 +1038,9 @@ def main():
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5d_summary_invalid_or_unsafe"
         write_live_depth_observer_summary_atomically(
-            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+            os.path.join(output_root, "live_depth_observer_summary.json"),
+            summary_dict,
+            storage_guard=storage_guard,
         )
         sys.exit(1)
 
@@ -939,7 +1100,9 @@ def main():
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_context_missing_for_observation"
         write_live_depth_observer_summary_atomically(
-            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+            os.path.join(output_root, "live_depth_observer_summary.json"),
+            summary_dict,
+            storage_guard=storage_guard,
         )
         sys.exit(1)
 
@@ -971,7 +1134,9 @@ def main():
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_summary_invalid_or_unsafe"
         write_live_depth_observer_summary_atomically(
-            os.path.join(output_root, "live_depth_observer_summary.json"), summary_dict
+            os.path.join(output_root, "live_depth_observer_summary.json"),
+            summary_dict,
+            storage_guard=storage_guard,
         )
         sys.exit(1)
 
@@ -997,11 +1162,12 @@ def main():
         make_terminal_hygiene_id,
     )
     state_file = os.path.join(output_root, "observer_state.jsonl")
-    compact_observer_state_jsonl(state_file)
+    compact_observer_state_jsonl(state_file, storage_guard=storage_guard)
     states = load_latest_state_by_event_symbol_id(state_file)
-    reconcile_terminal_hygiene_artifacts(output_root, state_file, states, now_ms=int(time.time() * 1000))
-    reconcile_missing_accepted_rows(output_root, states, watermark, now_ms=int(time.time() * 1000))
-    reconcile_missing_terminal_ignored_rows(output_root, states, now_ms=int(time.time() * 1000))
+    reconcile_terminal_hygiene_artifacts(output_root, state_file, states, now_ms=int(time.time() * 1000), storage_guard=storage_guard)
+    reconcile_missing_accepted_rows(output_root, states, watermark, now_ms=int(time.time() * 1000), storage_guard=storage_guard)
+    reconcile_missing_terminal_ignored_rows(output_root, states, now_ms=int(time.time() * 1000), storage_guard=storage_guard)
+
 
     terminal_states_by_stable_event_symbol_key = {
         s.stable_event_symbol_key: s
@@ -1086,7 +1252,7 @@ def main():
             row = exchangeinfo_cache["manifest_row"]
             request_manifest_rows.append(row)
             manifest_path = build_daily_path(output_root, "request_manifest", now_ms)
-            append_jsonl(manifest_path, row)
+            append_jsonl(manifest_path, row, storage_guard=storage_guard)
 
         previous_exchangeinfo_cache = exchangeinfo_cache
         exchangeinfo_state = {
@@ -1134,7 +1300,8 @@ def main():
             snapshots = load_all_snapshots_for_event_symbol(output_root, state.event_symbol_id)
             final_state = finalize_observation_if_due(state, now_ms, snapshots)
             states[state.event_symbol_id] = final_state
-            append_jsonl(state_file, final_state.to_dict())
+            append_jsonl(state_file, final_state.to_dict(), storage_guard=storage_guard)
+
 
         active_states = select_depth_collection_active_states(states)
         active_count = len(active_states)
@@ -1205,6 +1372,7 @@ def main():
                     output_root,
                     root_mode,
                     reason="runtime_source_binding_validated",
+                    storage_guard=storage_guard,
                     source_binding_facts=consumer_proof_facts,
                 )
 
@@ -1250,6 +1418,7 @@ def main():
                 now_ms=now_ms,
                 durable_stable_keys=[],
                 registry_map=event_batch_registry,
+                storage_guard=storage_guard,
             )
 
             durable_keys_for_batch = []
@@ -1278,7 +1447,7 @@ def main():
                 if action == "pending_revision_upsert":
                     updated = upsert_pending_state_with_event_revision(existing_state, flat_event, symbol)
                     states[event_symbol_id] = updated
-                    append_jsonl(state_file, updated.to_dict())
+                    append_jsonl(state_file, updated.to_dict(), storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     continue
 
@@ -1289,7 +1458,7 @@ def main():
                     d["latest_source_event_id"] = flat_event.get("event_id") or existing_state.event_id
                     updated = EventSymbolState.from_dict(d)
                     states[event_symbol_id] = updated
-                    append_jsonl(state_file, updated.to_dict())
+                    append_jsonl(state_file, updated.to_dict(), storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     continue
 
@@ -1299,7 +1468,7 @@ def main():
                     d["last_duplicate_seen_at_ms"] = now_ms
                     updated = EventSymbolState.from_dict(d)
                     states[event_symbol_id] = updated
-                    append_jsonl(state_file, updated.to_dict())
+                    append_jsonl(state_file, updated.to_dict(), storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     continue
 
@@ -1312,7 +1481,9 @@ def main():
                         durable_stable_keys=durable_keys_for_batch,
                         block_reason="identity_collision_blocked",
                         registry_map=event_batch_registry,
+                        storage_guard=storage_guard,
                     )
+
                     batch_blocked = True
                     block_new_event_admission = True
                     break
@@ -1340,6 +1511,7 @@ def main():
                         "historical_anchor_pre_bootstrap_ignored",
                         now_ms,
                         historical_diagnostic_samples_by_type,
+                        storage_guard=storage_guard,
                     )
                     d = terminal_state.to_dict()
                     d["diagnostic_expected"] = bool(diag_emitted)
@@ -1354,7 +1526,7 @@ def main():
                     if terminal_state.terminal_hygiene_id:
                         terminal_states_by_terminal_hygiene_id[terminal_state.terminal_hygiene_id] = terminal_state
 
-                    append_jsonl(state_file, terminal_state.to_dict())
+                    append_jsonl(state_file, terminal_state.to_dict(), storage_guard=storage_guard)
                     historical_anchor_newly_ignored_this_poll += 1
                     durable_keys_for_batch.append(stable_key)
                     continue
@@ -1378,6 +1550,7 @@ def main():
                             "bootstrap_watermark_missing",
                             now_ms,
                             historical_diagnostic_samples_by_type,
+                            storage_guard=storage_guard,
                         )
                     elif reason == "malformed_source_identity":
                         malformed_terminal_diagnostic_count += 1
@@ -1396,6 +1569,7 @@ def main():
                             "malformed_source_identity",
                             now_ms,
                             historical_diagnostic_samples_by_type,
+                            storage_guard=storage_guard,
                         )
                     durable_keys_for_batch.append(stable_key)
                     continue
@@ -1404,7 +1578,7 @@ def main():
                     pending_state = create_pending_observation_state(flat_event, reason, eligibility_diag, now_ms)
                     states[event_symbol_id] = pending_state
                     phase_a_pending_ids.add(event_symbol_id)
-                    append_jsonl(state_file, pending_state.to_dict())
+                    append_jsonl(state_file, pending_state.to_dict(), storage_guard=storage_guard)
 
                     pending_path = build_daily_path(output_root, "events_pending", now_ms)
                     append_jsonl(pending_path, {
@@ -1418,7 +1592,7 @@ def main():
                         "first_seen_at_ms": pending_state.first_seen_at_ms,
                         "next_admission_check_at_ms": pending_state.next_admission_check_at_ms,
                         "anchor_resolution_deadline_ms": pending_state.anchor_resolution_deadline_ms,
-                    })
+                    }, storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     has_pending_siblings = True
                     continue
@@ -1437,7 +1611,7 @@ def main():
                     )
                     states[event_symbol_id] = pending_state
                     phase_a_pending_ids.add(event_symbol_id)
-                    append_jsonl(state_file, pending_state.to_dict())
+                    append_jsonl(state_file, pending_state.to_dict(), storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     has_pending_siblings = True
                     continue
@@ -1460,7 +1634,7 @@ def main():
                             basis_diag=basis_diag,
                         )
                         rejected_path = build_daily_path(output_root, "events_rejected", now_ms)
-                        append_jsonl(rejected_path, rejected_row)
+                        append_jsonl(rejected_path, rejected_row, storage_guard=storage_guard)
 
                         rejected_state = EventSymbolState(
                             event_symbol_id=event_symbol_id,
@@ -1483,7 +1657,7 @@ def main():
                         terminal_states_by_stable_event_symbol_key[flat_event["stable_event_symbol_key"]] = rejected_state
                         if term_hygiene_id:
                             terminal_states_by_terminal_hygiene_id[term_hygiene_id] = rejected_state
-                        append_jsonl(state_file, rejected_state.to_dict())
+                        append_jsonl(state_file, rejected_state.to_dict(), storage_guard=storage_guard)
                     durable_keys_for_batch.append(stable_key)
                     continue
 
@@ -1495,9 +1669,10 @@ def main():
                     now_ms=now_ms,
                     durable_stable_keys=durable_keys_for_batch,
                     registry_map=event_batch_registry,
+                    storage_guard=storage_guard,
                 )
                 watermark = update_watermark_with_event(watermark, event)
-                write_watermark_atomic(watermark_path, watermark)
+                write_watermark_atomic(watermark_path, watermark, storage_guard=storage_guard)
                 update_batch_registry_status(
                     output_root=output_root,
                     event_batch_id=b_id,
@@ -1505,6 +1680,7 @@ def main():
                     now_ms=now_ms,
                     durable_stable_keys=durable_keys_for_batch,
                     registry_map=event_batch_registry,
+                    storage_guard=storage_guard,
                 )
             elif not batch_blocked and has_pending_siblings:
                 update_batch_registry_status(
@@ -1514,7 +1690,9 @@ def main():
                     now_ms=now_ms,
                     durable_stable_keys=durable_keys_for_batch,
                     registry_map=event_batch_registry,
+                    storage_guard=storage_guard,
                 )
+
 
         # 6.2.3 Apply revisions only after all same-poll launch states exist.
         for rev_event in revision_events:
@@ -1524,6 +1702,7 @@ def main():
                 state_file=state_file,
                 registry_file=Path(output_root) / "schedule_revision_registry.jsonl",
                 now_ms=now_ms,
+                storage_guard=storage_guard,
             )
 
         # 6.2.4 Re-resolve and admit only explicit reducer-authorized states.
@@ -1546,9 +1725,9 @@ def main():
                         active_states.append(promoted_state)
                         active_count += 1
                         post_watermark_accepted += 1
-                        append_jsonl(state_file, promoted_state.to_dict())
+                        append_jsonl(state_file, promoted_state.to_dict(), storage_guard=storage_guard)
                         accepted_path = build_daily_path(output_root, "events_accepted", now_ms)
-                        append_jsonl(accepted_path, build_accepted_row_from_state(promoted_state, watermark, now_ms))
+                        append_jsonl(accepted_path, build_accepted_row_from_state(promoted_state, watermark, now_ms), storage_guard=storage_guard)
                     else:
                         d = updated_pending.to_dict()
                         d["status"] = "pending_observation_capacity"
@@ -1556,10 +1735,10 @@ def main():
                         d["pending_terminal_reason"] = ""
                         d["capacity_defer_count"] = updated_pending.capacity_defer_count + 1
                         states[pending_id] = EventSymbolState.from_dict(d)
-                        append_jsonl(state_file, d)
+                        append_jsonl(state_file, d, storage_guard=storage_guard)
                 else:
                     states[pending_id] = updated_pending
-                    append_jsonl(state_file, updated_pending.to_dict())
+                    append_jsonl(state_file, updated_pending.to_dict(), storage_guard=storage_guard)
 
         # Commit only batches whose Phase-C states are no longer retryable pending.
         for event in launch_events:
@@ -1583,9 +1762,10 @@ def main():
                 now_ms=now_ms,
                 durable_stable_keys=durable_keys,
                 registry_map=event_batch_registry,
+                storage_guard=storage_guard,
             )
             watermark = update_watermark_with_event(watermark, event)
-            write_watermark_atomic(watermark_path, watermark)
+            write_watermark_atomic(watermark_path, watermark, storage_guard=storage_guard)
             update_batch_registry_status(
                 output_root=output_root,
                 event_batch_id=b_id,
@@ -1593,8 +1773,8 @@ def main():
                 now_ms=now_ms,
                 durable_stable_keys=durable_keys,
                 registry_map=event_batch_registry,
+                storage_guard=storage_guard,
             )
-
 
         # 6.3 Fetch public depth for active observations
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_client import (
@@ -1645,7 +1825,7 @@ def main():
                 )
                 request_manifest_rows.append(manifest_row)
                 manifest_path = build_daily_path(output_root, "request_manifest", now_ms)
-                append_jsonl(manifest_path, manifest_row)
+                append_jsonl(manifest_path, manifest_row, storage_guard=storage_guard)
             else:
                 res = fetch_depth_snapshot(symbol, live_public_readonly=args.live_public_readonly)
                 manifest_row = enrich_depth_request_manifest_row(
@@ -1656,7 +1836,7 @@ def main():
                 )
                 request_manifest_rows.append(manifest_row)
                 manifest_path = build_daily_path(output_root, "request_manifest", now_ms)
-                append_jsonl(manifest_path, manifest_row)
+                append_jsonl(manifest_path, manifest_row, storage_guard=storage_guard)
 
                 if res["ok"]:
                     payload = res["data"]
@@ -1686,14 +1866,14 @@ def main():
                 )
 
             snapshot_path = build_daily_path(output_root, "depth_snapshots", now_ms, event_symbol_id=state.event_symbol_id)
-            append_jsonl(snapshot_path, snapshot.to_dict())
+            append_jsonl(snapshot_path, snapshot.to_dict(), storage_guard=storage_guard)
 
             updated_state = record_depth_snapshot(state, snapshot)
             all_snapshots = load_all_snapshots_for_event_symbol(output_root, state.event_symbol_id)
 
             final_state = finalize_observation_if_due(updated_state, now_ms, all_snapshots)
             states[state.event_symbol_id] = final_state
-            append_jsonl(state_file, final_state.to_dict())
+            append_jsonl(state_file, final_state.to_dict(), storage_guard=storage_guard)
 
         # 6.4 Write heartbeat row at the end of every poll
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
@@ -1713,7 +1893,8 @@ def main():
         )
         heartbeat_rows.append(hb_row.to_dict())
         hb_path = build_daily_path(output_root, "heartbeat", now_ms)
-        append_jsonl(hb_path, hb_row.to_dict())
+        append_jsonl(hb_path, hb_row.to_dict(), storage_guard=storage_guard)
+
 
         # 6.5 Write summary generator
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_summary import (
@@ -1759,6 +1940,7 @@ def main():
             bootstrap_watermark_missing_diagnostic_count=bootstrap_watermark_missing_diagnostic_count,
             malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
             runtime_gate_context={
+                **storage_guard.status_snapshot(),
                 "stage1_5d_gate_mode": stage1_5d_gate_mode,
                 "stage1_5d_runtime_gate_path": args.stage1_5d_runtime_gate,
                 "stage1_5d_runtime_gate_decision": gate_res.get("decision") or gate_res.get("status") or "",
@@ -1786,13 +1968,48 @@ def main():
             },
         )
         write_live_depth_observer_summary_atomically(
-            os.path.join(output_root, "live_depth_observer_summary.json"), summary.to_dict()
+            os.path.join(output_root, "live_depth_observer_summary.json"),
+            summary.to_dict(),
+            storage_guard=storage_guard,
         )
 
         poll_index += 1
         sleep_sec = 0.01 if args.mock_response_dir else 60
         time.sleep(sleep_sec)
     sys.exit(0)
+
+
+def _write_runtime_storage_terminal_summary(error: StorageWriteBlocked) -> None:
+    output_root = Path(error.storage_guard.output_root)
+    terminal_summary = _build_storage_failure_summary(
+        error.storage_blocker,
+        error.result.get("storage_guard_status") or error.result.get("status"),
+    )
+    try:
+        write_live_depth_observer_summary_atomically(
+            output_root / "live_depth_observer_summary.json",
+            terminal_summary,
+            storage_guard=error.storage_guard,
+        )
+    except RuntimeError as terminal_error:
+        logger.error(f"StorageGuard terminal evidence write failed: {terminal_error}")
+    try:
+        write_live_depth_observer_summary_atomically(
+            output_root / "storage_failure_diagnostic.json",
+            _build_storage_failure_diagnostic(terminal_summary),
+            storage_guard=error.storage_guard,
+        )
+    except RuntimeError as terminal_error:
+        logger.error(f"StorageGuard terminal evidence write failed: {terminal_error}")
+
+
+def main():
+    try:
+        _main()
+    except StorageWriteBlocked as error:
+        _write_runtime_storage_terminal_summary(error)
+        logger.error(f"StorageGuard runtime write blocked: {error.storage_blocker}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1902,3 +1902,61 @@ def test_future_formal_anchor_reresolution_is_idempotent_and_advances_refresh_sc
     assert call1.anchor_resolution_started_at_ms is None and call2.anchor_resolution_started_at_ms is None
     assert call1.next_anchor_resolution_at_ms == 1_300_000 + 5 * 60 * 1000
     assert call2.next_anchor_resolution_at_ms == 1_600_000 + 5 * 60 * 1000
+
+
+def test_compute_event_semantic_fingerprint_included_and_excluded_fields():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+        compute_event_semantic_fingerprint,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    base_event = {
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "symbol": "ABCUSDT",
+        "symbols": ["ABCUSDT"],
+        "title": "Binance Launch ABCUSDT",
+        "source_published_at_ms": 1_000_000,
+        "now_ms": 1_050_000,
+        "request_id": "req-123",
+        "manifest_path": "/tmp/manifest.jsonl",
+        "raw_payload_path": "/tmp/raw.bin",
+        "http_fetch_time_ms": 1_040_000,
+    }
+
+    fp_base = compute_event_semantic_fingerprint(base_event, "ABCUSDT")
+
+    # Operational field mutations -> FP must remain IDENTICAL
+    op_mutated = dict(base_event)
+    op_mutated["now_ms"] = 9_999_999
+    op_mutated["request_id"] = "different-req"
+    op_mutated["manifest_path"] = "/other/manifest.jsonl"
+    op_mutated["raw_payload_path"] = "/other/raw.bin"
+    op_mutated["http_fetch_time_ms"] = 8_888_888
+
+    fp_op_mutated = compute_event_semantic_fingerprint(op_mutated, "ABCUSDT")
+    assert fp_base == fp_op_mutated
+
+    # Business field mutation -> FP must CHANGE
+    biz_mutated = dict(base_event)
+    biz_mutated["title"] = "Binance Launch ABCUSDT Different Title"
+    fp_biz_mutated = compute_event_semantic_fingerprint(biz_mutated, "ABCUSDT")
+    assert fp_base != fp_biz_mutated
+
+    # Verify classify_event_symbol_revision_admission exact replay noop
+    calculated_es_id = make_event_symbol_id(op_mutated, "ABCUSDT")
+    existing_state = EventSymbolState(
+        event_symbol_id=calculated_es_id,
+        symbol="ABCUSDT",
+        latest_source_semantic_fingerprint=fp_base,
+        status="pending_launch_time_in_future",
+    )
+    decision, _, meta = classify_event_symbol_revision_admission(
+        flat_event=op_mutated,
+        latest_states_by_id={calculated_es_id: existing_state},
+        grouped_states_by_key={},
+    )
+    assert decision == "exact_replay_noop"

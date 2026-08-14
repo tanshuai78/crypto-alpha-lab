@@ -301,4 +301,13 @@ def build_live_depth_observer_summary(
         consumer_static_attestation_verified=bool(runtime_gate_context.get("consumer_static_attestation_verified", False)),
         consumer_runtime_attestation_verified=bool(runtime_gate_context.get("consumer_runtime_attestation_verified", False)),
         consumer_runtime_attestation_compromised=bool(runtime_gate_context.get("consumer_runtime_attestation_compromised", False)),
+        storage_guard_status=str(runtime_gate_context.get("storage_guard_status", "")),
+        storage_guard_checked_at_ms=runtime_gate_context.get("storage_guard_checked_at_ms"),
+        storage_free_bytes=runtime_gate_context.get("storage_free_bytes"),
+        storage_root_bytes=runtime_gate_context.get("storage_root_bytes"),
+        storage_root_scanned_at_ms=runtime_gate_context.get("storage_root_scanned_at_ms"),
+        storage_root_max_bytes=runtime_gate_context.get("storage_root_max_bytes"),
+        storage_terminal_write_set_peak_bytes=runtime_gate_context.get("storage_terminal_write_set_peak_bytes"),
+        storage_emergency_blocker_reserve_bytes=runtime_gate_context.get("storage_emergency_blocker_reserve_bytes"),
+        storage_blocker=runtime_gate_context.get("storage_blocker"),
     )

@@ -337,6 +337,32 @@ def normalize_event_symbol_identity(flat_event: dict, symbol: str) -> dict:
     }
 
 
+def compute_event_semantic_fingerprint(flat_event: dict, symbol: str) -> str:
+    sym = (symbol or flat_event.get("symbol") or "").strip().upper()
+    symbols_list = flat_event.get("symbols")
+    symbols_sorted = sorted([str(s).strip().upper() for s in symbols_list]) if isinstance(symbols_list, list) else []
+
+    official_anchor = (flat_event.get("symbol_official_schedule_anchor_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_official_schedule_anchor_ms"), dict) else None
+    onboard_time = (flat_event.get("symbol_onboard_times_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_onboard_times_ms"), dict) else None
+    eff_launch = (flat_event.get("symbol_effective_launch_times_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_effective_launch_times_ms"), dict) else None
+
+    semantic_dict = {
+        "source_article_id": str(flat_event.get("source_article_id") or "").strip(),
+        "event_type": str(flat_event.get("event_type") or "").strip(),
+        "symbol": sym,
+        "symbols": symbols_sorted,
+        "title": str(flat_event.get("title") or "").strip(),
+        "source_published_at_ms": flat_event.get("source_published_at_ms"),
+        "formal_event_contract_version": flat_event.get("formal_event_contract_version"),
+        "symbol_official_schedule_anchor_ms": official_anchor,
+        "symbol_onboard_times_ms": onboard_time,
+        "symbol_effective_launch_times_ms": eff_launch,
+    }
+
+    serialized = json.dumps(semantic_dict, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def classify_event_symbol_revision_admission(
     flat_event: dict,
     latest_states_by_id: dict,
@@ -351,16 +377,21 @@ def classify_event_symbol_revision_admission(
         or flat_event.get("raw_payload_hash")
         or ""
     )
+    semantic_fp = compute_event_semantic_fingerprint(flat_event, sym)
 
     existing = latest_states_by_id.get(event_symbol_id)
     if existing is not None:
         latest_event_id = getattr(existing, "latest_source_event_id", None) or existing.event_id
+        existing_fp = getattr(existing, "latest_source_semantic_fingerprint", "")
         if (
-            latest_event_id == flat_event.get("event_id")
-            and getattr(existing, "latest_event_payload_hash", "") == payload_hash
-            and payload_hash != ""
+            (existing_fp != "" and existing_fp == semantic_fp)
+            or (
+                latest_event_id == flat_event.get("event_id")
+                and getattr(existing, "latest_event_payload_hash", "") == payload_hash
+                and payload_hash != ""
+            )
         ):
-            return "exact_replay_noop", existing, {"reason": "exact_payload_hash_replay"}
+            return "exact_replay_noop", existing, {"reason": "exact_semantic_fingerprint_or_payload_hash_replay"}
 
         status = getattr(existing, "status", "") or ""
         rej_reason = getattr(existing, "rejection_reason", "") or getattr(existing, "rejected_reason", "") or getattr(existing, "terminal_reason", "")
@@ -406,12 +437,15 @@ def upsert_pending_state_with_event_revision(pending_state, event_row: dict, sym
         or getattr(pending_state, "latest_event_payload_hash", "")
     )
     rev_count = int(getattr(pending_state, "revision_seen_count", 1) or 1) + 1
+    semantic_fp = compute_event_semantic_fingerprint(event_row, symbol)
 
     d = pending_state.to_dict()
     d["latest_source_event_id"] = event_id
     d["latest_event_payload_hash"] = latest_payload_hash
+    d["latest_source_semantic_fingerprint"] = semantic_fp
     d["revision_seen_count"] = rev_count
     return pending_state.__class__.from_dict(d)
+
 
 
 

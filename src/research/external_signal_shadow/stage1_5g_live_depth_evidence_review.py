@@ -103,6 +103,44 @@ def detect_duplicate_stable_event_symbol_identity(rows: list[dict]) -> list[dict
     ]
 
 
+def _load_observer_states_reduced(
+    path: Path,
+    loader_blockers: list[str],
+    state_errors: dict[str, int],
+) -> list[dict]:
+    if not path.exists():
+        return []
+
+    latest: dict[str, dict] = {}
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                state_errors["total"] += 1
+                try:
+                    row = json.loads(stripped)
+                except json.JSONDecodeError:
+                    state_errors["errors"] += 1
+                    if "jsonl_parse_error" not in loader_blockers:
+                        loader_blockers.append("jsonl_parse_error")
+                    continue
+
+                es_id = row.get("event_symbol_id")
+                if not es_id:
+                    continue
+
+                # JSONL append order is the durable state transition order.
+                latest[es_id] = row
+    except Exception:
+        if "jsonl_parse_error" not in loader_blockers:
+            loader_blockers.append("jsonl_parse_error")
+
+    return list(latest.values())
+
+
 def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
     root = Path(output_root)
     loader_blockers: list[str] = []
@@ -131,8 +169,9 @@ def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
         if not watermark:
             loader_blockers.append("missing_or_unreadable_watermark")
 
-    # 3. States
-    states = _load_jsonl_file(root / "observer_state.jsonl", loader_blockers, state_errors)
+    # 3. States (streaming physical-last reduction)
+    states = _load_observer_states_reduced(root / "observer_state.jsonl", loader_blockers, state_errors)
+
 
     # 4. Accepted/Rejected events
     accepted_events = _load_jsonl_glob(root, "events_accepted/*.jsonl", loader_blockers, state_errors)

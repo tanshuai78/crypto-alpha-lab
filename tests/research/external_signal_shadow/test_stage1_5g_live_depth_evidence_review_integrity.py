@@ -1,4 +1,7 @@
+import json
+
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+    load_stage1_5g_inputs,
     validate_evidence_integrity,
 )
 
@@ -23,6 +26,25 @@ def test_validator_accepts_announcement_and_launch_time_post_watermark():
     assert result.evidence_label_counts["announcement_and_launch_time"] == 1
     assert result.formal_announcement_and_launch_count == 1
     assert result.formal_completed_event_symbol_ids == {"es1"}
+
+
+def test_state_loader_uses_physical_last_row(tmp_path):
+    rows = [
+        {"event_symbol_id": "es1", "status": "pending_launch_time_in_future", "updated_at_ms": 3_000},
+        {"event_symbol_id": "es1", "status": "active", "updated_at_ms": 2_000},
+        # Durable append order, not producer timestamps, defines the latest state.
+        {"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 3, "updated_at_ms": 1_000},
+    ]
+    (tmp_path / "observer_state.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = load_stage1_5g_inputs(tmp_path)
+
+    assert len(bundle.states) == 1
+    assert bundle.states[0]["event_symbol_id"] == "es1"
+    assert bundle.states[0]["status"] == "completed"
 
 
 def test_validator_accepts_live_depth_evidence_basis_alias_from_stage1_5f():
@@ -416,7 +438,6 @@ def test_exchangeinfo_fallback_blocks_clean_depth_evidence_pass():
 
 
 def test_validator_requires_formal_v2_lineage_fields():
-    import pytest
     from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
         validate_evidence_integrity,
     )

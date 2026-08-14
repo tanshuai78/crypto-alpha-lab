@@ -169,6 +169,8 @@ class EventSymbolState:
     applied_schedule_revision_ids: list[str] | None = None
     observation_anchor_revision_contaminated: bool = False
     anchor_revision_contamination_reason: str = ""
+    latest_source_semantic_fingerprint: str = ""
+
 
     def __post_init__(self):
         if self.observation_anchor_candidates is None:
@@ -379,6 +381,15 @@ class LiveDepthObserverSummary:
     consumer_static_attestation_verified: bool = False
     consumer_runtime_attestation_verified: bool = False
     consumer_runtime_attestation_compromised: bool = False
+    storage_guard_status: str = ""
+    storage_guard_checked_at_ms: int | None = None
+    storage_free_bytes: int | None = None
+    storage_root_bytes: int | None = None
+    storage_root_scanned_at_ms: int | None = None
+    storage_root_max_bytes: int | None = None
+    storage_terminal_write_set_peak_bytes: int | None = None
+    storage_emergency_blocker_reserve_bytes: int | None = None
+    storage_blocker: str | None = None
 
     def to_dict(self) -> dict:
 

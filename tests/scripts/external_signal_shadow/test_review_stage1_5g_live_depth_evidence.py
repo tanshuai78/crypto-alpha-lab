@@ -55,6 +55,10 @@ def test_cli_does_not_write_inside_stage1_5f_output_root_by_default(tmp_path, mo
     assert main() == 0
     assert (output_root / "stage1_5g_live_depth_evidence_review_summary.json").exists()
     assert not (root / "stage1_5g_live_depth_evidence_review_summary.json").exists()
+    # review markdown must also land inside out_root, never in docs/reviews/
+    review_files = list(output_root.glob("*-review_CN.md"))
+    assert len(review_files) == 1, f"Expected 1 review markdown in out_root, got: {review_files}"
+
 
 
 def test_stage1_5g_cli_returns_nonzero_for_missing_output_root(tmp_path, monkeypatch):

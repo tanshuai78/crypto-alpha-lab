@@ -57,7 +57,7 @@ def main() -> int:
     if args.output_review:
         review_path = Path(args.output_review)
     else:
-        review_path = Path(f"docs/reviews/{today_str}-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md")
+        review_path = out_root / f"{today_str}-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md"
 
     # Load bundle
     bundle = load_stage1_5g_inputs(stage1_5f_root)

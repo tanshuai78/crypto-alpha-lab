@@ -1,6 +1,10 @@
 import json
+import shutil
 from pathlib import Path
 
+import pytest
+
+from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
     append_jsonl,
     build_daily_path,
@@ -9,10 +13,16 @@ from src.research.external_signal_shadow.stage1_5d_live_event_source_storage imp
     enforce_payload_budget,
     load_payload_version_first_observed,
     record_payload_version_first_observed,
-    write_detail_payload,
     write_detail_payload_append_only,
 )
 
+
+def create_test_guard(root: Path) -> StorageGuard:
+    return StorageGuard(
+        output_root=root,
+        stage="1.5D",
+        disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
 
 
 def test_build_daily_path_includes_utc_date(tmp_path):
@@ -30,105 +40,82 @@ def test_build_stream_paths_under_output_root(tmp_path):
 
 
 def test_append_jsonl_writes_one_row(tmp_path):
+    guard = create_test_guard(tmp_path)
     path = tmp_path / "events.jsonl"
-    append_jsonl(path, {"a": 1})
+    append_jsonl(path, {"a": 1}, storage_guard=guard)
     assert json.loads(path.read_text().strip()) == {"a": 1}
 
 
 def test_payload_version_first_observed_survives_reload(tmp_path):
+    guard = create_test_guard(tmp_path)
     registry = tmp_path / "revision_payload_versions.jsonl"
     first = record_payload_version_first_observed(
-        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=1_000
+        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=1_000, storage_guard=guard
     )
     second = record_payload_version_first_observed(
-        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=2_000
+        registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=2_000, storage_guard=guard
     )
 
     assert first == second == 1_000
     assert load_payload_version_first_observed(registry)[("a" * 32, "hash-a")] == 1_000
 
 
-def test_enforce_payload_budget_blocks_large_day(tmp_path):
-    path = tmp_path / "raw.jsonl"
-    path.write_text("x" * 101)
-    result = enforce_payload_budget(path, max_bytes=100)
+
+def test_enforce_payload_budget_blocks_large_raw_directory(tmp_path):
+    raw_dir = tmp_path / "raw_payloads" / "announcement_detail" / "article1"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / "test.bin").write_bytes(b"x" * 101)
+
+    result = enforce_payload_budget(tmp_path, max_bytes=100)
     assert result["storage_budget_passed"] is False
-    assert result["blocker"] == "max_raw_payload_bytes_per_day_exceeded"
+    assert result["blocker"] == "max_raw_payload_bytes_exceeded"
 
 
 def test_build_detail_payload_path_under_announcement_detail(tmp_path):
-    path = build_detail_payload_path(tmp_path, timestamp_ms=1710000000000, source_article_id="abc123", suffix="json")
-    assert path.parent.name == "2024-03-09"
+    path = build_detail_payload_path(
+        tmp_path,
+        source_article_id="abc123",
+        detail_fetch_variant="bapi_article_detail_query",
+        raw_payload_sha256="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    )
+    assert path.name == "bapi_article_detail_query.1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef.bin"
+    assert path.parent.name == "abc123"
     assert path.parent.parent.name == "announcement_detail"
     assert path.parent.parent.parent.name == "raw_payloads"
-    assert path.name == "abc123.json"
 
 
-def test_write_detail_payload_persists_payload_and_returns_hash(tmp_path):
-    result = write_detail_payload(
+def test_write_detail_payload_append_only_content_addressed(tmp_path):
+    guard = create_test_guard(tmp_path)
+    res1 = write_detail_payload_append_only(
         root=tmp_path,
-        timestamp_ms=1710000000000,
-        source_article_id="abc123",
-        payload={"data": {"body": "ABCUSDT"}},
-    )
-
-    assert result["payload_size_bytes"] > 0
-    assert len(result["payload_sha256"]) == 64
-    path = result["payload_path"]
-    assert path.endswith("abc123.json")
-    assert (tmp_path / path).exists() or Path(path).exists()
-
-
-def test_write_detail_payload_handles_bytes_payload(tmp_path):
-    result = write_detail_payload(
-        root=tmp_path,
-        timestamp_ms=1710000000000,
-        source_article_id="abc123",
-        payload=b"AMDUSDT QCOMUSDT",
-    )
-
-    assert result["payload_path"].endswith("abc123.txt")
-    assert len(result["payload_sha256"]) == 64
-
-
-def test_write_detail_payload_append_only_includes_variant_timestamp_hash(tmp_path):
-    result1 = write_detail_payload_append_only(
-        root=tmp_path,
-        timestamp_ms=1710000000000,
         source_article_id="f43403ef11974998bc0f46420826577a",
         detail_fetch_variant="bapi_article_detail_query",
         raw_bytes=b'{"data":{"body":"SHAZUSDT"}}',
+        storage_guard=guard,
         parsed_payload={"data": {"body": "SHAZUSDT"}},
-        content_type="application/json",
-        http_status=200,
     )
-    result2 = write_detail_payload_append_only(
+    assert res1["raw_payload_persisted"] is True
+    assert res1["payload_path"].endswith(".bin")
+    assert (tmp_path / res1["payload_path"]).exists()
+
+    # Retry same article, variant, raw_bytes -> returns same file path
+    res2 = write_detail_payload_append_only(
         root=tmp_path,
-        timestamp_ms=1710000060000,
         source_article_id="f43403ef11974998bc0f46420826577a",
         detail_fetch_variant="bapi_article_detail_query",
-        raw_bytes=b'{"data":{"body":"SOFIUSDT"}}',
-        parsed_payload={"data": {"body": "SOFIUSDT"}},
-        content_type="application/json",
-        http_status=200,
+        raw_bytes=b'{"data":{"body":"SHAZUSDT"}}',
+        storage_guard=guard,
+        parsed_payload={"data": {"body": "SHAZUSDT"}},
     )
-    assert result1["payload_path"] != result2["payload_path"]
-    assert "f43403ef11974998bc0f46420826577a" in result1["payload_path"]
-    assert "bapi_article_detail_query" in result1["payload_path"]
-    assert (tmp_path / result1["payload_path"]).exists()
-    assert (tmp_path / result2["payload_path"]).exists()
+    assert res2["payload_path"] == res1["payload_path"]
 
 
-def test_write_detail_payload_append_only_rejects_bad_variant(tmp_path):
-    import pytest
-    with pytest.raises(ValueError, match="detail_fetch_variant_invalid"):
+def test_content_addressed_writer_requires_guard(tmp_path):
+    with pytest.raises(TypeError, match="storage_guard_required"):
         write_detail_payload_append_only(
             root=tmp_path,
-            timestamp_ms=1710000000000,
             source_article_id="abc",
-            detail_fetch_variant="../bad",
+            detail_fetch_variant="bapi_article_detail_query",
             raw_bytes=b'{"x":1}',
-            parsed_payload={"x": 1},
-            content_type="application/json",
-            http_status=200,
+            storage_guard=None,  # Should fail
         )

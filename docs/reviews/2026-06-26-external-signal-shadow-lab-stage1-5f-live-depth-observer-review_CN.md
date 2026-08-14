@@ -3,14 +3,14 @@
 **日期:** 2026-07-01  
 **对应设计:** `docs/designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md`  
 **对应实现计划:** `docs/plans/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-implementation-plan_CN.md`  
-**当前运行重点:** Stage 1.5D/1.5F Official Schedule Priority Anchor Contract V2 + Stage 1.5F root contract/version isolation + Stage 1.5G anchor lineage invalidation
+**当前运行重点:** Stage 1.5D/1.5F Storage Lifecycle Resource Guard + local-only Stage 1.5G review
 
 ## 1. 当前结论
 
 ```text
-decision = stage1_5d_1_5f_official_schedule_priority_v2_ready_for_server_deployment
-implementation_status = completed_locally_verified_committed_pending_server_deployment
-current_server_mode = 7d_pending_anchor_deadline_state_semantics_hotfix
+decision = stage1_5d_1_5f_1_5g_storage_lifecycle_resource_guard_ready_for_commit_and_server_deployment
+implementation_status = independently_audited_complete_pending_commit_and_server_deployment
+current_server_mode = 7d_storage_lifecycle_resource_guard_hotfix
 stage1_5g_next_action = run_after_new_12h_observation
 stage1_5h_allowed = design_only_until_more_evidence
 ```
@@ -23,7 +23,7 @@ stage1_5h_allowed = design_only_until_more_evidence
 3. Stage 1.5F 必须写入 observer_root_contract.json，root_mode = v2_production，且默认拒绝 v1/v2 混用。
 4. Stage 1.5F 必须使用 --stage1-5d-runtime-gate，并验证 anchor_precedence_policy = official_schedule_priority_v1。
 5. Stage 1.5G 必须验证 accepted/state/completed anchor lineage hash；fallback、contamination、malformed、lineage mismatch 一律 invalid。
-6. Stage 1.5D/1.5F 必须使用新的 pending_anchor_deadline_state_semantics_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
+6. Stage 1.5D/1.5F 必须使用新的 storage_lifecycle_resource_guard_hotfix output root；旧 title-symbol / multi-symbol / SKHYUSDT/SPCX/POPMART evidence root 只读保存，不改写、不补写。
 7. schedule_revision transport / consumer ready，但 automatic schedule revision producer classifier 仍是后续 follow-up，不作为本次部署 blocker。
 ```
 
@@ -67,7 +67,7 @@ Stage 1.5F 只做一件事：消费 Stage 1.5D watermark 之后的新 `futures_c
 ## 3. 后续基本计划
 
 ```text
-P0: 部署并维持 pending_anchor_deadline_state_semantics_hotfix 1.5D/1.5F root 健康运行。
+P0: 部署并维持 storage_lifecycle_resource_guard_hotfix 1.5D/1.5F root 健康运行。
 理由: 当前核心风险是 official schedule 与 exchangeInfo onboardDate 不一致时，1.5F 使用错误 anchor 或进入 pending_anchor_conflict。
 
 P1: 等待新 root 中出现 post-watermark futures_contract_launch event-symbol。
@@ -112,8 +112,8 @@ P4: Stage 1.5H 继续保持 design-only。
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name 'live_event_source_continuous_*_7d_storage_lifecycle_resource_guard_hotfix' | sort | tail -n 1)"
+export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_storage_lifecycle_resource_guard_hotfix' | sort | tail -n 1)"
 export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
 
 echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
@@ -123,8 +123,8 @@ echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 最新部署后应看到：
 
 ```text
-STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_pending_anchor_deadline_state_semantics_hotfix
-STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_pending_anchor_deadline_state_semantics_hotfix
+STAGE1_5D_EVENTS_OUT = data/external_signal_shadow/stage1_5d/live_event_source_continuous_<RUN_ID>_7d_storage_lifecycle_resource_guard_hotfix
+STAGE1_5F_OUT = data/external_signal_shadow/stage1_5f/live_depth_observer_<RUN_ID>_7d_storage_lifecycle_resource_guard_hotfix
 ```
 
 ### 4.2 旧路径处理规则
@@ -158,7 +158,7 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 1. 不 rm -rf 旧 SKHYUSDT evidence root。
 2. 不在旧 root 上继续启动 1.5F。
 3. 不把旧 root 和新 root 的 events/depth_snapshots/request_manifest 混合审计。
-4. 新 1.5D/1.5F 部署必须使用 pending_anchor_deadline_state_semantics_hotfix 后缀。
+4. 新 1.5D/1.5F 部署必须使用 storage_lifecycle_resource_guard_hotfix 后缀。
 ```
 
 ## 5. Stage 1.5F 原理速记
@@ -229,11 +229,11 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-本章是当前 `pending_anchor_deadline_state_semantics_hotfix` 的唯一部署入口。它同时部署已完成的 Git Ancestry Attestation 与本次 1.5F pending-anchor 修补。
+本章是当前 `storage_lifecycle_resource_guard_hotfix` 的唯一部署入口。它部署已完成的 Git Ancestry Attestation 与 StorageGuard 资源生命周期修补；Stage 1.5G 永远不在 VPS 上执行。
 
 ```text
-current_deployment_scope = stage1_5f_pending_anchor_deadline_state_semantics_hotfix
-root_suffix = 7d_pending_anchor_deadline_state_semantics_hotfix
+current_deployment_scope = stage1_5d_1_5f_1_5g_storage_lifecycle_resource_guard_hotfix
+root_suffix = 7d_storage_lifecycle_resource_guard_hotfix
 deployment_transport = git_commit_checkout
 formal_event_contract_version = 2
 anchor_precedence_policy = official_schedule_priority_v1
@@ -266,10 +266,19 @@ git status --short
 git diff --check
 
 PYTHONPATH=src:. .venv/bin/python -m pytest \
+  tests/research/external_signal_shadow/test_stage1_5_storage_guard.py \
   tests/research/external_signal_shadow/test_stage1_5_launch_anchor_contract.py \
+  tests/research/external_signal_shadow/test_stage1_5d_detail_retry_scheduler.py \
+  tests/research/external_signal_shadow/test_stage1_5d_live_event_source_storage.py \
   tests/research/external_signal_shadow/test_stage1_5d_schedule_revision_producer.py \
+  tests/research/external_signal_shadow/test_stage1_5d_runtime_gate.py \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_state.py \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_loader.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_storage.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_summary.py \
+  tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_watermark.py \
+  tests/research/external_signal_shadow/test_stage1_5f_schedule_revision_registry.py \
+  tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_integrity.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py -q
 
@@ -378,7 +387,22 @@ PY
 fi
 ```
 
-判定：磁盘可用空间建议至少 `5G`。若旧 observer 的 `active_observation_count > 0`，先保留该 root 并记录摘要；继续部署会中断该 root 的后续采集，但不会删除已采集数据。
+在停止旧会话前，执行硬性存储预检。此命令只读，不会关闭 SSH：
+
+```bash
+HOST_STORAGE_READY=1
+python3 - <<'PY' || HOST_STORAGE_READY=0
+import shutil
+
+free_bytes = shutil.disk_usage("/").free
+minimum_bytes = 8 * 1024 * 1024 * 1024
+print({"storage_free_bytes": free_bytes, "required_start_free_bytes": minimum_bytes})
+assert free_bytes >= minimum_bytes, "STOP: host free space is below the mandatory 8GiB start threshold"
+PY
+echo "HOST_STORAGE_READY=$HOST_STORAGE_READY"
+```
+
+判定：`HOST_STORAGE_READY=1` 是启动新 root 的硬前提，不是“建议至少 5G”。若旧 observer 的 `active_observation_count > 0`，先保留该 root 并记录摘要；继续部署会中断该 root 的后续采集，但不会删除已采集数据。
 
 确认允许停止旧会话后，**手工填入** `tmux ls` 中的两个真实 session 名；不要使用“匹配到就全部 kill”的循环：
 
@@ -400,12 +424,15 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
 export STAGE1_5D_SESSION="stage1_5d_continuous_${ROOT_SUFFIX}"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${ROOT_SUFFIX}"
 
-D_START_READY=1
+D_START_READY="$HOST_STORAGE_READY"
+if [ "$D_START_READY" != "1" ]; then
+  echo "STOP: host storage preflight failed; do not create a new Stage 1.5D root." >&2
+fi
 if tmux has-session -t "$STAGE1_5D_SESSION" 2>/dev/null; then
   echo "STOP: target Stage 1.5D tmux session already exists." >&2
   D_START_READY=0
@@ -416,7 +443,6 @@ if [ -e "$STAGE1_5D_EVENTS_OUT" ]; then
 fi
 
 if [ "$D_START_READY" = "1" ]; then
-  mkdir -p "$STAGE1_5D_EVENTS_OUT"
   tmux new-session -d -s "$STAGE1_5D_SESSION" "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
@@ -455,12 +481,19 @@ else:
         "formal_schedule_revision_contract_versions_supported",
         "anchor_precedence_policy", "schedule_revision_producer_configured_enabled",
         "schedule_revision_producer_effective_enabled", "fatal_blockers",
+        "storage_guard_status", "storage_free_bytes", "storage_root_bytes",
+        "storage_root_scanned_at_ms", "storage_root_max_bytes", "storage_blocker",
+        "storage_terminal_write_set_peak_bytes", "storage_emergency_blocker_reserve_bytes",
     )}
     print(view)
     assert g.get("status") == "READY"
     assert g.get("decision") == "stage1_5d_runtime_gate_ready"
     assert g.get("consumable_by_stage1_5f") is True
     assert g.get("fatal_blockers") in (None, [])
+    assert g.get("storage_guard_status") == "ready"
+    assert g.get("storage_blocker") is None
+    assert int(g.get("storage_root_bytes") or -1) >= 0
+    assert int(g.get("storage_root_max_bytes") or 0) > int(g.get("storage_root_bytes") or 0)
 PY
 if [ $? -ne 0 ]; then
   D_GATE_READY=0
@@ -476,7 +509,7 @@ echo "D_GATE_READY=$D_GATE_READY"
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
 export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
 export STAGE1_5F_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_${ROOT_SUFFIX}"
@@ -495,6 +528,8 @@ assert g.get("status") == "READY"
 assert g.get("decision") == "stage1_5d_runtime_gate_ready"
 assert g.get("consumable_by_stage1_5f") is True
 assert g.get("fatal_blockers") in (None, [])
+assert g.get("storage_guard_status") == "ready"
+assert g.get("storage_blocker") is None
 PY
   if [ $? -ne 0 ]; then
     echo "STOP: Stage 1.5D runtime gate is not admissible for Stage 1.5F." >&2
@@ -596,6 +631,9 @@ print({
         "consumer_runtime_attestation_verified",
         "consumer_runtime_attestation_compromised", "block_new_event_admission",
         "active_observation_count", "pending_launch_observation_count", "blocker",
+        "storage_guard_status", "storage_free_bytes", "storage_root_bytes",
+        "storage_root_scanned_at_ms", "storage_root_max_bytes", "storage_blocker",
+        "storage_terminal_write_set_peak_bytes", "storage_emergency_blocker_reserve_bytes",
     )},
 })
 
@@ -610,6 +648,10 @@ assert contract.get("consumer_static_attestation_verified") is True
 assert summary.get("consumer_runtime_attestation_verified") is True
 assert summary.get("consumer_runtime_attestation_compromised") is False
 assert summary.get("block_new_event_admission") is False
+assert summary.get("storage_guard_status") == "ready"
+assert summary.get("storage_blocker") is None
+assert int(summary.get("storage_root_bytes") or -1) >= 0
+assert int(summary.get("storage_root_max_bytes") or 0) > int(summary.get("storage_root_bytes") or 0)
 PY
 
 ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
@@ -627,7 +669,7 @@ ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
 export STAGE1_5D_EVENTS_OUT="$(ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 export STAGE1_5F_OUT="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 
@@ -659,18 +701,24 @@ print({
     "stage1_5d": {k: g.get(k) for k in (
         "status", "decision", "successful_poll_count", "failed_poll_count",
         "consecutive_failed_polls", "consumable_by_stage1_5f", "fatal_blockers",
+        "storage_guard_status", "storage_free_bytes", "storage_root_bytes",
+        "storage_root_max_bytes", "storage_root_scanned_at_ms", "storage_blocker",
+        "storage_terminal_write_set_peak_bytes", "storage_emergency_blocker_reserve_bytes",
     )},
     "stage1_5f": {k: s.get(k) for k in (
         "decision", "post_watermark_events_accepted", "active_observation_count",
         "pending_launch_observation_count", "pending_launch_time_in_future_count",
         "pending_launch_anchor_missing_count", "pending_anchor_conflict_count",
         "pending_observation_capacity_count", "block_new_event_admission", "blocker",
+        "storage_guard_status", "storage_free_bytes", "storage_root_bytes",
+        "storage_root_max_bytes", "storage_root_scanned_at_ms", "storage_blocker",
+        "storage_terminal_write_set_peak_bytes", "storage_emergency_blocker_reserve_bytes",
     )},
 })
 PY
 ```
 
-正常：1.5D `decision=stage1_5d_runtime_gate_ready`、连续失败为 `0`；1.5F `block_new_event_admission=false`、`blocker=null`。没有新事件时，accepted、active、pending 均为 `0` 是正常结果。
+正常：1.5D `decision=stage1_5d_runtime_gate_ready`、`storage_guard_status=ready`、连续失败为 `0`；1.5F `storage_guard_status=ready`、`block_new_event_admission=false`、`storage_blocker=null`、`blocker=null`。任一 guard 状态非 `ready`、root bytes 达到 root max、或出现 storage blocker 时，停止对应会话、保留 root 与 `storage_failure_diagnostic.json`，不得原地重启或删除数据。没有新事件时，accepted、active、pending 均为 `0` 是正常结果。
 
 ### 8.3 事件流和 root 绑定快速检查
 
@@ -762,7 +810,7 @@ observation_anchor_ms / next_anchor_resolution_at_ms / next_admission_check_at_m
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_pending_anchor_deadline_state_semantics_hotfix"
+export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
 tmux kill-session -t "stage1_5f_live_depth_${ROOT_SUFFIX}" 2>/dev/null || true
 tmux kill-session -t "stage1_5d_continuous_${ROOT_SUFFIX}" 2>/dev/null || true
 
@@ -773,7 +821,7 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 
 ## 9. 新事件定位与排障
 
-本章只保留当前 `pending_anchor_deadline_state_semantics_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
+本章只保留当前 `storage_lifecycle_resource_guard_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
 
 ### 9.1 查看 1.5F watermark 时间
 
@@ -964,21 +1012,36 @@ paper/live trading readiness。
 
 允许的下一步是编写 Stage 1.5H clean-input design / shadow simulator design plan；不允许直接接入 paper/live 或声明执行可行性。
 
-后续新 root 完成 12h observation 后，再运行 Stage 1.5G：
+后续新 root 完成 12h observation 后，**只在本地工作站**运行 Stage 1.5G。VPS 只允许读取和传输完整的 1.5F evidence；不得在 VPS 上执行 `review_stage1_5g_live_depth_evidence.py`。
+
+在本地工作站执行。先填写服务器上已完成的 1.5F root 绝对路径；这不会修改 VPS 或原始 root：
 
 ```bash
-cd /root/crypto-alpha-lab
+cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 source .venv/bin/activate
 
-export STAGE1_5F_OUT="$(find data/external_signal_shadow/stage1_5f -maxdepth 1 -type d -name 'live_depth_observer_*_7d_pending_anchor_deadline_state_semantics_hotfix' | sort | tail -n 1)"
+export SERVER="root@47.82.4.85"
+export REMOTE_STAGE1_5F_OUT="/root/crypto-alpha-lab/替换为已完成的 live_depth_observer root"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
-export STAGE1_5G_OUT="data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}"
+export LOCAL_EVIDENCE_ROOT="$PWD/data/external_signal_shadow/local_evidence/${RUN_ID}_stage1_5f"
+export STAGE1_5G_OUT="$PWD/data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}_local"
 
+mkdir -p "$LOCAL_EVIDENCE_ROOT"
+# A complete F root is bounded to 2GiB and avoids missing optional-directory errors.
+rsync -aP --partial "$SERVER:$REMOTE_STAGE1_5F_OUT/" "$LOCAL_EVIDENCE_ROOT/"
+
+find "$LOCAL_EVIDENCE_ROOT" -type f -exec shasum -a 256 {} \; | sort > "$LOCAL_EVIDENCE_ROOT/SHA256SUMS"
+wc -l "$LOCAL_EVIDENCE_ROOT/observer_state.jsonl"
+```
+
+同步完成后仍在本地执行 review。`STAGE1_5G_OUT` 是本地生成物，不提交、不回传 VPS：
+
+```bash
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
-  --stage1-5f-output-root "$STAGE1_5F_OUT" \
+  --stage1-5f-output-root "$LOCAL_EVIDENCE_ROOT" \
   --output-root "$STAGE1_5G_OUT" \
   --output-summary "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review_summary.json" \
-  --output-review "docs/reviews/$(date -u +%Y-%m-%d)-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md"
+  --output-review "$STAGE1_5G_OUT/stage1_5g_live_depth_evidence_review.md"
 ```
 
 判定：
@@ -1026,4 +1089,9 @@ stage1_5g_depth_evidence_invalid -> continue_observation。
 5. stable_event_symbol_key collision 必须阻断 admission。
 6. active observation 运行中不得随意重启 1.5F。
 7. Stage 1.5G clean/quarantine/invalid 只评价 evidence，不放开 paper/live/execution/alpha。
+8. 1.5D/1.5F 必须使用 StorageGuard TCB fail-closed 资源保护，严格遵守 30GB VPS 容量上限与 8GiB/4GiB 宿主机/根目录空闲保留。
+9. 1.5F 状态与批次注册表必须使用 2-pass streaming physical-last 压缩与 PID 作用域原子写入，禁止产生 .bak 文件。
+10. 所有持久化落盘操作必须显式使用 Python 标准库 fcntl.flock 进程锁，拒绝第三方数据库与未受保护的直接写盘。
+
+
 ```

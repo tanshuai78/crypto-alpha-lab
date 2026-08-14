@@ -1,9 +1,11 @@
 import hashlib
 import json
 import os
-import tempfile
 import time
+from pathlib import Path
+from typing import Any
 
+from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
 
 
@@ -60,34 +62,61 @@ def validate_watermark(data: dict) -> None:
         raise ValueError("'seen_stable_event_keys' must be a list")
 
 
-def write_watermark_atomic(path: str, watermark: Watermark) -> None:
-    dir_name = os.path.dirname(os.path.abspath(path))
-    os.makedirs(dir_name, exist_ok=True)
+def write_watermark_atomic(
+    path: str,
+    watermark: Watermark,
+    *,
+    storage_guard: Any,
+) -> dict:
+    if storage_guard is None:
+        raise TypeError("storage_guard_required")
 
-    fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix="watermark_", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(watermark.to_dict(), f, indent=2)
+    target_path = Path(path).resolve()
+    watermark_dict = watermark.to_dict()
+    validate_watermark(watermark_dict)
+
+    serialized_bytes = (json.dumps(watermark_dict, indent=2) + "\n").encode("utf-8")
+    old_size = target_path.stat().st_size if target_path.exists() else 0
+    persistent_delta = len(serialized_bytes) - old_size
+    transient_peak = len(serialized_bytes)
+
+    pid = os.getpid()
+    tmp_path = target_path.parent / f".{target_path.name}.atomic.{pid}.tmp"
+
+    def _write_action():
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            f.write(serialized_bytes)
             f.flush()
-            os.fsync(fd)
+            os.fsync(f.fileno())
 
-        os.replace(tmp_path, path)
+        os.replace(tmp_path, target_path)
 
         try:
-            parent_fd = os.open(dir_name, os.O_RDONLY)
+            parent_fd = os.open(target_path.parent, os.O_RDONLY)
             try:
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
         except Exception:
             pass
-    except Exception as e:
-        if os.path.exists(tmp_path):
+
+    res = storage_guard.reserve_and_write(
+        artifact_class="ordinary_control_plane",
+        transient_peak_bytes=transient_peak,
+        persistent_delta_bytes=persistent_delta,
+        write_func=_write_action,
+    )
+
+    if res["status"] != "ready" or not res.get("written", False):
+        if tmp_path.exists():
             try:
-                os.remove(tmp_path)
-            except Exception:
+                tmp_path.unlink()
+            except OSError:
                 pass
-        raise e
+        require_storage_write(storage_guard, res)
+
+    return {"written": True, "storage_blocker": None}
 
 
 def bootstrap_watermark_from_stage1_5d_events(
