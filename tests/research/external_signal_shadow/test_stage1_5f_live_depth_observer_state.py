@@ -211,12 +211,14 @@ def test_startup_compacts_observer_state_to_latest_row_per_event_symbol(tmp_path
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    root.mkdir(parents=True)
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5F",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
-    state_file = tmp_path / "observer_state.jsonl"
+    state_file = root / "observer_state.jsonl"
     # Write duplicate rows for same event_symbol_id
     rows = [
         {"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "active"},
@@ -243,19 +245,21 @@ def test_state_compaction_does_not_write_bak_backup(tmp_path):
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    root.mkdir(parents=True)
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5F",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
-    state_file = tmp_path / "observer_state.jsonl"
+    state_file = root / "observer_state.jsonl"
     with open(state_file, "w") as f:
         f.write(json.dumps({"event_symbol_id": "id1", "symbol": "BTCUSDT", "status": "active"}) + "\n")
 
     compact_observer_state_jsonl(str(state_file), storage_guard=guard)
 
     # Check that NO .bak file exists in the directory (INV-04)
-    files = os.listdir(tmp_path)
+    files = os.listdir(root)
     bak_files = [f for f in files if f.endswith(".bak")]
     assert len(bak_files) == 0
 
@@ -682,7 +686,9 @@ def test_compaction_and_collision_detection_produce_same_result(tmp_path):
         group_latest_states_by_stable_event_symbol_key,
         load_latest_states_by_event_symbol_id,
     )
-    p = tmp_path / "state.jsonl"
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    root.mkdir(parents=True)
+    p = root / "state.jsonl"
     s1 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="pending", stable_event_symbol_key="k1")
     s2 = EventSymbolState(event_symbol_id="es1", symbol="BTCUSDT", detected_at_ms=1000, status="active", stable_event_symbol_key="k1")
     s3 = EventSymbolState(event_symbol_id="es2", symbol="BTCUSDT", detected_at_ms=2000, status="active", stable_event_symbol_key="k1")
@@ -698,7 +704,7 @@ def test_compaction_and_collision_detection_produce_same_result(tmp_path):
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
-    guard = StorageGuard(output_root=tmp_path, stage="1.5F", disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3))
+    guard = StorageGuard(output_root=root, stage="1.5F", disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3))
     compact_observer_state_jsonl(p, storage_guard=guard)
 
     latest2 = load_latest_states_by_event_symbol_id(p)

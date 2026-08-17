@@ -18,8 +18,9 @@ def create_test_guard(root):
 
 
 def test_schedule_revision_registry_idempotency_and_replay(tmp_path):
-    guard = create_test_guard(tmp_path)
-    reg_file = tmp_path / "schedule_revision_registry.jsonl"
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    guard = create_test_guard(root)
+    reg_file = root / "schedule_revision_registry.jsonl"
     reg = ScheduleRevisionRegistry(reg_file)
 
     app_id = compute_revision_application_id(
@@ -62,8 +63,9 @@ def test_schedule_revision_registry_writer_requires_guard(tmp_path):
 
 
 def test_schedule_revision_registry_records_orphaned_and_ambiguous(tmp_path):
-    guard = create_test_guard(tmp_path)
-    reg_file = tmp_path / "schedule_revision_registry.jsonl"
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    guard = create_test_guard(root)
+    reg_file = root / "schedule_revision_registry.jsonl"
     reg = ScheduleRevisionRegistry(reg_file)
 
     app_id = compute_revision_application_id(

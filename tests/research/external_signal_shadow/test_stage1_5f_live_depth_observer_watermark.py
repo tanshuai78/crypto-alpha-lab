@@ -18,12 +18,13 @@ def test_watermark_write_is_atomic(tmp_path):
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5F",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
-    target_path = tmp_path / "watermark.json"
+    target_path = root / "watermark.json"
     w = Watermark(
         watermark_version=1,
         max_seen_detected_at_ms=1000,

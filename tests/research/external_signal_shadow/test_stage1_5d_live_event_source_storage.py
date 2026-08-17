@@ -25,6 +25,10 @@ def create_test_guard(root: Path) -> StorageGuard:
     )
 
 
+def storage_root(tmp_path: Path) -> Path:
+    return tmp_path / "data" / "external_signal_shadow" / "stage1_5d" / "test_output"
+
+
 def test_build_daily_path_includes_utc_date(tmp_path):
     path = build_daily_path(tmp_path, "events", 1710000000000)
     assert "events" in str(path)
@@ -40,15 +44,17 @@ def test_build_stream_paths_under_output_root(tmp_path):
 
 
 def test_append_jsonl_writes_one_row(tmp_path):
-    guard = create_test_guard(tmp_path)
-    path = tmp_path / "events.jsonl"
+    root = storage_root(tmp_path)
+    guard = create_test_guard(root)
+    path = root / "events.jsonl"
     append_jsonl(path, {"a": 1}, storage_guard=guard)
     assert json.loads(path.read_text().strip()) == {"a": 1}
 
 
 def test_payload_version_first_observed_survives_reload(tmp_path):
-    guard = create_test_guard(tmp_path)
-    registry = tmp_path / "revision_payload_versions.jsonl"
+    root = storage_root(tmp_path)
+    guard = create_test_guard(root)
+    registry = root / "revision_payload_versions.jsonl"
     first = record_payload_version_first_observed(
         registry, source_article_id="a" * 32, payload_sha256="hash-a", observed_at_ms=1_000, storage_guard=guard
     )
@@ -85,9 +91,10 @@ def test_build_detail_payload_path_under_announcement_detail(tmp_path):
 
 
 def test_write_detail_payload_append_only_content_addressed(tmp_path):
-    guard = create_test_guard(tmp_path)
+    root = storage_root(tmp_path)
+    guard = create_test_guard(root)
     res1 = write_detail_payload_append_only(
-        root=tmp_path,
+        root=root,
         source_article_id="f43403ef11974998bc0f46420826577a",
         detail_fetch_variant="bapi_article_detail_query",
         raw_bytes=b'{"data":{"body":"SHAZUSDT"}}',
@@ -96,11 +103,11 @@ def test_write_detail_payload_append_only_content_addressed(tmp_path):
     )
     assert res1["raw_payload_persisted"] is True
     assert res1["payload_path"].endswith(".bin")
-    assert (tmp_path / res1["payload_path"]).exists()
+    assert (root / res1["payload_path"]).exists()
 
     # Retry same article, variant, raw_bytes -> returns same file path
     res2 = write_detail_payload_append_only(
-        root=tmp_path,
+        root=root,
         source_article_id="f43403ef11974998bc0f46420826577a",
         detail_fetch_variant="bapi_article_detail_query",
         raw_bytes=b'{"data":{"body":"SHAZUSDT"}}',

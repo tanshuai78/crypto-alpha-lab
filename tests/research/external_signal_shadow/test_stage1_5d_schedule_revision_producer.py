@@ -226,13 +226,14 @@ def test_restart_rebuilds_missing_current_root_identity_index(tmp_path):
         },
         symbol_contracts={symbol: contract},
     )
-    events_dir = tmp_path / "events"
-    events_dir.mkdir()
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5d" / "test_output"
+    events_dir = root / "events"
+    events_dir.mkdir(parents=True)
     (events_dir / "2026-08-07.jsonl").write_text(json.dumps(launch_row) + "\n")
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     storage_guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5D",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(
             100 * 1024**3, 50 * 1024**3, 50 * 1024**3
@@ -241,7 +242,7 @@ def test_restart_rebuilds_missing_current_root_identity_index(tmp_path):
 
     rebuilt, diagnostics = rebuild_missing_formal_launch_identity_index(
         events_dir=events_dir,
-        index_path=tmp_path / "formal_launch_identity_index.jsonl",
+        index_path=root / "formal_launch_identity_index.jsonl",
         source_root_id="current-root",
         commit_sha="abc123",
         storage_guard=storage_guard,
@@ -249,7 +250,7 @@ def test_restart_rebuilds_missing_current_root_identity_index(tmp_path):
 
     assert diagnostics == []
     assert rebuilt == 1
-    index_rows = [json.loads(line) for line in (tmp_path / "formal_launch_identity_index.jsonl").read_text().splitlines()]
+    index_rows = [json.loads(line) for line in (root / "formal_launch_identity_index.jsonl").read_text().splitlines()]
     assert index_rows[0]["supersedes_source_article_id"] == "a" * 32
     assert index_rows[0]["formal_row_durable_at_ms"] >= 800
 

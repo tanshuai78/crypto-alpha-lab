@@ -27,8 +27,9 @@ def test_build_daily_path_uses_utc_date():
 
 
 def test_append_jsonl_preserves_existing_rows(tmp_path):
-    target = tmp_path / "test.jsonl"
-    guard = create_test_guard(tmp_path)
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5f" / "test_output"
+    target = root / "test.jsonl"
+    guard = create_test_guard(root)
     append_jsonl(str(target), {"a": 1}, storage_guard=guard)
     append_jsonl(str(target), {"b": 2}, storage_guard=guard)
 

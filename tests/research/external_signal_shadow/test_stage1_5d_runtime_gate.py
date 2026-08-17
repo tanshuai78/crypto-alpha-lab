@@ -148,17 +148,18 @@ def test_stage1_5d_runtime_gate_failed_state():
 
 def test_stage1_5d_runtime_gate_atomic_write(tmp_path):
     import hashlib
-    ctx = _build_test_gate_context(output_root=tmp_path)
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5d" / "test_output"
+    ctx = _build_test_gate_context(output_root=root)
     gate = build_stage1_5d_runtime_gate(ctx)
-    expected_root_id = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
+    expected_root_id = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()
     assert gate["stage1_5d_output_root_id"] == expected_root_id
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
-    storage_guard = StorageGuard(output_root=tmp_path, stage="1.5D")
-    written_path = write_stage1_5d_runtime_gate_atomic(tmp_path, gate, storage_guard=storage_guard)
+    storage_guard = StorageGuard(output_root=root, stage="1.5D")
+    written_path = write_stage1_5d_runtime_gate_atomic(root, gate, storage_guard=storage_guard)
     assert written_path.exists()
     assert written_path.name == "live_safety_gate_summary.json"
-    assert write_stage1_5d_runtime_gate(tmp_path, gate, storage_guard=storage_guard).exists()
+    assert write_stage1_5d_runtime_gate(root, gate, storage_guard=storage_guard).exists()
 
 
 def test_runtime_gate_writer_requires_guard_and_reserves_by_gate_status(tmp_path):
