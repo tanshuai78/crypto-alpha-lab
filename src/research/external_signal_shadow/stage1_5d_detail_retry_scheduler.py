@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from configs import base
 from src.research.external_signal_shadow.stage1_5_storage_guard import require_storage_write
 
 logger = logging.getLogger(__name__)
@@ -47,18 +46,15 @@ def select_detail_retry_attempts(
 
     never_attempted = []
     attempted = []
-    max_retries = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
     for code, state in detail_retry_state.items():
         if state.get("terminal_state"):
             continue
         if state.get("detail_fetch_status") == "not_needed" and not _not_needed_state_missing_launch_anchor(state):
             continue
-        attempt_count = state.get("detail_http_request_count")
-        if attempt_count is None:
-            attempt_count = state.get("detail_fetch_attempt_count", 0)
-        cnt = int(attempt_count or 0)
-        if cnt >= max_retries:
-            continue
+        cycle_count = state.get("detail_retry_cycle_count")
+        if cycle_count is None:
+            cycle_count = state.get("detail_fetch_attempt_count")
+        cnt = int(cycle_count or 0)
         if cnt <= 0:
             never_attempted.append((code, state))
         else:
@@ -355,6 +351,7 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "exchangeinfo_missing_symbols": state.get("exchangeinfo_missing_symbols"),
             "hard_rejected_symbols": state.get("hard_rejected_symbols"),
             "symbol_exchangeinfo_statuses": state.get("symbol_exchangeinfo_statuses"),
+            "inflight_cycle": state.get("inflight_cycle"),
         }
     return serialized
 

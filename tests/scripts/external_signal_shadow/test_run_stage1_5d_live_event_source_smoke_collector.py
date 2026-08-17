@@ -9,8 +9,16 @@ import pytest
 from configs import base
 from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
     main,
+    parse_args,
     write_smoke_summary_atomically,
 )
+
+
+@pytest.fixture
+def tmp_path(tmp_path: Path) -> Path:
+    p = tmp_path / "data" / "external_signal_shadow"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def _write_valid_upstream(tmp_path):
@@ -6452,3 +6460,610 @@ def test_task6_e0_e1_e2_lifecycle_proof_wiring(tmp_path, monkeypatch):
     )
     assert res_e2_fail["valid"] is False
     assert res_e2_fail["reason"] == "armed_consumer_process_id_mismatch"
+
+
+def test_detail_retry_reservation_persisted_before_http_and_raises_without_network(tmp_path):
+    import time
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+
+    now_ms = int(time.time() * 1000)
+    ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
+    initial_state = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "title": "Binance Will Launch Test Futures",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 60_000,
+            "first_detected_at_ms": now_ms - 60_000,
+            "detected_at_ms": now_ms - 60_000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": now_ms - 1000,
+            "last_retry_at_ms": now_ms - 30_000,
+            "terminal_state": False,
+        }
+    }
+    write_detail_retry_scheduler_state(
+        output_root,
+        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    )
+
+    fetch_call_count = 0
+
+    def counting_fetch(*args, **kwargs):
+        nonlocal fetch_call_count
+        fetch_call_count += 1
+        return {"ok": True, "payload": {}}
+
+    list_payload = {"data": {"catalogs": [{"articles": []}]}}
+    fixture_info = {"symbols": []}
+
+    def fake_list_fetch(url, *args, **kwargs):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        nonlocal fetch_call_count
+        fetch_call_count += 1
+        return {"ok": True, "payload": {}}
+
+    def counting_payload_fetch(*args, **kwargs):
+        nonlocal fetch_call_count
+        fetch_call_count += 1
+        return {"ok": True, "payload": "<html>test</html>"}
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    orig_write = write_detail_retry_scheduler_state
+
+    def failing_write_on_reservation(root, sched_state, *args, **kwargs):
+        # When inflight_cycle is set during pre-HTTP reservation, inject failure!
+        articles = sched_state.get("articles", {})
+        if articles.get(ARTICLE, {}).get("inflight_cycle"):
+            raise OSError("injected_reservation_write_failure")
+        return orig_write(root, sched_state, *args, **kwargs)
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.write_detail_retry_scheduler_state", side_effect=failing_write_on_reservation):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=counting_payload_fetch):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("sys.argv", args):
+                    try:
+                        main()
+                    except (OSError, Exception):
+                        pass
+
+    assert fetch_call_count == 0
+
+
+def test_detail_retry_restart_with_inflight_cycle_emits_diagnostic_and_increments_cycle(tmp_path):
+    import time
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        load_detail_retry_scheduler_state,
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+
+    now_ms = int(time.time() * 1000)
+    ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
+    initial_state = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "title": "Binance Will Launch Test Futures",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 60_000,
+            "first_detected_at_ms": now_ms - 60_000,
+            "detected_at_ms": now_ms - 60_000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 3,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": now_ms - 1000,
+            "last_retry_at_ms": now_ms - 30_000,
+            "terminal_state": False,
+            "inflight_cycle": {"cycle": 3, "reserved_at_ms": now_ms - 10_000},
+        }
+    }
+    write_detail_retry_scheduler_state(
+        output_root,
+        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    )
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    list_payload = {"data": {"catalogs": [{"articles": []}]}}
+    fixture_info = {"symbols": []}
+
+    def fake_list_fetch(url, *args, **kwargs):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": 0, "error": "http_202_empty"}
+
+    def fake_payload_fetch(url, *args, **kwargs):
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": 0, "error": "http_202_empty"}
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
+
+    assert rc == 0
+    loaded = load_detail_retry_scheduler_state(output_root)
+    resumed_art = loaded["articles"][ARTICLE]
+    assert resumed_art["detail_retry_cycle_count"] == 4
+    assert resumed_art.get("inflight_cycle") is None
+
+    # Verify diagnostic was emitted
+    diag_files = list((output_root / "detail_retry_scheduler_diagnostics").glob("*.jsonl"))
+    assert len(diag_files) > 0
+    diag_rows = [json.loads(line) for f in diag_files for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
+    unknown_diags = [r for r in diag_rows if r.get("diagnostic_type") == "request_manifest_persistence_unknown"]
+    assert len(unknown_diags) >= 1
+    assert unknown_diags[0]["source_article_id"] == ARTICLE
+    assert unknown_diags[0]["reserved_cycle"] == 3
+
+
+def test_crash_after_event_append_before_state_write_dedupes_on_restart(tmp_path):
+    import time
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+
+    now_ms = int(time.time() * 1000)
+    ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
+
+    # Pre-seed one formal event row on disk to simulate crash after event append
+    events_dir = output_root / "events"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    event_row = {
+        "event_id": f"event_{ARTICLE}",
+        "source_article_id": ARTICLE,
+        "symbol": "BTCUSDT",
+        "detected_at_ms": now_ms - 60_000,
+        "first_detected_at_ms": now_ms - 60_000,
+        "symbol_resolved_at_ms": now_ms - 1000,
+        "formal_event_contract_version": 2,
+    }
+    (events_dir / "formal_futures_launch_events.jsonl").write_text(json.dumps(event_row) + "\n", encoding="utf-8")
+
+    initial_state = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "title": "Binance Will Launch Test Futures BTCUSDT",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 60_000,
+            "first_detected_at_ms": now_ms - 60_000,
+            "detected_at_ms": now_ms - 60_000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": now_ms - 1000,
+            "last_retry_at_ms": now_ms - 30_000,
+            "terminal_state": False,
+        }
+    }
+    write_detail_retry_scheduler_state(
+        output_root,
+        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    )
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    list_payload = {"data": {"catalogs": [{"articles": []}]}}
+    fixture_info = {
+        "symbols": [
+            {"symbol": "BTCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000}
+        ]
+    }
+    detail_html = "<html><body>Binance Futures Will Launch BTCUSDT Perpetual Contract</body></html>"
+
+    def fake_list_fetch(url, *args, **kwargs):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 1, "error": None}
+        return {"ok": True, "payload": {"code": "000000", "data": {"title": "Binance Will Launch Test Futures BTCUSDT", "body": detail_html}}}
+
+    def fake_payload_fetch(url, *args, **kwargs):
+        return {"ok": True, "payload": detail_html, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": len(detail_html), "row_count": 1, "error": None}
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
+
+    assert rc == 0
+    all_events = [json.loads(line) for line in (events_dir / "formal_futures_launch_events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    matching = [e for e in all_events if e.get("source_article_id") == ARTICLE]
+    assert len(matching) == 1
+
+
+def test_active_root_recovery_cli_options_validation(tmp_path):
+    c1, c = _write_valid_upstream(tmp_path)
+    base_args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(tmp_path / "out"),
+        "--output-summary", str(tmp_path / "summary.json"),
+    ]
+
+    # 1. Reject wildcard
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-source-article-id", "*", "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1"]):
+            parse_args()
+
+    # 2. Reject comma list
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-source-article-id", "0872245db74c4daaabd4f11984ba52c1,0872245db74c4daaabd4f11984ba52c2", "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1"]):
+            parse_args()
+
+    # 3. Reject invalid hex length
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-source-article-id", "0872245d", "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1"]):
+            parse_args()
+
+    # 4. Reject one-sided option (article without provenance)
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-source-article-id", "0872245db74c4daaabd4f11984ba52c1"]):
+            parse_args()
+
+    # 5. Reject one-sided option (provenance without article)
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1"]):
+            parse_args()
+
+    # 6. Reject unknown provenance enum
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", base_args + ["--active-root-recovery-source-article-id", "0872245db74c4daaabd4f11984ba52c1", "--active-root-recovery-provenance", "invalid_enum_v2"]):
+            parse_args()
+
+
+def test_active_root_recovery_emits_marker_only_for_exact_article_and_preserves_identity(tmp_path):
+    import time
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+        record_formal_futures_launch_event,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    summary = tmp_path / "summary.json"
+
+    now_ms = int(time.time() * 1000)
+    ARTICLE_A = "0872245db74c4daaabd4f11984ba52c1"
+    ARTICLE_B = "93b58498f3f84f248239847129837192"
+
+    initial_state = {
+        ARTICLE_A: {
+            "source_article_id": ARTICLE_A,
+            "title": "Binance Futures Will Launch BTCUSDT Perpetual Contract",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE_A}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 60_000,
+            "first_detected_at_ms": now_ms - 60_000,
+            "detected_at_ms": now_ms - 60_000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": now_ms - 1000,
+            "last_retry_at_ms": now_ms - 30_000,
+            "terminal_state": False,
+        },
+        ARTICLE_B: {
+            "source_article_id": ARTICLE_B,
+            "title": "Binance Futures Will Launch ETHUSDT Perpetual Contract",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE_B}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 60_000,
+            "first_detected_at_ms": now_ms - 60_000,
+            "detected_at_ms": now_ms - 60_000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": now_ms - 1000,
+            "last_retry_at_ms": now_ms - 30_000,
+            "terminal_state": False,
+        }
+    }
+    write_detail_retry_scheduler_state(
+        output_root,
+        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    )
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+        "--active-root-recovery-source-article-id", ARTICLE_A,
+        "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1",
+    ]
+
+    list_payload = {"data": {"catalogs": [{"articles": []}]}}
+    fixture_info = {
+        "symbols": [
+            {"symbol": "BTCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms},
+            {"symbol": "ETHUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms},
+        ]
+    }
+    detail_html_a = "<html><body>Binance Futures Will Launch BTCUSDT Perpetual Contract</body></html>"
+    detail_html_b = "<html><body>Binance Futures Will Launch ETHUSDT Perpetual Contract</body></html>"
+
+    def fake_list_fetch(url, *args, **kwargs):
+        if "article/list/query" in url:
+            return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        if "exchangeInfo" in url:
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 2, "error": None}
+        if ARTICLE_A in url:
+            return {"ok": True, "payload": {"code": "000000", "data": {"code": ARTICLE_A, "title": "Binance Futures Will Launch BTCUSDT Perpetual Contract", "body": detail_html_a}}}
+        return {"ok": True, "payload": {"code": "000000", "data": {"code": ARTICLE_B, "title": "Binance Futures Will Launch ETHUSDT Perpetual Contract", "body": detail_html_b}}}
+
+    def fake_payload_fetch(url, *args, **kwargs):
+        body = detail_html_a if ARTICLE_A in url else detail_html_b
+        return {"ok": True, "payload": body, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": len(body), "row_count": 1, "error": None}
+
+    with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
+        with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_list_fetch):
+                with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_payload_fetch):
+                    with patch("sys.argv", args):
+                        rc = main()
+
+    assert rc == 0
+    all_events = [json.loads(line) for f in (output_root / "events").glob("*.jsonl") for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
+    ev_a = next(e for e in all_events if e.get("source_article_id") == ARTICLE_A)
+    ev_b = next(e for e in all_events if e.get("source_article_id") == ARTICLE_B)
+
+    assert ev_a.get("detail_recovery_provenance") == "active_root_retry_cycle_recovery_v1"
+    assert "detail_recovery_provenance" not in ev_b
+
+    # The recovery marker is transport provenance, never formal identity input.
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        validate_launch_anchor_contract,
+    )
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
+        build_stream_paths,
+    )
+
+    base_row = dict(ev_a)
+    base_row.pop("detail_recovery_provenance")
+    normal_root = tmp_path / "normal"
+    recovery_root = tmp_path / "recovery"
+    normal_paths = build_stream_paths(
+        normal_root,
+        now_ms,
+        storage_guard=StorageGuard(output_root=normal_root, stage="1.5D"),
+    )
+    recovery_paths = build_stream_paths(
+        recovery_root,
+        now_ms,
+        storage_guard=StorageGuard(output_root=recovery_root, stage="1.5D"),
+    )
+    recovery_paths["active_root_recovery_authority"] = {
+        "article_id": ARTICLE_A,
+        "provenance": "active_root_retry_cycle_recovery_v1",
+    }
+    normal_written = record_formal_futures_launch_event(
+        stream_paths=normal_paths,
+        row=base_row,
+        seen_event_ids=set(),
+        events_detected=[],
+    )
+    recovered_written = record_formal_futures_launch_event(
+        stream_paths=recovery_paths,
+        row=base_row,
+        seen_event_ids=set(),
+        events_detected=[],
+    )
+    assert normal_written is not None
+    assert recovered_written is not None
+    assert validate_launch_anchor_contract(normal_written, "BTCUSDT")["valid"] is True
+    assert validate_launch_anchor_contract(recovered_written, "BTCUSDT")["valid"] is True
+    assert recovered_written["detail_recovery_provenance"] == "active_root_retry_cycle_recovery_v1"
+    for field in (
+        "event_id",
+        "stable_event_key",
+        "stable_event_symbol_key",
+        "formal_event_contract_version",
+        "source_anchor_contract_hash",
+        "symbol_source_anchor_contract_hashes",
+        "symbol_official_schedule_revision_ids",
+    ):
+        assert recovered_written.get(field) == normal_written.get(field)
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "event_stream"),
+    [
+        (True, ""),
+        (False, '{"source_article_id": "0872245db74c4daaabd4f11984ba52c1"}\n'),
+        (False, "{not-json}\n"),
+    ],
+    ids=["terminal_target", "already_emitted_target", "malformed_event_stream"],
+)
+def test_active_root_recovery_preflight_rejects_unsafe_target_before_network(
+    tmp_path,
+    terminal_state,
+    event_stream,
+):
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    c1, c = _write_valid_upstream(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    article = "0872245db74c4daaabd4f11984ba52c1"
+    write_detail_retry_scheduler_state(
+        output_root,
+        {
+            "articles": serialize_retry_articles(
+                {
+                    article: {
+                        "source_article_id": article,
+                        "detail_retryable": True,
+                        "terminal_state": terminal_state,
+                    }
+                }
+            ),
+            "endpoint_health": {},
+        },
+        metadata_version=2,
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    )
+    if event_stream:
+        events_dir = output_root / "events"
+        events_dir.mkdir()
+        (events_dir / "2026-08-17.jsonl").write_text(event_stream, encoding="utf-8")
+
+    calls = []
+
+    def network_forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("recovery preflight must stop before network access")
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(tmp_path / "summary.json"),
+        "--active-root-recovery-source-article-id", article,
+        "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1",
+    ]
+    with patch(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json",
+        side_effect=network_forbidden,
+    ), patch(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload",
+        side_effect=network_forbidden,
+    ), patch("sys.argv", args), pytest.raises(SystemExit):
+        main()
+
+    assert calls == []
+
+
+def test_zero_max_seconds_stops_before_first_network_poll(tmp_path):
+    c1, c = _write_valid_upstream(tmp_path)
+    calls = []
+
+    def network_forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("zero max-seconds must not enter a poll")
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(tmp_path / "out"),
+        "--output-summary", str(tmp_path / "summary.json"),
+        "--max-seconds", "0",
+    ]
+    with patch(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json",
+        side_effect=network_forbidden,
+    ), patch(
+        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload",
+        side_effect=network_forbidden,
+    ), patch("sys.argv", args):
+        assert main() == 0
+
+    assert calls == []

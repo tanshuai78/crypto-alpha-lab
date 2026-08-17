@@ -1178,8 +1178,20 @@ def classify_event_symbol_eligibility_with_diagnostics(
     clean_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_CLEAN_START_DELAY_MS
     recovery_delay_max = base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
 
+    recovery_prov = row.get("detail_recovery_provenance")
+    if recovery_prov is not None:
+        if recovery_prov != "active_root_retry_cycle_recovery_v1":
+            diag["evidence_start_class"] = "malformed_provenance"
+            return "diagnostic_only", "malformed_recovery_provenance", diag
+
     max_evidence_class = diag.get("admission_max_evidence_class") or diag.get("latest_max_evidence_class") or "clean_or_recovery"
-    if max_evidence_class != "clean_or_recovery":
+    if recovery_prov == "active_root_retry_cycle_recovery_v1":
+        diag["evidence_start_class"] = "recovery_start"
+        diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        diag["clean_start_forbidden_reason"] = "active_root_retry_cycle_recovery_marker"
+        _attach_admission_anchor_lineage(diag, now_ms)
+        return "eligible", "eligible_recovery_only", diag
+    elif max_evidence_class != "clean_or_recovery":
         diag["evidence_start_class"] = "recovery_start"
         diag["live_depth_evidence_basis"] = "recovery_validation_only"
         diag["clean_start_forbidden_reason"] = "anchor_contract_not_clean_eligible"
@@ -1222,17 +1234,21 @@ def classify_live_depth_evidence_basis(row: dict, watermark) -> dict:
         evidence_start_class = row.get("evidence_start_class", "")
         if evidence_start_class == "recovery_start":
             basis = "recovery_validation_only"
+            ann_allowed = False
         elif ann_post and launch_post:
             basis = "announcement_and_launch_time"
+            ann_allowed = True
         elif launch_post:
             basis = "launch_time_only"
+            ann_allowed = False
         else:
             basis = "recovery_validation_only"
+            ann_allowed = False
 
         return {
             "announcement_capture_time_ms": row.get("announcement_capture_time_ms"),
             "announcement_capture_time_source": row.get("announcement_capture_time_source", ""),
-            "announcement_time_capture_evidence_allowed": ann_post,
+            "announcement_time_capture_evidence_allowed": ann_allowed,
             "launch_time_depth_evidence_allowed": launch_post,
             "live_depth_evidence_basis": basis,
         }
@@ -1241,6 +1257,20 @@ def classify_live_depth_evidence_basis(row: dict, watermark) -> dict:
     observation_age_base_ms, observation_age_basis = resolve_observation_age_base_ms(
         row, row.get("symbol") or (row.get("symbols") or [""])[0]
     )
+
+    evidence_start_class = row.get("evidence_start_class", "")
+    if evidence_start_class == "recovery_start":
+        observation_after_watermark = (
+            observation_age_base_ms is not None
+            and observation_age_base_ms > watermark.max_seen_detected_at_ms
+        )
+        return {
+            "announcement_capture_time_ms": announcement_capture_time_ms,
+            "announcement_capture_time_source": announcement_capture_time_source,
+            "announcement_time_capture_evidence_allowed": False,
+            "launch_time_depth_evidence_allowed": bool(observation_after_watermark),
+            "live_depth_evidence_basis": "recovery_validation_only",
+        }
 
     announcement_after_watermark = (
         announcement_capture_time_ms is not None

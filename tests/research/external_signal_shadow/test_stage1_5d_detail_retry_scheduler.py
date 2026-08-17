@@ -204,8 +204,10 @@ def create_test_guard(root: Path):
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
+    guard_root = root / "data" / "external_signal_shadow" / "stage1_5d_root"
+    guard_root.mkdir(parents=True, exist_ok=True)
     return StorageGuard(
-        output_root=root,
+        output_root=guard_root,
         stage="1.5D",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
@@ -656,9 +658,10 @@ def test_overdue_attempted_respects_minimum_retry_interval():
     selected = select_detail_retry_attempts(
         detail_retry_state={
             "f434": {
-                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "transient_detail_error_count": 1,
+                    "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                    "detail_http_request_count": 2,
+                    "detail_fetch_attempt_count": 2,
+                    "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_202_empty",
                 "detail_retryable": True,
                 "last_retry_at_ms": now_ms - 5 * 60 * 1000,
@@ -681,9 +684,10 @@ def test_attempted_state_with_missing_next_retry_is_diagnosed_not_selected():
     selected = select_detail_retry_attempts(
         detail_retry_state={
             "bad": {
-                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "transient_detail_error_count": 1,
+                    "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                    "detail_http_request_count": 2,
+                    "detail_fetch_attempt_count": 2,
+                    "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_202_empty",
                 "detail_retryable": True,
                 "last_retry_at_ms": now_ms - 80 * 60 * 1000,
@@ -706,9 +710,10 @@ def test_title_symbol_missing_alone_does_not_make_hard_failure_retryable():
     selected = select_detail_retry_attempts(
         detail_retry_state={
             "hard": {
-                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "pending_reason": "title_symbol_missing",
+                    "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                    "detail_http_request_count": 2,
+                    "detail_fetch_attempt_count": 2,
+                    "pending_reason": "title_symbol_missing",
                 "last_detail_failure_class": "http_404",
                 "detail_retryable": False,
                 "last_retry_at_ms": now_ms - 80 * 60 * 1000,
@@ -731,9 +736,10 @@ def test_missing_failure_class_does_not_make_title_symbol_missing_retryable():
     selected = select_detail_retry_attempts(
         detail_retry_state={
             "ambiguous": {
-                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "pending_reason": "title_symbol_missing",
+                    "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                    "detail_http_request_count": 2,
+                    "detail_fetch_attempt_count": 2,
+                    "pending_reason": "title_symbol_missing",
                 "last_retry_at_ms": now_ms - 80 * 60 * 1000,
                 "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
             }
@@ -758,9 +764,10 @@ def test_http_500_transient_row_does_not_consume_overdue_reserved_slot_with_firs
                 "detail_http_request_count": 0,
             },
             "server_error": {
-                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "transient_detail_error_count": 1,
+                    "first_detected_at_ms": now_ms - 90 * 60 * 1000,
+                    "detail_http_request_count": 2,
+                    "detail_fetch_attempt_count": 2,
+                    "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_500",
                 "detail_retryable": True,
                 "last_retry_at_ms": now_ms - 80 * 60 * 1000,
@@ -912,10 +919,11 @@ def test_overdue_attempted_queue_has_bounded_round_robin_service():
     now_ms = 10_000_000
     state = {
         f"article_{i}": {
-            "source_article_id": f"article_{i}",
-            "first_detected_at_ms": now_ms - (100 + i) * 60_000,
-            "detail_http_request_count": 2,
-            "transient_detail_error_count": 1,
+                "source_article_id": f"article_{i}",
+                "first_detected_at_ms": now_ms - (100 + i) * 60_000,
+                "detail_http_request_count": 2,
+                "detail_fetch_attempt_count": 2,
+                "transient_detail_error_count": 1,
             "last_detail_failure_class": "http_202_empty",
             "detail_retryable": True,
             "last_retry_at_ms": now_ms - (80 + i) * 60_000,
@@ -1053,3 +1061,145 @@ def test_v1_scheduler_state_loads_with_safe_defaults(tmp_path):
     assert art["last_bapi_detail_status"] is None
     assert art["last_bapi_parser_status"] is None
     assert art["launch_anchor_policy"] is None
+
+
+def test_selector_incident_shape_http_count_4_cycle_2_is_selected():
+    ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
+    NOW = 10_000_000
+    state = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "detail_http_request_count": 4,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": NOW - 1,
+            "last_retry_at_ms": NOW - 60_000,
+            "first_detected_at_ms": NOW - 120_000,
+            "terminal_state": False,
+        }
+    }
+    selected = select_detail_retry_attempts(
+        detail_retry_state=state,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=0,
+        overdue_attempted_retry_budget_per_poll=1,
+    )
+    assert selected == [ARTICLE]
+
+
+def test_selector_retains_bounds_for_terminal_non_retryable_interval_cycle_cap():
+    ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
+    NOW = 10_000_000
+    base_state = {
+        "source_article_id": ARTICLE,
+        "detail_http_request_count": 4,
+        "detail_retry_cycle_count": 2,
+        "detail_fetch_attempt_count": 2,
+        "detail_retryable": True,
+        "last_detail_failure_class": "http_202_empty",
+        "next_detail_retry_at_ms": NOW - 1,
+        "last_retry_at_ms": NOW - 60_000,
+        "first_detected_at_ms": NOW - 120_000,
+        "terminal_state": False,
+    }
+
+    # 1. Terminal state excluded
+    s_term = {ARTICLE: {**base_state, "terminal_state": True}}
+    assert select_detail_retry_attempts(detail_retry_state=s_term, now_ms=NOW, detail_budget_per_poll=1, endpoint_degraded_until_ms=0, overdue_attempted_retry_budget_per_poll=1) == []
+
+    # 2. Non-retryable excluded
+    s_nonret = {ARTICLE: {**base_state, "detail_retryable": False}}
+    assert select_detail_retry_attempts(detail_retry_state=s_nonret, now_ms=NOW, detail_budget_per_poll=1, endpoint_degraded_until_ms=0, overdue_attempted_retry_budget_per_poll=1) == []
+
+    # 3. Not due excluded
+    s_notdue = {ARTICLE: {**base_state, "next_detail_retry_at_ms": NOW + 10_000}}
+    assert select_detail_retry_attempts(detail_retry_state=s_notdue, now_ms=NOW, detail_budget_per_poll=1, endpoint_degraded_until_ms=0, overdue_attempted_retry_budget_per_poll=1) == []
+
+    # 4. Below minimum interval excluded when fresh article present
+    s_interval = {
+        "fresh": {"first_detected_at_ms": NOW - 1000, "detail_retry_cycle_count": 0},
+        ARTICLE: base_state,
+    }
+    assert select_detail_retry_attempts(
+        detail_retry_state=s_interval,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=0,
+        overdue_attempted_retry_budget_per_poll=1,
+        overdue_attempted_min_interval_ms=120_000,  # last_retry_at_ms was NOW - 60_000 => now - last = 60_000 < 120_000
+        min_never_attempted_slots_per_poll=1,
+    ) == ["fresh"]
+
+    # 5. Degraded cycle cap excluded
+    s_degraded = {ARTICLE: {**base_state, "detail_retry_cycle_count": 3}}
+    assert select_detail_retry_attempts(
+        detail_retry_state=s_degraded,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=NOW + 100_000,
+        degraded_recent_retry_budget_per_poll=1,
+        degraded_recent_retry_max_cycles=3,  # cycle_count 3 >= 3
+    ) == []
+
+
+def test_selector_legacy_fallback_when_cycle_count_absent():
+    ARTICLE = "art_legacy"
+    NOW = 10_000_000
+    # Legacy state without detail_retry_cycle_count but with detail_fetch_attempt_count=0 => never_attempted
+    state_never = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "detail_fetch_attempt_count": 0,
+            "first_detected_at_ms": NOW - 1000,
+        }
+    }
+    assert select_detail_retry_attempts(
+        detail_retry_state=state_never,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=0,
+    ) == [ARTICLE]
+
+    # HTTP telemetry is not a legacy selector fallback. Without either logical
+    # counter, this remains a never-attempted row even when transport audit is high.
+    state_http_only = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "detail_http_request_count": 4,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": NOW - 1,
+            "last_retry_at_ms": NOW - 60_000,
+            "first_detected_at_ms": NOW - 120_000,
+        }
+    }
+    assert select_detail_retry_attempts(
+        detail_retry_state=state_http_only,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=NOW + 1,
+        degraded_recent_retry_budget_per_poll=0,
+    ) == [ARTICLE]
+
+    # Legacy state with detail_fetch_attempt_count=2 => attempted
+    state_attempted = {
+        ARTICLE: {
+            "source_article_id": ARTICLE,
+            "detail_fetch_attempt_count": 2,
+            "detail_retryable": True,
+            "last_detail_failure_class": "http_202_empty",
+            "next_detail_retry_at_ms": NOW - 1,
+            "last_retry_at_ms": NOW - 60_000,
+            "first_detected_at_ms": NOW - 120_000,
+        }
+    }
+    assert select_detail_retry_attempts(
+        detail_retry_state=state_attempted,
+        now_ms=NOW,
+        detail_budget_per_poll=1,
+        endpoint_degraded_until_ms=0,
+        overdue_attempted_retry_budget_per_poll=1,
+    ) == [ARTICLE]

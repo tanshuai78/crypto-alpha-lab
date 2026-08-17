@@ -229,17 +229,19 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-本章是当前 `storage_lifecycle_resource_guard_hotfix` 的唯一部署入口。它部署已完成的 Git Ancestry Attestation 与 StorageGuard 资源生命周期修补；Stage 1.5G 永远不在 VPS 上执行。
+本章是已审批 Stage 1.5D/1.5F hotfix 的常规 Git 部署入口；Stage 1.5G 永远不在 VPS 上执行。本次 `detail_retry_cycle_active_root_recovery_hotfix` 同时修复逻辑 retry starvation，并提供受控 active-root recovery 所需代码。
 
 ```text
-current_deployment_scope = stage1_5d_1_5f_1_5g_storage_lifecycle_resource_guard_hotfix
-root_suffix = 7d_storage_lifecycle_resource_guard_hotfix
+current_deployment_scope = stage1_5d_detail_retry_cycle_active_root_recovery_hotfix
+ordinary_new_root_suffix = 7d_detail_retry_cycle_active_root_recovery_hotfix
 deployment_transport = git_commit_checkout
 formal_event_contract_version = 2
 anchor_precedence_policy = official_schedule_priority_v1
 schedule_revision_producer_default_enabled = false
 RISK_LIVE_TRADING_ENABLED = false
 ```
+
+**部署边界：** 第 7.2--7.8 节创建一对全新的 D/F root，适用于常规代码部署；它不会恢复旧 root 中已经 pending 的文章。第 7.9 节是同 root active-root recovery 的单次切割规范，仍需独立的部署决策、运行时 preflight 和明确的用户授权，不能与第 7.6/7.7 节混用。
 
 ### 7.1 部署原则与数据保护
 
@@ -278,6 +280,7 @@ PYTHONPATH=src:. .venv/bin/python -m pytest \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_summary.py \
   tests/research/external_signal_shadow/test_stage1_5f_live_depth_observer_watermark.py \
   tests/research/external_signal_shadow/test_stage1_5f_schedule_revision_registry.py \
+  tests/research/external_signal_shadow/test_stage1_5f_runtime_gate_validator.py \
   tests/research/external_signal_shadow/test_stage1_5g_live_depth_evidence_review_integrity.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5d_live_event_source_smoke_collector.py \
   tests/scripts/external_signal_shadow/test_run_stage1_5f_live_depth_observer.py -q
@@ -329,7 +332,8 @@ echo "SERVER_GIT_READY=$SERVER_GIT_READY"
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export DEPLOY_COMMIT="483fcc98b9741e4458f0bbe970ce587c42aaee75"
+# 粘贴第 7.2 节输出的精确 40 位 SHA；不得复用文档历史示例 SHA。
+export DEPLOY_COMMIT="REPLACE_WITH_EXACT_40_CHAR_COMMIT_SHA"
 DEPLOY_READY=1
 
 if [ "${#DEPLOY_COMMIT}" -ne 40 ]; then
@@ -424,7 +428,8 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
+# 本次常规新 root 部署使用该 suffix；active-root recovery 不创建新 root。
+export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
 export STAGE1_5D_SESSION="stage1_5d_continuous_${ROOT_SUFFIX}"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${ROOT_SUFFIX}"
@@ -509,7 +514,8 @@ echo "D_GATE_READY=$D_GATE_READY"
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
+# 本次常规新 root 部署使用该 suffix；active-root recovery 不创建新 root。
+export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
 export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
 export STAGE1_5F_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_${ROOT_SUFFIX}"
@@ -659,6 +665,53 @@ ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 
 正常首检：1.5D 为 `READY` / `stage1_5d_runtime_gate_ready`；三个 `source_stage1_5d_*_root_id` 全部相同且绑定新 D root；1.5F runtime attestation 为 true、`block_new_event_admission=false`。若任一断言失败，停止新会话、保留所有新旧 root，定位后再重新部署。
 
+### 7.9 Active-Root Recovery Cutover Runbook (Non-Executable by Default)
+
+> [!IMPORTANT]
+> **Non-Executable by Default**: 本小节仅作为未来 active-root 恢复切割的操作规范文档与审计依据。实施计划与本代码库默认**不授权**自动执行切换；必须在所有代码实现、静态检查与回归验证完全闭环并经独立部署决策后，方可由操作人员手动执行。
+
+```text
+Task 0 / current-B premise evidence, before code edits:
+  freeze B commit, current roots, current scheduler/event/manifest facts,
+  current watermark/root contract and health only.
+
+Deployment preflight, after implementation/completion:
+  freeze exact approved C commit and fresh target/root facts again:
+  article is one 32-hex value, pending/retryable/nonterminal/not emitted/in max age;
+  prove no systemd/supervisord/cron/container restart policy will recreate B or generic C D/F
+    (record tmux ls, ps -ef, and verify no auto-supervisor/cron recreates processes);
+  D/F gates and host storage are ready; no concurrent writer; F active_observation_count=0;
+  current watermark/state/root contract and B lock path are readable; C lock equals B lock.
+
+Cutover:
+  1. stop B D and B F; prove both exited; do not checkout or restart B.
+  2. start D(C) exactly once, against original absolute D root, with both exact flags:
+       --active-root-recovery-source-article-id=<article>
+       --active-root-recovery-provenance=active_root_retry_cycle_recovery_v1
+  3. record PID, started_at, full command line, C commit, article and enum in the local ledger;
+     prove the running command contains both flags before accepting D READY.
+  4. verify D READY, same B lock, and target continuity.
+  5. start F(C) once against original absolute F root, without --bootstrap-watermark;
+     verify same watermark/root/state, C process/commit, healthy attestation and unchanged D-root bindings.
+  6. only then allow recovery to continue; verify any emitted target row carries the marker and F evidence is recovery-only.
+
+If D(C) exits before the target becomes terminal or formal:
+  stop; no automatic generic restart is a valid continuation; fresh deployment preflight is required;
+  any new recovery invocation must repeat the exact authority pair.
+
+Partial-cutover failure matrix:
+  C D fails before root write -> stop C processes; preserve roots/ledger; do not restart B; new decision.
+  C D writes scheduler state then fails -> stop C processes; preserve roots/ledger; fresh preflight.
+  C D emits marked event and C F fails -> stop C D; preserve event/roots; never start old B F.
+  C F starts with unhealthy attestation/binding -> stop both C processes; preserve roots/ledger; new decision.
+  C pair healthy -> recovery may continue.
+
+Always forbidden:
+  bootstrap/new root, automatic B resume, marker stripping, manual state/watermark/event edits,
+  manual/offline compaction before recovery, or VPS 1.5G review.
+  Existing guarded automatic F startup compaction remains allowed lifecycle behavior.
+```
+
 ## 8. 日常监控
 
 ### 8.1 当前 root 快速定位
@@ -669,7 +722,7 @@ ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
+export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
 export STAGE1_5D_EVENTS_OUT="$(ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 export STAGE1_5F_OUT="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 
@@ -810,7 +863,7 @@ observation_anchor_ms / next_anchor_resolution_at_ms / next_admission_check_at_m
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_storage_lifecycle_resource_guard_hotfix"
+export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
 tmux kill-session -t "stage1_5f_live_depth_${ROOT_SUFFIX}" 2>/dev/null || true
 tmux kill-session -t "stage1_5d_continuous_${ROOT_SUFFIX}" 2>/dev/null || true
 

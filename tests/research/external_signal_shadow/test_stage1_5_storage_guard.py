@@ -203,7 +203,8 @@ def test_storage_guard_imports_and_reservation():
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        root = pathlib.Path(tmpdir) / "stage1_5d_root"
+        root = pathlib.Path(tmpdir) / "data" / "external_signal_shadow" / "stage1_5d_root"
+        root.mkdir(parents=True, exist_ok=True)
         guard = StorageGuard(
             output_root=root,
             stage="1.5D",
@@ -239,8 +240,10 @@ def test_write_oserror_becomes_fail_closed_storage_result(tmp_path):
         require_storage_write,
     )
 
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5d_root"
+    root.mkdir(parents=True, exist_ok=True)
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5D",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
@@ -265,8 +268,9 @@ def test_host_emergency_reserve_covers_actual_d_plus_f_peaks(tmp_path):
     )
     from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as f_runner
 
+    root_d = tmp_path / "data" / "external_signal_shadow" / "stage1_5d"
     d_gate, d_summary, d_diagnostic = d_runner._build_storage_failure_artifacts(
-        tmp_path / "stage1_5d",
+        root_d,
         "x" * 512,
         "x" * 128,
     )
@@ -288,8 +292,10 @@ def test_startup_rejects_host_emergency_smaller_than_d_plus_f_terminal_caps(tmp_
         + base.EXTERNAL_SIGNAL_STAGE1_5F_TERMINAL_WRITE_SET_MAX_PEAK_BYTES
         - 1,
     )
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5d_root"
+    root.mkdir(parents=True, exist_ok=True)
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5D",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
@@ -301,7 +307,7 @@ def test_normal_write_denied_when_near_reserve():
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        root = pathlib.Path(tmpdir) / "stage1_5d_root"
+        root = pathlib.Path(tmpdir) / "data" / "external_signal_shadow" / "stage1_5d_root"
         root.mkdir(parents=True, exist_ok=True)
         # Create dummy file to simulate root usage near limit (1GiB - 15MiB)
         # Root limit = 1GiB (1073741824), Ordinary reserve = 12MiB, Emergency reserve = 4MiB
@@ -326,9 +332,8 @@ def test_normal_write_denied_when_near_reserve():
 def test_ordinary_write_allowed_in_ordinary_reserve_but_denied_in_emergency():
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
-
     with tempfile.TemporaryDirectory() as tmpdir:
-        root = pathlib.Path(tmpdir) / "stage1_5d_root"
+        root = pathlib.Path(tmpdir) / "data" / "external_signal_shadow" / "stage1_5d_root"
         root.mkdir(parents=True, exist_ok=True)
         guard = StorageGuard(
             output_root=root,
@@ -362,7 +367,7 @@ def test_terminal_write_allowed_in_emergency_reserve():
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        root = pathlib.Path(tmpdir) / "stage1_5d_root"
+        root = pathlib.Path(tmpdir) / "data" / "external_signal_shadow" / "stage1_5d_root"
         root.mkdir(parents=True, exist_ok=True)
         guard = StorageGuard(
             output_root=root,
@@ -383,8 +388,10 @@ def test_terminal_write_allowed_in_emergency_reserve():
 def test_terminal_write_larger_than_configured_cap_is_blocked_before_write(tmp_path):
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
+    root = tmp_path / "data" / "external_signal_shadow" / "stage1_5d_root"
+    root.mkdir(parents=True, exist_ok=True)
     guard = StorageGuard(
-        output_root=tmp_path,
+        output_root=root,
         stage="1.5D",
         disk_usage_func=lambda path: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
     )
@@ -409,7 +416,8 @@ def test_startup_validation_rejects_excessive_terminal_peak():
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        root = pathlib.Path(tmpdir) / "stage1_5d_root"
+        root = pathlib.Path(tmpdir) / "data" / "external_signal_shadow" / "stage1_5d_root"
+        root.mkdir(parents=True, exist_ok=True)
         guard = StorageGuard(
             output_root=root,
             stage="1.5D",
@@ -419,3 +427,87 @@ def test_startup_validation_rejects_excessive_terminal_peak():
 
         res = guard.validate_startup()
         assert res["status"] == "blocked_start_terminal_peak_exceeded"
+
+
+def test_storage_guard_lock_identity_across_cwd_and_worktrees(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    base_b = tmp_path / "worktree_b"
+    data_ancestor = base_b / "data" / "external_signal_shadow"
+    d_root = data_ancestor / "smoke_1.5d"
+    f_root = data_ancestor / "observer_1.5f"
+    d_root.mkdir(parents=True, exist_ok=True)
+    f_root.mkdir(parents=True, exist_ok=True)
+
+    other_dir = tmp_path / "worktree_c"
+    other_dir.mkdir(parents=True, exist_ok=True)
+
+    # Change CWD to worktree_c
+    monkeypatch.chdir(other_dir)
+    guard_d = StorageGuard(
+        output_root=d_root,
+        stage="1.5D",
+        disk_usage_func=lambda p: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
+
+    # Change CWD to base_b
+    monkeypatch.chdir(base_b)
+    guard_f = StorageGuard(
+        output_root=f_root,
+        stage="1.5F",
+        disk_usage_func=lambda p: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+    )
+
+    expected_lock = (data_ancestor / ".stage1_5_storage_guard.lock").resolve()
+    assert guard_d.lock_file_path.resolve() == expected_lock
+    assert guard_f.lock_file_path.resolve() == expected_lock
+
+    # Verify serialization of concurrent reserve_and_write calls
+    events = []
+    def slow_write_d():
+        events.append("d_start")
+        time.sleep(0.05)
+        events.append("d_end")
+
+    def slow_write_f():
+        events.append("f_start")
+        time.sleep(0.05)
+        events.append("f_end")
+
+    t1 = threading.Thread(target=lambda: guard_d.reserve_and_write(
+        artifact_class="normal_data", transient_peak_bytes=10, persistent_delta_bytes=10, write_func=slow_write_d
+    ))
+    t2 = threading.Thread(target=lambda: guard_f.reserve_and_write(
+        artifact_class="normal_data", transient_peak_bytes=10, persistent_delta_bytes=10, write_func=slow_write_f
+    ))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert ("d_start" in events) and ("f_start" in events)
+    # They cannot interleave start/end
+    if events[0] == "d_start":
+        assert events[1] == "d_end"
+        assert events[2] == "f_start"
+        assert events[3] == "f_end"
+    else:
+        assert events[1] == "f_end"
+        assert events[2] == "d_start"
+        assert events[3] == "d_end"
+
+
+def test_storage_guard_fails_closed_without_data_external_signal_shadow_ancestor(tmp_path):
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    random_root = tmp_path / "arbitrary_root"
+    random_root.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ValueError, match="output_root_missing_external_signal_shadow_ancestor"):
+        StorageGuard(
+            output_root=random_root,
+            stage="1.5D",
+            disk_usage_func=lambda p: shutil._ntuple_diskusage(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+        )

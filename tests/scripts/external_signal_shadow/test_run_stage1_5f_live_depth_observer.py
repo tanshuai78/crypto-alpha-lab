@@ -6,6 +6,13 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture
+def tmp_path(tmp_path: Path) -> Path:
+    p = tmp_path / "data" / "external_signal_shadow"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def _make_f_storage_guard(output_root):
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
 
@@ -3586,3 +3593,152 @@ def test_same_poll_schedule_revision_prevents_stale_launch_admission(
         assert reloaded_states[-1]["status"] == "pending_launch_anchor_missing"
         assert reloaded_states[-1]["anchor_resolution_deadline_ms"] == first_deadline_ms
         assert not list((output_root / "events_accepted").glob("**/*.jsonl"))
+
+
+def test_stage1_5f_same_root_resume_without_bootstrap(tmp_path, monkeypatch):
+    import time
+
+    from scripts.external_signal_shadow import (
+        run_stage1_5f_live_depth_observer as runner,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_state_by_event_symbol_id,
+    )
+
+    now_ms = int(time.time() * 1000)
+    output_root = tmp_path / "f_out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    d_root = tmp_path / "d_out"
+    events_dir = d_root / "events"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    (events_dir / "2026-08-17.jsonl").write_text("")
+    gate_path = d_root / "live_safety_gate_summary.json"
+    gate_path.write_text(json.dumps({
+        "runtime_gate_schema_version": 1,
+        "decision": "stage1_5d_runtime_gate_ready",
+        "status": "READY",
+        "consumable_by_stage1_5f": True,
+        "fatal_blockers": [],
+        "source_root": str(d_root.resolve()),
+        "generated_at_ms": now_ms,
+        "live_trading_enabled": False,
+        "execution_feasibility_claim_allowed": False,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    # Seed watermark
+    watermark_data = {
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": now_ms - 100_000,
+        "seen_event_ids": ["seeded_event_1"],
+        "seen_source_article_ids": ["seeded_article_1"],
+        "seen_stable_event_keys": ["seeded_key_1"],
+        "updated_at_ms": now_ms - 100_000,
+    }
+    watermark_path = output_root / "watermark.json"
+    watermark_path.write_text(json.dumps(watermark_data))
+    seeded_watermark_bytes = watermark_path.read_bytes()
+
+    seeded_state = EventSymbolState(
+        event_symbol_id="seeded_event_symbol",
+        event_id="seeded_event",
+        symbol="BTCUSDT",
+        status="completed",
+        source_article_id="seeded_article",
+    )
+    state_path = output_root / "observer_state.jsonl"
+    state_path.write_text(json.dumps(seeded_state.to_dict()) + "\n")
+
+    # Seed a B-era contract/summary. C must reuse this root rather than bootstrap it.
+    runner.write_observer_root_contract_atomically(
+        str(output_root),
+        "v2_production",
+        reason="initial_test_setup",
+        storage_guard=StorageGuard(output_root=output_root, stage="1.5F"),
+        source_binding_facts={
+            "source_stage1_5d_output_root_id": str(d_root.resolve()),
+            "source_stage1_5d_events_root_id": str(d_root.resolve()),
+            "source_stage1_5d_runtime_gate_root_id": str(d_root.resolve()),
+        },
+    )
+    (output_root / "live_depth_observer_summary.json").write_text(json.dumps({
+        "consumer_process_instance_id": "old_process_b",
+        "consumer_root_id": runner.canonical_root_id(output_root),
+    }))
+
+    # Mock response dir for network-free run
+    mock_dir = tmp_path / "mock_responses"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    with open(mock_dir / "exchangeinfo.json", "w") as f:
+        json.dump({"symbols": []}, f)
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--stage1-5d-events-glob", str(events_dir / "*.jsonl"),
+        "--stage1-5d-runtime-gate", str(gate_path),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+    assert "--bootstrap-watermark" not in args
+    monkeypatch.setattr(
+        runner,
+        "verify_consumer_static_proof",
+        lambda _repo_root: {
+            "valid": True,
+            "startup_head_sha": "commit_c",
+            "manifest_sha256": runner.canonical_manifest_sha256(
+                "1.5F_v1", runner.CONSUMER_RUNTIME_MANIFEST
+            ),
+        },
+    )
+    monkeypatch.setattr(runner, "verify_consumer_runtime_proof", lambda *_args: {"valid": True})
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    # Same root resumes its durable B state without a bootstrap rewrite.
+    assert watermark_path.read_bytes() == seeded_watermark_bytes
+    reloaded_states = load_latest_state_by_event_symbol_id(state_path)
+    assert reloaded_states[seeded_state.event_symbol_id] == seeded_state
+
+    summary_path = output_root / "live_depth_observer_summary.json"
+    assert summary_path.exists()
+    summary = json.loads(summary_path.read_text())
+    assert summary["block_new_event_admission"] is False
+    assert summary["consumer_root_id"] == runner.canonical_root_id(output_root)
+    assert summary["consumer_process_instance_id"] != "old_process_b"
+    assert summary["consumer_startup_commit_sha"] == "commit_c"
+    assert summary["consumer_runtime_attestation_verified"] is True
+    assert summary["consumer_runtime_attestation_compromised"] is False
+
+    root_contract = json.loads((output_root / "observer_root_contract.json").read_text())
+    expected_d_root_id = runner.canonical_root_id(d_root)
+    assert root_contract["consumer_root_id"] == runner.canonical_root_id(output_root)
+    assert root_contract["source_stage1_5d_output_root_id"] == expected_d_root_id
+    assert root_contract["source_stage1_5d_events_root_id"] == expected_d_root_id
+    assert root_contract["source_stage1_5d_runtime_gate_root_id"] == expected_d_root_id

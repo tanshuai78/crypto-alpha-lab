@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from configs import base
 from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
     build_formal_event_anchor_contract_row,
@@ -730,7 +732,11 @@ def record_formal_futures_launch_event(
     event_id = row.get("event_id")
     if event_id in seen_event_ids:
         return None
-    written = append_formal_futures_launch_event(stream_paths, row)
+    row_copy = dict(row)
+    rec_auth = stream_paths.get("active_root_recovery_authority")
+    if rec_auth and row_copy.get("source_article_id") == rec_auth.get("article_id"):
+        row_copy["detail_recovery_provenance"] = rec_auth["provenance"]
+    written = append_formal_futures_launch_event(stream_paths, row_copy)
     if written is None:
         return None
     seen_event_ids.add(written["event_id"])
@@ -1618,7 +1624,7 @@ def classify_detail_attempt_result(fetch_res: dict) -> str:
         return "non_transient_error"
 
 
-def _main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--live-public-readonly", action="store_true")
     parser.add_argument("--fixture-json", type=str)
@@ -1644,8 +1650,30 @@ def _main():
     parser.add_argument("--formal-launch-identity-index-snapshot", type=str)
     parser.add_argument("--stage1-5f-consumer-root-contract", type=str, default="")
     parser.add_argument("--stage1-5f-consumer-summary", type=str, default="")
+    parser.add_argument("--active-root-recovery-source-article-id", type=str, default=None)
+    parser.add_argument(
+        "--active-root-recovery-provenance",
+        type=str,
+        choices=["active_root_retry_cycle_recovery_v1"],
+        default=None,
+    )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    has_art = bool(args.active_root_recovery_source_article_id)
+    has_prov = bool(args.active_root_recovery_provenance)
+    if has_art != has_prov:
+        parser.error("Both --active-root-recovery-source-article-id and --active-root-recovery-provenance must be provided together.")
+    if has_art:
+        import re
+        if not re.fullmatch(r"[0-9a-f]{32}", args.active_root_recovery_source_article_id):
+            parser.error("Invalid --active-root-recovery-source-article-id: must be exactly 32 lowercase hex characters.")
+
+    return args
+
+
+def _main():
+    args = parse_args()
 
 
     output_root = Path(args.output_root)
@@ -1847,6 +1875,7 @@ def _main():
             "consumable_event_allowed": article.get("consumable_event_allowed"),
             "symbol_launch_time_candidates_ms": article.get("symbol_launch_time_candidates_ms"),
             "launch_time_conflict_ms": article.get("launch_time_conflict_ms"),
+            "inflight_cycle": article.get("inflight_cycle"),
         }
 
 
@@ -1961,11 +1990,67 @@ def _main():
         "EXTERNAL_SIGNAL_STAGE1_5D_BINANCE_ANNOUNCEMENT_LIST_PATH",
         "/bapi/composite/v1/public/cms/article/list/query",
     )
-
     fatal_blockers = []
     source_parent_url = "https://www.binance.com/en/support/announcement"
     output_root.mkdir(parents=True, exist_ok=True)
+    active_root_recovery_authority = None
+    if args.active_root_recovery_source_article_id:
+        target_art = args.active_root_recovery_source_article_id
+        art_info = persisted_articles.get(target_art)
+        if not art_info:
+            logger.error("Active root recovery target article not found in scheduler state: {}", target_art)
+            sys.exit(1)
+        if art_info.get("terminal_state"):
+            logger.error("Active root recovery target article is already terminal: {}", target_art)
+            sys.exit(1)
+        if not art_info.get("detail_retryable", True):
+            logger.error("Active root recovery target article is not detail_retryable: {}", target_art)
+            sys.exit(1)
+
+        events_dir = output_root / "events"
+        if events_dir.exists():
+            for event_file in events_dir.glob("*.jsonl"):
+                try:
+                    lines = event_file.read_text(encoding="utf-8").splitlines()
+                except (OSError, UnicodeDecodeError) as exc:
+                    logger.error("Active root recovery cannot read event stream {}: {}", event_file, exc)
+                    sys.exit(1)
+                for line_number, line in enumerate(lines, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        logger.error(
+                            "Active root recovery found malformed event row {}:{}: {}",
+                            event_file,
+                            line_number,
+                            exc,
+                        )
+                        sys.exit(1)
+                    if not isinstance(ev, dict):
+                        logger.error(
+                            "Active root recovery found non-object event row {}:{}",
+                            event_file,
+                            line_number,
+                        )
+                        sys.exit(1)
+                    if ev.get("source_article_id") == target_art:
+                        logger.error(
+                            "Active root recovery target article already has formal event in {}: {}",
+                            event_file,
+                            target_art,
+                        )
+                        sys.exit(1)
+
+        active_root_recovery_authority = {
+            "article_id": target_art,
+            "provenance": args.active_root_recovery_provenance,
+        }
+
     startup_stream_paths = build_stream_paths(output_root, startup_now_ms, storage_guard=storage_guard)
+    if active_root_recovery_authority:
+        startup_stream_paths["active_root_recovery_authority"] = active_root_recovery_authority
     rebuilt_index_rows, index_rebuild_diagnostics = rebuild_missing_formal_launch_identity_index(
         events_dir=output_root / "events",
         index_path=startup_stream_paths["formal_launch_identity_index"],
@@ -1977,6 +2062,33 @@ def _main():
         append_stage1_5d_diagnostic(
             startup_stream_paths,
             {"diagnostic_type": "formal_launch_identity_index_rebuild", **diagnostic},
+        )
+
+    # Recover any pre-crash inflight_cycle reservations
+    inflight_recovered = False
+    for code, article in list(persisted_articles.items()):
+        inflight = article.get("inflight_cycle")
+        if inflight:
+            inflight_recovered = True
+            diag = {
+                "diagnostic_type": "request_manifest_persistence_unknown",
+                "source_article_id": code,
+                "reserved_cycle": inflight.get("cycle"),
+                "reserved_at_ms": inflight.get("reserved_at_ms"),
+                "detected_at_ms": startup_now_ms,
+            }
+            append_jsonl(startup_stream_paths["detail_retry_scheduler_diagnostics"], diag, storage_guard=storage_guard)
+            article.pop("inflight_cycle", None)
+            if code in detail_retry_state:
+                detail_retry_state[code].pop("inflight_cycle", None)
+
+    if inflight_recovered:
+        scheduler_state["articles"] = serialize_retry_articles(detail_retry_state)
+        write_detail_retry_scheduler_state(
+            output_root,
+            scheduler_state,
+            metadata_version=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 2),
+            storage_guard=storage_guard,
         )
 
     # Write startup runtime gate (INITIALIZING)
@@ -1993,7 +2105,13 @@ def _main():
         "successful_poll_count": 0,
         "failed_poll_count": 0,
         "consecutive_failed_polls": 0,
-        "fatal_blockers": fatal_blockers,
+        "current_fatal_blockers": fatal_blockers,
+        "events_detected_count": 0,
+        "first_bar_recorded_count": 0,
+        "exchangeinfo_status": "PENDING",
+        "poll_interval_sec": args.poll_interval_sec,
+        "status": "INITIALIZING",
+        "decision": "stage1_5d_runtime_gate_initializing",
         "prior_stage_safety_prerequisite_met": prior_stage_safety_prerequisite_met,
 
         "fixture_run": bool(args.fixture_json),
@@ -2019,11 +2137,11 @@ def _main():
         if args.max_seconds is not None and (time.time() - start_time) >= args.max_seconds:
             break
 
-
         poll_count += 1
         now_ms = int(time.time() * 1000)
         if first_poll_started_at_ms is None:
             first_poll_started_at_ms = now_ms
+
         actual_poll_interval_sec = None
 
         if base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED:
@@ -2043,6 +2161,8 @@ def _main():
         last_poll_started_at_ms = now_ms
 
         stream_paths = build_stream_paths(output_root, now_ms, storage_guard=storage_guard)
+        if active_root_recovery_authority:
+            stream_paths["active_root_recovery_authority"] = active_root_recovery_authority
 
 
         exchangeinfo_by_symbol_cache = None
@@ -2809,6 +2929,24 @@ def _main():
             # Sort to_fetch_codes to match prioritized order in attempt_codes
             to_fetch_codes.sort(key=lambda c: attempt_codes.index(c))
 
+            # Pre-HTTP durable reservation: reserve logical cycle for all selected attempts
+            if to_fetch_codes:
+                for code in to_fetch_codes:
+                    if code in detail_retry_state:
+                        st = detail_retry_state[code]
+                        cycle = int(st.get("detail_retry_cycle_count") or 0) + 1
+                        st["detail_retry_cycle_count"] = cycle
+                        st["last_retry_at_ms"] = now_ms
+                        st["inflight_cycle"] = {"cycle": cycle, "reserved_at_ms": now_ms}
+                scheduler_state["articles"] = serialize_retry_articles(detail_retry_state)
+                scheduler_state["endpoint_health"] = endpoint_health
+                write_detail_retry_scheduler_state(
+                    output_root,
+                    scheduler_state,
+                    metadata_version=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 2),
+                    storage_guard=storage_guard,
+                )
+
             # Pass 2: Perform fetches in the priority order of attempt_codes!
             for code in to_fetch_codes:
                 if code not in detail_retry_state:
@@ -2817,8 +2955,7 @@ def _main():
 
                 # 4. Attempt fetch
                 detail_budget_remaining -= 1
-                state["detail_retry_cycle_count"] = state.get("detail_retry_cycle_count", 0) + 1
-                state["last_retry_at_ms"] = now_ms
+                state.pop("inflight_cycle", None)
                 detail_fetch_attempted_count += 1
 
                 detail_url = f"{source_parent_url.rstrip('/')}/{code}"

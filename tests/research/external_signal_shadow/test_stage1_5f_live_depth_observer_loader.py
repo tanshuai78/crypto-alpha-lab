@@ -1960,3 +1960,68 @@ def test_compute_event_semantic_fingerprint_included_and_excluded_fields():
         grouped_states_by_key={},
     )
     assert decision == "exact_replay_noop"
+
+
+def test_classify_event_symbol_eligibility_recovery_provenance_contrast():
+    T0 = 1_000_000
+    LAUNCH_MS = 2_000_000
+    OBSERVE_MS = LAUNCH_MS + 5_000  # Within clean start delay
+    raw_event = {
+        "event_type": "futures_contract_launch",
+        "detected_at_ms": T0,
+        "first_detected_at_ms": T0,
+        "detail_fetched_at_ms": T0 + 50_000,
+        "symbol_effective_launch_times_ms": {"BTCUSDT": LAUNCH_MS},
+    }
+    base_event = _formalize_launch_event(raw_event, "BTCUSDT")
+    watermark = Watermark(
+        max_seen_detected_at_ms=T0 - 1000,
+        updated_at_ms=T0 - 1000,
+    )
+    exchangeinfo_state = {"available": True, "symbols": {"BTCUSDT"}}
+
+    # 1. Normal event produces clean_start
+    normal_status, normal_reason, normal_diag = classify_event_symbol_eligibility_with_diagnostics(
+        base_event,
+        symbol="BTCUSDT",
+        now_ms=OBSERVE_MS,
+        watermark=watermark,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={},
+    )
+    assert normal_status == "eligible"
+    assert normal_diag["evidence_start_class"] == "clean_start"
+
+    # 2. Valid recovery provenance produces recovery_start and recovery_validation_only
+    recovered_event = dict(base_event, detail_recovery_provenance="active_root_retry_cycle_recovery_v1")
+    rec_status, rec_reason, rec_diag = classify_event_symbol_eligibility_with_diagnostics(
+        recovered_event,
+        symbol="BTCUSDT",
+        now_ms=OBSERVE_MS,
+        watermark=watermark,
+        exchangeinfo_state=exchangeinfo_state,
+        budget_state={},
+    )
+    assert rec_status == "eligible"
+    assert rec_diag["evidence_start_class"] == "recovery_start"
+
+    basis_rec = classify_live_depth_evidence_basis(
+        {"evidence_start_class": "recovery_start", "first_seen_watermark_sequence_number": 2, "detected_at_ms": T0},
+        watermark=watermark,
+    )
+    assert basis_rec["live_depth_evidence_basis"] == "recovery_validation_only"
+    assert basis_rec["announcement_time_capture_evidence_allowed"] is False
+
+    # 3. Invalid / malformed markers fail closed
+    for bad_marker in ("", "future_v2", 123):
+        bad_event = dict(base_event, detail_recovery_provenance=bad_marker)
+        bad_status, bad_reason, bad_diag = classify_event_symbol_eligibility_with_diagnostics(
+            bad_event,
+            symbol="BTCUSDT",
+            now_ms=OBSERVE_MS,
+            watermark=watermark,
+            exchangeinfo_state=exchangeinfo_state,
+            budget_state={},
+        )
+        assert bad_status in ("diagnostic_only", "ineligible", "rejected")
+        assert bad_diag.get("evidence_start_class") != "clean_start"

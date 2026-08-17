@@ -73,8 +73,16 @@ class StorageGuard:
             terminal_write_set_peak_bytes if terminal_write_set_peak_bytes is not None else self.terminal_write_set_cap_bytes
         )
 
-        # Lock file setup
-        lock_dir = pathlib.Path("data/external_signal_shadow").resolve()
+        # Lock file setup derived from output_root ancestor
+        target_ancestor = None
+        for anc in [self.output_root] + list(self.output_root.parents):
+            if anc.name == "external_signal_shadow" and anc.parent.name == "data":
+                target_ancestor = anc
+                break
+        if target_ancestor is None:
+            raise ValueError("output_root_missing_external_signal_shadow_ancestor")
+
+        lock_dir = target_ancestor
         lock_dir.mkdir(parents=True, exist_ok=True)
         self.lock_file_path = lock_dir / ".stage1_5_storage_guard.lock"
 
