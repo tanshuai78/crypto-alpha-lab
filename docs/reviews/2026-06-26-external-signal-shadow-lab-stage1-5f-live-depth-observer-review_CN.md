@@ -333,7 +333,7 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 # 粘贴第 7.2 节输出的精确 40 位 SHA；不得复用文档历史示例 SHA。
-export DEPLOY_COMMIT="REPLACE_WITH_EXACT_40_CHAR_COMMIT_SHA"
+export DEPLOY_COMMIT="483fcc98b9741e4458f0bbe970ce587c42aaee75"
 DEPLOY_READY=1
 
 if [ "${#DEPLOY_COMMIT}" -ne 40 ]; then
@@ -411,8 +411,8 @@ echo "HOST_STORAGE_READY=$HOST_STORAGE_READY"
 确认允许停止旧会话后，**手工填入** `tmux ls` 中的两个真实 session 名；不要使用“匹配到就全部 kill”的循环：
 
 ```bash
-export OLD_5D_SESSION="替换为要停止的旧 1.5D tmux session"
-export OLD_5F_SESSION="替换为要停止的旧 1.5F tmux session"
+export OLD_5D_SESSION="stage1_5d_continuous_7d_storage_lifecycle_resource_guard_hotfix"
+export OLD_5F_SESSION="stage1_5f_live_depth_7d_storage_lifecycle_resource_guard_hotfix"
 
 tmux kill-session -t "$OLD_5F_SESSION"
 tmux kill-session -t "$OLD_5D_SESSION"
@@ -577,14 +577,16 @@ echo "F_START_READY=$F_START_READY"
 if [ "$F_START_READY" != "1" ]; then
   echo "STOP: Stage 1.5F was not started; fix the checks above. SSH remains open." >&2
 else
-  PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  if ! PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
     --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
     --stage1-5d-runtime-gate "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
     --stage1-5e-summary "$STAGE1_5E_SUMMARY" \
     --output-root "$STAGE1_5F_OUT" \
-    --bootstrap-watermark
-
-  tmux new-session -d -s "$STAGE1_5F_SESSION" "
+    --bootstrap-watermark; then
+    echo "STOP: Stage 1.5F bootstrap failed; observer tmux session was not started. SSH remains open." >&2
+    F_START_READY=0
+  else
+    tmux new-session -d -s "$STAGE1_5F_SESSION" "
 cd /root/crypto-alpha-lab &&
 source .venv/bin/activate &&
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \\
@@ -594,7 +596,10 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_l
   --output-root '$STAGE1_5F_OUT' \\
   --live-public-readonly
 "
+  fi
 fi
+
+echo "F_START_READY=$F_START_READY"
 ```
 
 注意：`--stage1-5d-events-glob` 必须传入未带反斜杠的 `events/*.jsonl`。传入 `events/\*.jsonl` 会使 Python 按字面量查找，1.5F 看不到任何事件文件。
