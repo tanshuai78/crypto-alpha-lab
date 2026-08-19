@@ -1,0 +1,25 @@
+{
+  "manifest_version": "stage1_6a_fixture_v1",
+  "generated_at": "2026-08-18T15:00:00Z",
+  "provenance_note": "All fixtures in this directory are synthetic test captures. Under no circumstances may synthetic fixtures be interpreted as canonical official Binance evidence or used to declare production source_audit_passed=true.",
+  "fixtures": {
+    "synthetic_delisting_capture_bundle.jsonl": {
+      "fixture_origin": "synthetic",
+      "capture_mode": "historical_backfill",
+      "sha256": "c50cb70865d01bc9b99ebee97aca5d8211ffaa654beb51c54c618de8f47f8fac",
+      "description": "Standard synthetic capture bundle containing 1 list capture and multiple detail observations covering single-symbol, multi-symbol, mixed-market, unstated restriction, and malformed samples."
+    },
+    "synthetic_malformed_capture_bundle.jsonl": {
+      "fixture_origin": "synthetic",
+      "capture_mode": "historical_backfill",
+      "sha256": "593d20b7ba9db917328bcb2544cdd78a5baebbbd1410a8bfd54f43e9de115304",
+      "description": "Bundle containing malformed JSON lines and invalid base64 payloads to test fail-closed parser defenses."
+    },
+    "synthetic_injection_attempt_bundle.jsonl": {
+      "fixture_origin": "synthetic",
+      "capture_mode": "historical_backfill",
+      "sha256": "431e71cac70fec4ca31b454565f6467bc68879bac3c08ef11174d0f907d720e9",
+      "description": "Bundle containing caller-injected derived fields (e.g. pre-calculated settlement_time_ms, live_observed) to test rejection of caller-supplied authority."
+    }
+  }
+}
