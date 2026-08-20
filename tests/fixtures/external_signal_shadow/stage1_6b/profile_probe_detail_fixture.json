@@ -1,0 +1,13 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetailList": null,
+  "data": {
+    "id": 123456,
+    "code": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+    "title": "Binance Futures Will Delist USD\u24c8-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
+    "body": "<p>Fellow Binancians, Binance Futures will delist the UNIFIUSDT Perpetual Contract at 2024-11-25 09:00 (UTC)...</p>",
+    "releaseDate": 1732000000000
+  },
+  "success": true
+}

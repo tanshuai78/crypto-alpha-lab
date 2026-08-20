@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Binance Futures Will Delist USD\u24c8-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
+    "expected_candidate": true,
+    "description": "Standard USD-M delisting announcement"
+  },
+  {
+    "title": "Binance Futures Will Delist COIN-M RAD Perpetual Contract at 2024-10-22 09:00 (UTC)",
+    "expected_candidate": true,
+    "description": "Standard COIN-M delisting announcement"
+  },
+  {
+    "title": "BINANCE FUTURES WILL DELIST USDT-MARGINED CONTRACT",
+    "expected_candidate": true,
+    "description": "Uppercase title casefold test"
+  },
+  {
+    "title": "Binance Futures \uff37ill \uff24elist USD\u24c8-M ABC Perpetual Contract",
+    "expected_candidate": true,
+    "description": "Fullwidth characters NFKC normalization test"
+  },
+  {
+    "title": "Binance Will Delist Spot Trading Pairs on 2024-11-01",
+    "expected_candidate": false,
+    "description": "Spot delisting (missing binance futures)"
+  },
+  {
+    "title": "Binance Futures Launches New USD\u24c8-M Contracts",
+    "expected_candidate": false,
+    "description": "Futures launch (missing delist)"
+  },
+  {
+    "title": "Updates on Binance Futures Leverage and Margin Tiers",
+    "expected_candidate": false,
+    "description": "Margin tier update"
+  },
+  {
+    "title": "Binance Futures Delisting Notice for Multiple Contracts",
+    "expected_candidate": true,
+    "description": "Plural and notice format"
+  }
+]
