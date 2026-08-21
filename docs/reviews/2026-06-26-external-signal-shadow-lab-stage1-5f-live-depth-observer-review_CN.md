@@ -834,8 +834,18 @@ python3 - "$STAGE1_5F_OUT" <<'PY'
 import json, re, sys
 from pathlib import Path
 
+if not sys.argv[1]:
+    raise SystemExit("STOP: STAGE1_5F_OUT is empty; run Section 8.1 or export the new F root first")
+root = Path(sys.argv[1])
+if not root.is_dir():
+    raise SystemExit(f"STOP: Stage 1.5F root is missing: {root}")
+state_path = root / "observer_state.jsonl"
+if not state_path.is_file():
+    print({"formal_v2_state_count": 0, "formal_v2_projection": "awaiting_new_event", "state_path": str(state_path)})
+    raise SystemExit(0)
+
 latest = {}
-for line in (Path(sys.argv[1]) / "observer_state.jsonl").read_text().splitlines():
+for line in state_path.read_text().splitlines():
     row = json.loads(line)
     latest[row.get("event_symbol_id")] = row
 v2 = [row for row in latest.values() if row.get("formal_event_contract_version") == 2]
