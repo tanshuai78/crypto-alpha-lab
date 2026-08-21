@@ -2,6 +2,8 @@ import glob
 import hashlib
 import json
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from configs import base
@@ -9,8 +11,10 @@ from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
     ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE,
     FORMAL_EVENT_CONTRACT_VERSION_V2,
     compute_admission_anchor_contract_hash,
+    compute_latest_anchor_contract_hash,
     select_latest_applicable_official_schedule,
     validate_launch_anchor_contract,
+    validate_schedule_revision_contract,
 )
 from src.research.external_signal_shadow.stage1_5_launch_event_contract import (
     validate_formal_launch_event,
@@ -363,6 +367,35 @@ def compute_event_semantic_fingerprint(flat_event: dict, symbol: str) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def compute_event_semantic_fingerprint_v2(flat_event: dict, symbol: str) -> str:
+    sym = (symbol or flat_event.get("symbol") or "").strip().upper()
+    symbols_list = flat_event.get("symbols")
+    symbols_sorted = sorted([str(s).strip().upper() for s in symbols_list]) if isinstance(symbols_list, list) else []
+
+    official_anchor = (flat_event.get("symbol_official_schedule_anchor_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_official_schedule_anchor_ms"), dict) else None
+    onboard_time = (flat_event.get("symbol_onboard_times_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_onboard_times_ms"), dict) else None
+    eff_launch = (flat_event.get("symbol_effective_launch_times_ms") or {}).get(sym) if isinstance(flat_event.get("symbol_effective_launch_times_ms"), dict) else None
+    eff_source = (flat_event.get("symbol_effective_observation_anchor_sources") or {}).get(sym) if isinstance(flat_event.get("symbol_effective_observation_anchor_sources"), dict) else None
+
+    semantic_dict = {
+        "source_article_id": str(flat_event.get("source_article_id") or "").strip(),
+        "event_type": str(flat_event.get("event_type") or "").strip(),
+        "symbol": sym,
+        "symbols": symbols_sorted,
+        "title": str(flat_event.get("title") or "").strip(),
+        "source_published_at_ms": flat_event.get("source_published_at_ms"),
+        "formal_event_contract_version": flat_event.get("formal_event_contract_version"),
+        "symbol_official_schedule_anchor_ms": official_anchor,
+        "symbol_onboard_times_ms": onboard_time,
+        "symbol_effective_launch_times_ms": eff_launch,
+        "symbol_effective_observation_anchor_sources": eff_source,
+    }
+
+    serialized = json.dumps(semantic_dict, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return f"source_semantic_fingerprint_v2:{digest}"
+
+
 def classify_event_symbol_revision_admission(
     flat_event: dict,
     latest_states_by_id: dict,
@@ -383,14 +416,39 @@ def classify_event_symbol_revision_admission(
     if existing is not None:
         latest_event_id = getattr(existing, "latest_source_event_id", None) or existing.event_id
         existing_fp = getattr(existing, "latest_source_semantic_fingerprint", "")
-        if (
-            (existing_fp != "" and existing_fp == semantic_fp)
-            or (
+
+        is_exact_replay = False
+        if existing_fp:
+            if ":" in existing_fp or existing_fp.startswith("source_semantic_fingerprint_"):
+                if re.fullmatch(r"source_semantic_fingerprint_v2:[0-9a-f]{64}", existing_fp):
+                    incoming_v2_fp = compute_event_semantic_fingerprint_v2(flat_event, sym)
+                    if existing_fp == incoming_v2_fp:
+                        is_exact_replay = True
+                    else:
+                        is_exact_replay = False
+                else:
+                    return "identity_collision_blocked", existing, {
+                        "reason": "malformed_versioned_source_semantic_fingerprint",
+                        "stored_fingerprint": existing_fp,
+                    }
+            else:
+                if existing_fp == semantic_fp:
+                    is_exact_replay = True
+                elif (
+                    latest_event_id == flat_event.get("event_id")
+                    and getattr(existing, "latest_event_payload_hash", "") == payload_hash
+                    and payload_hash != ""
+                ):
+                    is_exact_replay = True
+        else:
+            if (
                 latest_event_id == flat_event.get("event_id")
                 and getattr(existing, "latest_event_payload_hash", "") == payload_hash
                 and payload_hash != ""
-            )
-        ):
+            ):
+                is_exact_replay = True
+
+        if is_exact_replay:
             return "exact_replay_noop", existing, {"reason": "exact_semantic_fingerprint_or_payload_hash_replay"}
 
         status = getattr(existing, "status", "") or ""
@@ -425,6 +483,18 @@ def classify_event_symbol_revision_admission(
     return "new_event_symbol", None, {"reason": "new_unseen_event_symbol"}
 
 
+@dataclass(frozen=True)
+class ValidatedScheduleSelection:
+    revision_id: str
+    revision_application_id: str
+    revised_anchor_ms: int | None
+    effective_observation_anchor_source: str
+    available_at_ms: int | None
+    supersedes_source_article_id: str
+    revision_payload_hash: str
+    anchor_precedence_policy: str
+
+
 def upsert_pending_state_with_event_revision(pending_state, event_row: dict, symbol: str):
     if not getattr(pending_state, "status", "").startswith("pending_"):
         return pending_state
@@ -437,13 +507,45 @@ def upsert_pending_state_with_event_revision(pending_state, event_row: dict, sym
         or getattr(pending_state, "latest_event_payload_hash", "")
     )
     rev_count = int(getattr(pending_state, "revision_seen_count", 1) or 1) + 1
-    semantic_fp = compute_event_semantic_fingerprint(event_row, symbol)
+
+    stored_fp = getattr(pending_state, "latest_source_semantic_fingerprint", "")
+    is_v2_state = isinstance(stored_fp, str) and re.fullmatch(
+        r"source_semantic_fingerprint_v2:[0-9a-f]{64}", stored_fp
+    ) is not None
 
     d = pending_state.to_dict()
     d["latest_source_event_id"] = event_id
     d["latest_event_payload_hash"] = latest_payload_hash
-    d["latest_source_semantic_fingerprint"] = semantic_fp
     d["revision_seen_count"] = rev_count
+
+    if is_v2_state and event_row.get("formal_event_contract_version") == FORMAL_EVENT_CONTRACT_VERSION_V2:
+        resolver_diag = resolve_depth_observation_anchor_ms(event_row, symbol, {}, 0)
+        res_anchor = resolver_diag.get("observation_anchor_ms")
+        res_source = resolver_diag.get("effective_observation_anchor_source") or resolver_diag.get("observation_anchor_basis")
+        if (
+            res_anchor is not None
+            and res_anchor == pending_state.observation_anchor_ms
+            and res_source == "official_schedule_anchor"
+        ):
+            v2_fp = compute_event_semantic_fingerprint_v2(event_row, symbol)
+            d["latest_source_semantic_fingerprint"] = v2_fp
+            d["effective_observation_anchor_source"] = "official_schedule_anchor"
+            d["observation_anchor_basis"] = "official_schedule_anchor"
+            d["source_anchor_contract_hash"] = resolver_diag.get("source_anchor_contract_hash", "")
+            d["source_contract_status"] = "formal_v2_valid"
+            d["launch_anchor_evidence_level"] = (
+                event_row.get("launch_anchor_evidence_level")
+                or resolver_diag.get("admission_anchor_evidence_level")
+                or ""
+            )
+            d["anchor_precedence_policy"] = event_row.get(
+                "anchor_precedence_policy",
+                ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE,
+            )
+            return pending_state.__class__.from_dict(d)
+
+    semantic_fp = compute_event_semantic_fingerprint_v2(event_row, symbol) if is_v2_state else compute_event_semantic_fingerprint(event_row, symbol)
+    d["latest_source_semantic_fingerprint"] = semantic_fp
     return pending_state.__class__.from_dict(d)
 
 
@@ -498,6 +600,7 @@ def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_sta
             return {
                 "observation_anchor_ms": effective_anchor,
                 "observation_anchor_basis": effective_source,
+                "effective_observation_anchor_source": effective_source,
                 "observation_anchor_confidence": "high" if effective_source == "official_schedule_anchor" else "medium",
                 "observation_anchor_candidates": candidates,
                 "observation_anchor_disagreement_max_ms": disagreement_ms,
@@ -642,6 +745,9 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
             and pending_state.symbol in row.get("symbols", [])
         )
         if is_schedule_revision:
+            val = validate_schedule_revision_contract(row)
+            if not val.get("valid"):
+                continue
             statuses = row.get("symbol_official_schedule_statuses") or {}
             anchors = row.get("symbol_revised_anchor_ms") or {}
             available_at_ms = (row.get("symbol_official_schedule_revision_available_at_ms") or {}).get(pending_state.symbol)
@@ -653,6 +759,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
                     "revision_id": row.get("revision_id"),
                     "available_at_ms": available_at_ms,
                     "supersedes_revision_id": row.get("supersedes_revision_id"),
+                    "_raw_row": row,
                 })
             continue
         if stable_key_matches or legacy_symbol_match:
@@ -709,7 +816,49 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         anchor_ms = schedule["effective_official_anchor_ms"]
         conflict_active = False
         anchor_diag["observation_anchor_basis"] = "official_schedule_anchor"
+        anchor_diag["effective_observation_anchor_source"] = "official_schedule_anchor"
         anchor_diag["observation_anchor_confidence"] = "high"
+
+        sel_rev_id = schedule.get("revision_id")
+        sel_row = next((r["_raw_row"] for r in schedule_rows if r.get("revision_id") == sel_rev_id and "_raw_row" in r), None)
+        if sel_row:
+            app_id = str(sel_row.get("revision_application_id") or sel_row.get("revision_id") or "")
+            selection = ValidatedScheduleSelection(
+                revision_id=str(sel_row.get("revision_id") or ""),
+                revision_application_id=app_id,
+                revised_anchor_ms=schedule["effective_official_anchor_ms"],
+                effective_observation_anchor_source="official_schedule_anchor",
+                available_at_ms=schedule.get("available_at_ms"),
+                supersedes_source_article_id=str(sel_row.get("supersedes_source_article_id") or ""),
+                revision_payload_hash=str(sel_row.get("revision_payload_hash") or ""),
+                anchor_precedence_policy=str(sel_row.get("anchor_precedence_policy") or ANCHOR_PRECEDENCE_POLICY_OFFICIAL_SCHEDULE),
+            )
+            d["observation_anchor_ms"] = selection.revised_anchor_ms
+            d["observation_anchor_basis"] = selection.effective_observation_anchor_source
+            d["effective_observation_anchor_source"] = selection.effective_observation_anchor_source
+            applied_ids = list(getattr(pending_state, "applied_schedule_revision_ids", []) or [])
+            if selection.revision_application_id and selection.revision_application_id not in applied_ids:
+                d["applied_schedule_revision_ids"] = [*applied_ids, selection.revision_application_id]
+                d["anchor_contract_revision_count"] = (pending_state.anchor_contract_revision_count or 0) + 1
+                prev_hash = (
+                    pending_state.latest_anchor_contract_hash
+                    or pending_state.admission_anchor_contract_hash
+                    or pending_state.source_anchor_contract_hash
+                    or d.get("source_anchor_contract_hash")
+                    or anchor_diag.get("source_anchor_contract_hash")
+                )
+                if prev_hash:
+                    d["latest_anchor_contract_hash"] = compute_latest_anchor_contract_hash(
+                        previous_latest_anchor_contract_hash=prev_hash,
+                        revision_application_id=selection.revision_application_id,
+                        latest_contract={
+                            "symbol": pending_state.symbol,
+                            "symbol_revised_anchor_ms": selection.revised_anchor_ms,
+                            "revision_id": selection.revision_id,
+                            "revision_payload_hash": selection.revision_payload_hash,
+                            "anchor_precedence_policy": selection.anchor_precedence_policy,
+                        },
+                    )
 
     d["anchor_resolution_attempt_count"] = pending_state.anchor_resolution_attempt_count + 1
     d["last_anchor_resolution_at_ms"] = now_ms
@@ -1134,6 +1283,9 @@ def classify_event_symbol_eligibility_with_diagnostics(
     contract_res = classify_stage1_5d_source_contract(row, symbol)
     diag.update(contract_res)
     source_status = contract_res["source_contract_status"]
+
+    if row.get("formal_event_contract_version") == FORMAL_EVENT_CONTRACT_VERSION_V2 or source_status == "formal_v2_valid":
+        diag["latest_source_semantic_fingerprint"] = compute_event_semantic_fingerprint_v2(row, symbol)
 
     if source_status == "explicit_non_consumable":
         return "diagnostic_only", "explicit_non_consumable", diag

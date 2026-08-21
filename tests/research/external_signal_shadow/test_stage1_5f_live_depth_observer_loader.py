@@ -1152,6 +1152,7 @@ def test_re_resolve_pending_anchor_same_timestamp_revisions_fail_closed(reverse_
         "revision_payload_hash": "a" * 64,
         "revision_payload_version_id": "payload-v1",
         "revision_observation_id": "observation-v1",
+        "provenance": {"payload_sha256": "sha", "parser_version": "test"},
     }
     postponed = build_formal_schedule_revision_row(
         source_article_id="postponed-article",
@@ -2025,3 +2026,334 @@ def test_classify_event_symbol_eligibility_recovery_provenance_contrast():
         )
         assert bad_status in ("diagnostic_only", "ineligible", "rejected")
         assert bad_diag.get("evidence_start_class") != "clean_start"
+
+
+def test_compute_event_semantic_fingerprint_v1_frozen_reference():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        compute_event_semantic_fingerprint,
+    )
+    v1_fixture = {
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "symbol": "ABCUSDT",
+        "symbols": ["ABCUSDT"],
+        "title": "Binance Launch ABCUSDT",
+        "source_published_at_ms": 1_000_000,
+        "symbol_official_schedule_anchor_ms": {"ABCUSDT": 2_000_000},
+        "symbol_onboard_times_ms": {"ABCUSDT": 1_900_000},
+        "symbol_effective_launch_times_ms": {"ABCUSDT": 2_000_000},
+    }
+    assert compute_event_semantic_fingerprint(v1_fixture, "ABCUSDT") == "9bcb6a0b6b10c5d461620843f3d5979fee0c2316f2c3c55839e10016d2ea6f4a"
+
+
+def test_compute_event_semantic_fingerprint_v2_and_version_dispatch():
+    import re
+
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+        compute_event_semantic_fingerprint,
+        compute_event_semantic_fingerprint_v2,
+        make_event_symbol_id,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+
+    symbol = "ABCUSDT"
+    old_source = {
+        "event_id": "evt_legacy",
+        "source_article_id": "art1",
+        "event_type": "futures_contract_launch",
+        "symbol": symbol,
+        "symbols": [symbol],
+        "title": "Binance Launch ABCUSDT",
+        "source_published_at_ms": 1_000_000,
+        "symbol_official_schedule_anchor_ms": {symbol: 2_000_000},
+        "symbol_onboard_times_ms": {symbol: 1_900_000},
+        "symbol_effective_launch_times_ms": {symbol: 2_000_000},
+        "symbol_effective_observation_anchor_sources": {symbol: "official_schedule_anchor"},
+        "formal_event_contract_version": 2,
+        "detail_payload_hash": "phash1",
+    }
+    es_id = make_event_symbol_id(old_source, symbol)
+    old_source["event_symbol_id"] = es_id
+    new_source = dict(old_source, symbol_effective_observation_anchor_sources={symbol: "exchangeinfo_onboard_date"})
+
+    # Same row except source map: v1 is identical, v2 is distinct and exact.
+    assert compute_event_semantic_fingerprint(old_source, symbol) == compute_event_semantic_fingerprint(new_source, symbol)
+    assert compute_event_semantic_fingerprint_v2(old_source, symbol) != compute_event_semantic_fingerprint_v2(new_source, symbol)
+    v2_value = compute_event_semantic_fingerprint_v2(new_source, symbol)
+    assert re.fullmatch(r"source_semantic_fingerprint_v2:[0-9a-f]{64}", v2_value)
+
+    # New formal-v2 state receives the v2 value from eligibility diagnostics and survives to_dict/from_dict.
+    v2_diagnostics = {
+        "observation_anchor_ms": 2_000_000,
+        "source_contract_status": "formal_v2_valid",
+        "latest_source_semantic_fingerprint": v2_value,
+    }
+    state = create_pending_observation_state(new_source, "pending_launch_time_in_future", v2_diagnostics, now_ms=1_000_000)
+    assert state.latest_source_semantic_fingerprint == v2_value
+    assert EventSymbolState.from_dict(state.to_dict()).latest_source_semantic_fingerprint == v2_value
+
+    # New formal-v1 state never receives a v2 seed and retains current replay behavior.
+    formal_v1_row = {
+        "event_id": "evt_v1",
+        "source_article_id": "art_v1",
+        "event_type": "futures_contract_launch",
+        "symbol": symbol,
+        "symbols": [symbol],
+        "title": "Binance Launch ABCUSDT v1",
+        "formal_event_contract_version": 1,
+        "detected_at_ms": 1_000_000,
+        "detail_payload_hash": "hash_v1",
+    }
+    es_id_v1 = make_event_symbol_id(formal_v1_row, symbol)
+    formal_v1_row["event_symbol_id"] = es_id_v1
+    v1_diagnostics = {
+        "observation_anchor_ms": 2_000_000,
+        "source_contract_status": "formal_v1_valid",
+    }
+    formal_v1_state = create_pending_observation_state(formal_v1_row, "pending_launch_time_in_future", v1_diagnostics, now_ms=1_000_000)
+    assert not (formal_v1_state.latest_source_semantic_fingerprint or "").startswith("source_semantic_fingerprint_v2:")
+    assert classify_event_symbol_revision_admission(formal_v1_row, {es_id_v1: formal_v1_state}, {})[0] == "exact_replay_noop"
+
+    # Existing bare v1 and empty values remain legacy; a source-only correction does not upgrade them.
+    es_id = make_event_symbol_id(new_source, symbol)
+    v1_state = EventSymbolState(
+        event_symbol_id=es_id,
+        event_id="evt_legacy",
+        symbol=symbol,
+        latest_event_payload_hash="phash1",
+        latest_source_semantic_fingerprint=compute_event_semantic_fingerprint(old_source, symbol),
+        status="pending_launch_time_in_future",
+    )
+    empty_legacy_state = EventSymbolState(
+        event_symbol_id=es_id,
+        event_id="evt_legacy",
+        symbol=symbol,
+        latest_event_payload_hash="phash1",
+        latest_source_semantic_fingerprint="",
+        status="pending_launch_time_in_future",
+    )
+    assert classify_event_symbol_revision_admission(new_source, {es_id: v1_state}, {})[0] == "exact_replay_noop"
+    assert classify_event_symbol_revision_admission(new_source, {es_id: empty_legacy_state}, {})[0] == "exact_replay_noop"
+
+    # Existing v2 recognises a same-anchor/source-only difference as a pending revision.
+    v2_pending = EventSymbolState(
+        event_symbol_id=es_id,
+        symbol=symbol,
+        latest_source_semantic_fingerprint=compute_event_semantic_fingerprint_v2(old_source, symbol),
+        status="pending_launch_time_in_future",
+    )
+    assert classify_event_symbol_revision_admission(new_source, {es_id: v2_pending}, {})[0] == "pending_revision_upsert"
+
+    # Explicit malformed/unknown version never becomes legacy replay.
+    for bad in (
+        "source_semantic_fingerprint_v2:",
+        "source_semantic_fingerprint_v2:xyz",
+        "source_semantic_fingerprint_v3:" + "0" * 64,
+        "unexpected:abc",
+    ):
+        state_bad = EventSymbolState(
+            event_symbol_id=es_id,
+            symbol=symbol,
+            latest_source_semantic_fingerprint=bad,
+            status="pending_launch_time_in_future",
+        )
+        action, _s, diag = classify_event_symbol_revision_admission(new_source, {es_id: state_bad}, {})
+        assert action == "identity_collision_blocked"
+        assert diag.get("reason") == "malformed_versioned_source_semantic_fingerprint"
+
+
+def test_pending_upsert_keeps_existing_legacy_fingerprint_unversioned():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+        compute_event_semantic_fingerprint,
+        make_event_symbol_id,
+        upsert_pending_state_with_event_revision,
+    )
+
+    symbol = "ABCUSDT"
+    old_row = {
+        "event_id": "evt_legacy",
+        "source_article_id": "art_legacy",
+        "event_type": "futures_contract_launch",
+        "symbol": symbol,
+        "symbols": [symbol],
+        "title": "Original title",
+        "source_published_at_ms": 1_000_000,
+        "formal_event_contract_version": 2,
+        "detail_payload_hash": "old_payload",
+    }
+    old_row["event_symbol_id"] = make_event_symbol_id(old_row, symbol)
+    incoming = dict(old_row, title="Revised title", detail_payload_hash="new_payload")
+
+    for stored_fingerprint in (compute_event_semantic_fingerprint(old_row, symbol), ""):
+        pending = EventSymbolState(
+            event_symbol_id=old_row["event_symbol_id"],
+            event_id=old_row["event_id"],
+            symbol=symbol,
+            status="pending_launch_anchor_missing",
+            source_contract_status="formal_v2_valid",
+            formal_event_contract_version=2,
+            latest_source_semantic_fingerprint=stored_fingerprint,
+        )
+        action, _, _ = classify_event_symbol_revision_admission(
+            incoming, {pending.event_symbol_id: pending}, {}
+        )
+        assert action == "pending_revision_upsert"
+
+        updated = upsert_pending_state_with_event_revision(pending, incoming, symbol)
+        assert updated.latest_source_semantic_fingerprint == compute_event_semantic_fingerprint(incoming, symbol)
+        assert not updated.latest_source_semantic_fingerprint.startswith(
+            "source_semantic_fingerprint_v2:"
+        )
+
+
+def test_formal_v2_source_projection_and_validated_schedule_selection():
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_formal_schedule_revision_row,
+        build_symbol_anchor_contract,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_revision_admission,
+        compute_event_semantic_fingerprint_v2,
+        make_event_symbol_id,
+        make_stable_event_symbol_key,
+        re_resolve_pending_anchor,
+        resolve_depth_observation_anchor_ms,
+        upsert_pending_state_with_event_revision,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+        create_pending_observation_state,
+    )
+
+    symbol = "SOLUSDT"
+    now_ms = 1_000_000
+    symbol_contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=2_000_000,
+        exchangeinfo_onboard_date_ms=1_900_000,
+        anchor_contract_decision_at_ms=now_ms,
+        official_schedule_revision_id="sol_rev_1",
+        official_schedule_available_at_ms=now_ms,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "sha",
+            "parser_version": "test",
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body[0]",
+            "logical_block_id": "block-1",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    formal_v2_row = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "art_sol",
+            "event_id": "evt_sol",
+            "symbols": [symbol],
+            "title": "Binance Launch SOLUSDT",
+            "source_published_at_ms": now_ms,
+            "detail_payload_hash": "phash_sol",
+            "launch_anchor_evidence_level": "official_schedule_confirmed",
+        },
+        symbol_contracts={symbol: symbol_contract},
+    )
+    formal_v2_row["symbol"] = symbol
+    es_id = make_event_symbol_id(formal_v2_row, symbol)
+    stable_key = make_stable_event_symbol_key(formal_v2_row, symbol)
+    formal_v2_row["event_symbol_id"] = es_id
+    formal_v2_row["stable_event_symbol_key"] = stable_key
+
+    # 1. Initial formal-v2 source is projected only from validated per-symbol map
+    diag = resolve_depth_observation_anchor_ms(formal_v2_row, symbol, {}, now_ms)
+    diag["source_contract_status"] = "formal_v2_valid"
+    diag["latest_source_semantic_fingerprint"] = compute_event_semantic_fingerprint_v2(
+        formal_v2_row, symbol
+    )
+    assert diag["observation_anchor_basis"] == "official_schedule_anchor"
+    assert diag["effective_observation_anchor_source"] == "official_schedule_anchor"
+
+    # 2. Top-level source cannot spoof missing formal-v2 map
+    spoofed = dict(formal_v2_row, symbol_effective_observation_anchor_sources={})
+    state_spoofed = create_pending_observation_state(
+        {**spoofed, "effective_observation_anchor_source": "official_schedule_anchor"},
+        "pending_launch_anchor_missing",
+        {},
+        now_ms,
+    )
+    assert state_spoofed.effective_observation_anchor_source in (None, "")
+
+    # 3. Same anchor + changed validated source updates one complete pending lineage tuple
+    pending_v2 = create_pending_observation_state(
+        formal_v2_row,
+        "pending_launch_time_in_future",
+        diag,
+        now_ms,
+    )
+    incoming_v2 = dict(
+        formal_v2_row,
+        symbol_source_anchor_contract_hashes={symbol: "src_hash_sol_new"},
+    )
+    action, _, _ = classify_event_symbol_revision_admission(incoming_v2, {es_id: pending_v2}, {})
+    # Upsert updates full lineage
+    updated_source_only = upsert_pending_state_with_event_revision(pending_v2, incoming_v2, symbol)
+    assert updated_source_only.observation_anchor_basis == "official_schedule_anchor"
+    assert updated_source_only.effective_observation_anchor_source == "official_schedule_anchor"
+    assert updated_source_only.observation_anchor_ms == pending_v2.observation_anchor_ms
+    assert updated_source_only.admission_anchor_contract_hash == pending_v2.admission_anchor_contract_hash
+    assert updated_source_only.latest_anchor_contract_hash == pending_v2.latest_anchor_contract_hash
+    assert updated_source_only.source_contract_status == "formal_v2_valid"
+    assert classify_event_symbol_revision_admission(incoming_v2, {es_id: updated_source_only}, {})[0] == "exact_replay_noop"
+
+    # 4. Raw invalid schedule revision rejected
+    raw_invalid = {
+        "event_type": "futures_contract_launch_schedule_revision",
+        "symbols": [symbol],
+        "source_article_id": "rev_art_1",
+        "supersedes_source_article_id": "art_sol",
+        "revision_payload_hash": "default_hash",
+    }
+    unaffected = re_resolve_pending_anchor(pending_v2, [raw_invalid], {}, now_ms)
+    assert unaffected.applied_schedule_revision_ids == []
+
+    # 5. Valid schedule revision builds ValidatedScheduleSelection and applies atomically
+    valid_rev = build_formal_schedule_revision_row(
+        source_article_id="rev_art_1",
+        supersedes_source_article_id="art_sol",
+        symbol=symbol,
+        revision_id="rev_1_id",
+        revision_semantic_id="rev_1_id",
+        revision_application_id="rev_1_id",
+        revision_payload_version_id="pv_1",
+        revision_observation_id="obs_1",
+        revision_payload_hash="rev_hash_1",
+        revised_anchor_ms=3_000_000,
+        revision_available_at_ms=now_ms,
+        revision_intent="rescheduled_with_new_anchor",
+        provenance={"payload_sha256": "sha", "parser_version": "test"},
+    )
+    # Direct apply_anchor_contract_revision_to_state is a NO-OP for formal-v2 pending
+    assert apply_anchor_contract_revision_to_state(pending_v2, valid_rev, now_ms) == pending_v2
+
+    # Adapter transition owns all matching state lineage fields
+    updated_rev = re_resolve_pending_anchor(pending_v2, [valid_rev], {}, now_ms)
+    assert updated_rev.observation_anchor_ms == 3_000_000
+    assert updated_rev.observation_anchor_basis == "official_schedule_anchor"
+    assert updated_rev.effective_observation_anchor_source == "official_schedule_anchor"
+    assert updated_rev.applied_schedule_revision_ids == ["rev_1_id"]
+    assert updated_rev.anchor_contract_revision_count == 1
+    assert updated_rev.latest_anchor_contract_hash != ""
+
+    # Replay of same revision is idempotent
+    replayed = re_resolve_pending_anchor(updated_rev, [valid_rev], {}, now_ms + 1000)
+    assert replayed.applied_schedule_revision_ids == ["rev_1_id"]
+    assert replayed.anchor_contract_revision_count == 1

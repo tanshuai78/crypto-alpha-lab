@@ -453,6 +453,7 @@ def test_validator_requires_formal_v2_lineage_fields():
         "source_contract_status": "formal_v2_valid",
         "launch_anchor_evidence_level": "official_schedule",
         "effective_observation_anchor_source": "official_schedule_anchor",
+        "observation_anchor_basis": "official_schedule_anchor",
         "anchor_precedence_policy": "official_schedule_priority_v1",
         "source_anchor_contract_hash": "source-hash",
         "admission_anchor_contract_hash": "admission-hash",
@@ -465,6 +466,7 @@ def test_validator_requires_formal_v2_lineage_fields():
         "source_contract_status": "formal_v2_valid",
         "launch_anchor_evidence_level": "official_schedule",
         "effective_observation_anchor_source": "official_schedule_anchor",
+        "observation_anchor_basis": "official_schedule_anchor",
         "source_article_id": "307687ad279e42e6909ee1be8c472b50",
         "anchor_contract_version": 2,
         "anchor_precedence_policy": "official_schedule_priority_v1",
@@ -494,6 +496,7 @@ def test_validator_requires_formal_v2_lineage_fields():
         "source_contract_status",
         "launch_anchor_evidence_level",
         "effective_observation_anchor_source",
+        "observation_anchor_basis",
         "anchor_precedence_policy",
         "source_anchor_contract_hash",
         "admission_anchor_contract_hash",
@@ -563,3 +566,72 @@ def test_formal_v2_lineage_requires_completed_hash_to_match_latest():
         False,
         "formal_v2_lineage_incomplete_or_mismatch",
     )
+
+
+def test_formal_v2_strict_source_and_basis_equality_predicate():
+    from research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        _validate_formal_v2_lineage,
+    )
+
+    base_event = {
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "launch_anchor_evidence_level": "official_schedule",
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "observation_anchor_basis": "official_schedule_anchor",
+        "source_article_id": "article_v2",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+    }
+    base_state = {
+        "formal_event_contract_version": 2,
+        "anchor_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "launch_anchor_evidence_level": "official_schedule",
+        "latest_anchor_evidence_level": "official_schedule",
+        "effective_observation_anchor_source": "official_schedule_anchor",
+        "observation_anchor_basis": "official_schedule_anchor",
+        "source_article_id": "article_v2",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "source_anchor_contract_hash": "source-hash",
+        "admission_anchor_contract_hash": "admission-hash",
+        "latest_anchor_contract_hash": "latest-hash",
+        "latest_max_evidence_class": "clean_or_recovery",
+        "observation_anchor_revision_contaminated": False,
+    }
+
+    # 1. Clean valid 6-condition pass
+    ok, blocker = _validate_formal_v2_lineage(base_event, base_state)
+    assert ok is True
+    assert blocker is None
+
+    # 2. latest_state effective_observation_anchor_source is None
+    st_none_src = dict(base_state, effective_observation_anchor_source=None)
+    assert _validate_formal_v2_lineage(base_event, st_none_src) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 3. latest_state effective_observation_anchor_source is exchangeinfo_onboard_date (fallback)
+    st_fallback = dict(base_state, effective_observation_anchor_source="exchangeinfo_onboard_date")
+    assert _validate_formal_v2_lineage(base_event, st_fallback) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 4. accepted_event source != latest_state source
+    evt_other_src = dict(base_event, effective_observation_anchor_source="other_source")
+    assert _validate_formal_v2_lineage(evt_other_src, base_state) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 5. accepted_event basis != accepted_event source
+    evt_basis_mismatch = dict(base_event, observation_anchor_basis="exchangeinfo_onboard_date")
+    assert _validate_formal_v2_lineage(evt_basis_mismatch, base_state) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 6. latest_state basis != latest_state source
+    st_basis_mismatch = dict(base_state, observation_anchor_basis="exchangeinfo_onboard_date")
+    assert _validate_formal_v2_lineage(base_event, st_basis_mismatch) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 7. accepted_event basis != latest_state basis
+    evt_basis_diff = dict(base_event, observation_anchor_basis="other_basis")
+    st_basis_diff = dict(base_state, observation_anchor_basis="other_basis_2")
+    assert _validate_formal_v2_lineage(evt_basis_diff, st_basis_diff) == (False, "formal_v2_lineage_incomplete_or_mismatch")
+
+    # 8. UNITREE structural negative shape: valid hashes/policy/basis with null source remains rejected
+    unitree_event = dict(base_event, effective_observation_anchor_source=None)
+    unitree_state = dict(base_state, effective_observation_anchor_source=None)
+    assert _validate_formal_v2_lineage(unitree_event, unitree_state) == (False, "formal_v2_lineage_incomplete_or_mismatch")

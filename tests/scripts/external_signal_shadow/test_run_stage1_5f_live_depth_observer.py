@@ -3573,7 +3573,7 @@ def test_same_poll_schedule_revision_prevents_stale_launch_admission(
         summary = json.loads((output_root / "live_depth_observer_summary.json").read_text())
         assert summary["pending_launch_observation_count"] == 0
         assert summary["active_observation_count"] == 0
-        assert re_resolve_call_count == 0
+        assert re_resolve_call_count == 1
 
         run_one_poll()
         states = [json.loads(line) for line in (output_root / "observer_state.jsonl").read_text().splitlines() if line.strip()]
@@ -3742,3 +3742,521 @@ def test_stage1_5f_same_root_resume_without_bootstrap(tmp_path, monkeypatch):
     assert root_contract["source_stage1_5d_output_root_id"] == expected_d_root_id
     assert root_contract["source_stage1_5d_events_root_id"] == expected_d_root_id
     assert root_contract["source_stage1_5d_runtime_gate_root_id"] == expected_d_root_id
+
+
+def test_runner_v2_source_only_pending_update_and_replay_idempotence(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        compute_event_semantic_fingerprint_v2,
+        make_event_symbol_id,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    symbol = "SOLUSDT"
+    now_ms = 1_000_000
+    symbol_contract_1 = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=2_000_000,
+        exchangeinfo_onboard_date_ms=1_900_000,
+        anchor_contract_decision_at_ms=now_ms,
+        official_schedule_revision_id="sol_rev_1",
+        official_schedule_available_at_ms=now_ms,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "sha1",
+            "parser_version": "test",
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body[0]",
+            "logical_block_id": "block-1",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    event_1 = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "art_sol",
+            "event_id": "evt_sol",
+            "symbols": [symbol],
+            "title": "Binance Launch SOLUSDT",
+            "source_published_at_ms": now_ms,
+            "detected_at_ms": now_ms,
+            "detail_payload_hash": "phash_sol_1",
+            "launch_anchor_evidence_level": "official_schedule_confirmed",
+        },
+        symbol_contracts={symbol: symbol_contract_1},
+    )
+    event_1["symbol"] = symbol
+    es_id = make_event_symbol_id(event_1, symbol)
+
+    fp_1 = compute_event_semantic_fingerprint_v2(event_1, symbol)
+
+    # Seed pending state with event_1
+    seeded_state = EventSymbolState(
+        event_symbol_id=es_id,
+        event_id="evt_sol",
+        symbol=symbol,
+        detected_at_ms=now_ms,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v2_valid",
+        source_article_id="art_sol",
+        stable_event_symbol_key=f"futures_contract_launch|art_sol|{symbol}",
+        observation_anchor_ms=2_000_000,
+        observation_anchor_basis="official_schedule_anchor",
+        effective_observation_anchor_source="official_schedule_anchor",
+        source_anchor_contract_hash="src_hash_1",
+        admission_anchor_contract_hash="adm_hash_1",
+        latest_anchor_contract_hash="lat_hash_1",
+        anchor_contract_version=2,
+        anchor_precedence_policy="official_schedule_priority_v1",
+        latest_source_semantic_fingerprint=fp_1,
+        latest_event_payload_hash="phash_sol_1",
+        first_seen_at_ms=now_ms,
+        revision_seen_count=1,
+    )
+
+    output_root = tmp_path / "output"
+    output_root.mkdir(parents=True, exist_ok=True)
+    state_file = output_root / "observer_state.jsonl"
+    state_file.write_text(json.dumps(seeded_state.to_dict()) + "\n")
+
+    watermark_file = output_root / "watermark.json"
+    watermark_file.write_text(json.dumps({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": now_ms - 100,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+        "updated_at_ms": now_ms - 100,
+    }))
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    mock_dir = tmp_path / "mock_responses"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+
+    # Event 2 has same event_id, same article/anchor, but updated contract hash / provenance
+    symbol_contract_2 = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=2_000_000,
+        exchangeinfo_onboard_date_ms=1_900_000,
+        anchor_contract_decision_at_ms=now_ms + 1000,
+        official_schedule_revision_id="sol_rev_1",
+        official_schedule_available_at_ms=now_ms + 1000,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "sha2",
+            "parser_version": "test",
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body[0]",
+            "logical_block_id": "block-1",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    event_2 = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "art_sol",
+            "event_id": "evt_sol",
+            "symbols": [symbol],
+            "title": "Binance Launch SOLUSDT Updated",
+            "source_published_at_ms": now_ms + 1000,
+            "detected_at_ms": now_ms + 1000,
+            "detail_payload_hash": "phash_sol_2",
+            "launch_anchor_evidence_level": "official_schedule_confirmed",
+        },
+        symbol_contracts={symbol: symbol_contract_2},
+    )
+    event_2["symbol"] = symbol
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps(event_2) + "\n")
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    # Assert exactly one new state row added with complete source lineage
+    state_lines = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert len(state_lines) == 2
+    latest = state_lines[-1]
+    fp_2 = compute_event_semantic_fingerprint_v2(event_2, symbol)
+    assert latest["latest_source_semantic_fingerprint"] == fp_2
+    assert latest["effective_observation_anchor_source"] == "official_schedule_anchor"
+    assert latest["observation_anchor_basis"] == "official_schedule_anchor"
+    assert latest["source_contract_status"] == "formal_v2_valid"
+    assert latest["observation_anchor_ms"] == 2_000_000
+    assert latest["admission_anchor_contract_hash"] == "adm_hash_1"
+    assert latest["latest_anchor_contract_hash"] == "lat_hash_1"
+    assert latest["anchor_precedence_policy"] == "official_schedule_priority_v1"
+    assert latest["revision_seen_count"] == 2
+
+    # Replay test: second identical poll adds no state row (compacts on start to 1 latest state, exact_replay_noop appends nothing)
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    state_lines_replay = [json.loads(line) for line in state_file.read_text().splitlines() if line.strip()]
+    assert len(state_lines_replay) == 1
+    assert state_lines_replay[0]["latest_source_semantic_fingerprint"] == fp_2
+    assert state_lines_replay[0]["revision_seen_count"] == 2
+    assert state_lines_replay[0]["observation_anchor_ms"] == 2_000_000
+    assert state_lines_replay[0]["effective_observation_anchor_source"] == "official_schedule_anchor"
+
+
+def test_runner_registry_before_adapter_crash_recovery(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        make_event_symbol_id,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_state_by_event_symbol_id,
+    )
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    symbol = "SOLUSDT"
+    now_ms = 1_000_000
+    output_root = tmp_path / "output"
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    es_id = make_event_symbol_id({"event_id": "evt_sol"}, symbol)
+
+    # Seed pending state with no applied revision
+    seeded_state = EventSymbolState(
+        event_symbol_id=es_id,
+        event_id="evt_sol",
+        symbol=symbol,
+        detected_at_ms=now_ms,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v2_valid",
+        source_article_id="art_sol",
+        stable_event_symbol_key=f"futures_contract_launch|art_sol|{symbol}",
+        observation_anchor_ms=2_000_000,
+        observation_anchor_basis="official_schedule_anchor",
+        effective_observation_anchor_source="official_schedule_anchor",
+        source_anchor_contract_hash="src_hash_1",
+        admission_anchor_contract_hash="src_hash_1",
+        latest_anchor_contract_hash="src_hash_1",
+        anchor_contract_version=2,
+        anchor_precedence_policy="official_schedule_priority_v1",
+        applied_schedule_revision_ids=[],
+        anchor_contract_revision_count=0,
+    )
+    state_file = output_root / "observer_state.jsonl"
+    state_file.write_text(json.dumps(seeded_state.to_dict()) + "\n")
+
+    # Seed registry JSONL with revision_received and revision_applied (crash recovery window)
+    registry_file = output_root / "schedule_revision_registry.jsonl"
+    registry_file.write_text(
+        json.dumps({
+            "record_type": "revision_received",
+            "revision_id": "rev_crash_1",
+            "revision_semantic_id": "rev_crash_1",
+            "revision_application_id": "rev_crash_1",
+            "symbol": symbol,
+            "supersedes_source_article_id": "art_sol",
+            "recorded_at_ms": now_ms + 100,
+        }) + "\n" +
+        json.dumps({
+            "record_type": "revision_applied",
+            "revision_id": "rev_crash_1",
+            "revision_semantic_id": "rev_crash_1",
+            "revision_application_id": "rev_crash_1",
+            "symbol": symbol,
+            "supersedes_source_article_id": "art_sol",
+            "recorded_at_ms": now_ms + 100,
+        }) + "\n"
+    )
+
+    watermark_file = output_root / "watermark.json"
+    watermark_data = {
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": now_ms - 100,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+        "updated_at_ms": now_ms - 100,
+    }
+    watermark_file.write_text(json.dumps(watermark_data))
+    watermark_bytes_before = watermark_file.read_bytes()
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    mock_dir = tmp_path / "mock_responses"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+
+    # Valid schedule revision row for rev_crash_1
+    valid_rev = build_formal_schedule_revision_row(
+        source_article_id="rev_art_crash",
+        supersedes_source_article_id="art_sol",
+        symbol=symbol,
+        revision_id="rev_crash_1",
+        revision_semantic_id="rev_crash_1",
+        revision_application_id="rev_crash_1",
+        revision_payload_version_id="pv_crash",
+        revision_observation_id="obs_crash",
+        revision_payload_hash="rev_hash_crash",
+        revised_anchor_ms=3_000_000,
+        revision_available_at_ms=now_ms + 100,
+        revision_intent="rescheduled_with_new_anchor",
+        provenance={"payload_sha256": "sha", "parser_version": "test"},
+    )
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps(valid_rev) + "\n")
+
+    accepted_file = output_root / "accepted_events.jsonl"
+    if accepted_file.exists():
+        accepted_file.unlink()
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    # Verify after restart:
+    # 1. exactly one revision_applied registry record (no duplicate)
+    reg_rows = [json.loads(line) for line in registry_file.read_text().splitlines() if line.strip()]
+    applied_records = [r for r in reg_rows if r.get("record_type") == "revision_applied"]
+    assert len(applied_records) == 1
+
+    # 2. no new accepted row
+    assert not accepted_file.exists() or accepted_file.read_text().strip() == ""
+
+    # 3. watermark bytes unchanged
+    assert watermark_file.read_bytes() == watermark_bytes_before
+
+    # 4. state fields updated atomically
+    latest_st = load_latest_state_by_event_symbol_id(state_file)[es_id]
+    assert latest_st.observation_anchor_ms == 3_000_000
+    assert latest_st.observation_anchor_basis == "official_schedule_anchor"
+    assert latest_st.effective_observation_anchor_source == "official_schedule_anchor"
+    assert "rev_crash_1" in latest_st.applied_schedule_revision_ids
+    assert latest_st.anchor_contract_revision_count == 1
+    assert latest_st.latest_anchor_contract_hash != ""
+
+
+def test_runner_malformed_versioned_fingerprint_blocks_without_mutation(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        make_event_symbol_id,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_state_by_event_symbol_id,
+    )
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import main
+
+    symbol = "SOLUSDT"
+    now_ms = 1_000_000
+    output_root = tmp_path / "output"
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    symbol_contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=2_000_000,
+        exchangeinfo_onboard_date_ms=1_900_000,
+        anchor_contract_decision_at_ms=now_ms,
+        official_schedule_revision_id="sol_rev_1",
+        official_schedule_available_at_ms=now_ms,
+        mapping_confidence="exact_single_symbol",
+        provenance={
+            "payload_sha256": "sha",
+            "parser_version": "test",
+            "raw_time_text": "2026-08-03 05:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body[0]",
+            "logical_block_id": "block-1",
+            "schedule_text_context": "Launch Time",
+            "mapping_method": "single_symbol_article_unique_futures_launch_time",
+        },
+    )
+    event = build_formal_event_anchor_contract_row(
+        base_event={
+            "event_type": "futures_contract_launch",
+            "source_article_id": "art_sol",
+            "event_id": "evt_sol",
+            "symbols": [symbol],
+            "title": "Binance Launch SOLUSDT",
+            "source_published_at_ms": now_ms,
+            "detected_at_ms": now_ms,
+            "detail_payload_hash": "phash_sol",
+            "launch_anchor_evidence_level": "official_schedule_confirmed",
+        },
+        symbol_contracts={symbol: symbol_contract},
+    )
+    event["symbol"] = symbol
+    es_id = make_event_symbol_id(event, symbol)
+
+    # Seed state with explicit malformed versioned fingerprint
+    seeded_state = EventSymbolState(
+        event_symbol_id=es_id,
+        event_id="evt_sol",
+        symbol=symbol,
+        detected_at_ms=now_ms,
+        status="pending_launch_time_in_future",
+        source_contract_status="formal_v2_valid",
+        source_article_id="art_sol",
+        stable_event_symbol_key=f"futures_contract_launch|art_sol|{symbol}",
+        observation_anchor_ms=2_000_000,
+        observation_anchor_basis="official_schedule_anchor",
+        effective_observation_anchor_source="official_schedule_anchor",
+        latest_source_semantic_fingerprint="source_semantic_fingerprint_v2:xyz",
+    )
+    state_file = output_root / "observer_state.jsonl"
+    state_file.write_text(json.dumps(seeded_state.to_dict()) + "\n")
+
+    watermark_file = output_root / "watermark.json"
+    watermark_data = {
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": now_ms - 100,
+        "seen_event_ids": [],
+        "seen_source_article_ids": [],
+        "seen_stable_event_keys": [],
+        "updated_at_ms": now_ms - 100,
+    }
+    watermark_file.write_text(json.dumps(watermark_data))
+    watermark_bytes_before = watermark_file.read_bytes()
+
+    summary_d = tmp_path / "summary_d.json"
+    summary_d.write_text(json.dumps({
+        "decision": "stage1_5d_event_detection_passed",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    summary_e = tmp_path / "summary_e.json"
+    summary_e.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+
+    mock_dir = tmp_path / "mock_responses"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+
+    event_file = tmp_path / "events.jsonl"
+    event_file.write_text(json.dumps(event) + "\n")
+
+    accepted_file = output_root / "accepted_events.jsonl"
+    if accepted_file.exists():
+        accepted_file.unlink()
+
+    args = [
+        "run_stage1_5f_live_depth_observer.py",
+        "--fixture-events-jsonl", str(event_file),
+        "--stage1-5d-summary", str(summary_d),
+        "--stage1-5e-summary", str(summary_e),
+        "--output-root", str(output_root),
+        "--mock-response-dir", str(mock_dir),
+        "--max-polls", "1",
+    ]
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = args
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = orig_argv
+
+    # Assert no mutation: state is unmodified, watermark bytes identical, no accepted event
+    latest_st = load_latest_state_by_event_symbol_id(state_file)[es_id]
+    assert latest_st.latest_source_semantic_fingerprint == "source_semantic_fingerprint_v2:xyz"
+    assert latest_st.status == "pending_launch_time_in_future"
+    assert watermark_file.read_bytes() == watermark_bytes_before
+    assert not accepted_file.exists() or accepted_file.read_text().strip() == ""

@@ -290,13 +290,28 @@ def _validate_formal_v2_lineage(
         if expected is not None and accepted_value != expected:
             return False, "formal_v2_lineage_incomplete_or_mismatch"
 
+    acc_source = accepted_event.get("effective_observation_anchor_source")
+    lat_source = latest_st.get("effective_observation_anchor_source")
+    acc_basis = accepted_event.get("observation_anchor_basis")
+    lat_basis = latest_st.get("observation_anchor_basis")
+
+    source_basis_valid = (
+        acc_source == "official_schedule_anchor"
+        and lat_source == "official_schedule_anchor"
+        and acc_source == lat_source
+        and acc_basis == acc_source
+        and lat_basis == lat_source
+        and acc_basis == lat_basis
+    )
+    if not source_basis_valid:
+        return False, "formal_v2_lineage_incomplete_or_mismatch"
+
     v2_valid = (
         accepted_event.get("formal_event_contract_version") == 2
         and latest_st.get("anchor_contract_version") == 2
         and accepted_event.get("source_contract_status") == "formal_v2_valid"
         and accepted_event.get("launch_anchor_evidence_level") == "official_schedule"
         and latest_st.get("latest_anchor_evidence_level") == "official_schedule"
-        and accepted_event.get("effective_observation_anchor_source") == "official_schedule_anchor"
         and bool(accepted_event.get("source_article_id"))
         and accepted_event.get("source_article_id") == latest_st.get("source_article_id")
         and not latest_st.get("observation_anchor_revision_contaminated")

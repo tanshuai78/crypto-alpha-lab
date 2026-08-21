@@ -263,6 +263,15 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         next_check = d.get("next_admission_check_at_ms") or (anchor_ms if anchor_ms else now_ms + retry_interval_ms)
         next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
 
+    is_formal_v2 = (
+        event_symbol_row.get("formal_event_contract_version") == 2
+        or d.get("formal_event_contract_version") == 2
+        or d.get("anchor_contract_version") == 2
+    )
+    eff_source = d.get("effective_observation_anchor_source") if is_formal_v2 else (
+        d.get("effective_observation_anchor_source") or event_symbol_row.get("effective_observation_anchor_source")
+    )
+
     return EventSymbolState(
         event_symbol_id=event_symbol_row["event_symbol_id"],
         event_id=event_symbol_row.get("event_id", ""),
@@ -305,7 +314,7 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         formal_event_consumable_by_stage1_5f=event_symbol_row.get("formal_event_consumable_by_stage1_5f") if event_symbol_row.get("formal_event_consumable_by_stage1_5f") is not None else d.get("formal_event_consumable_by_stage1_5f"),
         symbol_identity_validation_status=event_symbol_row.get("symbol_identity_validation_status") or d.get("symbol_identity_validation_status"),
         launch_anchor_evidence_level=event_symbol_row.get("launch_anchor_evidence_level") or d.get("launch_anchor_evidence_level"),
-        effective_observation_anchor_source=d.get("effective_observation_anchor_source") or event_symbol_row.get("effective_observation_anchor_source"),
+        effective_observation_anchor_source=eff_source,
         launch_anchor_validation_status=event_symbol_row.get("launch_anchor_validation_status") or d.get("launch_anchor_validation_status"),
         source_anchor_contract_hash=d.get("source_anchor_contract_hash", ""),
         admission_anchor_contract_hash=d.get("admission_anchor_contract_hash", ""),
@@ -319,6 +328,7 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         latest_max_evidence_class=d.get("latest_max_evidence_class", ""),
         clean_start_sla_pass=d.get("clean_start_sla_pass", False),
         clean_evidence_start_allowed=d.get("clean_evidence_start_allowed", False),
+        latest_source_semantic_fingerprint=str(d.get("latest_source_semantic_fingerprint") or ""),
     )
 
 
@@ -369,6 +379,14 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
     )
 
     if state.status == "pending_cancelled":
+        return state
+
+    is_formal_v2 = (
+        state.formal_event_contract_version == 2
+        or state.anchor_contract_version == 2
+        or getattr(state, "source_contract_status", "") == "formal_v2_valid"
+    )
+    if state.status.startswith("pending_") and is_formal_v2:
         return state
 
     revision_application_id = str(revision.get("revision_application_id") or "")

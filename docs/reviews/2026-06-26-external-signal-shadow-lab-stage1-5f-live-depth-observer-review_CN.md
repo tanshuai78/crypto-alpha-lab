@@ -229,11 +229,12 @@ SKHYUSDT 已完成 1.5G quarantined review 的 root 必须只读保留：
 
 ## 7. 部署 Runbook
 
-本章是已审批 Stage 1.5D/1.5F hotfix 的常规 Git 部署入口；Stage 1.5G 永远不在 VPS 上执行。本次 `detail_retry_cycle_active_root_recovery_hotfix` 同时修复逻辑 retry starvation，并提供受控 active-root recovery 所需代码。
+本章是已审批 Stage 1.5D/1.5F hotfix 的常规 Git 部署入口；Stage 1.5G 永远不在 VPS 上执行。第 7.2--7.9 保留此前 `detail_retry_cycle_active_root_recovery_hotfix` 的通用部署与 active-root recovery 记录。当前 `formal_v2_anchor_source_lineage_projection_hotfix` 的生产切换必须优先使用第 7.10 节；它是 F-only 新 root rollout，不得套用第 7.5--7.7 的“停止 D 并新建 D/F 一对 root”流程。
 
 ```text
 current_deployment_scope = stage1_5d_detail_retry_cycle_active_root_recovery_hotfix
 ordinary_new_root_suffix = 7d_detail_retry_cycle_active_root_recovery_hotfix
+current_formal_v2_f_only_rollout = 7d_formal_v2_anchor_source_lineage_projection_hotfix
 deployment_transport = git_commit_checkout
 formal_event_contract_version = 2
 anchor_precedence_policy = official_schedule_priority_v1
@@ -717,6 +718,139 @@ Always forbidden:
   Existing guarded automatic F startup compaction remains allowed lifecycle behavior.
 ```
 
+### 7.10 Formal-V2 Anchor Source Lineage Projection Hotfix: F-Only New-Root Rollout
+
+> [!IMPORTANT]
+> 本节只适用于 `formal_v2_anchor_source_lineage_projection_hotfix` 的已审查 commit，并要求另行获得 VPS 部署授权。UNITREE 的 12 小时采集和 1.5G 复核已经结束；其 `formal_v2_lineage_incomplete_or_mismatch` 结论保持不变，旧 F root 只能作为只读历史证据。它不是“等待完成”的门禁，也不得通过新版程序补写为 clean evidence。
+
+**本次切换顺序：** 先按第 7.2--7.4 节完成本地测试、提交/推送和服务器精确 Git checkout；随后保留健康的选定 D root，不启动新 D、不恢复旧 F，只启动一个 bootstrap 后的新 F root。若 D gate、存储、commit attestation 或唯一 writer 检查失败，停止，不启动新 F。
+
+若旧 F Python writer 仍在运行，先用第 8.2 节确认其 `active_observation_count=0`，再手工填入唯一旧 F session 并停止它。不得停止 D collector；不得删除旧 F root：
+
+```bash
+tmux ls
+export OLD_5F_SESSION="手工填入已完成观测的唯一旧 F session 名"
+tmux kill-session -t "$OLD_5F_SESSION"
+ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/'
+```
+
+上面的 `awk` 必须没有输出后，才可继续本节的 F-only preflight。
+
+```bash
+cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+# 必须由正在运行的唯一 Python D collector 导出；空值或多值均停止。
+export D_ROOT_CANDIDATES="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5d_live_event_source_smoke_collector.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}')"
+export D_ROOT_CANDIDATE_COUNT="$(printf '%s\n' "$D_ROOT_CANDIDATES" | sed '/^$/d' | wc -l | tr -d ' ')"
+export STAGE1_5D_EVENTS_OUT="$(printf '%s\n' "$D_ROOT_CANDIDATES" | sed -n '1p')"
+export ROOT_SUFFIX="7d_formal_v2_anchor_source_lineage_projection_hotfix"
+export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
+export STAGE1_5F_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_${ROOT_SUFFIX}"
+export STAGE1_5E_SUMMARY="data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json"
+
+echo "STAGE1_5D_EVENTS_OUT=[$STAGE1_5D_EVENTS_OUT]"
+echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
+
+F_V2_START_READY=1
+if [ "$D_ROOT_CANDIDATE_COUNT" != "1" ] || [ -z "$STAGE1_5D_EVENTS_OUT" ] || [ ! -f "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" ]; then
+  echo "STOP: exactly one active Stage 1.5D root with a runtime gate is required." >&2
+  F_V2_START_READY=0
+fi
+if ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {found=1} END {exit !found}'; then
+  echo "STOP: an existing Stage 1.5F Python writer is still running; finish/archive it first." >&2
+  F_V2_START_READY=0
+fi
+if tmux has-session -t "$STAGE1_5F_SESSION" 2>/dev/null || [ -e "$STAGE1_5F_OUT" ]; then
+  echo "STOP: target F session or root already exists." >&2
+  F_V2_START_READY=0
+fi
+if [ ! -f "$STAGE1_5E_SUMMARY" ]; then
+  echo "STOP: missing Stage 1.5E summary: $STAGE1_5E_SUMMARY" >&2
+  F_V2_START_READY=0
+fi
+
+HOST_STORAGE_READY=1
+python3 - <<'PY' || HOST_STORAGE_READY=0
+import shutil
+free_bytes = shutil.disk_usage("/").free
+minimum_bytes = 8 * 1024 * 1024 * 1024
+print({"storage_free_bytes": free_bytes, "required_start_free_bytes": minimum_bytes})
+assert free_bytes >= minimum_bytes, "STOP: host free space is below the mandatory 8GiB start threshold"
+PY
+if [ "$HOST_STORAGE_READY" != "1" ]; then
+  F_V2_START_READY=0
+fi
+
+if [ "$F_V2_START_READY" = "1" ]; then
+  python3 - "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" <<'PY'
+import json, sys
+g = json.load(open(sys.argv[1]))
+assert g.get("status") == "READY"
+assert g.get("decision") == "stage1_5d_runtime_gate_ready"
+assert g.get("consumable_by_stage1_5f") is True
+assert g.get("fatal_blockers") in (None, [])
+assert g.get("storage_guard_status") == "ready"
+assert g.get("storage_blocker") is None
+PY
+  [ $? -eq 0 ] || F_V2_START_READY=0
+fi
+echo "F_V2_START_READY=$F_V2_START_READY"
+```
+
+仅当 `F_V2_START_READY=1` 时执行；先 bootstrap，再以同一个 root 启动唯一 F writer。这个操作不会改写 D root、旧 F root、旧 watermark 或 UNITREE artifact：
+
+```bash
+if [ "$F_V2_START_READY" != "1" ]; then
+  echo "STOP: do not create a new F root until every preflight passes." >&2
+else
+  if ! PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+      --stage1-5d-events-glob "$STAGE1_5D_EVENTS_OUT/events/*.jsonl" \
+      --stage1-5d-runtime-gate "$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json" \
+      --stage1-5e-summary "$STAGE1_5E_SUMMARY" \
+      --output-root "$STAGE1_5F_OUT" \
+      --bootstrap-watermark; then
+    echo "STOP: bootstrap failed; no F tmux session was started. SSH remains open." >&2
+  else
+    tmux new-session -d -s "$STAGE1_5F_SESSION" "
+cd /root/crypto-alpha-lab &&
+source .venv/bin/activate &&
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \\
+  --stage1-5d-events-glob '$STAGE1_5D_EVENTS_OUT/events/*.jsonl' \\
+  --stage1-5d-runtime-gate '$STAGE1_5D_EVENTS_OUT/live_safety_gate_summary.json' \\
+  --stage1-5e-summary '$STAGE1_5E_SUMMARY' \\
+  --output-root '$STAGE1_5F_OUT' \\
+  --live-public-readonly
+"
+  fi
+fi
+```
+
+等待约 90 秒后，复用第 7.8 节的 root binding/attestation 首检，并追加以下 formal-v2 观察检查。没有新的 formal-v2 事件时 `formal_v2_state_count=0` 是正常结果；一旦存在，所有值必须精确通过：
+
+```bash
+python3 - "$STAGE1_5F_OUT" <<'PY'
+import json, re, sys
+from pathlib import Path
+
+latest = {}
+for line in (Path(sys.argv[1]) / "observer_state.jsonl").read_text().splitlines():
+    row = json.loads(line)
+    latest[row.get("event_symbol_id")] = row
+v2 = [row for row in latest.values() if row.get("formal_event_contract_version") == 2]
+for row in v2:
+    assert row.get("effective_observation_anchor_source") == "official_schedule_anchor"
+    assert row.get("observation_anchor_basis") == "official_schedule_anchor"
+    assert re.fullmatch(r"source_semantic_fingerprint_v2:[0-9a-f]{64}", row.get("latest_source_semantic_fingerprint") or "")
+print({"formal_v2_state_count": len(v2), "formal_v2_projection": "OK" if v2 else "awaiting_new_event"})
+PY
+```
+
+**停止/回滚：** 如果新 F 的 bootstrap、attestation、storage 或 formal-v2 projection 检查失败，只停止这个新 F session，保留其 root 和全部旧 root；不得重新启动旧 F root、不得修改其 JSONL/watermark，也不得删除 UNITREE evidence。健康的 D collector 可继续运行。
+
+**与 Stage 1.6B 的顺序：** UNITREE 已完成采集与本地 1.5G 复核，因此不需要等待它。推荐先完成本节的新 F root 首检，确认 D/F 共享锁、心跳和存储遥测正常；随后才按 [Stage 1.6B deployment checklist](2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md) 的独立操作工单部署 1.6B live observer。1.6B 绝不读取/写入本节任何 D/F root，且其 checklist 本身不包含启动授权。
+
 ## 8. 日常监控
 
 ### 8.1 当前 root 快速定位
@@ -727,7 +861,7 @@ Always forbidden:
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
+export ROOT_SUFFIX="7d_formal_v2_anchor_source_lineage_projection_hotfix"
 export STAGE1_5D_EVENTS_OUT="$(ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 export STAGE1_5F_OUT="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
 
@@ -868,7 +1002,7 @@ observation_anchor_ms / next_anchor_resolution_at_ms / next_admission_check_at_m
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
+export ROOT_SUFFIX="7d_formal_v2_anchor_source_lineage_projection_hotfix"
 tmux kill-session -t "stage1_5f_live_depth_${ROOT_SUFFIX}" 2>/dev/null || true
 tmux kill-session -t "stage1_5d_continuous_${ROOT_SUFFIX}" 2>/dev/null || true
 
@@ -879,7 +1013,7 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 
 ## 9. 新事件定位与排障
 
-本章只保留当前 `storage_lifecycle_resource_guard_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
+本章只保留当前 `formal_v2_anchor_source_lineage_projection_hotfix` root 的必要排障命令。旧 BAPI table / endpoint fallback / starvation 专项命令不再放在日常 runbook 主体中，历史语义见第 12 章索引。
 
 ### 9.1 查看 1.5F watermark 时间
 

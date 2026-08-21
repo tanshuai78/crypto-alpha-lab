@@ -905,12 +905,12 @@ def test_cancelled_revision_is_non_admissible_sink_with_clean_audit_fields():
         "event_id": "evt1",
         "symbol": "KUAISHOUUSDT",
         "detected_at_ms": 1_000_000,
-        "source_contract_status": "formal_v2_valid",
+        "source_contract_status": "formal_v1_valid",
     }
     pending_future_state = create_pending_observation_state(
         event_symbol_row=event_symbol_row,
         status="pending_launch_time_in_future",
-        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v2_valid"},
+        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v1_valid"},
         now_ms=1_000_000,
     )
     cancelled_revision = {
@@ -920,6 +920,16 @@ def test_cancelled_revision_is_non_admissible_sink_with_clean_audit_fields():
         "symbol_official_schedule_statuses": {"KUAISHOUUSDT": "cancelled"},
         "symbol_revised_anchor_ms": {},
     }
+
+    # Formal-v2 pending direct reducer is a no-op
+    pending_v2 = create_pending_observation_state(
+        event_symbol_row={**event_symbol_row, "formal_event_contract_version": 2},
+        status="pending_launch_time_in_future",
+        diagnostics={"observation_anchor_ms": 2_000_000, "formal_event_contract_version": 2, "source_contract_status": "formal_v2_valid"},
+        now_ms=1_000_000,
+    )
+    assert apply_anchor_contract_revision_to_state(pending_v2, cancelled_revision, now_ms=1_100_000) == pending_v2
+
     updated = apply_anchor_contract_revision_to_state(pending_future_state, cancelled_revision, now_ms=1_100_000)
     assert updated.status == "pending_cancelled"
     assert updated.pending_reason == "official_schedule_cancelled"
@@ -974,12 +984,12 @@ def test_unresolved_episode_deadline_tracking_and_no_sliding_deadline():
         "event_id": "evt1",
         "symbol": "KUAISHOUUSDT",
         "detected_at_ms": 1_000_000,
-        "source_contract_status": "formal_v2_valid",
+        "source_contract_status": "formal_v1_valid",
     }
     pending_future_state = create_pending_observation_state(
         event_symbol_row=event_symbol_row,
         status="pending_launch_time_in_future",
-        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v2_valid"},
+        diagnostics={"observation_anchor_ms": 2_000_000, "source_contract_status": "formal_v1_valid"},
         now_ms=1_000_000,
     )
     unresolved_revision = {
