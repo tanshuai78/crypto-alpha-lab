@@ -66,7 +66,7 @@ def test_probe_validates_32_hex_article_id(tmp_path):
 
 
 def test_probe_execution_and_attestation_persistence(tmp_path):
-    """Verify successful probe execution writes valid attestation with injected opener."""
+    """Verify successful probe execution writes valid v2 attestation with injected opener."""
     fix_dir = Path("tests/fixtures/external_signal_shadow/stage1_6b")
     index_json = fix_dir / "profile_probe_index_fixture.json"
     detail_json = fix_dir / "profile_probe_detail_fixture.json"
@@ -75,11 +75,14 @@ def test_probe_execution_and_attestation_persistence(tmp_path):
     index_bytes = index_json.read_bytes()
     detail_bytes = detail_json.read_bytes()
 
+    detail_calls = []
+
     def mock_opener(req, timeout=10.0):
         url = req.get_full_url()
         if "article/list/query" in url:
             return MockHTTPResponse(index_bytes, url=url)
         elif "article/detail/query" in url:
+            detail_calls.append(url)
             return MockHTTPResponse(detail_bytes, url=url)
         raise ValueError(f"Unexpected url: {url}")
 
@@ -95,15 +98,80 @@ def test_probe_execution_and_attestation_persistence(tmp_path):
     assert attestation_path.is_file()
     validated = validate_probe_attestation_path(attestation_path, project_root=tmp_path)
     assert validated == attestation_path.resolve()
+    assert len(detail_calls) == 1
 
-    # Validate contents of attestation JSON
+    # Validate contents of attestation JSON v2
     data = json.loads(attestation_path.read_text())
+    assert data["schema_version"] == "stage1_6b_source_profile_probe_attestation_v2"
+    assert data["probe_command_version"] == "source_profile_probe_v2"
     assert data["source_profile_id"] == SOURCE_PROFILE_ID
+    assert data["selected_catalog_id"] == 161
+    assert data["selected_catalog_name"] == "Delisting"
+    assert data["selected_catalog_article_count"] == 1
     assert data["request_headers_profile_sha256"] == compute_request_headers_profile_sha256()
     assert data["probe_article_id"] == article_id
     assert data["index_http_status"] == 200
     assert data["detail_http_status"] == 200
     assert data["probe_attested_at_ms"] > 0
+
+
+def test_probe_fails_when_article_id_not_in_selected_catalog(tmp_path):
+    """Task 3.1: Probe must fail before detail fetch if probe_article_id is not in selected catalog."""
+    fix_dir = Path("tests/fixtures/external_signal_shadow/stage1_6b")
+    index_bytes = (fix_dir / "profile_probe_index_fixture.json").read_bytes()
+    detail_calls = []
+
+    def mock_opener(req, timeout=10.0):
+        url = req.get_full_url()
+        if "article/list/query" in url:
+            return MockHTTPResponse(index_bytes, url=url)
+        elif "article/detail/query" in url:
+            detail_calls.append(url)
+            return MockHTTPResponse(b"{}", url=url)
+        raise ValueError(f"Unexpected url: {url}")
+
+    non_member_id = "0" * 32
+    with pytest.raises(ValueError, match="probe_article_id_not_in_selected_catalog"):
+        run_source_profile_probe(
+            probe_article_id=non_member_id,
+            live_public_readonly=True,
+            project_root=tmp_path,
+            opener=mock_opener,
+        )
+
+    # Detail opener must NOT have been called
+    assert len(detail_calls) == 0
+
+    # No attestation file written
+    att_dir = tmp_path / "data" / "external_signal_shadow" / "stage1_6b" / "source_profile_attestations"
+    assert not att_dir.exists()
+
+
+def test_probe_fails_on_malformed_index_schema(tmp_path):
+    """Task 3.3: Probe fails on malformed index response and writes no attestation."""
+    malformed_index = json.dumps({"code": "000000", "data": {"articles": []}}).encode("utf-8")
+    detail_calls = []
+
+    def mock_opener(req, timeout=10.0):
+        url = req.get_full_url()
+        if "article/list/query" in url:
+            return MockHTTPResponse(malformed_index, url=url)
+        elif "article/detail/query" in url:
+            detail_calls.append(url)
+            return MockHTTPResponse(b"{}", url=url)
+        raise ValueError(f"Unexpected url: {url}")
+
+    with pytest.raises(RuntimeError, match="malformed_index_schema"):
+        run_source_profile_probe(
+            probe_article_id="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            live_public_readonly=True,
+            project_root=tmp_path,
+            opener=mock_opener,
+        )
+
+    assert len(detail_calls) == 0
+    att_dir = tmp_path / "data" / "external_signal_shadow" / "stage1_6b" / "source_profile_attestations"
+    assert not att_dir.exists()
 
 
 def test_probe_persists_attestation_through_guarded_atomic_writer(tmp_path, monkeypatch):

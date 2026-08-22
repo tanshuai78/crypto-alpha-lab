@@ -17,6 +17,8 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     DETAIL_QUERY_TEMPLATE,
     INDEX_PATH,
     INDEX_QUERY_TEMPLATE,
+    SELECTED_CATALOG_ID,
+    SELECTED_CATALOG_NAME,
 )
 
 
@@ -28,6 +30,99 @@ class ClientValidationError(ValueError):
 class ClientNetworkError(RuntimeError):
     """Raised on network or transport failure."""
     pass
+
+
+@dataclass(frozen=True)
+class SelectedDelistingCatalogResult:
+    """Strictly extracted and validated Delisting catalog payload result."""
+    catalog_id: int
+    catalog_name: str
+    catalog_total: int
+    articles: list
+
+
+def extract_selected_delisting_catalog(raw_payload: bytes) -> SelectedDelistingCatalogResult:
+    """SSOT extractor for selected Delisting catalog (catalogId=161, catalogName='Delisting').
+
+    Fail-closed on any schema deviation, missing catalog, duplicate catalog, or invalid article/releaseDate.
+    """
+    try:
+        data = json.loads(raw_payload.decode("utf-8"))
+    except Exception as exc:
+        raise ClientValidationError(f"malformed_index_schema: JSON decode error: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ClientValidationError("malformed_index_schema: top-level JSON must be an object")
+
+    body_data = data.get("data")
+    if not isinstance(body_data, dict):
+        raise ClientValidationError("malformed_index_schema: missing or invalid data object")
+
+    catalogs = body_data.get("catalogs")
+    if not isinstance(catalogs, list):
+        raise ClientValidationError("malformed_index_schema: missing data.catalogs list")
+
+    matching = []
+    for cat in catalogs:
+        if not isinstance(cat, dict):
+            continue
+        c_id = cat.get("catalogId")
+        c_name = cat.get("catalogName")
+        if c_id == SELECTED_CATALOG_ID and c_name == SELECTED_CATALOG_NAME:
+            matching.append(cat)
+
+    if len(matching) == 0:
+        raise ClientValidationError(
+            f"malformed_index_schema: selected catalog {SELECTED_CATALOG_ID} {SELECTED_CATALOG_NAME} not found"
+        )
+    if len(matching) > 1:
+        raise ClientValidationError(
+            f"malformed_index_schema: duplicate selected catalog {SELECTED_CATALOG_ID} {SELECTED_CATALOG_NAME} found"
+        )
+
+    target_cat = matching[0]
+    total = target_cat.get("total")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise ClientValidationError("malformed_index_schema: selected catalog total must be non-negative integer")
+
+    articles = target_cat.get("articles")
+    if not isinstance(articles, list):
+        raise ClientValidationError("malformed_index_schema: selected catalog articles must be a list")
+
+    if total < len(articles):
+        raise ClientValidationError(
+            f"malformed_index_schema: selected catalog total ({total}) < articles length ({len(articles)})"
+        )
+
+    hex_digits = set("0123456789abcdefABCDEF")
+    for art in articles:
+        if not isinstance(art, dict):
+            raise ClientValidationError("malformed_index_schema: article item must be an object")
+        code = art.get("code")
+        if not isinstance(code, str) or len(code) != 32 or not all(c in hex_digits for c in code):
+            raise ClientValidationError("malformed_index_schema: article code must be 32-character hex string")
+
+        title = art.get("title")
+        if not isinstance(title, str) or len(title.strip()) == 0:
+            raise ClientValidationError("malformed_index_schema: article title must be non-empty string")
+
+        release_date = art.get("releaseDate")
+        if (
+            isinstance(release_date, bool)
+            or not isinstance(release_date, int)
+            or release_date < 1_000_000_000_000
+            or release_date > 99_999_999_999_999
+        ):
+            raise ClientValidationError(
+                f"malformed_index_schema: article releaseDate must be 13-digit epoch-ms integer, got {release_date!r}"
+            )
+
+    return SelectedDelistingCatalogResult(
+        catalog_id=SELECTED_CATALOG_ID,
+        catalog_name=SELECTED_CATALOG_NAME,
+        catalog_total=total,
+        articles=articles,
+    )
 
 
 @dataclass(frozen=True)
@@ -217,21 +312,21 @@ class Stage16BCanonicalClient:
         res = self._execute_get(url)
 
         if res.trust_validation_status == "trusted":
-            # Semantic verification of index payload structure
+            # Semantic verification of index payload structure using strict extractor
             try:
-                data = json.loads(res.raw_payload.decode("utf-8"))
-                if not isinstance(data, dict) or not isinstance(data.get("data"), dict) or not isinstance(data["data"].get("articles"), list):
-                    return FetchResult(
-                        requested_url=res.requested_url,
-                        final_url=res.final_url,
-                        http_status=res.http_status,
-                        content_type=res.content_type,
-                        raw_payload_bytes=res.raw_payload_bytes,
-                        raw_payload=res.raw_payload,
-                        t_receive_ms=res.t_receive_ms,
-                        trust_validation_status="malformed_index_schema",
-                        error_message="Index payload missing data.articles list",
-                    )
+                extract_selected_delisting_catalog(res.raw_payload)
+            except ClientValidationError as exc:
+                return FetchResult(
+                    requested_url=res.requested_url,
+                    final_url=res.final_url,
+                    http_status=res.http_status,
+                    content_type=res.content_type,
+                    raw_payload_bytes=res.raw_payload_bytes,
+                    raw_payload=res.raw_payload,
+                    t_receive_ms=res.t_receive_ms,
+                    trust_validation_status="malformed_index_schema",
+                    error_message=str(exc),
+                )
             except Exception as exc:
                 return FetchResult(
                     requested_url=res.requested_url,

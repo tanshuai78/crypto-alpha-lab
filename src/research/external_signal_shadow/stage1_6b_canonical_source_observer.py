@@ -2,14 +2,14 @@
 
 import datetime
 import hashlib
-import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from configs import base
 from src.research.external_signal_shadow.stage1_6b_canonical_source_client import (
     Stage16BCanonicalClient,
+    extract_selected_delisting_catalog,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
     CANDIDATE_DISCOVERY_RULE_VERSION,
@@ -19,6 +19,8 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     INDEX_REQUEST_VARIANT,
     INDEX_SOURCE_LOCALE,
     INDEX_SOURCE_SURFACE,
+    SELECTED_CATALOG_ID,
+    SELECTED_CATALOG_NAME,
     SOURCE_PROFILE_ID,
     ArticleDiscoveryRecord,
     CandidateLane,
@@ -37,6 +39,7 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     compute_request_observation_id,
     is_delisting_candidate,
     normalize_discovery_text,
+    validate_observer_checkpoint_status_coverage,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_storage import (
     Stage16BStorageGuard,
@@ -54,6 +57,11 @@ class ObserverSLAError(RuntimeError):
 
 class ObserverCapacityError(RuntimeError):
     """Raised when candidate capacity limit is exceeded."""
+    pass
+
+
+class Stage16BSchemaDriftError(RuntimeError):
+    """Raised when source index schema deviates or selected catalog is missing/malformed."""
     pass
 
 
@@ -129,6 +137,47 @@ class Stage16BObserver:
         ).hexdigest()
         return delta
 
+    def _write_checkpoint(
+        self,
+        now_ms: int,
+        status: str = "trusted",
+        coverage: str = "successful",
+    ) -> ObserverCheckpointRecord:
+        """Helper to write v2 observer checkpoint with validated status and coverage."""
+        validate_observer_checkpoint_status_coverage(status, coverage)
+        chk_seed = f"{self.run_id}|{self.poll_seq}|{self.monotonic_request_seq}|{self.record_seq}|{self.accounted_root_bytes}"
+        checkpoint_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
+
+        chk_rec = ObserverCheckpointRecord(
+            schema_version="stage1_6b_observer_checkpoint_v2",
+            run_id=self.run_id,
+            capture_mode=self.capture_mode,
+            source_profile_id=SOURCE_PROFILE_ID,
+            source_profile_attestation_sha256=self.source_profile_attestation_sha256,
+            checkpoint_id=checkpoint_id,
+            prior_checkpoint_id=self.prior_checkpoint_id,
+            poll_seq=self.poll_seq,
+            monotonic_request_seq=self.monotonic_request_seq,
+            record_seq=self.record_seq,
+            accounted_root_bytes=self.accounted_root_bytes,
+            stream_offsets=self.stream_offsets,
+            stream_last_hashes=self.stream_last_hashes,
+            candidate_states={k: v.to_dict() for k, v in self.candidate_states.items()},
+            heartbeat_at_ms=now_ms,
+            last_index_poll_status=status,
+            last_index_poll_coverage=coverage,
+        )
+
+        delta_chk = write_observer_checkpoint(
+            run_root=self.run_root,
+            checkpoint=chk_rec,
+            guard=self.guard,
+            current_root_bytes=self.accounted_root_bytes,
+        )
+        self.accounted_root_bytes += delta_chk
+        self.prior_checkpoint_id = checkpoint_id
+        return chk_rec
+
     def execute_poll(self, now_ms: Optional[int] = None) -> ObserverCheckpointRecord:
         """Execute one deterministic observation poll."""
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -157,9 +206,60 @@ class Stage16BObserver:
             monotonic_request_seq=self.monotonic_request_seq,
         )
 
+        # Single request_manifest writer authority for live index attempt
+        req_manifest_row = {
+            "schema_version": "stage1_6b_request_manifest_v1",
+            "request_observation_id": req_obs_id_idx,
+            "run_id": self.run_id,
+            "poll_seq": self.poll_seq,
+            "monotonic_request_seq": self.monotonic_request_seq,
+            "request_class": RequestClass.LIVE_INDEX.value,
+            "page_no": 1,
+            "requested_url": res_idx.requested_url,
+            "final_url": res_idx.final_url,
+            "http_status": res_idx.http_status,
+            "content_type": res_idx.content_type,
+            "raw_payload_bytes": res_idx.raw_payload_bytes,
+            "validation_status": res_idx.trust_validation_status,
+            "error_message": res_idx.error_message,
+            "captured_at_ms": now_ms,
+        }
+        delta_rm = self._append_record(
+            f"request_manifest/{today_str}.jsonl",
+            req_manifest_row,
+            "normal_data",
+        )
+        self.accounted_root_bytes += delta_rm
+
+        # Handle non-trusted / schema drift result
+        if res_idx.trust_validation_status != "trusted":
+            if res_idx.trust_validation_status == "malformed_index_schema":
+                # Checkpoint degraded status and raise schema drift error
+                self._write_checkpoint(
+                    now_ms=now_ms,
+                    status="malformed_index_schema",
+                    coverage="degraded_not_successful",
+                )
+                raise Stage16BSchemaDriftError(
+                    f"source_profile_schema_drift: malformed_index_schema - {res_idx.error_message}"
+                )
+            else:
+                # Degraded checkpoint for other transport errors
+                return self._write_checkpoint(
+                    now_ms=now_ms,
+                    status=res_idx.trust_validation_status,
+                    coverage="degraded_not_successful",
+                )
+
+        # Extract selected Delisting catalog
+        catalog_res = extract_selected_delisting_catalog(res_idx.raw_payload)
+        articles_list = catalog_res.articles
+        article_count = len(articles_list)
+        selected_catalog_total = catalog_res.catalog_total
+
         idx_raw_sha = ""
         idx_rel_raw = ""
-        if res_idx.trust_validation_status == "trusted" and res_idx.raw_payload:
+        if res_idx.raw_payload:
             idx_raw_sha, idx_rel_raw, raw_b_written = write_content_addressed_raw_payload(
                 run_root=self.run_root,
                 payload_bytes=res_idx.raw_payload,
@@ -185,19 +285,9 @@ class Stage16BObserver:
             request_observation_id=req_obs_id_idx,
         )
 
-        article_count = 0
-        articles_list: List[Dict[str, Any]] = []
-        if res_idx.trust_validation_status == "trusted":
-            try:
-                data = json.loads(res_idx.raw_payload.decode("utf-8"))
-                articles_list = data.get("data", {}).get("articles", [])
-                article_count = len(articles_list)
-            except Exception:
-                pass
-
         self.record_seq += 1
         list_cap_rec = ListCaptureRecord(
-            schema_version="stage1_6b_list_capture_v1",
+            schema_version="stage1_6b_list_capture_v2",
             capture_mode=self.capture_mode,
             source_profile_id=SOURCE_PROFILE_ID,
             request_headers_profile_sha256=self.headers_profile_sha256,
@@ -218,6 +308,9 @@ class Stage16BObserver:
             t_list_receive_ms=res_idx.t_receive_ms,
             article_count=article_count,
             captured_at_ms=now_ms,
+            selected_catalog_id=SELECTED_CATALOG_ID,
+            selected_catalog_name=SELECTED_CATALOG_NAME,
+            selected_catalog_total=selected_catalog_total,
         )
         delta_lc = self._append_record(
             f"list_captures/{today_str}.jsonl",
@@ -226,50 +319,51 @@ class Stage16BObserver:
         )
         self.accounted_root_bytes += delta_lc
 
-        # 3. Derive candidates from index payload
-        if res_idx.trust_validation_status == "trusted":
-            for item in articles_list:
-                aid = str(item.get("code") or item.get("id") or "")
-                title = str(item.get("title") or "")
-                if not aid or not title:
-                    continue
+        # 3. Derive candidates from selected catalog articles
+        for item in articles_list:
+            aid = str(item.get("code") or item.get("id") or "")
+            title = str(item.get("title") or "")
+            if not aid or not title:
+                continue
 
-                norm_title = normalize_discovery_text(title)
-                if is_delisting_candidate(norm_title):
-                    if aid not in self.candidate_states:
-                        self.record_seq += 1
-                        disc_rec = ArticleDiscoveryRecord(
-                            schema_version="stage1_6b_article_discovery_v1",
-                            capture_mode=self.capture_mode,
-                            source_profile_id=SOURCE_PROFILE_ID,
-                            source_article_id=aid,
-                            discovery_title=title,
-                            discovery_rule_version=CANDIDATE_DISCOVERY_RULE_VERSION,
-                            first_list_capture_id=list_capture_id,
-                            notice_lineage_first_detected_at_ms=now_ms if self.capture_mode == CaptureMode.LIVE_OBSERVED.value else None,
-                            captured_at_ms=now_ms,
-                            record_seq=self.record_seq,
-                        )
-                        delta_disc = self._append_record(
-                            "article_discoveries.jsonl",
-                            disc_rec.to_dict(),
-                            "normal_data",
-                        )
-                        self.accounted_root_bytes += delta_disc
+            norm_title = normalize_discovery_text(title)
+            if is_delisting_candidate(norm_title):
+                if aid not in self.candidate_states:
+                    self.record_seq += 1
+                    disc_rec = ArticleDiscoveryRecord(
+                        schema_version="stage1_6b_article_discovery_v2",
+                        capture_mode=self.capture_mode,
+                        source_profile_id=SOURCE_PROFILE_ID,
+                        source_article_id=aid,
+                        discovery_title=title,
+                        discovery_rule_version=CANDIDATE_DISCOVERY_RULE_VERSION,
+                        first_list_capture_id=list_capture_id,
+                        notice_lineage_first_detected_at_ms=now_ms if self.capture_mode == CaptureMode.LIVE_OBSERVED.value else None,
+                        captured_at_ms=now_ms,
+                        record_seq=self.record_seq,
+                        source_catalog_id=SELECTED_CATALOG_ID,
+                        source_catalog_name=SELECTED_CATALOG_NAME,
+                    )
+                    delta_disc = self._append_record(
+                        "article_discoveries.jsonl",
+                        disc_rec.to_dict(),
+                        "normal_data",
+                    )
+                    self.accounted_root_bytes += delta_disc
 
-                        self.candidate_states[aid] = CandidateState(
-                            source_article_id=aid,
-                            first_discovered_poll_seq=self.poll_seq,
-                            first_discovered_at_ms=now_ms,
-                            lane=CandidateLane.LANE_A.value,
-                            detail_attempt_count=0,
-                            retry_cycle_count=0,
-                            first_attempt_at_ms=None,
-                            last_attempt_at_ms=None,
-                            next_retry_at_ms=None,
-                            terminal_reason=None,
-                            trusted_detail_revision_id=None,
-                        )
+                    self.candidate_states[aid] = CandidateState(
+                        source_article_id=aid,
+                        first_discovered_poll_seq=self.poll_seq,
+                        first_discovered_at_ms=now_ms,
+                        lane=CandidateLane.LANE_A.value,
+                        detail_attempt_count=0,
+                        retry_cycle_count=0,
+                        first_attempt_at_ms=None,
+                        last_attempt_at_ms=None,
+                        next_retry_at_ms=None,
+                        terminal_reason=None,
+                        trusted_detail_revision_id=None,
+                    )
 
         # 4. Detail candidate selection
         lane_a = [
@@ -444,34 +538,8 @@ class Stage16BObserver:
         self.accounted_root_bytes += delta_hb
 
         # 8. Checkpoint
-        chk_seed = f"{self.run_id}|{self.poll_seq}|{self.monotonic_request_seq}|{self.record_seq}|{self.accounted_root_bytes}"
-        checkpoint_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
-
-        chk_rec = ObserverCheckpointRecord(
-            schema_version="stage1_6b_observer_checkpoint_v1",
-            run_id=self.run_id,
-            capture_mode=self.capture_mode,
-            source_profile_id=SOURCE_PROFILE_ID,
-            source_profile_attestation_sha256=self.source_profile_attestation_sha256,
-            checkpoint_id=checkpoint_id,
-            prior_checkpoint_id=self.prior_checkpoint_id,
-            poll_seq=self.poll_seq,
-            monotonic_request_seq=self.monotonic_request_seq,
-            record_seq=self.record_seq,
-            accounted_root_bytes=self.accounted_root_bytes,
-            stream_offsets=self.stream_offsets,
-            stream_last_hashes=self.stream_last_hashes,
-            candidate_states={k: v.to_dict() for k, v in self.candidate_states.items()},
-            heartbeat_at_ms=now_ms,
+        return self._write_checkpoint(
+            now_ms=now_ms,
+            status="trusted",
+            coverage="successful",
         )
-
-        delta_chk = write_observer_checkpoint(
-            run_root=self.run_root,
-            checkpoint=chk_rec,
-            guard=self.guard,
-            current_root_bytes=self.accounted_root_bytes,
-        )
-        self.accounted_root_bytes += delta_chk
-        self.prior_checkpoint_id = checkpoint_id
-
-        return chk_rec

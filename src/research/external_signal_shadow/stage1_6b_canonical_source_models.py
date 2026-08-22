@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 CANDIDATE_DISCOVERY_RULE_VERSION = "candidate_discovery_rule_v1"
 
 # Frozen Canonical Public-Web Profile Constants
-SOURCE_PROFILE_ID = "binance_public_web_bapi_en_v1"
+SOURCE_PROFILE_ID = "binance_public_web_bapi_en_delisting_catalog_v2"
 SOURCE_AUTHORITY = "binance_official_content"
 TRANSPORT_SUPPORT_STATUS = "undocumented_public_web_profile"
 BASE_URL = "https://www.binance.com"
@@ -21,7 +21,12 @@ INDEX_PATH = "/bapi/composite/v1/public/cms/article/list/query"
 INDEX_QUERY_TEMPLATE = "type=1&pageNo={page_no}&pageSize=50"
 INDEX_SOURCE_SURFACE = "announcement_index"
 INDEX_SOURCE_LOCALE = "en"
-INDEX_REQUEST_VARIANT = "bapi_article_list_type_1_page_50_v1"
+INDEX_REQUEST_VARIANT = "bapi_article_list_type_1_delisting_catalog_161_page_50_v2"
+
+SELECTED_CATALOG_ID = 161
+SELECTED_CATALOG_NAME = "Delisting"
+SELECTED_ARTICLE_PATH = 'data.catalogs[?catalogId==161 && catalogName=="Delisting"].articles[]'
+SELECTED_ARTICLE_ID_PATH = 'data.catalogs[?catalogId==161 && catalogName=="Delisting"].articles[].code'
 
 DETAIL_PATH = "/bapi/composite/v1/public/cms/article/detail/query"
 DETAIL_QUERY_TEMPLATE = "articleCode={article_code}"
@@ -30,7 +35,7 @@ DETAIL_SOURCE_LOCALE = "en"
 DETAIL_REQUEST_VARIANT = "bapi_article_detail_query_v1"
 
 REQUEST_HEADERS_PROFILE_VERSION = "stage1_6b_public_web_en_v1"
-PROBE_COMMAND_VERSION = "source_profile_probe_v1"
+PROBE_COMMAND_VERSION = "source_profile_probe_v2"
 
 CANONICAL_HEADERS: Dict[str, str] = {
     "Accept": "application/json",
@@ -61,7 +66,7 @@ def compute_request_headers_profile_sha256() -> str:
 
 
 # -----------------------------------------------------------------------------
-# Enums
+# Enums and Checkpoint Pair Validator
 # -----------------------------------------------------------------------------
 
 class CaptureMode(str, Enum):
@@ -93,6 +98,28 @@ class TerminalReason(str, Enum):
     HTTP_FAILURE = "http_failure"
     TERMINAL_DETAIL_FAILURE = "terminal_detail_failure"
     PRECONDITION_FAILED = "precondition_failed"
+
+
+ALLOWED_CHECKPOINT_STATUS_COVERAGE_PAIRS: Dict[str, str] = {
+    "trusted": "successful",
+    "malformed_index_schema": "degraded_not_successful",
+    "http_error": "degraded_not_successful",
+    "network_error": "degraded_not_successful",
+    "disallowed_redirect": "degraded_not_successful",
+    "empty_payload": "degraded_not_successful",
+    "payload_size_exceeded": "degraded_not_successful",
+    "waf_rejected": "degraded_not_successful",
+    "malformed_json": "degraded_not_successful",
+    "wrong_locale": "degraded_not_successful",
+}
+
+
+def validate_observer_checkpoint_status_coverage(status: str, coverage: str) -> None:
+    expected_coverage = ALLOWED_CHECKPOINT_STATUS_COVERAGE_PAIRS.get(status)
+    if expected_coverage is None or expected_coverage != coverage:
+        raise ValueError(
+            f"invalid_checkpoint_status_coverage_pair: status={status!r}, coverage={coverage!r}, expected_coverage={expected_coverage!r}"
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -208,6 +235,9 @@ class ListCaptureRecord:
     t_list_receive_ms: int
     article_count: int
     captured_at_ms: int
+    selected_catalog_id: int = SELECTED_CATALOG_ID
+    selected_catalog_name: str = SELECTED_CATALOG_NAME
+    selected_catalog_total: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -225,6 +255,8 @@ class ArticleDiscoveryRecord:
     notice_lineage_first_detected_at_ms: Optional[int]  # None for historical_backfill
     captured_at_ms: int
     record_seq: int
+    source_catalog_id: int = SELECTED_CATALOG_ID
+    source_catalog_name: str = SELECTED_CATALOG_NAME
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -313,6 +345,8 @@ class ObserverCheckpointRecord:
     stream_last_hashes: Dict[str, str]
     candidate_states: Dict[str, Dict[str, Any]]
     heartbeat_at_ms: int
+    last_index_poll_status: str = "trusted"
+    last_index_poll_coverage: str = "successful"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -326,11 +360,11 @@ class HistoricalCoverageRecord:
     source_profile_attestation_sha256: str
     from_ms: int
     to_ms: int
-    sweep_a_transcript: List[Tuple[int, str, int]]  # (page_no, source_article_id, source_published_at_ms)
-    sweep_b_transcript: List[Tuple[int, str, int]]
+    sweep_a_transcript: List[Tuple[int, int, str, int]]  # (page_no, selected_catalog_id, source_article_id, source_published_at_ms)
+    sweep_b_transcript: List[Tuple[int, int, str, int]]
     page_failures: List[Dict[str, Any]]
     candidate_terminal_counts: Dict[str, int]
-    status: str  # "complete_stable", "incomplete_range", "incomplete_sweep_mismatch", "incomplete_page_failure"
+    status: str  # "complete_stable", "incomplete_range", "incomplete_sweep_mismatch", "incomplete_page_failure", "incomplete_ordering_inversion", "incomplete_schema_failure"
     captured_at_ms: int
     sweep_a: Dict[str, Any] = field(default_factory=dict)
     sweep_b: Dict[str, Any] = field(default_factory=dict)
@@ -339,6 +373,12 @@ class HistoricalCoverageRecord:
     pending_candidate_count: int = 0
     unattempted_candidate_count: int = 0
     final_checkpoint_valid: bool = False
+    selected_catalog_id: int = SELECTED_CATALOG_ID
+    selected_catalog_name: str = SELECTED_CATALOG_NAME
+    selected_catalog_total_historical_max: int = 0
+    selected_catalog_total_sweep_a_final: int = 0
+    selected_catalog_total_sweep_b_final: int = 0
+    failure_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -382,6 +422,9 @@ class SourceProfileProbeAttestation:
     detail_payload_bytes: int
     detail_body_path: str
     probe_attested_at_ms: int
+    selected_catalog_id: int = SELECTED_CATALOG_ID
+    selected_catalog_name: str = SELECTED_CATALOG_NAME
+    selected_catalog_article_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

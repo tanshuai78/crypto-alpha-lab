@@ -9,13 +9,18 @@ from typing import Any, Callable, Optional
 
 from src.research.external_signal_shadow.stage1_6b_canonical_source_client import (
     Stage16BCanonicalClient,
+    extract_selected_delisting_catalog,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
     ALLOWED_FINAL_HOST,
     BASE_URL,
     DETAIL_PATH,
     INDEX_PATH,
+    INDEX_REQUEST_VARIANT,
     PROBE_COMMAND_VERSION,
+    SELECTED_ARTICLE_ID_PATH,
+    SELECTED_CATALOG_ID,
+    SELECTED_CATALOG_NAME,
     SOURCE_AUTHORITY,
     SOURCE_PROFILE_ID,
     TRANSPORT_SUPPORT_STATUS,
@@ -39,6 +44,9 @@ def compute_source_profile_sha256() -> str:
         "base_url": BASE_URL,
         "allowed_final_host": ALLOWED_FINAL_HOST,
         "index_path": INDEX_PATH,
+        "index_request_variant": INDEX_REQUEST_VARIANT,
+        "selected_catalog_id": SELECTED_CATALOG_ID,
+        "selected_catalog_name": SELECTED_CATALOG_NAME,
         "detail_path": DETAIL_PATH,
     }
     return hashlib.sha256(canonical_json(profile_dict).encode("utf-8")).hexdigest()
@@ -71,7 +79,15 @@ def run_source_profile_probe(
     if res_index.trust_validation_status != "trusted":
         raise RuntimeError(f"Probe index fetch failed: {res_index.trust_validation_status} - {res_index.error_message}")
 
-    # 2. Probe Detail Query
+    # Extract selected Delisting catalog and check probe_article_id membership
+    catalog_res = extract_selected_delisting_catalog(res_index.raw_payload)
+    matching_articles = [art for art in catalog_res.articles if art.get("code") == probe_article_id]
+    if not matching_articles:
+        raise ValueError(
+            f"probe_article_id_not_in_selected_catalog: {probe_article_id} not found in catalog {SELECTED_CATALOG_ID} ({SELECTED_CATALOG_NAME})"
+        )
+
+    # 2. Probe Detail Query for the exact confirmed article ID
     res_detail = client.fetch_article_detail(
         article_code=probe_article_id,
         run_id="probe_run",
@@ -86,7 +102,7 @@ def run_source_profile_probe(
     now_ms = int(time.time() * 1000)
 
     attestation = SourceProfileProbeAttestation(
-        schema_version="stage1_6b_source_profile_probe_attestation_v1",
+        schema_version="stage1_6b_source_profile_probe_attestation_v2",
         probe_command_version=PROBE_COMMAND_VERSION,
         source_profile_id=SOURCE_PROFILE_ID,
         source_authority=SOURCE_AUTHORITY,
@@ -99,7 +115,7 @@ def run_source_profile_probe(
         index_http_status=res_index.http_status,
         index_content_type=res_index.content_type,
         index_payload_bytes=res_index.raw_payload_bytes,
-        index_article_id_path="data.articles[].code",
+        index_article_id_path=SELECTED_ARTICLE_ID_PATH,
         detail_requested_url=res_detail.requested_url,
         detail_final_url=res_detail.final_url,
         detail_http_status=res_detail.http_status,
@@ -107,6 +123,9 @@ def run_source_profile_probe(
         detail_payload_bytes=res_detail.raw_payload_bytes,
         detail_body_path="data.body",
         probe_attested_at_ms=now_ms,
+        selected_catalog_id=SELECTED_CATALOG_ID,
+        selected_catalog_name=SELECTED_CATALOG_NAME,
+        selected_catalog_article_count=len(catalog_res.articles),
     )
 
     target_dir = p_root / "data" / "external_signal_shadow" / "stage1_6b" / "source_profile_attestations" / profile_sha

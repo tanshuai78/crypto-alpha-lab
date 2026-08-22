@@ -24,6 +24,7 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_observer import (
     Stage16BObserver,
+    Stage16BSchemaDriftError,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_storage import (
     RootWriterLock,
@@ -68,6 +69,9 @@ def run_live_source_observer(
     # 1. Validate probe attestation
     validated_att_path = validate_probe_attestation_path(attestation_path, project_root=p_root)
     att_data = json.loads(validated_att_path.read_text(encoding="utf-8"))
+
+    if att_data.get("schema_version") != "stage1_6b_source_profile_probe_attestation_v2":
+        raise ValueError(f"attestation_schema_mismatch: {att_data.get('schema_version')}")
 
     if att_data.get("source_profile_id") != SOURCE_PROFILE_ID:
         raise ValueError(f"attestation_profile_mismatch: {att_data.get('source_profile_id')} != {SOURCE_PROFILE_ID}")
@@ -158,41 +162,55 @@ def run_live_source_observer(
         polls_executed = 0
         terminal_reason = TerminalReason.EPOCH_COMPLETE.value
 
-        while True:
-            now_ms = int(time.time() * 1000)
-            if now_ms >= effective_deadline_ms:
-                if max_seconds is not None and max_seconds < epoch_max_sec:
+        try:
+            while True:
+                now_ms = int(time.time() * 1000)
+                if now_ms >= effective_deadline_ms:
+                    if max_seconds is not None and max_seconds < epoch_max_sec:
+                        terminal_reason = TerminalReason.TEST_BOUND.value
+                    else:
+                        terminal_reason = TerminalReason.EPOCH_COMPLETE.value
+                    break
+
+                observer.execute_poll(now_ms=now_ms)
+                polls_executed += 1
+
+                if max_polls is not None and polls_executed >= max_polls:
                     terminal_reason = TerminalReason.TEST_BOUND.value
-                else:
-                    terminal_reason = TerminalReason.EPOCH_COMPLETE.value
-                break
+                    break
 
-            observer.execute_poll(now_ms=now_ms)
-            polls_executed += 1
+                # Sleep until next poll interval
+                sleep_sec = float(poll_interval)
+                sleeper(sleep_sec)
 
-            if max_polls is not None and polls_executed >= max_polls:
-                terminal_reason = TerminalReason.TEST_BOUND.value
-                break
+            # 4. Write terminal status
+            term_rec = TerminalStatusRecord(
+                schema_version="stage1_6b_terminal_status_v1",
+                run_id=effective_run_id,
+                capture_mode=CaptureMode.LIVE_OBSERVED.value,
+                source_profile_id=SOURCE_PROFILE_ID,
+                status="complete",
+                terminal_reason=terminal_reason,
+                final_checkpoint_id=observer.prior_checkpoint_id,
+                terminated_at_ms=int(time.time() * 1000),
+            )
+            write_terminal_status(validated_root, term_rec, guard, observer.accounted_root_bytes)
 
-            # Sleep until next poll interval
-            sleep_sec = float(poll_interval)
-            sleeper(sleep_sec)
-
-        # 4. Write terminal status
-        term_rec = TerminalStatusRecord(
-            schema_version="stage1_6b_terminal_status_v1",
-            run_id=effective_run_id,
-            capture_mode=CaptureMode.LIVE_OBSERVED.value,
-            source_profile_id=SOURCE_PROFILE_ID,
-            status="complete",
-            terminal_reason=terminal_reason,
-            final_checkpoint_id=observer.prior_checkpoint_id,
-            terminated_at_ms=int(time.time() * 1000),
-        )
-        write_terminal_status(validated_root, term_rec, guard, observer.accounted_root_bytes)
-
-        # 5. Seal export
-        seal_export(validated_root, guard, observer.accounted_root_bytes)
+            # 5. Seal export
+            seal_export(validated_root, guard, observer.accounted_root_bytes)
+        except Stage16BSchemaDriftError as drift_err:
+            term_rec = TerminalStatusRecord(
+                schema_version="stage1_6b_terminal_status_v1",
+                run_id=effective_run_id,
+                capture_mode=CaptureMode.LIVE_OBSERVED.value,
+                source_profile_id=SOURCE_PROFILE_ID,
+                status="failure",
+                terminal_reason="source_profile_schema_drift",
+                final_checkpoint_id=observer.prior_checkpoint_id,
+                terminated_at_ms=int(time.time() * 1000),
+            )
+            write_terminal_status(validated_root, term_rec, guard, observer.accounted_root_bytes)
+            raise LiveObserverRunnerError(f"source_profile_schema_drift: {drift_err}") from drift_err
 
     return validated_root
 

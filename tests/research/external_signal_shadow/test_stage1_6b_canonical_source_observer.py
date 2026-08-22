@@ -66,23 +66,34 @@ def setup_observer(tmp_path, run_id="run_live_obs"):
     return run_root, guard
 
 
+def make_index_catalog_payload(articles):
+    return json.dumps({
+        "code": "000000",
+        "data": {
+            "catalogs": [
+                {
+                    "catalogId": 161,
+                    "catalogName": "Delisting",
+                    "total": max(len(articles), 400),
+                    "articles": articles,
+                }
+            ]
+        }
+    }).encode("utf-8")
+
+
 def test_observer_single_poll_lifecycle(tmp_path):
     """Verify one live poll discovers candidate, executes Lane A detail, writes revision and checkpoint."""
     run_root, guard = setup_observer(tmp_path, "run_poll_1")
 
     article_code = "a" * 32
-    index_payload = json.dumps({
-        "code": "000000",
-        "data": {
-            "articles": [
-                {
-                    "code": article_code,
-                    "title": "Binance Futures Will Delist USDⓈ-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
-                    "releaseDate": 1732000000000
-                }
-            ]
+    index_payload = make_index_catalog_payload([
+        {
+            "code": article_code,
+            "title": "Binance Futures Will Delist USDⓈ-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
+            "releaseDate": 1732000000000
         }
-    }).encode("utf-8")
+    ])
 
     detail_payload = json.dumps({
         "code": "000000",
@@ -123,6 +134,8 @@ def test_observer_single_poll_lifecycle(tmp_path):
     assert len(disc_lines) == 1
     disc_data = json.loads(disc_lines[0])
     assert disc_data["source_article_id"] == article_code
+    assert disc_data["source_catalog_id"] == 161
+    assert disc_data["source_catalog_name"] == "Delisting"
     assert disc_data["discovery_rule_version"] == CANDIDATE_DISCOVERY_RULE_VERSION
     assert disc_data["notice_lineage_first_detected_at_ms"] == now_ms  # Anchored live discovery time
 
@@ -138,10 +151,14 @@ def test_observer_single_poll_lifecycle(tmp_path):
     chk_file = run_root / "observer_checkpoint.json"
     assert chk_file.is_file()
     chk_data = json.loads(chk_file.read_text())
+    assert chk_data["schema_version"] == "stage1_6b_observer_checkpoint_v2"
+    assert chk_data["last_index_poll_status"] == "trusted"
+    assert chk_data["last_index_poll_coverage"] == "successful"
     assert chk_data["poll_seq"] == 1
     assert chk_data["candidate_states"][article_code]["terminal_reason"] == "trusted_detail_observed"
     date_str = datetime.datetime.fromtimestamp(now_ms / 1000.0, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
     for stream_rel in (
+        f"request_manifest/{date_str}.jsonl",
         f"list_captures/{date_str}.jsonl",
         "article_discoveries.jsonl",
         f"detail_observations/{date_str}.jsonl",
@@ -163,13 +180,16 @@ def test_observer_lane_a_precedence_and_lane_b_retry(tmp_path):
     art_2 = "2" * 32
 
     # Poll 1 index: contains art_1
-    index_1 = json.dumps({"code": "000000", "data": {"articles": [{"code": art_1, "title": "Binance Futures Will Delist A"}]}}).encode("utf-8")
+    index_1 = make_index_catalog_payload([{"code": art_1, "title": "Binance Futures Will Delist A", "releaseDate": 1732000000000}])
     # Poll 2 index: contains art_1 and art_2
-    index_2 = json.dumps({"code": "000000", "data": {"articles": [{"code": art_1, "title": "Binance Futures Will Delist A"}, {"code": art_2, "title": "Binance Futures Will Delist B"}]}}).encode("utf-8")
+    index_2 = make_index_catalog_payload([
+        {"code": art_1, "title": "Binance Futures Will Delist A", "releaseDate": 1732000000000},
+        {"code": art_2, "title": "Binance Futures Will Delist B", "releaseDate": 1732000000000},
+    ])
 
     # Detail fails for art_1 on poll 1, succeeds for art_2 on poll 2
     detail_fail = json.dumps({"code": "100000", "message": "temporary error"}).encode("utf-8")
-    detail_art_2 = json.dumps({"code": "000000", "data": {"code": art_2, "title": "Delist B", "body": "Body B"}}).encode("utf-8")
+    detail_art_2 = json.dumps({"code": "000000", "data": {"code": art_2, "title": "Delist B", "body": "Body B", "releaseDate": 1732000000000}}).encode("utf-8")
 
     current_poll = [1]
 
@@ -216,11 +236,11 @@ def test_observer_lane_a_sla_exceeded_fails_closed(tmp_path):
 
     # Observer receives 3 new candidates in poll 1, but can only attempt 1 per poll
     articles = [
-        {"code": f"{i}" * 32, "title": f"Binance Futures Will Delist {i}"}
+        {"code": f"{i}" * 32, "title": f"Binance Futures Will Delist {i}", "releaseDate": 1732000000000}
         for i in range(1, 4)
     ]
-    index_payload = json.dumps({"code": "000000", "data": {"articles": articles}}).encode("utf-8")
-    detail_payload = json.dumps({"code": "000000", "data": {"code": "1" * 32, "body": "ok"}}).encode("utf-8")
+    index_payload = make_index_catalog_payload(articles)
+    detail_payload = json.dumps({"code": "000000", "data": {"code": "1" * 32, "body": "ok", "releaseDate": 1732000000000}}).encode("utf-8")
 
     def mock_opener(req, timeout=10.0):
         url = req.get_full_url()
@@ -246,3 +266,68 @@ def test_observer_lane_a_sla_exceeded_fails_closed(tmp_path):
     # Article 3 was not attempted within 2 polls window -> raises SLA error
     with pytest.raises(ObserverSLAError, match="detail_first_attempt_sla_exceeded"):
         observer.execute_poll(now_ms=3000)
+
+
+def test_observer_schema_drift_degraded_checkpoint_and_terminal_error(tmp_path):
+    """Task 4.2 & 4.3: Live observer handles malformed selected catalog by writing manifest, degraded checkpoint, and raising schema drift error."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_observer import (
+        Stage16BSchemaDriftError,
+    )
+    run_root, guard = setup_observer(tmp_path, "run_drift")
+
+    # Index response with wrong catalog ID/name (schema drift)
+    malformed_index = json.dumps({
+        "code": "000000",
+        "data": {
+            "catalogs": [
+                {"catalogId": 999, "catalogName": "WrongCatalog", "articles": [], "total": 0}
+            ]
+        },
+    }).encode("utf-8")
+
+    def mock_opener(req, timeout=10.0):
+        return MockHTTPResponse(malformed_index, url=req.get_full_url())
+
+    client = Stage16BCanonicalClient(live_public_readonly=True, opener=mock_opener)
+    observer = Stage16BObserver(
+        run_root=run_root,
+        run_id="run_drift",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_attestation_sha256="dummy_att_sha",
+        guard=guard,
+        client=client,
+    )
+
+    now_ms = 1732000000000
+    with pytest.raises(Stage16BSchemaDriftError, match="source_profile_schema_drift"):
+        observer.execute_poll(now_ms=now_ms)
+
+    # 1. No ListCapture rows
+    date_str = datetime.datetime.fromtimestamp(now_ms / 1000.0, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+    lc_file = run_root / "list_captures" / f"{date_str}.jsonl"
+    assert not lc_file.exists()
+
+    # 2. No ArticleDiscovery rows
+    disc_file = run_root / "article_discoveries.jsonl"
+    assert not disc_file.exists()
+
+    # 3. No candidate state progress
+    assert len(observer.candidate_states) == 0
+
+    # 4. Exactly one request_manifest row with validation_status=malformed_index_schema
+    manifest_file = run_root / "request_manifest" / f"{date_str}.jsonl"
+    assert manifest_file.is_file()
+    m_lines = manifest_file.read_text().strip().splitlines()
+    assert len(m_lines) == 1
+    m_row = json.loads(m_lines[0])
+    assert m_row["validation_status"] == "malformed_index_schema"
+    assert m_row["monotonic_request_seq"] == 1
+
+    # 5. Observer checkpoint v2 with degraded status and coverage
+    chk_file = run_root / "observer_checkpoint.json"
+    assert chk_file.is_file()
+    chk_data = json.loads(chk_file.read_text())
+    assert chk_data["schema_version"] == "stage1_6b_observer_checkpoint_v2"
+    assert chk_data["last_index_poll_status"] == "malformed_index_schema"
+    assert chk_data["last_index_poll_coverage"] == "degraded_not_successful"
+    assert chk_data["stream_offsets"][f"request_manifest/{date_str}.jsonl"] == manifest_file.stat().st_size

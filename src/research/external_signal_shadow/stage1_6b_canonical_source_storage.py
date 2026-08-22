@@ -13,6 +13,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from configs import base
 from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+    SELECTED_CATALOG_ID,
+    SELECTED_CATALOG_NAME,
+    SOURCE_PROFILE_ID,
     CaptureMode,
     CaptureRunContract,
     ObserverCheckpointRecord,
@@ -21,6 +24,7 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     canonical_json,
     compute_export_id,
     compute_request_headers_profile_sha256,
+    validate_observer_checkpoint_status_coverage,
 )
 
 
@@ -445,6 +449,26 @@ def copy_probe_attestation_to_root(
     return size
 
 
+def _validate_reconcile_row(stream_rel: str, row: Dict[str, Any]) -> None:
+    """Validate authoritative rows during bounded restart reconciliation preflight."""
+    if stream_rel.startswith("list_captures/"):
+        if row.get("schema_version") != "stage1_6b_list_capture_v2":
+            raise ValueError("list_capture_v2_required")
+        if row.get("source_profile_id") != SOURCE_PROFILE_ID:
+            raise ValueError("list_capture_profile_mismatch")
+        if row.get("selected_catalog_id") != SELECTED_CATALOG_ID or row.get("selected_catalog_name") != SELECTED_CATALOG_NAME:
+            raise ValueError("list_capture_catalog_provenance_mismatch")
+        if int(row.get("selected_catalog_total", 0)) < int(row.get("article_count", 0)):
+            raise ValueError("list_capture_catalog_total_invalid")
+    elif stream_rel == "article_discoveries.jsonl":
+        if row.get("schema_version") != "stage1_6b_article_discovery_v2":
+            raise ValueError("article_discovery_v2_required")
+        if row.get("source_profile_id") != SOURCE_PROFILE_ID:
+            raise ValueError("article_discovery_profile_mismatch")
+        if row.get("source_catalog_id") != SELECTED_CATALOG_ID or row.get("source_catalog_name") != SELECTED_CATALOG_NAME:
+            raise ValueError("article_discovery_catalog_provenance_mismatch")
+
+
 def reconcile_and_load_checkpoint(
     run_root: Path,
     guard: Stage16BStorageGuard,
@@ -455,6 +479,11 @@ def reconcile_and_load_checkpoint(
         raise ValueError("missing_checkpoint_file")
 
     data = json.loads(chk_path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != "stage1_6b_observer_checkpoint_v2":
+        raise ValueError(f"checkpoint_schema_version_invalid: {data.get('schema_version')}")
+    if data.get("source_profile_id") != SOURCE_PROFILE_ID:
+        raise ValueError(f"checkpoint_profile_mismatch: {data.get('source_profile_id')} != {SOURCE_PROFILE_ID}")
+
     chk = ObserverCheckpointRecord(**data)
 
     # A bounded tail is the only uncommitted state permitted between polls.
@@ -493,6 +522,13 @@ def reconcile_and_load_checkpoint(
             actual_hash = hashlib.sha256(committed_lines[-1]).hexdigest()
             if actual_hash != expected_hash:
                 raise ValueError("checkpoint_prefix_hash_mismatch")
+            for line in committed_lines:
+                try:
+                    parsed_c = json.loads(line)
+                    if isinstance(parsed_c, dict):
+                        _validate_reconcile_row(stream_rel, parsed_c)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
 
         tail_size = actual_size - offset
         if tail_size > tail_limit:
@@ -510,6 +546,7 @@ def reconcile_and_load_checkpoint(
                 parsed = json.loads(line)
                 if not isinstance(parsed, dict):
                     raise ValueError("checkpoint_tail_row_not_object")
+                _validate_reconcile_row(stream_rel, parsed)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("checkpoint_malformed_jsonl_tail") from exc
         added_bytes += tail_size
@@ -533,6 +570,8 @@ def reconcile_and_load_checkpoint(
         stream_last_hashes=stream_last_hashes,
         candidate_states=chk.candidate_states,
         heartbeat_at_ms=chk.heartbeat_at_ms,
+        last_index_poll_status=chk.last_index_poll_status,
+        last_index_poll_coverage=chk.last_index_poll_coverage,
     )
 
     return reconciled_chk, reconciled_root_bytes
@@ -570,6 +609,8 @@ def reconcile_and_write_checkpoint(
         stream_last_hashes=checkpoint.stream_last_hashes,
         candidate_states=checkpoint.candidate_states,
         heartbeat_at_ms=checkpoint.heartbeat_at_ms,
+        last_index_poll_status=checkpoint.last_index_poll_status,
+        last_index_poll_coverage=checkpoint.last_index_poll_coverage,
     )
     delta = write_observer_checkpoint(run_root, reconciled, guard, root_bytes)
     return reconciled, root_bytes + delta
@@ -753,6 +794,9 @@ def load_sealed_export(export_dir: Path) -> Dict[str, Any]:
     if manifest_data.get("status") != "complete":
         raise ValueError(f"export_status_not_complete: {manifest_data.get('status')}")
 
+    if manifest_data.get("source_profile_id") != SOURCE_PROFILE_ID:
+        raise ValueError(f"export_profile_mismatch: {manifest_data.get('source_profile_id')} != {SOURCE_PROFILE_ID}")
+
     # Verify all authoritative artifacts
     artifacts = manifest_data.get("authoritative_artifacts", [])
     if not artifacts:
@@ -772,6 +816,50 @@ def load_sealed_export(export_dir: Path) -> Dict[str, Any]:
         if actual_sha != expected_sha:
             raise ValueError(f"artifact_hash_mismatch: {rel_p}")
 
+    # V2 Checkpoint validation
+    chk_p = export_dir / "observer_checkpoint.json"
+    if chk_p.is_file():
+        chk_data = json.loads(chk_p.read_text(encoding="utf-8"))
+        if chk_data.get("schema_version") != "stage1_6b_observer_checkpoint_v2":
+            raise ValueError("checkpoint_v2_schema_invalid")
+        if chk_data.get("source_profile_id") != SOURCE_PROFILE_ID:
+            raise ValueError("checkpoint_profile_mismatch")
+        validate_observer_checkpoint_status_coverage(
+            chk_data.get("last_index_poll_status", ""),
+            chk_data.get("last_index_poll_coverage", ""),
+        )
+
+    # V2 List Captures validation
+    list_captures_dir = export_dir / "list_captures"
+    if list_captures_dir.is_dir():
+        for lc_file in list_captures_dir.glob("*.jsonl"):
+            for line in lc_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if row.get("schema_version") != "stage1_6b_list_capture_v2":
+                    raise ValueError("list_capture_v2_provenance_invalid")
+                if row.get("source_profile_id") != SOURCE_PROFILE_ID:
+                    raise ValueError("list_capture_v2_provenance_invalid")
+                if row.get("selected_catalog_id") != SELECTED_CATALOG_ID or row.get("selected_catalog_name") != SELECTED_CATALOG_NAME:
+                    raise ValueError("list_capture_v2_provenance_invalid")
+                if int(row.get("selected_catalog_total", 0)) < int(row.get("article_count", 0)):
+                    raise ValueError("list_capture_v2_provenance_invalid")
+
+    # V2 Article Discoveries validation
+    ad_p = export_dir / "article_discoveries.jsonl"
+    if ad_p.is_file():
+        for line in ad_p.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("schema_version") != "stage1_6b_article_discovery_v2":
+                raise ValueError("article_discovery_v2_provenance_invalid")
+            if row.get("source_profile_id") != SOURCE_PROFILE_ID:
+                raise ValueError("article_discovery_v2_provenance_invalid")
+            if row.get("source_catalog_id") != SELECTED_CATALOG_ID or row.get("source_catalog_name") != SELECTED_CATALOG_NAME:
+                raise ValueError("article_discovery_v2_provenance_invalid")
+
     capture_mode = manifest_data.get("capture_mode")
     if capture_mode == CaptureMode.HISTORICAL_BACKFILL.value:
         cov_sha = manifest_data.get("historical_coverage_sha256")
@@ -784,6 +872,18 @@ def load_sealed_export(export_dir: Path) -> Dict[str, Any]:
         if actual_cov_sha != cov_sha:
             raise ValueError("historical_coverage_sha_mismatch")
         cov_data = json.loads(cov_p.read_text(encoding="utf-8"))
+        if cov_data.get("schema_version") != "stage1_6b_historical_coverage_v2":
+            raise ValueError("historical_coverage_v2_provenance_invalid")
+        if cov_data.get("source_profile_id") != SOURCE_PROFILE_ID:
+            raise ValueError("historical_coverage_v2_provenance_invalid")
+        if cov_data.get("selected_catalog_id") != SELECTED_CATALOG_ID or cov_data.get("selected_catalog_name") != SELECTED_CATALOG_NAME:
+            raise ValueError("historical_coverage_v2_provenance_invalid")
+        if not all(k in cov_data for k in ["selected_catalog_total_historical_max", "selected_catalog_total_sweep_a_final", "selected_catalog_total_sweep_b_final"]):
+            raise ValueError("historical_coverage_v2_provenance_invalid")
+        for entry in cov_data.get("sweep_a_transcript", []) + cov_data.get("sweep_b_transcript", []):
+            if not (isinstance(entry, (list, tuple)) and len(entry) == 4 and entry[1] == SELECTED_CATALOG_ID):
+                raise ValueError("historical_coverage_v2_provenance_invalid")
+
         term_p = export_dir / "terminal_status.json"
         if not term_p.is_file():
             raise ValueError("historical_terminal_status_missing")

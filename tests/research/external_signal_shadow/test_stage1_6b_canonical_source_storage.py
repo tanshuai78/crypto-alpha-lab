@@ -2,6 +2,7 @@
 
 import fcntl
 import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
@@ -316,7 +317,7 @@ def test_checkpoint_reconciliation_and_recovery(tmp_path):
 
     # Initial checkpoint
     chk = ObserverCheckpointRecord(
-        schema_version="stage1_6b_observer_checkpoint_v1",
+        schema_version="stage1_6b_observer_checkpoint_v2",
         run_id="run_rec",
         capture_mode=CaptureMode.LIVE_OBSERVED.value,
         source_profile_id=SOURCE_PROFILE_ID,
@@ -331,11 +332,21 @@ def test_checkpoint_reconciliation_and_recovery(tmp_path):
         stream_last_hashes={},
         candidate_states={},
         heartbeat_at_ms=1700000000000,
+        last_index_poll_status="trusted",
+        last_index_poll_coverage="successful",
     )
     write_observer_checkpoint(run_root, chk, guard, 100)
 
     # Append some JSONL record after checkpoint (simulating crash before next checkpoint)
-    record = {"row": 1, "content": "test"}
+    record = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 10,
+        "article_count": 1,
+    }
     append_jsonl_record(run_root, "list_captures/2026-08-20.jsonl", record, "normal_data", guard, 200)
 
     # Reconcile and load checkpoint
@@ -353,12 +364,28 @@ def test_checkpoint_reconciliation_verifies_prefix_hash_and_reads_only_tail(tmp_
     stream_rel = "list_captures/2026-08-20.jsonl"
     stream_path = run_root / stream_rel
     stream_path.parent.mkdir(parents=True)
-    committed_line = b'{"committed":1}\n'
-    tail_line = b'{"tail":2}\n'
+    committed_line = json.dumps({
+        "schema_version": "stage1_6b_list_capture_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 10,
+        "article_count": 1,
+    }).encode("utf-8") + b"\n"
+    tail_line = json.dumps({
+        "schema_version": "stage1_6b_list_capture_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 10,
+        "article_count": 1,
+    }).encode("utf-8") + b"\n"
     stream_path.write_bytes(committed_line + tail_line)
 
     chk = ObserverCheckpointRecord(
-        schema_version="stage1_6b_observer_checkpoint_v1",
+        schema_version="stage1_6b_observer_checkpoint_v2",
         run_id="run_rec_prefix",
         capture_mode=CaptureMode.LIVE_OBSERVED.value,
         source_profile_id=SOURCE_PROFILE_ID,
@@ -373,6 +400,8 @@ def test_checkpoint_reconciliation_verifies_prefix_hash_and_reads_only_tail(tmp_
         stream_last_hashes={stream_rel: hashlib.sha256(committed_line.rstrip(b"\n")).hexdigest()},
         candidate_states={},
         heartbeat_at_ms=1700000000000,
+        last_index_poll_status="trusted",
+        last_index_poll_coverage="successful",
     )
     write_observer_checkpoint(run_root, chk, guard, 100)
 
@@ -420,12 +449,35 @@ def test_seal_export_and_load_sealed_export(tmp_path):
         run_root, b"{\"test\":1}", "index", guard, b0
     )
 
+    lc_rec = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "capture_mode": CaptureMode.LIVE_OBSERVED.value,
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 426,
+        "article_count": 1,
+        "raw_sha": raw_sha,
+    }
     b2 = append_jsonl_record(
-        run_root, "list_captures/2026-08-20.jsonl", {"raw_sha": raw_sha}, "normal_data", guard, b0 + b1
+        run_root, "list_captures/2026-08-20.jsonl", lc_rec, "normal_data", guard, b0 + b1
+    )
+
+    ad_rec = {
+        "schema_version": "stage1_6b_article_discovery_v2",
+        "capture_mode": CaptureMode.LIVE_OBSERVED.value,
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_catalog_id": 161,
+        "source_catalog_name": "Delisting",
+        "source_article_id": "a" * 32,
+        "discovery_title": "Binance Will Delist",
+    }
+    b2_ad = append_jsonl_record(
+        run_root, "article_discoveries.jsonl", ad_rec, "normal_data", guard, b0 + b1 + b2
     )
 
     chk = ObserverCheckpointRecord(
-        schema_version="stage1_6b_observer_checkpoint_v1",
+        schema_version="stage1_6b_observer_checkpoint_v2",
         run_id="run_seal_ok",
         capture_mode=CaptureMode.LIVE_OBSERVED.value,
         source_profile_id=SOURCE_PROFILE_ID,
@@ -435,13 +487,15 @@ def test_seal_export_and_load_sealed_export(tmp_path):
         poll_seq=1,
         monotonic_request_seq=1,
         record_seq=1,
-        accounted_root_bytes=b0 + b1 + b2,
+        accounted_root_bytes=b0 + b1 + b2 + b2_ad,
         stream_offsets={},
         stream_last_hashes={},
         candidate_states={},
         heartbeat_at_ms=1700000000000,
+        last_index_poll_status="trusted",
+        last_index_poll_coverage="successful",
     )
-    b3 = write_observer_checkpoint(run_root, chk, guard, b0 + b1 + b2)
+    b3 = write_observer_checkpoint(run_root, chk, guard, b0 + b1 + b2 + b2_ad)
 
     term = TerminalStatusRecord(
         schema_version="stage1_6b_terminal_status_v1",
@@ -453,10 +507,10 @@ def test_seal_export_and_load_sealed_export(tmp_path):
         final_checkpoint_id="chk_final_1",
         terminated_at_ms=1700000001000,
     )
-    b4 = write_terminal_status(run_root, term, guard, b0 + b1 + b2 + b3)
+    b4 = write_terminal_status(run_root, term, guard, b0 + b1 + b2 + b2_ad + b3)
 
     # Execute seal
-    export_dir, manifest, added_bytes = seal_export(run_root, guard, b0 + b1 + b2 + b3 + b4)
+    export_dir, manifest, added_bytes = seal_export(run_root, guard, b0 + b1 + b2 + b2_ad + b3 + b4)
     assert export_dir.is_dir()
     assert (export_dir / "sealed_export_manifest.json").is_file()
 
@@ -466,6 +520,172 @@ def test_seal_export_and_load_sealed_export(tmp_path):
     assert loaded["status"] == "complete"
     assert loaded["capture_mode"] == CaptureMode.LIVE_OBSERVED.value
     assert len(loaded["authoritative_artifacts"]) >= 4
+
+
+def test_load_sealed_export_v2_consumer_validations(tmp_path):
+    """Task 6.1: load_sealed_export rejects non-v2 schemas and unprovenanced catalog fields."""
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    run_root = stage1_6b_dir / "live_observation" / "run_seal_val"
+    run_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+
+    # Create baseline valid live root
+    contract = CaptureRunContract(
+        schema_version="stage1_6b_capture_run_contract_v1",
+        run_id="run_seal_val",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha_123",
+        run_started_at_ms=1700000000000,
+    )
+    write_capture_run_contract(run_root, contract, guard, 0)
+    raw_sha, _, _ = write_content_addressed_raw_payload(run_root, b"{\"test\":1}", "index", guard, 10)
+    append_jsonl_record(
+        run_root, "list_captures/2026-08-20.jsonl",
+        {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1},
+        "normal_data", guard, 20,
+    )
+    append_jsonl_record(
+        run_root, "article_discoveries.jsonl",
+        {"schema_version": "stage1_6b_article_discovery_v2", "source_profile_id": SOURCE_PROFILE_ID, "source_catalog_id": 161, "source_catalog_name": "Delisting", "source_article_id": "a" * 32},
+        "normal_data", guard, 30,
+    )
+    chk = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v2",
+        run_id="run_seal_val",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha_123",
+        checkpoint_id="chk_val_1",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=100,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={},
+        heartbeat_at_ms=1700000000000,
+        last_index_poll_status="trusted",
+        last_index_poll_coverage="successful",
+    )
+    write_observer_checkpoint(run_root, chk, guard, 40)
+    term = TerminalStatusRecord(
+        schema_version="stage1_6b_terminal_status_v1",
+        run_id="run_seal_val",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        status="complete",
+        terminal_reason=TerminalReason.EPOCH_COMPLETE.value,
+        final_checkpoint_id="chk_val_1",
+        terminated_at_ms=1700000001000,
+    )
+    write_terminal_status(run_root, term, guard, 50)
+    export_dir, manifest, _ = seal_export(run_root, guard, 60)
+
+    # 1. Profile mismatch in manifest
+    manifest_p = export_dir / "sealed_export_manifest.json"
+    m_data = json.loads(manifest_p.read_text())
+    bad_m = dict(m_data, source_profile_id="binance_public_web_bapi_en_v1")
+    manifest_p.write_text(json.dumps(bad_m))
+    with pytest.raises(ValueError, match="export_profile_mismatch"):
+        load_sealed_export(export_dir)
+    manifest_p.write_text(json.dumps(m_data))
+
+    # 2. Checkpoint v1 in export bundle
+    chk_p = export_dir / "observer_checkpoint.json"
+    bad_chk = dict(chk.to_dict(), schema_version="stage1_6b_observer_checkpoint_v1")
+    chk_p.write_text(json.dumps(bad_chk))
+    # update manifest sha
+    new_sha = hashlib.sha256(chk_p.read_bytes()).hexdigest()
+    m_patched = dict(m_data)
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "observer_checkpoint.json":
+            a["sha256"] = new_sha
+            a["byte_count"] = chk_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="checkpoint_v2_schema_invalid"):
+        load_sealed_export(export_dir)
+
+    # 3. Checkpoint status/coverage contradiction
+    bad_chk2 = dict(chk.to_dict(), last_index_poll_status="malformed_index_schema", last_index_poll_coverage="successful")
+    chk_p.write_text(json.dumps(bad_chk2))
+    new_sha2 = hashlib.sha256(chk_p.read_bytes()).hexdigest()
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "observer_checkpoint.json":
+            a["sha256"] = new_sha2
+            a["byte_count"] = chk_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="invalid_checkpoint_status_coverage_pair"):
+        load_sealed_export(export_dir)
+
+    # Restore valid checkpoint
+    chk_p.write_text(json.dumps(chk.to_dict()))
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "observer_checkpoint.json":
+            a["sha256"] = hashlib.sha256(chk_p.read_bytes()).hexdigest()
+            a["byte_count"] = chk_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+
+    # 4. List capture with wrong catalog id
+    lc_p = export_dir / "list_captures" / "2026-08-20.jsonl"
+    bad_lc = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 999, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1}
+    lc_p.write_text(json.dumps(bad_lc) + "\n")
+    new_lc_sha = hashlib.sha256(lc_p.read_bytes()).hexdigest()
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "list_captures/2026-08-20.jsonl":
+            a["sha256"] = new_lc_sha
+            a["byte_count"] = lc_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="list_capture_v2_provenance_invalid"):
+        load_sealed_export(export_dir)
+
+    # 5. List capture with total < article_count
+    bad_lc_total = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 0, "article_count": 5}
+    lc_p.write_text(json.dumps(bad_lc_total) + "\n")
+    new_lc_sha2 = hashlib.sha256(lc_p.read_bytes()).hexdigest()
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "list_captures/2026-08-20.jsonl":
+            a["sha256"] = new_lc_sha2
+            a["byte_count"] = lc_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="list_capture_v2_provenance_invalid"):
+        load_sealed_export(export_dir)
+
+    # Restore valid list capture
+    valid_lc = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1}
+    lc_p.write_text(json.dumps(valid_lc) + "\n")
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "list_captures/2026-08-20.jsonl":
+            a["sha256"] = hashlib.sha256(lc_p.read_bytes()).hexdigest()
+            a["byte_count"] = lc_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+
+    # 6. Article discovery profile mismatch.
+    ad_p = export_dir / "article_discoveries.jsonl"
+    valid_ad = {"schema_version": "stage1_6b_article_discovery_v2", "source_profile_id": SOURCE_PROFILE_ID, "source_catalog_id": 161, "source_catalog_name": "Delisting", "source_article_id": "a" * 32}
+    bad_ad_profile = {**valid_ad, "source_profile_id": "binance_public_web_bapi_en_v1"}
+    ad_p.write_text(json.dumps(bad_ad_profile) + "\n")
+    new_ad_sha = hashlib.sha256(ad_p.read_bytes()).hexdigest()
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "article_discoveries.jsonl":
+            a["sha256"] = new_ad_sha
+            a["byte_count"] = ad_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="article_discovery_v2_provenance_invalid"):
+        load_sealed_export(export_dir)
+
+    # 7. List capture profile mismatch cannot inherit authority from the manifest.
+    bad_lc_profile = {**valid_lc, "source_profile_id": "binance_public_web_bapi_en_v1"}
+    lc_p.write_text(json.dumps(bad_lc_profile) + "\n")
+    for a in m_patched["authoritative_artifacts"]:
+        if a["relative_path"] == "list_captures/2026-08-20.jsonl":
+            a["sha256"] = hashlib.sha256(lc_p.read_bytes()).hexdigest()
+            a["byte_count"] = lc_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_patched))
+    with pytest.raises(ValueError, match="list_capture_v2_provenance_invalid"):
+        load_sealed_export(export_dir)
+
 
 
 def test_seal_export_rejects_incomplete_root(tmp_path):
@@ -479,3 +699,86 @@ def test_seal_export_rejects_incomplete_root(tmp_path):
     # Missing terminal status -> raises ValueError
     with pytest.raises(ValueError, match="terminal_status_missing_or_failed"):
         seal_export(run_root, guard, 0)
+
+
+def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path):
+    """Task 4.5: Reconcile and load checkpoint must reject v1 schema/profile/records before network admission."""
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    run_root = stage1_6b_dir / "live_observation" / "run_reconcile_test"
+    run_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+
+    # 1. Rejection on v1 checkpoint schema
+    chk_file = run_root / "observer_checkpoint.json"
+    chk_v1 = {
+        "schema_version": "stage1_6b_observer_checkpoint_v1",
+        "run_id": "run_reconcile_test",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "checkpoint_id": "chk_1",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+    }
+    chk_file.write_text(json.dumps(chk_v1), encoding="utf-8")
+    with pytest.raises(ValueError, match="checkpoint_schema_version_invalid"):
+        reconcile_and_load_checkpoint(run_root, guard)
+
+    # 2. Rejection on legacy profile ID
+    chk_v2_bad_profile = dict(chk_v1)
+    chk_v2_bad_profile["schema_version"] = "stage1_6b_observer_checkpoint_v2"
+    chk_v2_bad_profile["source_profile_id"] = "binance_public_web_bapi_en_v1"
+    chk_file.write_text(json.dumps(chk_v2_bad_profile), encoding="utf-8")
+    with pytest.raises(ValueError, match="checkpoint_profile_mismatch"):
+        reconcile_and_load_checkpoint(run_root, guard)
+
+    # 3. Rejection on v1 ListCapture in bounded prefix batch
+    lc_file = run_root / "list_captures" / "2026-08-22.jsonl"
+    lc_file.parent.mkdir(parents=True, exist_ok=True)
+    v1_lc_row = {
+        "schema_version": "stage1_6b_list_capture_v1",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "article_count": 1,
+    }
+    lc_file.write_text(json.dumps(v1_lc_row) + "\n", encoding="utf-8")
+    lc_offset = lc_file.stat().st_size
+    lc_hash = hashlib.sha256(json.dumps(v1_lc_row).encode("utf-8")).hexdigest()
+
+    chk_v2_with_v1_stream = dict(chk_v1)
+    chk_v2_with_v1_stream["schema_version"] = "stage1_6b_observer_checkpoint_v2"
+    chk_v2_with_v1_stream["source_profile_id"] = SOURCE_PROFILE_ID
+    chk_v2_with_v1_stream["stream_offsets"] = {"list_captures/2026-08-22.jsonl": lc_offset}
+    chk_v2_with_v1_stream["stream_last_hashes"] = {"list_captures/2026-08-22.jsonl": lc_hash}
+    chk_file.write_text(json.dumps(chk_v2_with_v1_stream), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="list_capture_v2_required"):
+        reconcile_and_load_checkpoint(run_root, guard)
+
+    # 4. Valid v2 records in prefix batch succeeds
+    v2_lc_row = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 426,
+        "article_count": 1,
+    }
+    lc_file.write_text(json.dumps(v2_lc_row) + "\n", encoding="utf-8")
+    lc_offset = lc_file.stat().st_size
+    lc_hash = hashlib.sha256(json.dumps(v2_lc_row).encode("utf-8")).hexdigest()
+    chk_v2_with_v1_stream["stream_offsets"] = {"list_captures/2026-08-22.jsonl": lc_offset}
+    chk_v2_with_v1_stream["stream_last_hashes"] = {"list_captures/2026-08-22.jsonl": lc_hash}
+    chk_file.write_text(json.dumps(chk_v2_with_v1_stream), encoding="utf-8")
+
+    reconciled, root_bytes = reconcile_and_load_checkpoint(run_root, guard)
+    assert reconciled.schema_version == "stage1_6b_observer_checkpoint_v2"
+    assert reconciled.source_profile_id == SOURCE_PROFILE_ID

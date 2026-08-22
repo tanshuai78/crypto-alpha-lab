@@ -3,16 +3,78 @@
   "message": null,
   "messageDetailList": null,
   "data": {
-    "catalogs": [],
-    "articles": [
+    "catalogs": [
       {
-        "id": 123456,
-        "code": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
-        "title": "Binance Futures Will Delist USD\u24c8-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
-        "releaseDate": 1732000000000
+        "catalogId": 48,
+        "catalogName": "New Cryptocurrency Listing",
+        "total": 10,
+        "articles": [
+          {
+            "id": 10001,
+            "code": "00000000000000000000000000000001",
+            "title": "Binance Will List New Token",
+            "releaseDate": 1732000000000
+          }
+        ]
+      },
+      {
+        "catalogId": 49,
+        "catalogName": "Latest Binance News",
+        "total": 20,
+        "articles": [
+          {
+            "id": 10002,
+            "code": "00000000000000000000000000000002",
+            "title": "Latest News Item",
+            "releaseDate": 1732000000000
+          }
+        ]
+      },
+      {
+        "catalogId": 50,
+        "catalogName": "Latest Activities",
+        "total": 15,
+        "articles": [
+          {
+            "id": 10003,
+            "code": "00000000000000000000000000000003",
+            "title": "Activity Announcement",
+            "releaseDate": 1732000000000
+          }
+        ]
+      },
+      {
+        "catalogId": 161,
+        "catalogName": "Delisting",
+        "total": 426,
+        "articles": [
+          {
+            "id": 123456,
+            "code": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            "title": "Binance Futures Will Delist USD\u24c8-M UNIFI Perpetual Contract at 2024-11-25 09:00 (UTC)",
+            "releaseDate": 1732000000000
+          }
+        ]
+      },
+      {
+        "catalogId": 51,
+        "catalogName": "Maintenance Updates",
+        "total": 5,
+        "articles": []
+      },
+      {
+        "catalogId": 52,
+        "catalogName": "API Updates",
+        "total": 3,
+        "articles": []
+      },
+      {
+        "catalogId": 53,
+        "catalogName": "General Announcements",
+        "total": 100,
+        "articles": []
       }
-    ],
-    "total": 1
+    ]
   },
   "success": true
 }

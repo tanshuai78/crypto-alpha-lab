@@ -29,6 +29,8 @@
 
 ### 1.3 来源配置探针凭证门禁 (Attestation Gate)
 - [ ] **探针先行完成**: 在目标采集启动前，已针对固定的 32-hex 公告 ID 运行过探针，并生成原子凭证文件。
+- [ ] **V2 profile 绑定**: 凭证的 `source_profile_id` 必须为 `binance_public_web_bapi_en_delisting_catalog_v2`，且 `schema_version` 必须为 `stage1_6b_source_profile_probe_attestation_v2`。
+- [ ] **同次目录-详情链路**: `probe_article_id` 必须来自同一次 index 响应中精确选择的 `catalogId=161`、`catalogName=Delisting` 的 `articles` 列表；随后仅对该 ID 进行 detail GET。
 - [ ] **凭证哈希强绑定**:
   - 探针凭证严格存放于 `data/external_signal_shadow/stage1_6b/source_profile_attestations/<profile-sha256>/source_profile_probe_attestation.json`。
   - 凭证中的 `source_profile_sha256` 与 `request_headers_profile_sha256` 与静态 SSOT 完全一致。

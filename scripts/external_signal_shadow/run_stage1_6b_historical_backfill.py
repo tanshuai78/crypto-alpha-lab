@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from configs import base
 from src.research.external_signal_shadow.stage1_6b_canonical_source_client import (
     Stage16BCanonicalClient,
+    extract_selected_delisting_catalog,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
     CANDIDATE_DISCOVERY_RULE_VERSION,
@@ -22,6 +23,8 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     INDEX_REQUEST_VARIANT,
     INDEX_SOURCE_LOCALE,
     INDEX_SOURCE_SURFACE,
+    SELECTED_CATALOG_ID,
+    SELECTED_CATALOG_NAME,
     SOURCE_PROFILE_ID,
     ArticleDiscoveryRecord,
     CaptureMode,
@@ -91,6 +94,9 @@ def run_historical_backfill(
     validated_att_path = validate_probe_attestation_path(attestation_path, project_root=p_root)
     att_data = json.loads(validated_att_path.read_text(encoding="utf-8"))
 
+    if att_data.get("schema_version") != "stage1_6b_source_profile_probe_attestation_v2":
+        raise ValueError(f"attestation_schema_mismatch: {att_data.get('schema_version')}")
+
     if att_data.get("source_profile_id") != SOURCE_PROFILE_ID:
         raise ValueError(f"attestation_profile_mismatch: {att_data.get('source_profile_id')} != {SOURCE_PROFILE_ID}")
 
@@ -141,11 +147,78 @@ def run_historical_backfill(
                 sleeper(remaining)
         last_request_at = monotonic_clock()
 
-    def _execute_sweep(sweep_name: str) -> Tuple[List[Tuple[int, str, int]], bool]:
+    def _append_index_request_manifest(request_observation_id: str, page_no: int, result: Any) -> None:
+        """Persist the one authoritative record for each historical index attempt."""
+        nonlocal root_bytes
+        row = {
+            "schema_version": "stage1_6b_request_manifest_v1",
+            "request_observation_id": request_observation_id,
+            "run_id": effective_run_id,
+            "poll_seq": 0,
+            "monotonic_request_seq": monotonic_request_seq,
+            "request_class": RequestClass.HISTORICAL_INDEX.value,
+            "page_no": page_no,
+            "requested_url": result.requested_url,
+            "final_url": result.final_url,
+            "http_status": result.http_status,
+            "content_type": result.content_type,
+            "raw_payload_bytes": result.raw_payload_bytes,
+            "validation_status": result.trust_validation_status,
+            "error_message": result.error_message,
+            "captured_at_ms": result.t_receive_ms,
+        }
+        root_bytes += append_jsonl_record(
+            run_root=validated_root,
+            relative_path="request_manifest/historical.jsonl",
+            record=row,
+            write_class="normal_data",
+            guard=guard,
+            current_root_bytes=root_bytes,
+        )
+
+    def _write_final_checkpoint(status: str, coverage: str) -> str:
+        """Commit the historical index manifest boundary before terminal status."""
+        nonlocal root_bytes
+        manifest_rel = "request_manifest/historical.jsonl"
+        manifest_path = validated_root / manifest_rel
+        stream_offsets: Dict[str, int] = {}
+        stream_last_hashes: Dict[str, str] = {}
+        if manifest_path.is_file():
+            lines = manifest_path.read_bytes().splitlines()
+            if lines:
+                stream_offsets[manifest_rel] = manifest_path.stat().st_size
+                stream_last_hashes[manifest_rel] = hashlib.sha256(lines[-1]).hexdigest()
+
+        chk_seed = f"{effective_run_id}|0|{monotonic_request_seq}|{record_seq}|{root_bytes}"
+        checkpoint_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
+        checkpoint = ObserverCheckpointRecord(
+            schema_version="stage1_6b_observer_checkpoint_v2",
+            run_id=effective_run_id,
+            capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
+            source_profile_id=SOURCE_PROFILE_ID,
+            source_profile_attestation_sha256=att_sha256,
+            checkpoint_id=checkpoint_id,
+            prior_checkpoint_id=None,
+            poll_seq=0,
+            monotonic_request_seq=monotonic_request_seq,
+            record_seq=record_seq,
+            accounted_root_bytes=root_bytes,
+            stream_offsets=stream_offsets,
+            stream_last_hashes=stream_last_hashes,
+            candidate_states={},
+            heartbeat_at_ms=int(time.time() * 1000),
+            last_index_poll_status=status,
+            last_index_poll_coverage=coverage,
+        )
+        root_bytes += write_observer_checkpoint(validated_root, checkpoint, guard, root_bytes)
+        return checkpoint_id
+
+    def _execute_sweep(sweep_name: str) -> Tuple[List[Tuple[int, int, str, int]], bool, List[int]]:
         nonlocal monotonic_request_seq, record_seq, root_bytes
-        transcript: List[Tuple[int, str, int]] = []
+        transcript: List[Tuple[int, int, str, int]] = []
         seen_articles_in_sweep = set()
         reached_from = False
+        sweep_totals: List[int] = []
 
         for page_no in range(1, base.EXTERNAL_SIGNAL_STAGE1_6B_HISTORICAL_MAX_INDEX_PAGES + 1):
             monotonic_request_seq += 1
@@ -157,6 +230,13 @@ def run_historical_backfill(
                 monotonic_request_seq=monotonic_request_seq,
             )
 
+            req_obs_id = compute_request_observation_id(
+                effective_run_id,
+                RequestClass.HISTORICAL_INDEX.value,
+                monotonic_request_seq,
+            )
+            _append_index_request_manifest(req_obs_id, page_no, res)
+
             if res.trust_validation_status != "trusted" or res.http_status != 200:
                 page_failures.append({
                     "sweep": sweep_name,
@@ -165,7 +245,12 @@ def run_historical_backfill(
                     "validation": res.trust_validation_status,
                     "error": res.error_message,
                 })
-                return transcript, False
+                return transcript, False, sweep_totals
+
+            catalog_res = extract_selected_delisting_catalog(res.raw_payload)
+            articles = catalog_res.articles
+            catalog_total = catalog_res.catalog_total
+            sweep_totals.append(catalog_total)
 
             # Persist raw payload and list capture record
             raw_sha, rel_raw, b_written = write_content_addressed_raw_payload(
@@ -177,11 +262,6 @@ def run_historical_backfill(
             )
             root_bytes += b_written
 
-            req_obs_id = compute_request_observation_id(
-                effective_run_id,
-                RequestClass.HISTORICAL_INDEX.value,
-                monotonic_request_seq,
-            )
             list_payload_id = compute_list_payload_id(
                 INDEX_SOURCE_SURFACE,
                 INDEX_SOURCE_LOCALE,
@@ -197,11 +277,8 @@ def run_historical_backfill(
             )
 
             record_seq += 1
-            data = json.loads(res.raw_payload.decode("utf-8"))
-            articles = data.get("data", {}).get("articles", [])
-
             lc_rec = ListCaptureRecord(
-                schema_version="stage1_6b_list_capture_v1",
+                schema_version="stage1_6b_list_capture_v2",
                 capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
                 source_profile_id=SOURCE_PROFILE_ID,
                 request_headers_profile_sha256=expected_headers_sha,
@@ -222,6 +299,9 @@ def run_historical_backfill(
                 t_list_receive_ms=res.t_receive_ms,
                 article_count=len(articles),
                 captured_at_ms=res.t_receive_ms,
+                selected_catalog_id=SELECTED_CATALOG_ID,
+                selected_catalog_name=SELECTED_CATALOG_NAME,
+                selected_catalog_total=catalog_total,
             )
             delta_lc = append_jsonl_record(
                 run_root=validated_root,
@@ -241,10 +321,10 @@ def run_historical_backfill(
                 if aid in seen_articles_in_sweep:
                     # Duplicate article in sweep -> failure
                     page_failures.append({"sweep": sweep_name, "error": f"duplicate_article:{aid}"})
-                    return transcript, False
+                    return transcript, False, sweep_totals
 
                 seen_articles_in_sweep.add(aid)
-                transcript.append((page_no, aid, pub_time))
+                transcript.append((page_no, SELECTED_CATALOG_ID, aid, pub_time))
 
                 if sweep_name == "sweep_a":
                     all_discovered_articles[aid] = {
@@ -261,15 +341,17 @@ def run_historical_backfill(
 
             if page_no == base.EXTERNAL_SIGNAL_STAGE1_6B_HISTORICAL_MAX_INDEX_PAGES and not reached_from:
                 # 100 pages reached without reaching from_ms
-                return transcript, False
+                return transcript, False, sweep_totals
 
-        return transcript, reached_from
+        return transcript, reached_from, sweep_totals
 
     # 3. Sweep A
-    transcript_a, sweep_a_ok = _execute_sweep("sweep_a")
+    transcript_a, sweep_a_ok, sweep_a_totals = _execute_sweep("sweep_a")
     if not sweep_a_ok or page_failures:
+        is_drift = any(f.get("validation") == "malformed_index_schema" for f in page_failures)
+        reason = "source_profile_schema_drift" if is_drift else "sweep_a_failed"
         cov = HistoricalCoverageRecord(
-            schema_version="stage1_6b_historical_coverage_v1",
+            schema_version="stage1_6b_historical_coverage_v2",
             run_id=effective_run_id,
             source_profile_id=SOURCE_PROFILE_ID,
             source_profile_attestation_sha256=att_sha256,
@@ -279,28 +361,45 @@ def run_historical_backfill(
             sweep_b_transcript=[],
             page_failures=page_failures,
             candidate_terminal_counts={},
-            status="incomplete_sweep_a_failure",
+            status="failure",
+            failure_reason=reason,
             captured_at_ms=int(time.time() * 1000),
+            selected_catalog_id=SELECTED_CATALOG_ID,
+            selected_catalog_name=SELECTED_CATALOG_NAME,
+            selected_catalog_total_historical_max=max(sweep_a_totals) if sweep_a_totals else 0,
+            selected_catalog_total_sweep_a_final=sweep_a_totals[-1] if sweep_a_totals else 0,
+            selected_catalog_total_sweep_b_final=0,
         )
         root_bytes += write_historical_coverage(validated_root, cov, guard, root_bytes)
+        checkpoint_status = page_failures[0].get("validation", "http_error") if page_failures else "http_error"
+        final_checkpoint_id = _write_final_checkpoint(checkpoint_status, "degraded_not_successful")
         term = TerminalStatusRecord(
             schema_version="stage1_6b_terminal_status_v1",
             run_id=effective_run_id,
             capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
             source_profile_id=SOURCE_PROFILE_ID,
             status="failure",
-            terminal_reason="sweep_a_failed",
-            final_checkpoint_id=None,
+            terminal_reason=reason,
+            final_checkpoint_id=final_checkpoint_id,
             terminated_at_ms=int(time.time() * 1000),
         )
         write_terminal_status(validated_root, term, guard, root_bytes)
+        if is_drift:
+            raise HistoricalBackfillError("source_profile_schema_drift")
         return validated_root
 
     # 4. Sweep B
-    transcript_b, sweep_b_ok = _execute_sweep("sweep_b")
+    transcript_b, sweep_b_ok, sweep_b_totals = _execute_sweep("sweep_b")
+    all_totals = sweep_a_totals + sweep_b_totals
+    hist_max = max(all_totals) if all_totals else 0
+    sw_a_final = sweep_a_totals[-1] if sweep_a_totals else 0
+    sw_b_final = sweep_b_totals[-1] if sweep_b_totals else 0
+
     if not sweep_b_ok or transcript_a != transcript_b:
+        is_drift = any(f.get("validation") == "malformed_index_schema" for f in page_failures)
+        reason = "source_profile_schema_drift" if is_drift else "sweep_b_mismatch"
         cov = HistoricalCoverageRecord(
-            schema_version="stage1_6b_historical_coverage_v1",
+            schema_version="stage1_6b_historical_coverage_v2",
             run_id=effective_run_id,
             source_profile_id=SOURCE_PROFILE_ID,
             source_profile_attestation_sha256=att_sha256,
@@ -310,21 +409,31 @@ def run_historical_backfill(
             sweep_b_transcript=transcript_b,
             page_failures=page_failures or [{"error": "sweep_mismatch"}],
             candidate_terminal_counts={},
-            status="incomplete_sweep_mismatch",
+            status="failure",
+            failure_reason=reason,
             captured_at_ms=int(time.time() * 1000),
+            selected_catalog_id=SELECTED_CATALOG_ID,
+            selected_catalog_name=SELECTED_CATALOG_NAME,
+            selected_catalog_total_historical_max=hist_max,
+            selected_catalog_total_sweep_a_final=sw_a_final,
+            selected_catalog_total_sweep_b_final=sw_b_final,
         )
         root_bytes += write_historical_coverage(validated_root, cov, guard, root_bytes)
+        checkpoint_status = page_failures[0].get("validation", "http_error") if page_failures else "http_error"
+        final_checkpoint_id = _write_final_checkpoint(checkpoint_status, "degraded_not_successful")
         term = TerminalStatusRecord(
             schema_version="stage1_6b_terminal_status_v1",
             run_id=effective_run_id,
             capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
             source_profile_id=SOURCE_PROFILE_ID,
             status="failure",
-            terminal_reason="sweep_b_mismatch",
-            final_checkpoint_id=None,
+            terminal_reason=reason,
+            final_checkpoint_id=final_checkpoint_id,
             terminated_at_ms=int(time.time() * 1000),
         )
         write_terminal_status(validated_root, term, guard, root_bytes)
+        if is_drift:
+            raise HistoricalBackfillError("source_profile_schema_drift")
         return validated_root
 
     # 5. Candidate Extraction & Detail Fetches
@@ -337,7 +446,7 @@ def run_historical_backfill(
             record_seq += 1
             now_art_ms = int(time.time() * 1000)
             disc_rec = ArticleDiscoveryRecord(
-                schema_version="stage1_6b_article_discovery_v1",
+                schema_version="stage1_6b_article_discovery_v2",
                 capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
                 source_profile_id=SOURCE_PROFILE_ID,
                 source_article_id=aid,
@@ -347,6 +456,8 @@ def run_historical_backfill(
                 notice_lineage_first_detected_at_ms=None,  # Null for historical backfill
                 captured_at_ms=now_art_ms,
                 record_seq=record_seq,
+                source_catalog_id=SELECTED_CATALOG_ID,
+                source_catalog_name=SELECTED_CATALOG_NAME,
             )
             delta_d = append_jsonl_record(
                 run_root=validated_root,
@@ -362,7 +473,7 @@ def run_historical_backfill(
 
     if len(delisting_candidates) > base.EXTERNAL_SIGNAL_STAGE1_6B_MAX_PENDING_DETAIL_CANDIDATES:
         cov = HistoricalCoverageRecord(
-            schema_version="stage1_6b_historical_coverage_v1",
+            schema_version="stage1_6b_historical_coverage_v2",
             run_id=effective_run_id,
             source_profile_id=SOURCE_PROFILE_ID,
             source_profile_attestation_sha256=att_sha256,
@@ -381,6 +492,11 @@ def run_historical_backfill(
             pending_candidate_count=len(delisting_candidates),
             unattempted_candidate_count=len(delisting_candidates),
             final_checkpoint_valid=False,
+            selected_catalog_id=SELECTED_CATALOG_ID,
+            selected_catalog_name=SELECTED_CATALOG_NAME,
+            selected_catalog_total_historical_max=hist_max,
+            selected_catalog_total_sweep_a_final=sw_a_final,
+            selected_catalog_total_sweep_b_final=sw_b_final,
         )
         root_bytes += write_historical_coverage(validated_root, cov, guard, root_bytes)
         failure = TerminalStatusRecord(
@@ -497,32 +613,13 @@ def run_historical_backfill(
             root_bytes += delta_rev
 
     # 6. Final Checkpoint and Terminal Status
-    chk_seed = f"{effective_run_id}|0|{monotonic_request_seq}|{record_seq}|{root_bytes}"
-    final_chk_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
-    chk_rec = ObserverCheckpointRecord(
-        schema_version="stage1_6b_observer_checkpoint_v1",
-        run_id=effective_run_id,
-        capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
-        source_profile_id=SOURCE_PROFILE_ID,
-        source_profile_attestation_sha256=att_sha256,
-        checkpoint_id=final_chk_id,
-        prior_checkpoint_id=None,
-        poll_seq=0,
-        monotonic_request_seq=monotonic_request_seq,
-        record_seq=record_seq,
-        accounted_root_bytes=root_bytes,
-        stream_offsets={},
-        stream_last_hashes={},
-        candidate_states={},
-        heartbeat_at_ms=int(time.time() * 1000),
-    )
-    root_bytes += write_observer_checkpoint(validated_root, chk_rec, guard, root_bytes)
+    final_chk_id = _write_final_checkpoint("trusted", "successful")
 
     # 7. Coverage
     transcript_a_hash = hashlib.sha256(json.dumps(transcript_a, separators=(",", ":")).encode("utf-8")).hexdigest()
     transcript_b_hash = hashlib.sha256(json.dumps(transcript_b, separators=(",", ":")).encode("utf-8")).hexdigest()
     cov = HistoricalCoverageRecord(
-        schema_version="stage1_6b_historical_coverage_v1",
+        schema_version="stage1_6b_historical_coverage_v2",
         run_id=effective_run_id,
         source_profile_id=SOURCE_PROFILE_ID,
         source_profile_attestation_sha256=att_sha256,
@@ -541,6 +638,11 @@ def run_historical_backfill(
         pending_candidate_count=0,
         unattempted_candidate_count=0,
         final_checkpoint_valid=False,
+        selected_catalog_id=SELECTED_CATALOG_ID,
+        selected_catalog_name=SELECTED_CATALOG_NAME,
+        selected_catalog_total_historical_max=hist_max,
+        selected_catalog_total_sweep_a_final=sw_a_final,
+        selected_catalog_total_sweep_b_final=sw_b_final,
     )
     final_checkpoint_valid = json.loads((validated_root / "observer_checkpoint.json").read_text(encoding="utf-8")).get("checkpoint_id") == final_chk_id
     cov = HistoricalCoverageRecord(
