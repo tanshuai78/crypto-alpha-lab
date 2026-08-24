@@ -31,6 +31,7 @@ risk_veto_candidate
 1. 项目路线图将 `futures_delisting_notice` 定为优先事件源，但已拒绝 `announcement_plus_1h_blind_short` 与“下架必然是单边做空机会”的假设。
 2. Stage 1.6A 的既定第一动作是 `futures_delisting_source_schema_effective_time_audit`；只有审计通过，才允许另写 `pre_settlement_forced_flow_diagnostic_replay_design`。
 3. 当前 Stage 1.5A 已有只读原始载荷、payload hash、`available_at_ms`、source-domain allowlist 与 generic `exchange_delisting_notice` 事件类型模式；它的 title 级 `delist/removal` 分类不能单独证明 USD-M futures scope。
+
 4. 当前 Stage 1.5D/F 正在收集 futures launch 事件。Stage 1.6A 尚无生产模块、持久化 root 或部署任务，且不得改变运行中的 Stage 1.5 root、watermark、事件流或运行进程。
 5. `RISK_LIVE_TRADING_ENABLED` 当前为 `False`。本 Design 不授权任何配置值、风险阈值或执行权限变更。
 

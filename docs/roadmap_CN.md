@@ -55,7 +55,7 @@
 | **Stage 1.5F** | `active` | 2026-07-26 / `live_depth_observer_summary.json` | 进程 PID 88770 稳定运行。上线时间闸门与 pre-bootstrap 终端 Ignore 去重工作正常 | 积累首个 Clean 级新币盘口证据 | 网络请求错误率 > 5% |
 | **Stage 1.5G** | `blocked` | 2026-07-26 / `stage1_5g_quarantine_summary.json` | 离线审查通过 Quarantine 级 1 例 (`SKHYUSDT`)，Clean Pass 仍阻塞为 0 | 积累首个无盘口空洞的 Clean 级事件 | 无 Clean 级事件持续 > 30天 |
 | **Stage 1.5H** | `completed` | 2026-07-12 / 1.5H 治理审查报告 | 静态只读报告生成器完成。锁定只读禁令标志 | 维持只读工具，防止策略越权 | 误写为执行模拟器或交易引擎 |
-| **Stage 1.6 Roadmap** | `planned` | 2026-07-19 / Master Assessment 评估 | 确定 1.6A (下架公告) 与 1.6R (安全事故 Risk-Veto) 为下一优先设计线 | 编写 1.6A 详细设计文档 | 缺乏公开只读锚点或数据不可审计 |
+| **Stage 1.6 Futures Delisting** | `active_research_route` | 2026-08-24 / [路线地图](project-status/2026-08-24-stage1-6-futures-delisting-route-map_CN.md) | 1.6A--C 已完成：范围契约、历史封签采集与真实语义审计；`source_audit_passed=true` | 仅推进 1.6D VPS live-source-observation deployment authorization | 未经单独授权不得部署；历史 source pass 不等于 PIT、replay 或交易许可 |
 
 ---
 
@@ -109,10 +109,10 @@ Stage 1.5H 静态只读报告生成 (Offline reporter)
   * **事实证据**：`_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5g/stage1_5g_quarantine_summary.json:L6` (`clean_depth_evidence_pass = false`)。
   * **阻碍与风险**：在获得真正的 Clean 级盘口快照前，无法完全排除新币开盘前网络极性对报价深度完整性的干扰。
   * **解封动作**：维持服务器 1.5D 和 1.5F 7天影子程序常驻，静待下一次新币上线公告。
-* **工程与设计阻塞 (P2 Blocker)**：
-  * **问题描述**：Stage 1.6A (Futures Delisting Notice) 下架事件源的设计文档尚未撰写。
-  * **事实证据**：[docs/strategy_specs/2026-07-13 统一研究路线总纲:L305](strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md#L305)。
-  * **解封动作**：按计划起草设计文档 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`。
+* **Stage 1.6D 部署授权阻塞 (P2 Blocker)**：
+  * **问题描述**：Stage 1.6 Futures Delisting 已完成 1.6A--C 历史证据链，但 VPS `live_observed` 尚无运行 root，不能将历史下载时间当作 point-in-time 证据。
+  * **事实证据**：[Stage 1.6 路线地图](project-status/2026-08-24-stage1-6-futures-delisting-route-map_CN.md)；[1.6B deployment checklist](reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md)。
+  * **解封动作**：只编写并审查 1.6D VPS live-source-observation deployment authorization；不得先启动 collector。
 
 ---
 
@@ -125,12 +125,12 @@ Stage 1.5H 静态只读报告生成 (Offline reporter)
 * **拒绝/停止条件**：丢包或空快照比例 $> 10\%$，或者首包快照延迟超过 60 秒。
 * **安全边界**：无交易信号生成 (`trade_signal_allowed = False`)。
 
-### 关卡 2：Stage 1.6A 期货下架公告设计审查
-* **前置依赖**：已审定的 Stage 1.6 统一路线总纲与 Master Assessment。
-* **所需证据**：提交设计文档 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`。
-* **通过标准**：设计中必须明确定义：期货下架源获取路径、排他性范围筛选逻辑、以及三大时间锚点（`available_at_ms`, `non_reduce_only_start_time_ms`, `settlement_time_ms`）的契约规范。
-* **拒绝/停止条件**：如果数据无法区分期货下架和现货/Margin 下架，或者数据供应商的 `available_at_ms` 缺乏 Point-In-Time 审计轨迹，则中止。
-* **安全边界**：只做只读数据源设计（在设计通过前禁止编写 Implementation Plan）。
+### 关卡 2：Stage 1.6D VPS 实时来源观测部署授权
+* **前置依赖**：1.6A--C 的完成证据、当前 Stage 1.5D/F 主机健康事实、VPS 磁盘与锁状态、有效 source-profile attestation。
+* **所需证据**：[Stage 1.6 路线地图](project-status/2026-08-24-stage1-6-futures-delisting-route-map_CN.md) 和 [1.6B deployment checklist](reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md) 的全部只读 preflight transcript。
+* **通过标准**：经审查的 deployment authorization 明确 live root、单 writer、300 秒轮询、storage stop 条件、attestation 绑定、终态/封签和 rollback。
+* **拒绝/停止条件**：任何 Stage 1.5 健康、磁盘 reserve、锁、profile attestation 或运行时安全门禁不满足，立即停止且不创建 live root。
+* **安全边界**：只读官方来源观察；不产生 PIT 交易结论、replay、paper/live trading 或执行权限。
 
 ---
 
@@ -143,6 +143,7 @@ Stage 1.5H 静态只读报告生成 (Offline reporter)
 * **2026-06-26**：1.5F 实时盘口观察器设计通过审查，服务器上部署实时 L2 快照采集。
 * **2026-07-05**：Route C1 7 天实盘烟雾测试最终评估不达标，现货价格代理策略被证伪结题。
 * **2026-07-12**：1.5H 静态代理只读报告生成器通过审查，确立“只读诊断报告，无模拟器或执行声明”治理契约。
+* **2026-08-18 至 2026-08-24**：Stage 1.6 Futures Delisting 完成 1.6A--C：来源/时间契约、1.6B 历史封签采集、sealed-export 语义审计与 H2 grammar 修补；历史 source audit 通过，但 VPS 实时观测仍未部署。
 * **2026-07-19**：发布 Master Assessment。决定放弃 listing 开盘首小时、放弃社交热点音量、降级治理提案；批准 1.6A (下架公告) 与 1.6R (安全事故 Risk-Veto) 作为下一优先设计路线。
 * **2026-07-24**：实施并验证 1.5F 历史锚点 Rejection Hygiene 热装补丁（水印 Schema v2、终端 Ignore 分流以防污染 `events_rejected`）。
 * **2026-07-26**：验证服务器 1.5D/1.5F 影子运行状态；完成项目当前状态报告（`current-project-state_CN.md`）与统一文档事实索引（`current-document-index_CN.md`）。

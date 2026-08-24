@@ -1,6 +1,6 @@
 # Crypto Alpha Lab 当前文档索引 (Current Document Index)
 
-> **文档生成时间：** 2026-07-26T11:52:38+08:00 (Server UTC: 2026-07-26T02:11:01Z)  
+> **文档生成时间：** 2026-08-24（Stage 1.6 路线治理更新；其它历史索引条目保留原采集时间）
 > **使用说明：** 本文档为仓库中所有研究、设计、计划、审查与状态文档的**统一事实索引入口**。未来的 AI Agent 在开展任何工作前，必须遵循《10. AI 使用规则》，严禁直接以历史被替代 (superseded) 或已证伪 (falsified) 的文档指导新开发。
 
 ---
@@ -9,8 +9,8 @@
 
 | 属性 | 统计值 / 事实 | 凭据与说明 |
 |---|---|---|
-| **generated_at** | `2026-07-26T11:52:38+08:00` | 生成点本地时间戳 |
-| **local_commit** | `2502e1220ec0144c5d6f4915f89d3ba9804661f3` | `git rev-parse HEAD` |
+| **generated_at** | `2026-08-24` | Stage 1.6 路线治理更新日期；非全仓重新扫描 |
+| **local_commit** | `4a15c1f8ab5f1893dc409270a88e5c3b153cf682` | 本次治理开始时的 `git rev-parse HEAD` |
 | **server_git_commit** | `unknown` | 当前服务器快照未成功采集 Git commit；仅能证明三份关键部署文件 SHA256 与本地匹配 |
 | **selected_deployed_file_hash_match** | `true` | `configs/base.py`、1.5D runner、1.5F runner 与服务器文件 SHA256 匹配 |
 | **scanned_document_count** | `180` | 全仓库扫描的 Markdown 研究与架构文档总数 |
@@ -29,7 +29,7 @@
 | **Stage 1.5F** (L2盘口观察+上线时间闸门) | [1.5F Design](../designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md) | [1.5F Terminal Hygiene Plan](../plans/2026-07-24-external-signal-shadow-lab-stage1-5f-historical-anchor-terminal-ignore-rejection-hygiene-hotfix-plan_CN.md) | [1.5F Review](../reviews/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-review_CN.md) | `implemented` | `deployed` (PID 88770) | `server_runtime_snapshot...txt:L26` |
 | **Stage 1.5G** (盘口质量离线审查) | [1.5G Design](../designs/2026-07-06-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review-design_CN.md) | [1.5G Quarantine Plan](../plans/2026-07-11-external-signal-shadow-lab-stage1-5g-raw-snapshot-quarantine-implementation-plan_CN.md) | [1.5G Clean Summary](../../data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json) | `implemented` | `implemented` (Offline) | SPCXUSD1 clean pass；SKHYUSDT quarantine pass；POPMARTUSDT invalid/quarantine candidate |
 | **Stage 1.5H** (静态只读报告生成器) | [1.5H Design](../designs/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-design_CN.md) | [1.5H Plan](../plans/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-implementation-plan_CN.md) | [1.5H Governance Review](../reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md) | `implemented` | `implemented` (Offline) | 原始 `data/stage1_5h` artifact 当前未同步进本地工作区 |
-| **Stage 1.6 Unified Roadmap** | [Unified Roadmap](../strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md) | [Master Assessment](../strategy_specs/2026-07-19-event_source_master_assessment.md) | N/A | `planned_only` | `planned_only` | 确定 1.6A 与 1.6R 为下一阶段优先路线 |
+| **Stage 1.6 Futures Delisting** | [1.6 Route Map](2026-08-24-stage1-6-futures-delisting-route-map_CN.md) | [1.6C H2 Plan](../plans/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-implementation-plan_CN.md) | [1.6C H2 Completion Audit](../reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md) | `implemented_through_1_6C` | `1_6D_not_deployed` | 历史 source audit 已通过；下一步只能是 1.6D 部署授权，不是 collector 启动 |
 
 ---
 
@@ -101,12 +101,13 @@
   - [docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md](../reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md) (`falsified`: CMOM 截面动量因子超额收益不足以覆盖现金替代)
 - **结论**：截面动量因子在扣除交易成本后未呈现超越 Cash Fallback 的稳定 Alpha，项目闭环结题。
 
-### 4.5 Stage 1.6 Event Source Roadmap (后续事件源统一路线图)
-- **状态**：`current_authority` (仅限选型与设计规范)
+### 4.5 Stage 1.6 Event-Source Candidate Registry (研究候选登记)
+- **状态**：`strategic_reference_only`
 - **核心文档**：
-  - [2026-07-13 统一研究路线总纲](../strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md) (`current_authority`)
-  - [2026-07-19 Master Assessment 评估](../strategy_specs/2026-07-19-event_source_master_assessment.md) (`current_authority`)
-- **结论**：批准 Stage 1.6A (Futures Delisting Notice) 为下一代强流事件源唯一最高优先研究线，批准 Stage 1.6R (Security Incident) 为 Risk-Veto 旁路线。
+  - [2026-07-13 统一研究路线总纲](../strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md) (`strategic_reference_only`)
+  - [2026-07-19 Master Assessment 评估](../strategy_specs/2026-07-19-event_source_master_assessment.md) (`strategic_reference_only`)
+- **当前实施编号 authority**：[2026-08-24 Stage 1.6 Futures Delisting 路线地图](2026-08-24-stage1-6-futures-delisting-route-map_CN.md)。旧文档中 ETF Flow 等的 `1.6B`、`1.6C` 候选编号不再用于当前工程实施编号。
+- **结论**：Futures Delisting 是当前唯一已立项的 Stage 1.6 研究事件；ETF Flow、Prediction Market 和 Security Incident 保留为未立项候选。
 
 ---
 
@@ -122,6 +123,8 @@
    `Design (2026-07-06)` -> `Plan (2026-07-11 Quarantine Plan)` -> `Review (2026-07-24 Review)` -> `Code (src/.../stage1_5g_*)` -> `Test (tests/.../test_stage1_5g_*)` -> `Deployment (Offline Tool)` -> `Runtime Evidence (stage1_5g_quarantine_summary.json)`
 4. **Stage 1.5H 静态只读报告生成链**：
    `Design (2026-07-12 Governance Design)` -> `Plan (2026-07-12 Plan)` -> `Review (2026-07-12 Review)` -> `Code (scripts/.../review_stage1_5h_*)` -> `Test (tests/.../test_review_stage1_5h_*)` -> `Deployment (Offline Report Tool)` -> `Runtime Evidence (stage1_5h...summary.json)`
+5. **Stage 1.6 Futures Delisting 历史证据与审计链**：
+   `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Live Observation (not deployed)`。
 
 ---
 
@@ -158,9 +161,9 @@
 
 ## 9. 缺失文档 (Missing Documents)
 
-1. **缺失 Stage 1.6A Futures Delisting Notice 设计与计划文档**：
-   - **现状**：Roadmap 已确定 1.6A 为最高优先级，但 `docs/designs/` 下尚无 `2026-07-26-stage1-6a-futures-delisting-design_CN.md`。
-2. **缺失 Stage 1.6R Security Incident Risk-Veto 设计文档**：
+1. **Stage 1.6A--C 文件缺失项已关闭**：
+   - **现状**：实际基线文件为 `docs/designs/2026-08-18-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`；后续 1.6B producer、1.6C adapter 和 H2 completion evidence 见 [Stage 1.6 路线地图](2026-08-24-stage1-6-futures-delisting-route-map_CN.md)。
+2. **Stage 1.6R Security Incident Risk-Veto 设计文档尚未立项**：
    - **现状**：Roadmap 已确定 1.6R 为风控旁路线，但 `docs/designs/` 下尚无相关设计与 SOP 文档。
 3. **缺失 Stage 1.5G Clean Markdown 正式审查报告索引**：
    - **现状**：本地已同步 `SPCXUSD1` Clean summary JSON，但 `docs/reviews/2026-07-22-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review_CN.md` 曾被 pytest quarantine 产物污染；若需要人类可读正式结论，应以服务器正式 Markdown 覆盖或补写索引说明。
