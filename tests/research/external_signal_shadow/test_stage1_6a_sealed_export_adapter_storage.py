@@ -16,7 +16,7 @@ from tests.research.external_signal_shadow.stage1_6a_sealed_export_adapter_test_
 def test_persistence_writes_exact_artifacts_precompletion_then_manifest_last(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_persist_001"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -49,7 +49,7 @@ def test_persistence_writes_exact_artifacts_precompletion_then_manifest_last(tmp
 def test_persistence_binds_actual_sealed_export_manifest_bytes(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path)
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
     out_root = tmp_path / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / "manifest_binding"
 
     adapter_storage.persist_adapter_audit(
@@ -72,7 +72,7 @@ def test_persistence_binds_actual_sealed_export_manifest_bytes(tmp_path):
 def test_persistence_emits_only_approved_exact_authority_schemas(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path)
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / "exact_schema"
 
     adapter_storage.persist_adapter_audit(
@@ -139,7 +139,7 @@ def test_persistence_emits_only_approved_exact_authority_schemas(tmp_path):
 def test_completed_consumer_rejects_coherently_rehashed_receipt_schema_tamper(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path)
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / "receipt_tamper"
     adapter_storage.persist_adapter_audit(
         out_root,
@@ -169,7 +169,7 @@ def test_completed_consumer_rejects_coherently_rehashed_receipt_schema_tamper(tm
 def test_completed_consumer_rejects_coherently_rehashed_summary_binding_tamper(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path)
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / "summary_tamper"
     adapter_storage.persist_adapter_audit(
         out_root,
@@ -199,7 +199,7 @@ def test_completed_consumer_rejects_coherently_rehashed_summary_binding_tamper(t
 def test_precompletion_summary_has_only_fixed_nonfinal_pass_and_pending_action(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_persist_002"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -220,7 +220,7 @@ def test_precompletion_summary_has_only_fixed_nonfinal_pass_and_pending_action(t
 def test_partial_root_without_completion_manifest_is_nonconsumable(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_partial_003"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -241,7 +241,7 @@ def test_partial_root_without_completion_manifest_is_nonconsumable(tmp_path):
 def test_completed_consumer_rejects_hash_shape_and_projection_tamper(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_tamper_004"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -264,7 +264,7 @@ def test_completed_consumer_rejects_hash_shape_and_projection_tamper(tmp_path):
 def test_completed_consumer_rejects_coherent_source_derived_artifact_tamper(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_coherent_tamper_005"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -300,7 +300,7 @@ def test_completed_consumer_rejects_coherent_source_derived_artifact_tamper(tmp_
 def test_completed_consumer_rejects_boolean_and_action_tampered_together(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_bool_tamper_006"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -324,7 +324,7 @@ def test_completed_consumer_rejects_boolean_and_action_tampered_together(tmp_pat
 def test_completed_consumer_ignores_only_semantic_extracted_at_ms_in_rebuild(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_time_ignore_007"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -343,7 +343,7 @@ def test_completed_consumer_ignores_only_semantic_extracted_at_ms_in_rebuild(tmp
 def test_completed_consumer_rejects_candidate_summary_binding_threshold_and_flag_mismatch(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_flag_tamper_008"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -367,7 +367,7 @@ def test_completed_consumer_rejects_candidate_summary_binding_threshold_and_flag
 def test_completed_consumer_rejects_missing_or_mutated_explicit_source_export(tmp_path):
     root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
     snapshot = adapter.load_verified_source_snapshot(root, export)
-    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
 
     run_id = "run_missing_src_009"
     out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
@@ -382,3 +382,224 @@ def test_completed_consumer_rejects_missing_or_mutated_explicit_source_export(tm
     nonexistent_export = root / "data" / "external_signal_shadow" / "stage1_6b" / "historical_backfill" / "none" / "sealed_exports" / "none"
     with pytest.raises(adapter.AdapterInputError):
         adapter_storage.load_completed_adapter_audit(root, out_root, nonexistent_export)
+
+
+def test_new_writer_rejects_g1_reduction(tmp_path):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G1_GRAMMAR_PAIR)
+    run_id = "run_g1_reject_001"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    with pytest.raises(adapter.AdapterInputError, match="new_writer_requires_g2_grammar_pair"):
+        adapter_storage.persist_adapter_audit(
+            out_root,
+            audit_run_id=run_id,
+            snapshot=snapshot,
+            reduction=reduction,
+            semantic_extracted_at_ms=1700000050000,
+        )
+    assert not out_root.exists()
+
+
+def _rehash_artifact_in_completion(out_root, rel_path: str, new_bytes: bytes) -> None:
+    target_path = out_root / rel_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(new_bytes)
+    completion_path = out_root / "completion_manifest.json"
+    completion = json.loads(completion_path.read_text(encoding="utf-8"))
+    for art in completion["authoritative_artifacts"]:
+        if art["relative_path"] == rel_path:
+            art["sha256"] = hashlib.sha256(new_bytes).hexdigest()
+            art["byte_length"] = len(new_bytes)
+    completion_path.write_text(json.dumps(completion, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def test_completed_consumer_rejects_summary_completion_grammar_pair_mismatch(tmp_path, monkeypatch):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
+    run_id = "run_pair_mismatch"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    adapter_storage.persist_adapter_audit(
+        out_root,
+        audit_run_id=run_id,
+        snapshot=snapshot,
+        reduction=reduction,
+        semantic_extracted_at_ms=1700000050000,
+    )
+
+    summary_path = out_root / "stage1_6a_futures_delisting_source_audit_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["body_normalization_version"] = "stage1_6a_bapi_body_tree_v1"
+    summary["semantic_extractor_version"] = "stage1_6a_extractor_v1"
+    summary_bytes = json.dumps(summary, indent=2, sort_keys=True).encode("utf-8")
+    _rehash_artifact_in_completion(out_root, "stage1_6a_futures_delisting_source_audit_summary.json", summary_bytes)
+
+    load_snapshot_calls = []
+    real_load_snapshot = adapter_storage.load_verified_source_snapshot
+
+    def spy_load_snapshot(*args, **kwargs):
+        load_snapshot_calls.append(args)
+        return real_load_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_storage, "load_verified_source_snapshot", spy_load_snapshot)
+
+    with pytest.raises(adapter.AdapterInputError, match="persisted_grammar_pair_mismatch"):
+        adapter_storage.load_completed_adapter_audit(root, out_root, export)
+
+    assert len(load_snapshot_calls) == 0
+
+
+def test_completed_consumer_rejects_unsupported_grammar_pair(tmp_path, monkeypatch):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
+    run_id = "run_unsupported_pair"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    adapter_storage.persist_adapter_audit(
+        out_root,
+        audit_run_id=run_id,
+        snapshot=snapshot,
+        reduction=reduction,
+        semantic_extracted_at_ms=1700000050000,
+    )
+
+    for fn in ("stage1_6a_futures_delisting_source_audit_summary.json", "completion_manifest.json"):
+        fp = out_root / fn
+        data = json.loads(fp.read_text(encoding="utf-8"))
+        data["body_normalization_version"] = "stage1_6a_bapi_body_tree_v99"
+        data["semantic_extractor_version"] = "stage1_6a_extractor_v99"
+        fp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    # Rehash summary into completion
+    sum_bytes = (out_root / "stage1_6a_futures_delisting_source_audit_summary.json").read_bytes()
+    _rehash_artifact_in_completion(out_root, "stage1_6a_futures_delisting_source_audit_summary.json", sum_bytes)
+
+    load_snapshot_calls = []
+    real_load_snapshot = adapter_storage.load_verified_source_snapshot
+
+    def spy_load_snapshot(*args, **kwargs):
+        load_snapshot_calls.append(args)
+        return real_load_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_storage, "load_verified_source_snapshot", spy_load_snapshot)
+
+    with pytest.raises(adapter.AdapterInputError, match="unsupported_grammar_pair"):
+        adapter_storage.load_completed_adapter_audit(root, out_root, export)
+
+    assert len(load_snapshot_calls) == 0
+
+
+def test_completed_consumer_rejects_missing_grammar_pair_member(tmp_path, monkeypatch):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
+    run_id = "run_missing_pair_member"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    adapter_storage.persist_adapter_audit(
+        out_root,
+        audit_run_id=run_id,
+        snapshot=snapshot,
+        reduction=reduction,
+        semantic_extracted_at_ms=1700000050000,
+    )
+
+    summary_path = out_root / "stage1_6a_futures_delisting_source_audit_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["body_normalization_version"] = ""
+    summary_bytes = json.dumps(summary, indent=2, sort_keys=True).encode("utf-8")
+    _rehash_artifact_in_completion(out_root, "stage1_6a_futures_delisting_source_audit_summary.json", summary_bytes)
+
+    load_snapshot_calls = []
+    real_load_snapshot = adapter_storage.load_verified_source_snapshot
+
+    def spy_load_snapshot(*args, **kwargs):
+        load_snapshot_calls.append(args)
+        return real_load_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_storage, "load_verified_source_snapshot", spy_load_snapshot)
+
+    with pytest.raises(adapter.AdapterInputError, match="persisted_grammar_pair_missing"):
+        adapter_storage.load_completed_adapter_audit(root, out_root, export)
+
+    assert len(load_snapshot_calls) == 0
+
+
+def test_completed_consumer_rejects_semantic_extraction_pair_mismatch(tmp_path, monkeypatch):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
+    run_id = "run_sem_pair_mismatch"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    adapter_storage.persist_adapter_audit(
+        out_root,
+        audit_run_id=run_id,
+        snapshot=snapshot,
+        reduction=reduction,
+        semantic_extracted_at_ms=1700000050000,
+    )
+
+    sem_p = out_root / "semantic_extractions.jsonl"
+    rows = [json.loads(x) for x in sem_p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    rows[0]["body_normalization_version"] = "stage1_6a_bapi_body_tree_v1"
+    new_bytes = ("\n".join(json.dumps(r, sort_keys=True, separators=(",", ":")) for r in rows) + "\n").encode("utf-8")
+    _rehash_artifact_in_completion(out_root, "semantic_extractions.jsonl", new_bytes)
+
+    load_snapshot_calls = []
+    real_load_snapshot = adapter_storage.load_verified_source_snapshot
+
+    def spy_load_snapshot(*args, **kwargs):
+        load_snapshot_calls.append(args)
+        return real_load_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_storage, "load_verified_source_snapshot", spy_load_snapshot)
+
+    with pytest.raises(adapter.AdapterInputError, match="persisted_grammar_pair_projection_mismatch"):
+        adapter_storage.load_completed_adapter_audit(root, out_root, export)
+
+    assert len(load_snapshot_calls) == 0
+
+
+def test_completed_consumer_rejects_contract_schedule_evidence_pair_mismatch(tmp_path, monkeypatch):
+    root, export = build_valid_historical_sealed_export(tmp_path, article_specs=[trusted_article()])
+    snapshot = adapter.load_verified_source_snapshot(root, export)
+    reduction = adapter.reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000050000, grammar_pair=adapter.G2_GRAMMAR_PAIR)
+    run_id = "run_contract_evidence_pair_mismatch"
+    out_root = root / "data" / "external_signal_shadow" / "stage1_6a" / "sealed_export_source_audits" / run_id
+    adapter_storage.persist_adapter_audit(
+        out_root,
+        audit_run_id=run_id,
+        snapshot=snapshot,
+        reduction=reduction,
+        semantic_extracted_at_ms=1700000050000,
+    )
+
+    contracts_p = out_root / "delisting_contracts.jsonl"
+    rows = [json.loads(x) for x in contracts_p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    rows[0]["settlement_time"]["evidence"]["body_normalization_version"] = "stage1_6a_bapi_body_tree_v1"
+    new_bytes = ("\n".join(json.dumps(r, sort_keys=True, separators=(",", ":")) for r in rows) + "\n").encode("utf-8")
+    _rehash_artifact_in_completion(out_root, "delisting_contracts.jsonl", new_bytes)
+
+    load_snapshot_calls = []
+    real_load_snapshot = adapter_storage.load_verified_source_snapshot
+
+    def spy_load_snapshot(*args, **kwargs):
+        load_snapshot_calls.append(args)
+        return real_load_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_storage, "load_verified_source_snapshot", spy_load_snapshot)
+
+    with pytest.raises(adapter.AdapterInputError, match="persisted_grammar_pair_projection_mismatch"):
+        adapter_storage.load_completed_adapter_audit(root, out_root, export)
+
+    assert len(load_snapshot_calls) == 0
+
+
+def test_select_persisted_grammar_pair_accepts_g1_and_g2():
+    summary_g1 = {"body_normalization_version": "stage1_6a_bapi_body_tree_v1", "semantic_extractor_version": "stage1_6a_extractor_v1"}
+    completion_g1 = dict(summary_g1)
+    assert adapter_storage._select_persisted_grammar_pair(summary_g1, completion_g1) == adapter.G1_GRAMMAR_PAIR
+
+    summary_g2 = {"body_normalization_version": "stage1_6a_bapi_body_tree_v2", "semantic_extractor_version": "stage1_6a_extractor_v2"}
+    completion_g2 = dict(summary_g2)
+    assert adapter_storage._select_persisted_grammar_pair(summary_g2, completion_g2) == adapter.G2_GRAMMAR_PAIR

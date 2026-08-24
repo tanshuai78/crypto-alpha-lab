@@ -27,8 +27,35 @@ SEMANTIC_EXTRACTOR_VERSION = "stage1_6a_extractor_v1"
 CANDIDATE_DISCOVERY_RULE_VERSION = "candidate_discovery_rule_v1"
 AUDIT_METRIC_DEFINITION_VERSION = "stage1_6a_audit_metric_v1"
 
-ALLOWED_TAGS = {"a", "br", "em", "h3", "h4", "li", "p", "span", "strong", "table", "tbody", "td", "tr", "u", "ul"}
-BLOCK_TAGS = {"p", "h3", "h4", "li", "tr", "td"}
+GrammarPair = tuple[str, str]
+
+G1_GRAMMAR_PAIR: GrammarPair = (
+    "stage1_6a_bapi_body_tree_v1",
+    "stage1_6a_extractor_v1",
+)
+G2_GRAMMAR_PAIR: GrammarPair = (
+    "stage1_6a_bapi_body_tree_v2",
+    "stage1_6a_extractor_v2",
+)
+_GRAMMAR_RULES: dict[GrammarPair, tuple[frozenset[str], frozenset[str]]] = {
+    G1_GRAMMAR_PAIR: (
+        frozenset({"a", "br", "em", "h3", "h4", "li", "p", "span", "strong", "table", "tbody", "td", "tr", "u", "ul"}),
+        frozenset({"p", "h3", "h4", "li", "tr", "td"}),
+    ),
+    G2_GRAMMAR_PAIR: (
+        frozenset({"a", "br", "em", "h2", "h3", "h4", "li", "p", "span", "strong", "table", "tbody", "td", "tr", "u", "ul"}),
+        frozenset({"h2", "h3", "h4", "li", "p", "tr", "td"}),
+    ),
+}
+
+
+def grammar_rules_for_pair(grammar_pair: GrammarPair) -> tuple[frozenset[str], frozenset[str]]:
+    try:
+        return _GRAMMAR_RULES[grammar_pair]
+    except KeyError as exc:
+        raise AdapterInputError("unsupported_grammar_pair") from exc
+
+
 UTC_DT_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
 
 
@@ -54,6 +81,7 @@ class VerifiedSourceSnapshot:
 
 @dataclass(frozen=True)
 class AdapterReduction:
+    grammar_pair: GrammarPair
     candidate_manifest: Dict[str, Any]
     parent_outcomes: Tuple[Dict[str, Any], ...]
     detail_revision_projection: Tuple[Dict[str, Any], ...]
@@ -78,12 +106,15 @@ def parse_and_normalize_bapi_body(
     raw_payload: bytes,
     *,
     article_id: str,
+    grammar_pair: GrammarPair,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Parses a trusted BAPI raw payload, validates BAPI envelope grammar, and normalizes body tree.
     Returns (result_dict, None) on success, or (None, error_status) on payload quality failure.
-    Raises AdapterInputError on present string data.code mismatch.
+    Raises AdapterInputError on present string data.code mismatch or unsupported grammar pair.
     """
+    allowed_tags, block_tags = grammar_rules_for_pair(grammar_pair)
+
     try:
         envelope = json.loads(raw_payload.decode("utf-8"))
     except Exception:
@@ -151,7 +182,7 @@ def parse_and_normalize_bapi_body(
             if not keys.issubset({"node", "tag", "attr", "child"}):
                 return False
             tag = node.get("tag")
-            if tag not in ALLOWED_TAGS:
+            if tag not in allowed_tags:
                 return False
             attr = node.get("attr")
             if attr is not None and not isinstance(attr, dict):
@@ -166,7 +197,7 @@ def parse_and_normalize_bapi_body(
                 tokens.append("\n")
                 return True
 
-            is_block = tag in BLOCK_TAGS
+            is_block = tag in block_tags
             if is_block:
                 tokens.append("\n")
             if child:
@@ -485,8 +516,12 @@ def reduce_verified_snapshot(
     snapshot: VerifiedSourceSnapshot,
     *,
     semantic_extracted_at_ms: int,
+    grammar_pair: GrammarPair,
 ) -> AdapterReduction:
     """Core reducer that projects verified sealed export into exact Stage 1.6A adapter artifacts."""
+    body_normalization_version, semantic_extractor_version = grammar_pair
+    grammar_rules_for_pair(grammar_pair)
+
     sorted_discoveries = sorted(snapshot.discoveries, key=lambda r: r["source_article_id"])
 
     # 1. Candidate manifest
@@ -597,6 +632,7 @@ def reduce_verified_snapshot(
             if not matching_obs:
                 raise AdapterInputError(f"orphan_revision_without_trusted_observation: {aid}:{raw_sha}")
 
+    # 4. Process each candidate article
     parent_outcomes = []
     detail_revision_projections = []
     semantic_extractions = []
@@ -609,12 +645,11 @@ def reduce_verified_snapshot(
         obs_list = obs_by_article.get(aid, [])
         if not obs_list:
             raise AdapterInputError(f"zero_observations_for_candidate: {aid}")
-
-        trusted_obs = [o for o in obs_list if o.get("trust_validation_status") == "trusted"]
         rev_list = rev_by_article.get(aid, [])
 
+        trusted_obs = [o for o in obs_list if o.get("trust_validation_status") == "trusted"]
+
         if not trusted_obs or not rev_list:
-            # Denominator-visible detail unavailable
             parent_outcomes.append(_parent_outcome(
                 source_article_id=aid, detail_authority_status="detail_unavailable",
                 selected_detail_revision_id=None, source_integrity_parent_pass=False,
@@ -674,7 +709,7 @@ def reduce_verified_snapshot(
         raw_rel = selected_rev["raw_payload_relative_path"]
         raw_bytes = snapshot.raw_payload_bytes[raw_rel]
 
-        parsed_bapi, parse_err = parse_and_normalize_bapi_body(raw_bytes, article_id=aid)
+        parsed_bapi, parse_err = parse_and_normalize_bapi_body(raw_bytes, article_id=aid, grammar_pair=grammar_pair)
 
         if parse_err:
             parent_outcomes.append(_parent_outcome(
@@ -736,7 +771,7 @@ def reduce_verified_snapshot(
                 if other_rev["detail_revision_id"] == selected_rev_id:
                     continue
                 other_rel = other_rev["raw_payload_relative_path"]
-                other_parsed, other_err = parse_and_normalize_bapi_body(snapshot.raw_payload_bytes[other_rel], article_id=aid)
+                other_parsed, other_err = parse_and_normalize_bapi_body(snapshot.raw_payload_bytes[other_rel], article_id=aid, grammar_pair=grammar_pair)
                 if other_parsed:
                     other_match = re.search(r"(?:conduct automatic settlement|automatic settlement|close all positions and delist|will delist)[^\n\.\;]*?at\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*\(UTC\)", other_parsed["normalized_body"], re.IGNORECASE)
                     other_settle_ts = parse_utc_timestamp_ms(other_match.group(1)) if other_match else None
@@ -747,7 +782,7 @@ def reduce_verified_snapshot(
         fact_fingerprint_seed = f"{selected_rev_id}|{settle_ts}|{bapi_pub_date}"
         fact_fingerprint = hashlib.sha256(fact_fingerprint_seed.encode("utf-8")).hexdigest()
         semantic_extraction_id = hashlib.sha256(
-            f"{selected_rev_id}|{SEMANTIC_EXTRACTOR_VERSION}|{BODY_NORMALIZATION_VERSION}|{fact_fingerprint}".encode("utf-8")
+            f"{selected_rev_id}|{semantic_extractor_version}|{body_normalization_version}|{fact_fingerprint}".encode("utf-8")
         ).hexdigest()
 
         # Semantic extraction row
@@ -757,8 +792,8 @@ def reduce_verified_snapshot(
             "source_article_id": aid,
             "detail_revision_id": selected_rev_id,
             "semantic_extraction_id": semantic_extraction_id,
-            "semantic_extractor_version": SEMANTIC_EXTRACTOR_VERSION,
-            "body_normalization_version": BODY_NORMALIZATION_VERSION,
+            "semantic_extractor_version": semantic_extractor_version,
+            "body_normalization_version": body_normalization_version,
             "canonical_fact_fingerprint": fact_fingerprint,
             "normalized_body_sha256": norm_body_sha,
             "semantic_extracted_at_ms": semantic_extracted_at_ms,
@@ -830,8 +865,8 @@ def reduce_verified_snapshot(
                     "detail_revision_id": selected_rev_id,
                     "detail_raw_sha256": selected_rev["detail_raw_sha256"],
                     "semantic_extraction_id": semantic_extraction_id,
-                    "semantic_extractor_version": SEMANTIC_EXTRACTOR_VERSION,
-                    "body_normalization_version": BODY_NORMALIZATION_VERSION,
+                    "semantic_extractor_version": semantic_extractor_version,
+                    "body_normalization_version": body_normalization_version,
                     "location_kind": "normalized_text_span",
                     "location_value": settle_match.group(0),
                     "normalized_body_utf8_byte_start": len(norm_body[:settle_match.start()].encode("utf-8")),
@@ -964,6 +999,7 @@ def reduce_verified_snapshot(
     diagnostics.sort(key=lambda r: r.get("observation_identity", ""))
 
     return AdapterReduction(
+        grammar_pair=grammar_pair,
         candidate_manifest=candidate_manifest_dict,
         parent_outcomes=tuple(parent_outcomes),
         detail_revision_projection=tuple(detail_revision_projections),
@@ -998,6 +1034,8 @@ def build_precompletion_summary(
 ) -> Dict[str, Any]:
     """Builds pre-completion summary containing frozen metrics, threshold snapshot, and false authority flags."""
     import configs.base as base
+
+    body_normalization_version, semantic_extractor_version = reduction.grammar_pair
 
     total_candidates = len(reduction.parent_outcomes)
     trusted_parents = sum(1 for o in reduction.parent_outcomes if o["detail_authority_status"] == "trusted")
@@ -1097,8 +1135,8 @@ def build_precompletion_summary(
         "audit_candidate_manifest_sha256": candidate_manifest_sha256,
         "candidate_discovery_rule_version": CANDIDATE_DISCOVERY_RULE_VERSION,
         "audit_metric_definition_version": AUDIT_METRIC_DEFINITION_VERSION,
-        "body_normalization_version": BODY_NORMALIZATION_VERSION,
-        "semantic_extractor_version": SEMANTIC_EXTRACTOR_VERSION,
+        "body_normalization_version": body_normalization_version,
+        "semantic_extractor_version": semantic_extractor_version,
         "metrics": {
             "candidate_total_denominator": total_candidates,
             "trusted_parents_count": trusted_parents,

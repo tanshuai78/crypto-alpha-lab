@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from src.research.external_signal_shadow.stage1_6a_sealed_export_adapter import (
+    G2_GRAMMAR_PAIR,
     AdapterInputError,
     load_verified_source_snapshot,
     reduce_verified_snapshot,
@@ -36,7 +37,11 @@ def main() -> None:
 
         snapshot = load_verified_source_snapshot(project_root, args.source_export)
         extracted_at_ms = int(time.time() * 1000)
-        reduction = reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=extracted_at_ms)
+        reduction = reduce_verified_snapshot(
+            snapshot,
+            semantic_extracted_at_ms=extracted_at_ms,
+            grammar_pair=G2_GRAMMAR_PAIR,
+        )
         completion_path = persist_adapter_audit(
             output_root,
             audit_run_id=args.audit_run_id,

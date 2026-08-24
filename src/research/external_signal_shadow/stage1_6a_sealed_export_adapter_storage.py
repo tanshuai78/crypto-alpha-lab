@@ -10,11 +10,14 @@ from typing import Any, Dict, List
 
 from src.research.external_signal_shadow.stage1_6a_sealed_export_adapter import (
     ARTIFACT_PROFILE_VERSION,
+    G2_GRAMMAR_PAIR,
     AdapterInputError,
     AdapterReduction,
+    GrammarPair,
     VerifiedSourceSnapshot,
     build_precompletion_summary,
     deterministic_projection_view,
+    grammar_rules_for_pair,
     load_verified_source_snapshot,
     reduce_verified_snapshot,
 )
@@ -34,6 +37,57 @@ DERIVED_ARTIFACT_NAMES = [
 ]
 
 
+def _select_persisted_grammar_pair(summary: Dict[str, Any], completion: Dict[str, Any]) -> GrammarPair:
+    summary_pair = (summary.get("body_normalization_version"), summary.get("semantic_extractor_version"))
+    completion_pair = (completion.get("body_normalization_version"), completion.get("semantic_extractor_version"))
+    if any(not isinstance(value, str) or not value for value in (*summary_pair, *completion_pair)):
+        raise AdapterInputError("persisted_grammar_pair_missing")
+    if summary_pair != completion_pair:
+        raise AdapterInputError("persisted_grammar_pair_mismatch")
+    grammar_rules_for_pair(summary_pair)
+    return summary_pair
+
+
+def _validate_persisted_pair_projections(persisted_bytes: Dict[str, bytes], grammar_pair: GrammarPair) -> None:
+    body_norm_v, sem_ext_v = grammar_pair
+    # Check semantic_extractions.jsonl
+    if "semantic_extractions.jsonl" in persisted_bytes:
+        for line in persisted_bytes["semantic_extractions.jsonl"].decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception as exc:
+                raise AdapterInputError(f"malformed_semantic_extractions_jsonl: {exc}") from exc
+            if (
+                row.get("body_normalization_version") != body_norm_v
+                or row.get("semantic_extractor_version") != sem_ext_v
+            ):
+                raise AdapterInputError("persisted_grammar_pair_projection_mismatch")
+
+    # Check delisting_contracts.jsonl schedule facts evidence
+    if "delisting_contracts.jsonl" in persisted_bytes:
+        for line in persisted_bytes["delisting_contracts.jsonl"].decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception as exc:
+                raise AdapterInputError(f"malformed_delisting_contracts_jsonl: {exc}") from exc
+            for fact_key in ("settlement_time", "order_restriction", "last_trading_time", "delisting_complete_time"):
+                fact = row.get(fact_key)
+                if isinstance(fact, dict):
+                    ev = fact.get("evidence")
+                    if ev is not None:
+                        if not isinstance(ev, dict):
+                            raise AdapterInputError("persisted_grammar_pair_projection_mismatch")
+                        if (
+                            ev.get("body_normalization_version") != body_norm_v
+                            or ev.get("semantic_extractor_version") != sem_ext_v
+                        ):
+                            raise AdapterInputError("persisted_grammar_pair_projection_mismatch")
+
+
 def _write_atomic_json(target_path: Path, data: Any) -> tuple[str, int]:
     """Atomically write JSON data to file and return (sha256, byte_count)."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +105,7 @@ def _write_atomic_json(target_path: Path, data: Any) -> tuple[str, int]:
     return sha256, byte_count
 
 
-def _write_atomic_jsonl(target_path: Path, rows: List[Dict[str, Any]]) -> tuple[str, int]:
+def _write_atomic_jsonl(target_path: Path, rows: Any) -> tuple[str, int]:
     """Atomically write JSONL data to file and return (sha256, byte_count)."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(r, sort_keys=True, separators=(",", ":")) for r in rows]
@@ -77,6 +131,9 @@ def persist_adapter_audit(
     semantic_extracted_at_ms: int,
 ) -> Path:
     """Persists all derived Stage 1.6A artifacts, summary, and atomic completion manifest last."""
+    if reduction.grammar_pair != G2_GRAMMAR_PAIR:
+        raise AdapterInputError("new_writer_requires_g2_grammar_pair")
+
     if output_root.exists():
         raise AdapterInputError(f"output_root_already_exists: {output_root}")
 
@@ -313,7 +370,11 @@ def load_completed_adapter_audit(
     ):
         raise AdapterInputError("authority_flags_exact_false_required")
 
-    # 4. Load source snapshot and re-reduce
+    # 4. Validate persisted grammar pair and pair projections
+    grammar_pair = _select_persisted_grammar_pair(summary_data, manifest_data)
+    _validate_persisted_pair_projections(persisted_bytes, grammar_pair)
+
+    # 5. Load source snapshot and re-reduce
     snapshot = load_verified_source_snapshot(root, source_export)
     if snapshot.export_id != manifest_data.get("input_export_id"):
         raise AdapterInputError("input_export_id_mismatch")
@@ -338,9 +399,13 @@ def load_completed_adapter_audit(
     ):
         raise AdapterInputError("receipt_source_binding_mismatch")
 
-    rebuilt_reduction = reduce_verified_snapshot(snapshot, semantic_extracted_at_ms=1700000000000)
+    rebuilt_reduction = reduce_verified_snapshot(
+        snapshot,
+        semantic_extracted_at_ms=1700000000000,
+        grammar_pair=grammar_pair,
+    )
 
-    # 5. Exact comparison of derived projections using deterministic_projection_view
+    # 6. Exact comparison of derived projections using deterministic_projection_view
     persisted_manifest = json.loads(persisted_bytes["audit_candidate_manifest.json"].decode("utf-8"))
     if deterministic_projection_view(persisted_manifest) != deterministic_projection_view(rebuilt_reduction.candidate_manifest):
         raise AdapterInputError("candidate_manifest_projection_mismatch")
