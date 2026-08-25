@@ -28,16 +28,22 @@ execution_engine_allowed = false
 alpha_interpretation_allowed = false
 ```
 
-所有命令块都在独立 `bash` 子进程运行，避免在交互式 zsh 中使用 `set -u` 触发 `RPROMPT` 问题。任一 `STOP`、assertion failure 或非零退出码均表示不得继续下一节。
+所有命令块都在独立 `bash` 子进程运行，避免在交互式 zsh 中使用 `set -u` 触发 `RPROMPT` 问题；每个命令块自行进入 `/root/crypto-alpha-lab`，不依赖前一块的 `cd`。子进程内的变量不会自动回到交互 shell；只有 Section 2 与 Section 5 的显式 handoff 可将已验证的启动事实交给后续命令。任一 `STOP`、assertion failure 或非零退出码均表示不得继续下一节。
 
 ## 2. Target Baseline And Environment Gate
 
-在 VPS repository root 执行。将 approved commit 替换为用户本次授权的 commit；不得使用未审查的 descendant。
+先在 VPS 的交互 shell 中记录用户本次授权的 exact commit；不得使用未审查的 descendant。之后再执行下方命令块。
+
+```bash
+export DEPLOY_COMMIT='<reviewed-40-character-deployment-commit-sha>'
+```
 
 ```bash
 bash <<'BASH'
 set -euo pipefail
-export DEPLOY_COMMIT='7adc2d6f48effe3f57a94ca5d4b87a531e6fe5ef'
+: "${DEPLOY_COMMIT:?STOP: export exact reviewed DEPLOY_COMMIT before Section 2}"
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" || { echo 'STOP: DEPLOY_COMMIT mismatch' >&2; exit 1; }
 test -z "$(git status --short --untracked-files=all)" || { echo 'STOP: target worktree is dirty' >&2; exit 1; }
 PYTHONPATH=src:. .venv/bin/python -c \
@@ -53,6 +59,8 @@ BASH
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 PYTHONPATH=src:. .venv/bin/pytest -q \
   tests/research/external_signal_shadow/test_stage1_6b_canonical_source_client.py \
   tests/research/external_signal_shadow/test_stage1_6b_canonical_source_models.py \
@@ -67,12 +75,14 @@ Expected: all tests pass. A failure blocks probe and start.
 
 ## 3. Dynamic Probe Article And Target-Local V2 Attestation
 
-禁止复用本地 attestation；不得硬编码历史公告 ID。先从 target 的当前 strict selected Delisting catalog 获取一个 current `code`；它必须是 32-hex string。这个预选只生成 `PROBE_ARTICLE_ID`，实际 probe 会自行再取 index，并验证它在**probe 同次** selected catalog 中。
+禁止复用本地 attestation；不得硬编码历史公告 ID。下方单一命令块从 target 的当前 strict selected Delisting catalog 获取一个 current `code`，再以同一个 `PROBE_ARTICLE_ID` 完成 probe 和 attestation validation。它不依赖跨 shell 环境变量。
 
 ```bash
 bash <<'BASH'
 set -euo pipefail
-export PROBE_ARTICLE_ID="$(PYTHONPATH=src:. .venv/bin/python - <<'PY'
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
+PROBE_ARTICLE_ID="$(PYTHONPATH=src:. .venv/bin/python - <<'PY'
 from src.research.external_signal_shadow.stage1_6b_canonical_source_client import (
     Stage16BCanonicalClient, extract_selected_delisting_catalog,
 )
@@ -93,30 +103,17 @@ assert isinstance(article_id, str) and len(article_id) == 32 and all(c in '01234
 print(article_id.lower())
 PY
 )"
-printf 'PROBE_ARTICLE_ID=%s\n' "$PROBE_ARTICLE_ID"
-BASH
-```
-
-运行 target-local profile probe：
-
-```bash
-bash <<'BASH'
-set -euo pipefail
-: "${PROBE_ARTICLE_ID:?STOP: run the dynamic selector in Section 3 first}"
 PYTHONPATH=src:. .venv/bin/python \
   scripts/external_signal_shadow/run_stage1_6b_source_profile_probe.py \
   --probe-article-id "$PROBE_ARTICLE_ID" \
   --live-public-readonly \
   --project-root "$PWD"
-BASH
-```
-
-从 probe 输出取得 `ATTEST_PATH`，然后验证其 exact contract。`probe_attested_at_ms` 只可早于或等于稍后首启的 `run_started_at_ms`。
-
-```bash
-bash <<'BASH'
-set -euo pipefail
-: "${ATTEST_PATH:?STOP: export exact target probe output path as ATTEST_PATH}"
+ATTEST_PATH="$PWD/data/external_signal_shadow/stage1_6b/source_profile_attestations/$(PYTHONPATH=src:. .venv/bin/python - <<'PY'
+from scripts.external_signal_shadow.run_stage1_6b_source_profile_probe import compute_source_profile_sha256
+print(compute_source_profile_sha256())
+PY
+)/source_profile_probe_attestation.json"
+test -f "$ATTEST_PATH" || { echo "STOP: expected attestation is missing: $ATTEST_PATH" >&2; exit 1; }
 PYTHONPATH=src:. .venv/bin/python - "$ATTEST_PATH" <<'PY'
 import hashlib, json, re, sys
 from pathlib import Path
@@ -135,10 +132,12 @@ assert row['request_headers_profile_sha256'] == compute_request_headers_profile_
 assert isinstance(row['probe_attested_at_ms'], int) and not isinstance(row['probe_attested_at_ms'], bool)
 print({'ATTEST_PATH': str(p), 'attestation_sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'probe_attested_at_ms': row['probe_attested_at_ms']})
 PY
+printf 'PROBE_ARTICLE_ID=%s\n' "$PROBE_ARTICLE_ID"
+printf 'ATTEST_PATH=%s\n' "$ATTEST_PATH"
 BASH
 ```
 
-任何 `probe_article_id_not_in_selected_catalog`、transport failure、schema drift 或 hash mismatch 都是 STOP；不得改用历史 ID、其他 endpoint 或其他机器的 attestation。
+`probe_attested_at_ms` 只可早于或等于稍后首启的 `run_started_at_ms`。保存本节打印的 `ATTEST_PATH`，供 Section 5 的显式 handoff 使用。任何 `probe_article_id_not_in_selected_catalog`、transport failure、schema drift 或 hash mismatch 都是 STOP；不得改用历史 ID、其他 endpoint 或其他机器的 attestation。
 
 ## 4. Shared Host, Root And Session Gate
 
@@ -147,6 +146,8 @@ BASH
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 export RUN_ID="stage1_6d_live_$(date -u +%Y%m%dT%H%M%SZ)"
 export SESSION="stage1_6d_live_${RUN_ID}"
 export LIVE_ROOT="data/external_signal_shadow/stage1_6b/live_observation/${RUN_ID}"
@@ -274,9 +275,34 @@ BASH
 
 本节是**部署后**命令形状，不得在未取得明确用户授权前执行。启动时使用 tmux pane 作为日志载体；不得重定向至 live root，也不得把外部日志文件复制回 root 或 sealed export。
 
+只有 Section 2--4 均 PASS 且用户已明确授权 exact `DEPLOY_COMMIT`、host、`RUN_ID` 与 `ATTEST_PATH` 后，才可在**同一个 VPS 交互 shell**中填入 Section 3/4 的打印值，并验证启动 handoff。新开终端时只可重输这些已验证值，禁止重新生成 `RUN_ID` 或 `ATTEST_PATH`。
+
+```bash
+export ATTEST_PATH='<exact-ATTEST_PATH-printed-by-Section-3>'
+export RUN_ID='<exact-RUN_ID-printed-by-Section-4>'
+export SESSION='<exact-SESSION-printed-by-Section-4>'
+export LIVE_ROOT='<exact-LIVE_ROOT-printed-by-Section-4>'
+
+bash <<'BASH'
+set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
+: "${ATTEST_PATH:?STOP: target-local v2 attestation path is required}"
+: "${RUN_ID:?STOP: fresh RUN_ID is required}"
+: "${SESSION:?STOP: fresh SESSION is required}"
+: "${LIVE_ROOT:?STOP: fresh LIVE_ROOT is required}"
+test -f "$ATTEST_PATH" || { echo "STOP: attestation missing: $ATTEST_PATH" >&2; exit 1; }
+test "$SESSION" = "stage1_6d_live_${RUN_ID}" || { echo 'STOP: SESSION does not bind RUN_ID' >&2; exit 1; }
+test "$LIVE_ROOT" = "data/external_signal_shadow/stage1_6b/live_observation/${RUN_ID}" || { echo 'STOP: LIVE_ROOT does not bind RUN_ID' >&2; exit 1; }
+printf 'START_CONTEXT=PASS RUN_ID=%s SESSION=%s LIVE_ROOT=%s ATTEST_PATH=%s\n' "$RUN_ID" "$SESSION" "$LIVE_ROOT" "$ATTEST_PATH"
+BASH
+```
+
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 : "${ATTEST_PATH:?STOP: target-local v2 attestation path is required}"
 : "${RUN_ID:?STOP: fresh RUN_ID is required}"
 : "${SESSION:?STOP: fresh SESSION is required}"
@@ -299,9 +325,11 @@ BASH
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 : "${LIVE_ROOT:?STOP: export LIVE_ROOT}"
 : "${RUN_ID:?STOP: export RUN_ID}"
- : "${SESSION:?STOP: export SESSION}"
+: "${SESSION:?STOP: export SESSION}"
 tmux has-session -t "$SESSION"
 pgrep -af "run_stage1_6b_live_source_observer.py.*--run-id ${RUN_ID}"
 PYTHONPATH=src:. .venv/bin/python - "$LIVE_ROOT" "$RUN_ID" <<'PY'
@@ -332,6 +360,8 @@ BASH
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 : "${LIVE_ROOT:?STOP: export LIVE_ROOT}"
 PYTHONPATH=src:. .venv/bin/python - "$LIVE_ROOT" <<'PY'
 import json, sys
@@ -359,6 +389,8 @@ Normal completion requires `terminal_reason=epoch_complete` and creates one inde
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 : "${LIVE_ROOT:?STOP: export LIVE_ROOT}"
 PYTHONPATH=src:. .venv/bin/python - "$LIVE_ROOT" <<'PY'
 import json, sys
@@ -383,6 +415,8 @@ BASH
 ```bash
 bash <<'BASH'
 set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
 : "${ATTEST_PATH:?STOP: original attestation path is required}"
 : "${RUN_ID:?STOP: original RUN_ID is required}"
 : "${LIVE_ROOT:?STOP: original LIVE_ROOT is required}"
