@@ -37,7 +37,7 @@ alpha_interpretation_allowed = false
 ```bash
 bash <<'BASH'
 set -euo pipefail
-export DEPLOY_COMMIT='c98801bb99e7e0d9d472b9684db97a12f442bdb6'
+export DEPLOY_COMMIT='7adc2d6f48effe3f57a94ca5d4b87a531e6fe5ef'
 test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" || { echo 'STOP: DEPLOY_COMMIT mismatch' >&2; exit 1; }
 test -z "$(git status --short --untracked-files=all)" || { echo 'STOP: target worktree is dirty' >&2; exit 1; }
 PYTHONPATH=src:. .venv/bin/python -c \
