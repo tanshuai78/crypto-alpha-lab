@@ -1,6 +1,6 @@
 # Crypto Alpha Lab 当前文档索引 (Current Document Index)
 
-> **文档生成时间：** 2026-08-24（Stage 1.6 路线治理更新；其它历史索引条目保留原采集时间）
+> **文档生成时间：** 2026-08-25（Stage 1.6D deployment authorization/runbook governance 更新；其它历史索引条目保留原采集时间）
 > **使用说明：** 本文档为仓库中所有研究、设计、计划、审查与状态文档的**统一事实索引入口**。未来的 AI Agent 在开展任何工作前，必须遵循《10. AI 使用规则》，严禁直接以历史被替代 (superseded) 或已证伪 (falsified) 的文档指导新开发。
 
 ---
@@ -9,7 +9,7 @@
 
 | 属性 | 统计值 / 事实 | 凭据与说明 |
 |---|---|---|
-| **generated_at** | `2026-08-24` | Stage 1.6 路线治理更新日期；非全仓重新扫描 |
+| **generated_at** | `2026-08-25` | Stage 1.6D deployment authorization/runbook governance 更新日期；非全仓重新扫描 |
 | **local_commit** | `4a15c1f8ab5f1893dc409270a88e5c3b153cf682` | 本次治理开始时的 `git rev-parse HEAD` |
 | **server_git_commit** | `unknown` | 当前服务器快照未成功采集 Git commit；仅能证明三份关键部署文件 SHA256 与本地匹配 |
 | **selected_deployed_file_hash_match** | `true` | `configs/base.py`、1.5D runner、1.5F runner 与服务器文件 SHA256 匹配 |
@@ -29,7 +29,7 @@
 | **Stage 1.5F** (L2盘口观察+上线时间闸门) | [1.5F Design](../designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md) | [1.5F Terminal Hygiene Plan](../plans/2026-07-24-external-signal-shadow-lab-stage1-5f-historical-anchor-terminal-ignore-rejection-hygiene-hotfix-plan_CN.md) | [1.5F Review](../reviews/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-review_CN.md) | `implemented` | `deployed` (PID 88770) | `server_runtime_snapshot...txt:L26` |
 | **Stage 1.5G** (盘口质量离线审查) | [1.5G Design](../designs/2026-07-06-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review-design_CN.md) | [1.5G Quarantine Plan](../plans/2026-07-11-external-signal-shadow-lab-stage1-5g-raw-snapshot-quarantine-implementation-plan_CN.md) | [1.5G Clean Summary](../../data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json) | `implemented` | `implemented` (Offline) | SPCXUSD1 clean pass；SKHYUSDT quarantine pass；POPMARTUSDT invalid/quarantine candidate |
 | **Stage 1.5H** (静态只读报告生成器) | [1.5H Design](../designs/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-design_CN.md) | [1.5H Plan](../plans/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-implementation-plan_CN.md) | [1.5H Governance Review](../reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md) | `implemented` | `implemented` (Offline) | 原始 `data/stage1_5h` artifact 当前未同步进本地工作区 |
-| **Stage 1.6 Futures Delisting** | [1.6 Route Map](2026-08-24-stage1-6-futures-delisting-route-map_CN.md) | [1.6C H2 Plan](../plans/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-implementation-plan_CN.md) | [1.6C H2 Completion Audit](../reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md) | `implemented_through_1_6C` | `1_6D_not_deployed` | 历史 source audit 已通过；下一步只能是 1.6D 部署授权，不是 collector 启动 |
+| **Stage 1.6 Futures Delisting** | [1.6D Deployment Authorization Design](../designs/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-deployment-authorization-design_CN.md) | [1.6D Runbook Governance Plan](../plans/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook-governance-implementation-plan_CN.md) | [1.6C H2 Completion Audit](../reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md) | `implemented_through_1_6C` | `1_6D_not_deployed` | [Current 1.6D Runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)；下一步是 target preflight transcript，随后仍需 explicit user deployment authorization |
 
 ---
 
@@ -124,7 +124,7 @@
 4. **Stage 1.5H 静态只读报告生成链**：
    `Design (2026-07-12 Governance Design)` -> `Plan (2026-07-12 Plan)` -> `Review (2026-07-12 Review)` -> `Code (scripts/.../review_stage1_5h_*)` -> `Test (tests/.../test_review_stage1_5h_*)` -> `Deployment (Offline Report Tool)` -> `Runtime Evidence (stage1_5h...summary.json)`
 5. **Stage 1.6 Futures Delisting 历史证据与审计链**：
-   `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Live Observation (not deployed)`。
+   `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Deployment Authorization Design` -> `1.6D current runbook` -> `target preflight transcript` -> `explicit user deployment authorization` -> `1.6D Live Observation (not deployed)`。
 
 ---
 

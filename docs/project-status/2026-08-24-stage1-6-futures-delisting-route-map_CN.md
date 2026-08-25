@@ -66,12 +66,14 @@ execution_engine_allowed = false
 4. [1.6C derived-artifact schema delta](../designs/2026-08-23-external-signal-shadow-lab-stage1-6a-sealed-export-adapter-derived-artifact-schema-delta-design_CN.md)
 5. [1.6C H2 grammar delta](../designs/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-design_CN.md)
 6. [1.6C H2 completion audit](../reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md)
-7. [1.6D deployment preflight checklist](../reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md)
+7. [1.6D VPS deployment authorization Design](../designs/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-deployment-authorization-design_CN.md)
+8. [1.6D current VPS live-source-observation runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)
+9. [1.6D historical preflight reference](../reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md) (`historical_preflight_reference`; not the current procedure)
 
 旧策略路线文档保留其候选选择与优先级分析价值；其 `1.6B`、`1.6C` 等候选编号不再作为当前工程实施编号 authority。
 
 ## 5. 下一项唯一工作
 
-下一项是 **1.6D VPS live-source-observation deployment authorization**：基于既有 live observer contract，冻结当前 VPS、Stage 1.5、disk、lock、attestation 和 runbook 的实际 preflight 事实，完成审查后才可执行部署。
+下一项是 **1.6D VPS live-source-observation target preflight**：按 current runbook 记录当前 VPS、Stage 1.5 co-tenancy、disk、lock、attestation 和 `DEPLOY_COMMIT` 的实际事实；只有 transcript PASS 且用户对命名 facts 明确授权后才可执行部署。
 
 它不是重新历史回填，不是重新运行 1.6C，不是市场数据采集，不是 replay，也不是交易授权。
