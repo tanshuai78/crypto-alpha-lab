@@ -168,22 +168,107 @@ if pgrep -af 'run_stage1_6b_live_source_observer.py' >/dev/null; then
   exit 1
 fi
 
-D_ACTIVE="$(pgrep -af 'run_stage1_5d_live_event_source_smoke_collector.py' || true)"
-F_ACTIVE="$(pgrep -af 'run_stage1_5f_live_depth_observer.py' || true)"
-if [ -n "$D_ACTIVE$F_ACTIVE" ]; then
-  printf '%s\n%s\n' "$D_ACTIVE" "$F_ACTIVE"
-  echo 'STOP unless each active Stage 1.5D/F writer has a healthy official summary, no blocker, and usable shared storage lock.' >&2
-  exit 1
-fi
+python3 - <<'PY'
+import json
+import time
+from pathlib import Path
 
-echo "stage1_5_co_tenancy=absent"
+PROCESS_SPECS = {
+    "stage1_5d": {
+        "script": "scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py",
+        "summary": "live_safety_gate_summary.json",
+    },
+    "stage1_5f": {
+        "script": "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py",
+        "summary": "live_depth_observer_summary.json",
+    },
+}
+
+
+def active_roots(script: str) -> list[str]:
+    roots = []
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = [part.decode("utf-8") for part in (proc / "cmdline").read_bytes().split(b"\0") if part]
+        except OSError:
+            continue
+        if script not in argv:
+            continue
+        try:
+            roots.append(argv[argv.index("--output-root") + 1])
+        except (ValueError, IndexError) as exc:
+            raise SystemExit(f"STOP: active writer has no --output-root: pid={proc.name}") from exc
+    if len(roots) != len(set(roots)):
+        raise SystemExit(f"STOP: duplicate active writer root for {script}: {roots}")
+    return roots
+
+
+def load(root: str, summary_name: str) -> dict:
+    path = Path(root) / summary_name
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"STOP: unreadable active-writer summary: {path}: {exc}") from exc
+
+
+def verify(stage: str, root: str) -> int:
+    summary = load(root, PROCESS_SPECS[stage]["summary"])
+    if stage == "stage1_5d":
+        assert summary.get("status") == "READY", summary
+        assert summary.get("decision") == "stage1_5d_runtime_gate_ready", summary
+        assert summary.get("consumable_by_stage1_5f") is True, summary
+        assert summary.get("fatal_blockers") in (None, []), summary
+    else:
+        assert summary.get("consumer_runtime_attestation_verified") is True, summary
+        assert summary.get("consumer_runtime_attestation_compromised") is False, summary
+        assert summary.get("block_new_event_admission") is False, summary
+        assert summary.get("blocker") is None, summary
+    assert summary.get("storage_guard_status") == "ready", summary
+    assert summary.get("storage_blocker") is None, summary
+    heartbeat = summary.get("last_heartbeat_at_ms")
+    assert isinstance(heartbeat, int) and heartbeat > 0, summary
+    return heartbeat
+
+
+active = {
+    stage: active_roots(spec["script"])
+    for stage, spec in PROCESS_SPECS.items()
+}
+if not any(active.values()):
+    print("stage1_5_co_tenancy=absent")
+    raise SystemExit(0)
+
+first = {
+    (stage, root): verify(stage, root)
+    for stage, roots in active.items()
+    for root in roots
+}
+print({"stage1_5_co_tenancy": "observing", "roots": active, "heartbeats": first})
+time.sleep(70)
+second = {
+    (stage, root): verify(stage, root)
+    for stage, roots in active.items()
+    for root in roots
+}
+for key, first_heartbeat in first.items():
+    assert second[key] > first_heartbeat, {
+        "STOP": "active Stage 1.5 heartbeat did not advance in 70 seconds",
+        "writer": key,
+        "first": first_heartbeat,
+        "second": second[key],
+    }
+print({"stage1_5_co_tenancy": "healthy", "roots": active, "heartbeats": second})
+PY
+
 # flock tests ownership; a pre-existing lock-file path alone is not an error and must never be deleted.
 flock -n "$SHARED_LOCK" -c 'true' || { echo "STOP: shared lock is currently held: $SHARED_LOCK" >&2; exit 1; }
 printf 'RUN_ID=%s\nSESSION=%s\nLIVE_ROOT=%s\n' "$RUN_ID" "$SESSION" "$LIVE_ROOT"
 BASH
 ```
 
-如果 1.5D/F active，停止在这里，先在其各自 root 验证 runtime gate/summary、heartbeat、storage 与 `blocker=null`，并确认 shared lock 没有被异常持有；通过后才可重新执行本节。不能通过删除 `.stage1_5_storage_guard.lock` 或任何 1.5 root 来绕过。
+若 1.5D/F active，本节会从 `/proc/*/cmdline` 精确读取其 `--output-root`，在 70 秒窗口内两次验证 official summary、heartbeat、storage、attestation 与 blocker 状态。仅当每个 active writer 的 heartbeat 前进且共享锁当前可用时，输出 `stage1_5_co_tenancy=healthy` 并继续；任何解析、summary、heartbeat 或 lock failure 都是 STOP。不能通过删除 `.stage1_5_storage_guard.lock` 或任何 1.5 root 来绕过。
 
 ## 5. Production Start Contract
 
