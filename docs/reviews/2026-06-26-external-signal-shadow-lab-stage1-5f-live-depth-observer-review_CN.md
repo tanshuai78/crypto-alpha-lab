@@ -334,7 +334,7 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 # 粘贴第 7.2 节输出的精确 40 位 SHA；不得复用文档历史示例 SHA。
-export DEPLOY_COMMIT="483fcc98b9741e4458f0bbe970ce587c42aaee75"
+export DEPLOY_COMMIT="<paste-exact-reviewed-40-character-commit-sha>"
 DEPLOY_READY=1
 
 if [ "${#DEPLOY_COMMIT}" -ne 40 ]; then
@@ -670,6 +670,173 @@ ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
 ```
 
 正常首检：1.5D 为 `READY` / `stage1_5d_runtime_gate_ready`；三个 `source_stage1_5d_*_root_id` 全部相同且绑定新 D root；1.5F runtime attestation 为 true、`block_new_event_admission=false`。若任一断言失败，停止新会话、保留所有新旧 root，定位后再重新部署。
+
+### 7.8A 2026-08-26 Fresh 1.5D/1.5F Restart
+
+**事实：** 旧 1.5D epoch 已达到 `--max-seconds 604800`，旧 1.5F 已失去新鲜 D runtime gate，且当前 `active_observation_count=0`。本节创建新的 D/F root，不复用或补写旧 root。
+
+**限制：** 新 F root 在 D gate 通过后才 bootstrap；D-only 的约 130 秒窗口内出现的公告会被新 F watermark 视为 pre-bootstrap 数据，不可作为 formal depth evidence。不得为缩小窗口而复用旧 F root 或放宽 watermark。
+
+先完成 Section 7.2--7.4 的本地测试、push、服务器 exact `DEPLOY_COMMIT` checkout；确认 VPS 当前 `git status --short` 为空后，在 VPS 交互 shell 填入该 SHA 并执行以下单一命令块。它使用现有 Section 7.5 的精确 tmux stop 方式，仅停止已验证无 active observation 的旧 F session；任何失败均保留新旧 root。
+
+```bash
+export DEPLOY_COMMIT='<exact-reviewed-40-character-commit-sha>'
+
+bash <<'BASH'
+set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
+: "${DEPLOY_COMMIT:?STOP: export exact reviewed DEPLOY_COMMIT first}"
+test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" || { echo 'STOP: DEPLOY_COMMIT mismatch' >&2; exit 1; }
+test -z "$(git status --short --untracked-files=all)" || { echo 'STOP: target worktree is dirty' >&2; exit 1; }
+PYTHONPATH=src:. .venv/bin/python -c 'from configs import base; assert base.RISK_LIVE_TRADING_ENABLED is False'
+
+OLD_F_SESSION='stage1_5f_live_depth_7d_formal_v2_anchor_source_lineage_projection_hotfix'
+OLD_F_ROOT='data/external_signal_shadow/stage1_5f/live_depth_observer_20260821T040942Z_7d_formal_v2_anchor_source_lineage_projection_hotfix'
+test -f "$OLD_F_ROOT/live_depth_observer_summary.json" || { echo "STOP: old F summary missing: $OLD_F_ROOT" >&2; exit 1; }
+PYTHONPATH=src:. .venv/bin/python - "$OLD_F_ROOT" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+summary_path = root / 'live_depth_observer_summary.json'
+summary = json.loads(summary_path.read_text(encoding='utf-8'))
+assert summary.get('active_observation_count') == 0, summary
+assert summary.get('block_new_event_admission') is True, summary
+assert summary.get('consumer_runtime_attestation_compromised') is True, summary
+print({
+    'old_f_root': str(root),
+    'old_f_summary_sha256': hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+    'old_f_active_observation_count': summary['active_observation_count'],
+    'old_f_block_new_event_admission': summary['block_new_event_admission'],
+})
+PY
+tmux has-session -t "$OLD_F_SESSION" || { echo "STOP: expected old F session is absent: $OLD_F_SESSION" >&2; exit 1; }
+tmux kill-session -t "$OLD_F_SESSION"
+
+has_python_writer() {
+  ps -eo comm=,args= | awk '$1 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/) {found=1} END {exit !found}'
+}
+WRITERS_STOPPED=0
+for _ in $(seq 1 30); do
+  if ! has_python_writer; then
+    WRITERS_STOPPED=1
+    break
+  fi
+  sleep 1
+done
+test "$WRITERS_STOPPED" = 1 || { echo 'STOP: existing Stage 1.5 Python writer is still running' >&2; exit 1; }
+
+python3 - <<'PY'
+import shutil
+required = 8 * 1024 * 1024 * 1024
+free = shutil.disk_usage('.').free
+print({'storage_free_bytes': free, 'required_start_free_bytes': required})
+assert free >= required, 'STOP: host free space is below 8 GiB'
+PY
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+D_SUFFIX='7d_detail_retry_cycle_active_root_recovery_hotfix'
+F_SUFFIX='7d_formal_v2_anchor_source_lineage_projection_hotfix'
+D_SESSION="stage1_5d_continuous_${RUN_ID}_${D_SUFFIX}"
+F_SESSION="stage1_5f_live_depth_${RUN_ID}_${F_SUFFIX}"
+D_ROOT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${D_SUFFIX}"
+F_ROOT="data/external_signal_shadow/stage1_5f/live_depth_observer_${RUN_ID}_${F_SUFFIX}"
+STAGE1_5E_SUMMARY='data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json'
+
+test ! -e "$D_ROOT" && test ! -e "$F_ROOT" || { echo 'STOP: fresh root already exists' >&2; exit 1; }
+if tmux has-session -t "$D_SESSION" 2>/dev/null; then
+  echo 'STOP: target D session exists' >&2
+  exit 1
+fi
+if tmux has-session -t "$F_SESSION" 2>/dev/null; then
+  echo 'STOP: target F session exists' >&2
+  exit 1
+fi
+test -f "$STAGE1_5E_SUMMARY" || { echo "STOP: Stage 1.5E summary missing: $STAGE1_5E_SUMMARY" >&2; exit 1; }
+
+tmux new-session -d -s "$D_SESSION" \
+  "cd /root/crypto-alpha-lab && exec env PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py --stage1-5c1-summary data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json --stage1-5c-summary data/external_signal_shadow/stage1_5c/external_catalyst_replay_summary.json --output-root '$D_ROOT' --output-summary '$D_ROOT/binance_futures_launch_smoke_summary.json' --poll-interval-sec 60 --max-seconds 604800 --live-public-readonly"
+
+sleep 130
+PYTHONPATH=src:. .venv/bin/python - "$D_ROOT/live_safety_gate_summary.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+assert path.is_file(), f'STOP: missing D runtime gate: {path}'
+gate = json.loads(path.read_text(encoding='utf-8'))
+assert gate.get('status') == 'READY', gate
+assert gate.get('decision') == 'stage1_5d_runtime_gate_ready', gate
+assert gate.get('consumable_by_stage1_5f') is True, gate
+assert gate.get('fatal_blockers') in (None, []), gate
+assert gate.get('storage_guard_status') == 'ready', gate
+assert gate.get('storage_blocker') is None, gate
+print({'d_gate': 'PASS', 'successful_poll_count': gate.get('successful_poll_count')})
+PY
+
+PYTHONPATH=src:. .venv/bin/python - "$D_ROOT" <<'PY'
+import glob
+import sys
+
+paths = sorted(glob.glob(f'{sys.argv[1]}/events/*.jsonl'))
+print({'stage1_5d_events_glob_hit_count': len(paths), 'tail': paths[-3:]})
+assert paths, 'STOP: wait for Stage 1.5D to create events/*.jsonl'
+PY
+
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  --stage1-5d-events-glob "$D_ROOT/events/*.jsonl" \
+  --stage1-5d-runtime-gate "$D_ROOT/live_safety_gate_summary.json" \
+  --stage1-5e-summary "$STAGE1_5E_SUMMARY" \
+  --output-root "$F_ROOT" \
+  --bootstrap-watermark
+
+tmux new-session -d -s "$F_SESSION" \
+  "cd /root/crypto-alpha-lab && exec env PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py --stage1-5d-events-glob '$D_ROOT/events/*.jsonl' --stage1-5d-runtime-gate '$D_ROOT/live_safety_gate_summary.json' --stage1-5e-summary '$STAGE1_5E_SUMMARY' --output-root '$F_ROOT' --live-public-readonly"
+
+sleep 90
+PYTHONPATH=src:. .venv/bin/python - "$D_ROOT" "$F_ROOT" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+d_root = Path(sys.argv[1]).resolve()
+f_root = Path(sys.argv[2]).resolve()
+gate = json.loads((d_root / 'live_safety_gate_summary.json').read_text(encoding='utf-8'))
+contract = json.loads((f_root / 'observer_root_contract.json').read_text(encoding='utf-8'))
+summary = json.loads((f_root / 'live_depth_observer_summary.json').read_text(encoding='utf-8'))
+d_root_id = hashlib.sha256(str(d_root).encode()).hexdigest()
+assert gate.get('status') == 'READY', gate
+assert gate.get('decision') == 'stage1_5d_runtime_gate_ready', gate
+assert all(contract.get(key) == d_root_id for key in (
+    'source_stage1_5d_output_root_id',
+    'source_stage1_5d_events_root_id',
+    'source_stage1_5d_runtime_gate_root_id',
+)), contract
+assert contract.get('consumer_static_attestation_verified') is True, contract
+assert summary.get('consumer_runtime_attestation_verified') is True, summary
+assert summary.get('consumer_runtime_attestation_compromised') is False, summary
+assert summary.get('block_new_event_admission') is False, summary
+assert summary.get('storage_guard_status') == 'ready', summary
+assert summary.get('storage_blocker') is None, summary
+print({
+    'fresh_d_root': str(d_root),
+    'fresh_f_root': str(f_root),
+    'd_successful_poll_count': gate.get('successful_poll_count'),
+    'f_block_new_event_admission': summary.get('block_new_event_admission'),
+    'f_storage_root_bytes': summary.get('storage_root_bytes'),
+})
+PY
+printf 'FRESH_RESTART=PASS DEPLOY_COMMIT=%s D_SESSION=%s F_SESSION=%s D_ROOT=%s F_ROOT=%s\n' \
+  "$DEPLOY_COMMIT" "$D_SESSION" "$F_SESSION" "$D_ROOT" "$F_ROOT"
+BASH
+```
+
+输出 `FRESH_RESTART=PASS` 后，保存新的 D/F root 和 session 名，再使用已更新的 Stage 1.6D Runbook Section 4 验证 co-tenancy。若本节任何 gate 失败，不自动重试、不启动第二 writer；保留 root 与 tmux 输出，先定位失败原因。
 
 ### 7.9 Active-Root Recovery Cutover Runbook (Non-Executable by Default)
 

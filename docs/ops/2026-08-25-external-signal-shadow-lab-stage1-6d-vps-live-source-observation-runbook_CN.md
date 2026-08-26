@@ -195,6 +195,10 @@ def active_roots(script: str) -> list[str]:
             argv = [part.decode("utf-8") for part in (proc / "cmdline").read_bytes().split(b"\0") if part]
         except OSError:
             continue
+        # tmux retains its first new-session command in argv after that pane exits.
+        # Only an interpreter process is an active Stage 1.5 writer.
+        if not argv or not Path(argv[0]).name.startswith("python"):
+            continue
         if script not in argv:
             continue
         try:
@@ -269,7 +273,9 @@ printf 'RUN_ID=%s\nSESSION=%s\nLIVE_ROOT=%s\n' "$RUN_ID" "$SESSION" "$LIVE_ROOT"
 BASH
 ```
 
-若 1.5D/F active，本节会从 `/proc/*/cmdline` 精确读取其 `--output-root`，在 70 秒窗口内两次验证 official summary、heartbeat、storage、attestation 与 blocker 状态。仅当每个 active writer 的 heartbeat 前进且共享锁当前可用时，输出 `stage1_5_co_tenancy=healthy` 并继续；任何解析、summary、heartbeat 或 lock failure 都是 STOP。不能通过删除 `.stage1_5_storage_guard.lock` 或任何 1.5 root 来绕过。
+若 1.5D/F active，本节只接受实际 Python interpreter process，并从其 `/proc/*/cmdline` 精确读取 `--output-root`；tmux server 保留的历史 `new-session` 参数不构成 active writer。在 70 秒窗口内两次验证 official summary、heartbeat、storage、attestation 与 blocker 状态。仅当每个 active writer 的 heartbeat 前进且共享锁当前可用时，输出 `stage1_5_co_tenancy=healthy` 并继续；任何解析、summary、heartbeat 或 lock failure 都是 STOP。不能通过删除 `.stage1_5_storage_guard.lock` 或任何 1.5 root 来绕过。
+
+本 runbook 不停止或重启 Stage 1.5。若实际 active 的 1.5 writer 不健康，必须保留其 root，并按该 stage 自己的结束或恢复授权处理；不得用 `kill -9`、删除 tmux server 或修改其 durable state 来把 co-tenancy 伪造为 absent。
 
 ## 5. Production Start Contract
 
