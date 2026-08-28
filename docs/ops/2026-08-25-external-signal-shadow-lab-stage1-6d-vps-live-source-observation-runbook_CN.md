@@ -15,7 +15,11 @@
 
 本 runbook 只编排既有的 public-read-only source probe 和 live observer。它不修改代码、配置、阈值或历史 evidence root。
 
+> [!CAUTION]
+> **历史事故根隔离铁律**: 2026-08-26 事故 live 目录 `stage1_6d_live_20260826T031333Z` 属于只读冻结 incident baseline，严禁对其执行 `--resume`、修改或覆盖。任何新启动必须分配全新 `RUN_ID`。
+
 完成全部 preflight 也**不等于**允许启动。只有下列内容在同一 target transcript 中全部 PASS 后，用户才能另行授权一个明确的 `DEPLOY_COMMIT`、host、`RUN_ID` 和 `ATTEST_PATH`：
+
 
 ```text
 point_in_time_source_validated = false
@@ -322,7 +326,7 @@ printf 'STARTED_SESSION=%s\nSTARTED_ROOT=%s\n' "$SESSION" "$LIVE_ROOT"
 BASH
 ```
 
-首个 production epoch 不得传 `--resume`、`--max-polls` 或短于 7 天的 `--max-seconds`。既有 runner 默认以 300 秒单线程顺序轮询，且 epoch 上限为 7 天。tmux pane 可用 `tmux attach -t "$SESSION"` 观察；任何外部持久化日志只能位于 live root family 之外且不是 evidence。
+首个 production epoch 不得传 `--resume`、`--max-polls` 或短于 7 天的 `--max-seconds`。既有 runner 默认以 300 秒单线程顺序轮询，每次 poll 最多顺序抓取 4 个 detail（`EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL = 4`，FIFO 突发队列调度），且 epoch 上限为 7 天。tmux pane 可用 `tmux attach -t "$SESSION"` 观察；任何外部持久化日志只能位于 live root family 之外且不是 evidence。
 
 ## 6. Running Health Gate
 
@@ -346,12 +350,13 @@ run_id = sys.argv[2]
 checkpoint = root / 'observer_checkpoint.json'
 assert checkpoint.is_file(), f'STOP: missing checkpoint: {checkpoint}'
 row = json.loads(checkpoint.read_text(encoding='utf-8'))
-assert row['schema_version'] == 'stage1_6b_observer_checkpoint_v2'
+assert row['schema_version'] == 'stage1_6b_observer_checkpoint_v3'
 assert row['run_id'] == run_id
 assert row['capture_mode'] == 'live_observed'
 assert row['source_profile_id'] == 'binance_public_web_bapi_en_delisting_catalog_v2'
 assert (root / '.stage1_6b_writer.lock').exists()
 assert not (root / 'terminal_status.json').exists(), 'STOP: root is terminal; use Section 7'
+assert row.get('pending_terminal_failure_reason') is None, 'STOP: root has pending terminal failure intent'
 print({'live_checkpoint_id': row['checkpoint_id'], 'poll_seq': row['poll_seq'], 'accounted_root_bytes': row['accounted_root_bytes']})
 PY
 BASH
@@ -378,7 +383,7 @@ terminal = json.loads((root / 'terminal_status.json').read_text(encoding='utf-8'
 assert terminal['schema_version'] == 'stage1_6b_terminal_status_v1'
 assert terminal['capture_mode'] == 'live_observed'
 assert terminal['status'] == 'complete'
-assert terminal['terminal_reason'] == 'epoch_complete'
+assert terminal['terminal_reason'] in ('epoch_complete', 'test_bound')
 exports = sorted((root / 'sealed_exports').glob('*/sealed_export_manifest.json'))
 assert len(exports) == 1, exports
 manifest = load_sealed_export(exports[0].parent)
@@ -388,9 +393,18 @@ PY
 BASH
 ```
 
-Normal completion requires `terminal_reason=epoch_complete` and creates one independent sealed evidence unit. It does not grant any PIT, market-data, replay, alpha or trading conclusion.
+Normal completion requires `terminal_reason=epoch_complete` (或测试环境 `test_bound`) and creates one independent sealed evidence unit. It does not grant any PIT, market-data, replay, alpha or trading conclusion.
 
 ### 7.2 Failure terminal
+
+受控终态包含以下 4 种 failure 模式和 1 种 operator stop：
+1. `detail_first_attempt_deadline_missed`: Lane A 候选 detail 首次抓取超过准入时分配的 SLA 截止 poll_seq（排队延迟或抓取饿死）。
+2. `pending_detail_candidate_capacity_exceeded`: 待抓取候选队列超过容量上限（`EXTERNAL_SIGNAL_STAGE1_6B_MAX_PENDING_DETAIL_CANDIDATES = 500`）。
+3. `source_profile_schema_drift`: Binance API 响应 schema 结构或 catalog 漂移，记录 `malformed_index_schema` 降级检查点。
+4. `storage_exhausted`: 写入触发磁盘存储保护阻断。`root_budget_exceeded` 与 `host_reserve_exceeded` 仅可作为 guard diagnostic，不能写入 terminal reason。
+5. `operator_stop`: 操作员发送 SIGINT/SIGTERM/Ctrl+C 触发的主动优雅终止（`status="complete"`, `terminal_reason="operator_stop"`，不封存）。
+
+所有 failure 终态均**严禁封存** (`sealed_exports/` 不存在)，保留未封存 live evidence root 供事后审计：
 
 ```bash
 bash <<'BASH'
@@ -403,20 +417,18 @@ import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
 terminal = json.loads((root / 'terminal_status.json').read_text(encoding='utf-8'))
-assert terminal['status'] == 'failure'
+assert terminal['status'] in ('failure', 'complete')
 assert not list((root / 'sealed_exports').glob('*/sealed_export_manifest.json'))
-print({'failure_terminal_reason': terminal['terminal_reason'], 'action': 'preserve_root_and_stop'})
+print({'terminal_reason': terminal['terminal_reason'], 'status': terminal['status'], 'action': 'preserve_root_and_stop'})
 PY
 BASH
 ```
 
-特别是 `source_profile_schema_drift`：保留 evidence，禁止 endpoint/field alias retry，另行走 source-contract Design。
+特别是 `source_profile_schema_drift` 或 SLA/Capacity failure：保留 evidence，禁止手工篡改，另行走 source-contract Design。
 
 ### 7.3 Interrupted root and controlled resume
 
-人工 cancellation 没有已实现的 graceful terminal handler。禁止手工写 `terminal_status.json`、删除 lock/checkpoint/attestation/raw payload 或重新创建同名 root。
-
-只在另行明确授权后，且 root 无 terminal、无 sealed export、原 attestation SHA 与 capture contract 完全一致时，才可按既有 runner `--resume` 分支恢复。它在 client/network 前必须先写 reconciliation checkpoint：
+只在另行明确授权后，且 root 无 terminal、无 sealed export、原 attestation SHA 与 capture contract 完全一致，且检查点 schema 为 `stage1_6b_observer_checkpoint_v3` 且 `pending_terminal_failure_reason` 为 null 时，才可按既有 runner `--resume` 分支恢复。它在 client/network 前必须先写 reconciliation checkpoint：
 
 ```bash
 bash <<'BASH'
@@ -439,6 +451,7 @@ PYTHONPATH=src:. .venv/bin/python \
   --project-root "$PWD"
 BASH
 ```
+
 
 ## 8. No-Start / Rollback Rule
 

@@ -23,11 +23,14 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     compute_request_headers_profile_sha256,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_observer import (
+    ObserverCapacityError,
+    ObserverSLAError,
     Stage16BObserver,
     Stage16BSchemaDriftError,
 )
 from src.research.external_signal_shadow.stage1_6b_canonical_source_storage import (
     RootWriterLock,
+    Stage16BStorageBlocked,
     Stage16BStorageGuard,
     copy_probe_attestation_to_root,
     reconcile_and_write_checkpoint,
@@ -41,7 +44,52 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_storage impo
 
 class LiveObserverRunnerError(RuntimeError):
     """Raised when live observer runner encounters a fatal error."""
+
     pass
+
+
+def _terminate_known_failure(
+    *,
+    root: Path,
+    guard: Stage16BStorageGuard,
+    observer: Stage16BObserver,
+    run_id: str,
+    terminal_reason: str,
+    cause: Exception,
+) -> None:
+    """Record a known failure without letting an ordinary write block terminal authority."""
+    now_ms = int(time.time() * 1000)
+    final_checkpoint_id = observer.prior_checkpoint_id
+    intent_error: Optional[Exception] = None
+    try:
+        observer.write_failure_intent_checkpoint(
+            now_ms=now_ms,
+            failure_reason=terminal_reason,
+        )
+        final_checkpoint_id = observer.prior_checkpoint_id
+    except Exception as exc:
+        intent_error = exc
+
+    terminal = TerminalStatusRecord(
+        schema_version="stage1_6b_terminal_status_v1",
+        run_id=run_id,
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        status="failure",
+        terminal_reason=terminal_reason,
+        final_checkpoint_id=final_checkpoint_id,
+        terminated_at_ms=now_ms,
+    )
+    try:
+        write_terminal_status(root, terminal, guard, observer.accounted_root_bytes)
+    except Exception as terminal_error:
+        state = "interrupted" if intent_error is not None else "interrupted_nonresumable"
+        raise LiveObserverRunnerError(
+            f"{terminal_reason}: {state}: {terminal_error}"
+        ) from terminal_error
+
+    suffix = f"; failure_intent_write_failed: {intent_error}" if intent_error else ""
+    raise LiveObserverRunnerError(f"{terminal_reason}: {cause}{suffix}") from cause
 
 
 def run_live_source_observer(
@@ -57,7 +105,9 @@ def run_live_source_observer(
 ) -> Path:
     """Run Stage 1.6B live observation loop under lifetime writer lock."""
     if not live_public_readonly:
-        raise ValueError("live_public_readonly_required: must explicitly supply --live-public-readonly")
+        raise ValueError(
+            "live_public_readonly_required: must explicitly supply --live-public-readonly"
+        )
 
     epoch_max_sec = base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_EPOCH_MAX_SECONDS
     if max_seconds is not None and max_seconds > epoch_max_sec:
@@ -74,7 +124,9 @@ def run_live_source_observer(
         raise ValueError(f"attestation_schema_mismatch: {att_data.get('schema_version')}")
 
     if att_data.get("source_profile_id") != SOURCE_PROFILE_ID:
-        raise ValueError(f"attestation_profile_mismatch: {att_data.get('source_profile_id')} != {SOURCE_PROFILE_ID}")
+        raise ValueError(
+            f"attestation_profile_mismatch: {att_data.get('source_profile_id')} != {SOURCE_PROFILE_ID}"
+        )
 
     expected_headers_sha = compute_request_headers_profile_sha256()
     if att_data.get("request_headers_profile_sha256") != expected_headers_sha:
@@ -86,8 +138,18 @@ def run_live_source_observer(
     att_sha256 = hashlib.sha256(validated_att_path.read_bytes()).hexdigest()
 
     # 2. Output root validation
-    effective_run_id = run_id or f"live_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    run_root = p_root / "data" / "external_signal_shadow" / "stage1_6b" / "live_observation" / effective_run_id
+    effective_run_id = (
+        run_id
+        or f"live_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    )
+    run_root = (
+        p_root
+        / "data"
+        / "external_signal_shadow"
+        / "stage1_6b"
+        / "live_observation"
+        / effective_run_id
+    )
     validated_root = validate_run_root_path(
         run_root,
         capture_mode=CaptureMode.LIVE_OBSERVED.value,
@@ -137,7 +199,9 @@ def run_live_source_observer(
                 or hashlib.sha256(copied_attestation_path.read_bytes()).hexdigest() != att_sha256
             ):
                 raise ValueError("cannot_resume_run_contract_or_attestation_mismatch")
-            recovered_checkpoint, recovered_root_bytes = reconcile_and_write_checkpoint(validated_root, guard)
+            recovered_checkpoint, recovered_root_bytes = reconcile_and_write_checkpoint(
+                validated_root, guard
+            )
 
         client = Stage16BCanonicalClient(live_public_readonly=True, opener=opener)
         observer = Stage16BObserver(
@@ -156,7 +220,11 @@ def run_live_source_observer(
 
         # Compute deadlines
         epoch_deadline_ms = run_started_at_ms + int(epoch_max_sec * 1000)
-        max_sec_deadline_ms = run_started_at_ms + int(max_seconds * 1000) if max_seconds is not None else epoch_deadline_ms
+        max_sec_deadline_ms = (
+            run_started_at_ms + int(max_seconds * 1000)
+            if max_seconds is not None
+            else epoch_deadline_ms
+        )
         effective_deadline_ms = min(epoch_deadline_ms, max_sec_deadline_ms)
 
         polls_executed = 0
@@ -198,31 +266,91 @@ def run_live_source_observer(
 
             # 5. Seal export
             seal_export(validated_root, guard, observer.accounted_root_bytes)
+        except ObserverSLAError as sla_err:
+            err_code = getattr(sla_err, "code", None)
+            if err_code != "detail_first_attempt_deadline_missed":
+                raise LiveObserverRunnerError(f"unmapped_observer_sla_error:{err_code}") from sla_err
+            _terminate_known_failure(
+                root=validated_root,
+                guard=guard,
+                observer=observer,
+                run_id=effective_run_id,
+                terminal_reason=err_code,
+                cause=sla_err,
+            )
+        except ObserverCapacityError as cap_err:
+            err_code = getattr(cap_err, "code", None)
+            if err_code != "pending_detail_candidate_capacity_exceeded":
+                raise LiveObserverRunnerError(
+                    f"unmapped_observer_capacity_error:{err_code}"
+                ) from cap_err
+            _terminate_known_failure(
+                root=validated_root,
+                guard=guard,
+                observer=observer,
+                run_id=effective_run_id,
+                terminal_reason=err_code,
+                cause=cap_err,
+            )
         except Stage16BSchemaDriftError as drift_err:
+            err_code = getattr(drift_err, "code", None)
+            if err_code != "source_profile_schema_drift":
+                raise LiveObserverRunnerError(
+                    f"unmapped_observer_schema_error:{err_code}"
+                ) from drift_err
+            _terminate_known_failure(
+                root=validated_root,
+                guard=guard,
+                observer=observer,
+                run_id=effective_run_id,
+                terminal_reason=err_code,
+                cause=drift_err,
+            )
+        except Stage16BStorageBlocked as storage_err:
+            _terminate_known_failure(
+                root=validated_root,
+                guard=guard,
+                observer=observer,
+                run_id=effective_run_id,
+                terminal_reason="storage_exhausted",
+                cause=storage_err,
+            )
+        except KeyboardInterrupt:
+            now_ms = int(time.time() * 1000)
             term_rec = TerminalStatusRecord(
                 schema_version="stage1_6b_terminal_status_v1",
                 run_id=effective_run_id,
                 capture_mode=CaptureMode.LIVE_OBSERVED.value,
                 source_profile_id=SOURCE_PROFILE_ID,
-                status="failure",
-                terminal_reason="source_profile_schema_drift",
+                status="complete",
+                terminal_reason=TerminalReason.OPERATOR_STOP.value,
                 final_checkpoint_id=observer.prior_checkpoint_id,
-                terminated_at_ms=int(time.time() * 1000),
+                terminated_at_ms=now_ms,
             )
             write_terminal_status(validated_root, term_rec, guard, observer.accounted_root_bytes)
-            raise LiveObserverRunnerError(f"source_profile_schema_drift: {drift_err}") from drift_err
 
     return validated_root
 
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 1.6B Live Source Observer Runner")
-    parser.add_argument("--source-profile-attestation", type=Path, required=True, help="Path to attested probe JSON")
-    parser.add_argument("--live-public-readonly", action="store_true", default=False, help="Explicit readonly network permission")
+    parser.add_argument(
+        "--source-profile-attestation", type=Path, required=True, help="Path to attested probe JSON"
+    )
+    parser.add_argument(
+        "--live-public-readonly",
+        action="store_true",
+        default=False,
+        help="Explicit readonly network permission",
+    )
     parser.add_argument("--run-id", type=str, default=None, help="Optional run ID")
-    parser.add_argument("--resume", action="store_true", default=False, help="Resume existing unsealed run")
+    parser.add_argument(
+        "--resume", action="store_true", default=False, help="Resume existing unsealed run"
+    )
     parser.add_argument("--max-polls", type=int, default=None, help="Optional poll execution limit")
-    parser.add_argument("--max-seconds", type=int, default=None, help="Optional time execution limit")
+    parser.add_argument(
+        "--max-seconds", type=int, default=None, help="Optional time execution limit"
+    )
     parser.add_argument("--project-root", type=Path, default=None, help="Root path of the project")
 
     args = parser.parse_args()

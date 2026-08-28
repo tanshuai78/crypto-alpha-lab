@@ -37,8 +37,13 @@ def test_stage1_6b_ssot_constants_in_configs_base():
     """Verify all 16 Stage 1.6B SSOT constants exist in configs/base.py with exact types and values."""
     assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_POLL_INTERVAL_SEC == 300
     assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_ROOT_MAX_BYTES == 256 * 1024 * 1024
-    assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_ROOT_ORDINARY_CONTROL_PLANE_RESERVE_BYTES == 4 * 1024 * 1024
-    assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_ROOT_EMERGENCY_BLOCKER_RESERVE_BYTES == 1 * 1024 * 1024
+    assert (
+        base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_ROOT_ORDINARY_CONTROL_PLANE_RESERVE_BYTES
+        == 4 * 1024 * 1024
+    )
+    assert (
+        base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_ROOT_EMERGENCY_BLOCKER_RESERVE_BYTES == 1 * 1024 * 1024
+    )
     assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_TERMINAL_WRITE_SET_MAX_PEAK_BYTES == 256 * 1024
     assert base.EXTERNAL_SIGNAL_STAGE1_6B_MAX_RAW_PAYLOAD_BYTES == 2_000_000
     assert base.EXTERNAL_SIGNAL_STAGE1_6B_HTTP_TIMEOUT_SEC == 10.0
@@ -67,7 +72,7 @@ def test_config_algebra_host_emergency_peak_sufficiency():
 
 def test_identity_formulas_and_separation():
     """Verify the 4-layer and export identity formulas from Design Section 6.1."""
-    raw_bytes = b"{\"code\":\"000000\",\"data\":{\"articles\":[]}}"
+    raw_bytes = b'{"code":"000000","data":{"articles":[]}}'
     raw_sha = hashlib.sha256(raw_bytes).hexdigest()
 
     list_payload_id = compute_list_payload_id(
@@ -141,7 +146,9 @@ def test_identity_formulas_and_separation():
 
 def test_candidate_discovery_rule_v1_semantic_parity():
     """Verify candidate discovery rule parity with Design and Stage 1.6A using the frozen fixture."""
-    fixture_path = Path("tests/fixtures/external_signal_shadow/stage1_6b/candidate_discovery_rule_v1_cases.json")
+    fixture_path = Path(
+        "tests/fixtures/external_signal_shadow/stage1_6b/candidate_discovery_rule_v1_cases.json"
+    )
     assert fixture_path.is_file(), f"Fixture {fixture_path} must exist"
     cases = json.loads(fixture_path.read_text())
 
@@ -200,7 +207,11 @@ def test_historical_null_pit_fields():
         historical_range_to_ms=1700000000000,
         historical_coverage_sha256="cov_sha",
         authoritative_artifacts=[
-            {"relative_path": "list_captures/2026-08-20.jsonl", "sha256": "sha_l", "byte_count": 100}
+            {
+                "relative_path": "list_captures/2026-08-20.jsonl",
+                "sha256": "sha_l",
+                "byte_count": 100,
+            }
         ],
         sealed_at_ms=1700000001000,
     )
@@ -247,6 +258,7 @@ def test_v2_exact_constants():
         SELECTED_CATALOG_NAME,
         SOURCE_PROFILE_ID,
     )
+
     assert SOURCE_PROFILE_ID == "binance_public_web_bapi_en_delisting_catalog_v2"
     assert INDEX_REQUEST_VARIANT == "bapi_article_list_type_1_delisting_catalog_161_page_50_v2"
     assert SELECTED_CATALOG_ID == 161
@@ -456,29 +468,44 @@ def test_v2_identity_algebra_and_no_migration():
     article_id = "art_test_123"
 
     v2_payload_page_1 = compute_list_payload_id(
-        "announcement_index", "en",
-        "bapi_article_list_type_1_delisting_catalog_161_page_50_v2", raw_sha,
+        "announcement_index",
+        "en",
+        "bapi_article_list_type_1_delisting_catalog_161_page_50_v2",
+        raw_sha,
     )
     v2_payload_page_2 = compute_list_payload_id(
-        "announcement_index", "en",
-        "bapi_article_list_type_1_delisting_catalog_161_page_50_v2", raw_sha,
+        "announcement_index",
+        "en",
+        "bapi_article_list_type_1_delisting_catalog_161_page_50_v2",
+        raw_sha,
     )
     assert v2_payload_page_1 == v2_payload_page_2
     assert v2_payload_page_1 != compute_list_payload_id(
-        "announcement_index", "en", "bapi_article_list_type_1_page_50_v1", raw_sha,
+        "announcement_index",
+        "en",
+        "bapi_article_list_type_1_page_50_v1",
+        raw_sha,
     )
 
-    first_capture_1 = compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_1)
-    first_capture_2 = compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_2)
+    first_capture_1 = compute_list_capture_id(
+        v2_profile, page_1_url, 1, v2_payload_page_1, request_1
+    )
+    first_capture_2 = compute_list_capture_id(
+        v2_profile, page_1_url, 1, v2_payload_page_1, request_2
+    )
 
-    assert compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_1) != \
-           compute_list_capture_id(v2_profile, page_2_url, 2, v2_payload_page_1, request_1)
-    assert compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_1) != \
-           compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_2)
-    assert compute_article_discovery_id(v2_profile, article_id, first_capture_1) == \
-           compute_article_discovery_id(v2_profile, article_id, first_capture_1)
-    assert compute_article_discovery_id(v2_profile, article_id, first_capture_1) != \
-           compute_article_discovery_id(v2_profile, article_id, first_capture_2)
+    assert compute_list_capture_id(
+        v2_profile, page_1_url, 1, v2_payload_page_1, request_1
+    ) != compute_list_capture_id(v2_profile, page_2_url, 2, v2_payload_page_1, request_1)
+    assert compute_list_capture_id(
+        v2_profile, page_1_url, 1, v2_payload_page_1, request_1
+    ) != compute_list_capture_id(v2_profile, page_1_url, 1, v2_payload_page_1, request_2)
+    assert compute_article_discovery_id(
+        v2_profile, article_id, first_capture_1
+    ) == compute_article_discovery_id(v2_profile, article_id, first_capture_1)
+    assert compute_article_discovery_id(
+        v2_profile, article_id, first_capture_1
+    ) != compute_article_discovery_id(v2_profile, article_id, first_capture_2)
 
 
 def test_static_ast_no_raw_legacy_profile_in_stage1_6b_codebase():
@@ -501,7 +528,9 @@ def test_static_ast_no_raw_legacy_profile_in_stage1_6b_codebase():
         tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                assert node.value != "binance_public_web_bapi_en_v1", f"Legacy profile string found in {p} at line {node.lineno}"
+                assert node.value != "binance_public_web_bapi_en_v1", (
+                    f"Legacy profile string found in {p} at line {node.lineno}"
+                )
 
 
 def test_sealed_export_manifest_explicit_downstream_caps_hardcoded_false():
@@ -536,3 +565,362 @@ def test_sealed_export_manifest_explicit_downstream_caps_hardcoded_false():
     assert manifest.live_trading_allowed is False
     assert manifest.execution_engine_allowed is False
     assert manifest.alpha_interpretation_allowed is False
+
+
+def test_stage1_6b_live_max_detail_requests_ssot_constant():
+    """Task 1.1: Verify EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL exists in configs/base.py."""
+    assert base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL == 4
+    assert base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_FIRST_ATTEMPT_MAX_POLLS == 2
+
+
+def test_v3_checkpoint_record_serialization_and_v2_backward_compatibility():
+    """Task 1.2: Verify v3 checkpoint serialization, CandidateState v3 keys, and v2 exact backward compatibility."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        CandidateState,
+        ObserverCheckpointRecord,
+        validate_observer_checkpoint_v3,
+    )
+
+    V2_CHECKPOINT_KEYS = {
+        "schema_version",
+        "run_id",
+        "capture_mode",
+        "source_profile_id",
+        "source_profile_attestation_sha256",
+        "checkpoint_id",
+        "prior_checkpoint_id",
+        "poll_seq",
+        "monotonic_request_seq",
+        "record_seq",
+        "accounted_root_bytes",
+        "stream_offsets",
+        "stream_last_hashes",
+        "candidate_states",
+        "heartbeat_at_ms",
+        "last_index_poll_status",
+        "last_index_poll_coverage",
+    }
+
+    aid = "0123456789abcdef0123456789abcdef"
+    cand_v2 = CandidateState(
+        source_article_id=aid,
+        first_discovered_poll_seq=1,
+        first_discovered_at_ms=1700000000000,
+        lane="lane_a",
+        detail_attempt_count=0,
+        retry_cycle_count=0,
+        first_attempt_at_ms=None,
+        last_attempt_at_ms=None,
+        next_retry_at_ms=None,
+        terminal_reason=None,
+        trusted_detail_revision_id=None,
+    )
+    chk_v2 = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v2",
+        run_id="run_001",
+        capture_mode="live_observed",
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha",
+        checkpoint_id="chk_v2_id",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=1000,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={
+            aid: cand_v2.to_dict("stage1_6b_observer_checkpoint_v2")
+            if hasattr(cand_v2, "to_dict")
+            and "schema_version" in cand_v2.to_dict.__code__.co_varnames
+            else cand_v2.to_dict()
+        },
+        heartbeat_at_ms=1700000000000,
+    )
+    v2_dict = chk_v2.to_dict()
+    assert set(v2_dict.keys()) == V2_CHECKPOINT_KEYS
+    assert "pending_terminal_failure_reason" not in v2_dict
+    assert "first_attempt_ahead_count_at_admission" not in v2_dict["candidate_states"][aid]
+    assert "first_attempt_deadline_poll_seq" not in v2_dict["candidate_states"][aid]
+
+    # v3 live checkpoint
+    cand_v3 = CandidateState(
+        source_article_id=aid,
+        first_discovered_poll_seq=1,
+        first_discovered_at_ms=1700000000000,
+        lane="lane_a",
+        detail_attempt_count=0,
+        retry_cycle_count=0,
+        first_attempt_at_ms=None,
+        last_attempt_at_ms=None,
+        next_retry_at_ms=None,
+        terminal_reason=None,
+        trusted_detail_revision_id=None,
+        first_attempt_ahead_count_at_admission=0,
+        first_attempt_deadline_poll_seq=1,
+    )
+    chk_v3 = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v3",
+        run_id="run_001",
+        capture_mode="live_observed",
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha",
+        checkpoint_id="chk_v3_id",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=1000,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={aid: cand_v3.to_dict("stage1_6b_observer_checkpoint_v3")},
+        heartbeat_at_ms=1700000000000,
+        pending_terminal_failure_reason=None,
+    )
+    v3_dict = chk_v3.to_dict()
+    assert v3_dict["schema_version"] == "stage1_6b_observer_checkpoint_v3"
+    assert v3_dict["pending_terminal_failure_reason"] is None
+    assert v3_dict["candidate_states"][aid]["first_attempt_ahead_count_at_admission"] == 0
+    assert v3_dict["candidate_states"][aid]["first_attempt_deadline_poll_seq"] == 1
+    validate_observer_checkpoint_v3(chk_v3)
+
+    # v3 validation rejects historical mode
+    chk_v3_hist = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v3",
+        run_id="hist_001",
+        capture_mode="historical_backfill",
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha",
+        checkpoint_id="chk_v3_id",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=1000,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={},
+        heartbeat_at_ms=1700000000000,
+        pending_terminal_failure_reason=None,
+    )
+    with pytest.raises(ValueError, match="v3_checkpoint_only_valid_for_live_observed"):
+        validate_observer_checkpoint_v3(chk_v3_hist)
+
+    # v3 validation rejects invalid pending failure reason
+    chk_v3_bad_reason = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v3",
+        run_id="run_001",
+        capture_mode="live_observed",
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha",
+        checkpoint_id="chk_v3_id",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=1000,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={},
+        heartbeat_at_ms=1700000000000,
+        pending_terminal_failure_reason="invalid_reason_string",
+    )
+    with pytest.raises(ValueError, match="invalid_pending_terminal_failure_reason"):
+        validate_observer_checkpoint_v3(chk_v3_bad_reason)
+
+    # v3 validation rejects invalid deadline formula
+    cand_v3_bad_deadline = CandidateState(
+        source_article_id=aid,
+        first_discovered_poll_seq=1,
+        first_discovered_at_ms=1700000000000,
+        lane="lane_a",
+        detail_attempt_count=0,
+        retry_cycle_count=0,
+        first_attempt_at_ms=None,
+        last_attempt_at_ms=None,
+        next_retry_at_ms=None,
+        terminal_reason=None,
+        trusted_detail_revision_id=None,
+        first_attempt_ahead_count_at_admission=4,
+        first_attempt_deadline_poll_seq=1,  # Should be 1 + 4//4 = 2
+    )
+    chk_v3_bad_cand = ObserverCheckpointRecord(
+        schema_version="stage1_6b_observer_checkpoint_v3",
+        run_id="run_001",
+        capture_mode="live_observed",
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha",
+        checkpoint_id="chk_v3_id",
+        prior_checkpoint_id=None,
+        poll_seq=1,
+        monotonic_request_seq=1,
+        record_seq=1,
+        accounted_root_bytes=1000,
+        stream_offsets={},
+        stream_last_hashes={},
+        candidate_states={aid: cand_v3_bad_deadline.to_dict("stage1_6b_observer_checkpoint_v3")},
+        heartbeat_at_ms=1700000000000,
+        pending_terminal_failure_reason=None,
+    )
+    with pytest.raises(ValueError, match="invalid_candidate_v3_deadline"):
+        validate_observer_checkpoint_v3(chk_v3_bad_cand)
+
+
+def test_v3_validator_requires_exact_immutable_fields_for_every_candidate_state():
+    """All v3 candidate lifecycles retain exact immutable admission fields."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        ObserverCheckpointRecord,
+        validate_observer_checkpoint_v3,
+    )
+
+    aid = "f" * 32
+    base_candidate = {
+        "source_article_id": aid,
+        "first_discovered_poll_seq": 1,
+        "first_discovered_at_ms": 1700000000000,
+        "lane": "lane_b",
+        "detail_attempt_count": 1,
+        "retry_cycle_count": 1,
+        "first_attempt_at_ms": 1700000000001,
+        "last_attempt_at_ms": 1700000000001,
+        "next_retry_at_ms": 1700000300001,
+        "terminal_reason": None,
+        "trusted_detail_revision_id": None,
+        "first_attempt_ahead_count_at_admission": 0,
+        "first_attempt_deadline_poll_seq": 1,
+    }
+
+    def checkpoint(candidate, status="trusted", coverage="successful"):
+        return ObserverCheckpointRecord(
+            schema_version="stage1_6b_observer_checkpoint_v3",
+            run_id="run_exact_v3",
+            capture_mode="live_observed",
+            source_profile_id=SOURCE_PROFILE_ID,
+            source_profile_attestation_sha256="att_sha",
+            checkpoint_id="chk_v3_id",
+            prior_checkpoint_id=None,
+            poll_seq=1,
+            monotonic_request_seq=1,
+            record_seq=1,
+            accounted_root_bytes=1000,
+            stream_offsets={},
+            stream_last_hashes={},
+            candidate_states={aid: candidate},
+            heartbeat_at_ms=1700000000001,
+            last_index_poll_status=status,
+            last_index_poll_coverage=coverage,
+            pending_terminal_failure_reason=None,
+        )
+
+    validate_observer_checkpoint_v3(checkpoint(base_candidate))
+
+    missing_fields = dict(base_candidate)
+    missing_fields["first_attempt_ahead_count_at_admission"] = None
+    with pytest.raises(ValueError, match="invalid_candidate_v3_ahead_count"):
+        validate_observer_checkpoint_v3(checkpoint(missing_fields))
+
+    extra_key = dict(base_candidate, unexpected=True)
+    with pytest.raises(ValueError, match="invalid_candidate_v3_keys"):
+        validate_observer_checkpoint_v3(checkpoint(extra_key))
+
+    with pytest.raises(ValueError, match="invalid_checkpoint_status_coverage_pair"):
+        validate_observer_checkpoint_v3(
+            checkpoint(base_candidate, status="trusted", coverage="degraded_not_successful")
+        )
+
+
+def test_v3_checkpoint_identity_golden_vector_and_sensitivity():
+    """Task 1.3: Verify exact v3 checkpoint identity projection, independent golden vector, and field sensitivity."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        V3_CHECKPOINT_ID_PROJECTION_KEYS,
+        canonical_json,
+        compute_live_v3_checkpoint_id,
+    )
+
+    V3_IDENTITY_PROJECTION_KEYS = {
+        "schema_version",
+        "run_id",
+        "capture_mode",
+        "source_profile_id",
+        "source_profile_attestation_sha256",
+        "prior_checkpoint_id",
+        "poll_seq",
+        "monotonic_request_seq",
+        "record_seq",
+        "accounted_root_bytes",
+        "stream_offsets",
+        "stream_last_hashes",
+        "candidate_states",
+        "heartbeat_at_ms",
+        "last_index_poll_status",
+        "last_index_poll_coverage",
+        "pending_terminal_failure_reason",
+    }
+    assert set(V3_CHECKPOINT_ID_PROJECTION_KEYS) == V3_IDENTITY_PROJECTION_KEYS
+
+    # Construct the Section 4.2.1 literal projection P independently
+
+    P = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "stage1_6b_identity_golden",
+        "capture_mode": "live_observed",
+        "source_profile_id": "binance_public_web_bapi_en_delisting_catalog_v2",
+        "source_profile_attestation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "prior_checkpoint_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "poll_seq": 7,
+        "monotonic_request_seq": 11,
+        "record_seq": 13,
+        "accounted_root_bytes": 17,
+        "stream_offsets": {
+            "article_discoveries.jsonl": 101,
+            "detail_observations.jsonl": 202,
+        },
+        "stream_last_hashes": {
+            "article_discoveries.jsonl": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "detail_observations.jsonl": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
+        "candidate_states": {
+            "0123456789abcdef0123456789abcdef": {
+                "source_article_id": "0123456789abcdef0123456789abcdef",
+                "first_discovered_poll_seq": 7,
+                "first_discovered_at_ms": 1700000000000,
+                "lane": "lane_a",
+                "detail_attempt_count": 0,
+                "retry_cycle_count": 0,
+                "first_attempt_at_ms": None,
+                "last_attempt_at_ms": None,
+                "next_retry_at_ms": None,
+                "terminal_reason": None,
+                "trusted_detail_revision_id": None,
+                "first_attempt_ahead_count_at_admission": 0,
+                "first_attempt_deadline_poll_seq": 7,
+            }
+        },
+        "heartbeat_at_ms": 1700000000123,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+
+    B = canonical_json(P).encode("utf-8")
+    assert len(B) == 1365
+    expected_digest = "2610ca21cd7a91f14c38581b184765bb9946b5e64776bb93789e66947eaaa71f"
+    assert hashlib.sha256(B).hexdigest() == expected_digest
+    assert compute_live_v3_checkpoint_id(P) == expected_digest
+
+    # Sensitivity tests: changing ahead_count, deadline, or pending_failure_reason alters digest
+    P_mod_ahead = json.loads(json.dumps(P))
+    P_mod_ahead["candidate_states"]["0123456789abcdef0123456789abcdef"][
+        "first_attempt_ahead_count_at_admission"
+    ] = 1
+    assert compute_live_v3_checkpoint_id(P_mod_ahead) != expected_digest
+
+    P_mod_deadline = json.loads(json.dumps(P))
+    P_mod_deadline["candidate_states"]["0123456789abcdef0123456789abcdef"][
+        "first_attempt_deadline_poll_seq"
+    ] = 8
+    assert compute_live_v3_checkpoint_id(P_mod_deadline) != expected_digest
+
+    P_mod_reason = json.loads(json.dumps(P))
+    P_mod_reason["pending_terminal_failure_reason"] = "detail_first_attempt_deadline_missed"
+    assert compute_live_v3_checkpoint_id(P_mod_reason) != expected_digest

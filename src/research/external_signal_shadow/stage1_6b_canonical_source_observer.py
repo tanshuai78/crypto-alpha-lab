@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from configs import base
 from src.research.external_signal_shadow.stage1_6b_canonical_source_client import (
@@ -35,6 +35,7 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_models impor
     compute_detail_revision_id,
     compute_list_capture_id,
     compute_list_payload_id,
+    compute_live_v3_checkpoint_id,
     compute_request_headers_profile_sha256,
     compute_request_observation_id,
     is_delisting_candidate,
@@ -51,18 +52,27 @@ from src.research.external_signal_shadow.stage1_6b_canonical_source_storage impo
 
 
 class ObserverSLAError(RuntimeError):
-    """Raised when Lane A first-attempt SLA is exceeded."""
-    pass
+    """Raised when Lane A first-attempt SLA / deadline is exceeded."""
+
+    def __init__(self, message: str, code: str = "detail_first_attempt_deadline_missed"):
+        super().__init__(message)
+        self.code = code
 
 
 class ObserverCapacityError(RuntimeError):
     """Raised when candidate capacity limit is exceeded."""
-    pass
+
+    def __init__(self, message: str, code: str = "pending_detail_candidate_capacity_exceeded"):
+        super().__init__(message)
+        self.code = code
 
 
 class Stage16BSchemaDriftError(RuntimeError):
     """Raised when source index schema deviates or selected catalog is missing/malformed."""
-    pass
+
+    def __init__(self, message: str, code: str = "source_profile_schema_drift"):
+        super().__init__(message)
+        self.code = code
 
 
 class Stage16BObserver:
@@ -142,14 +152,48 @@ class Stage16BObserver:
         now_ms: int,
         status: str = "trusted",
         coverage: str = "successful",
+        pending_terminal_failure_reason: Optional[str] = None,
     ) -> ObserverCheckpointRecord:
-        """Helper to write v2 observer checkpoint with validated status and coverage."""
+        """Helper to write observer checkpoint (v3 for live_observed, v2 for historical)."""
         validate_observer_checkpoint_status_coverage(status, coverage)
-        chk_seed = f"{self.run_id}|{self.poll_seq}|{self.monotonic_request_seq}|{self.record_seq}|{self.accounted_root_bytes}"
-        checkpoint_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
+
+        if self.capture_mode == CaptureMode.LIVE_OBSERVED.value:
+            schema_version = "stage1_6b_observer_checkpoint_v3"
+            cand_states_dict = {
+                k: v.to_dict("stage1_6b_observer_checkpoint_v3")
+                for k, v in self.candidate_states.items()
+            }
+            raw_record = {
+                "schema_version": schema_version,
+                "run_id": self.run_id,
+                "capture_mode": self.capture_mode,
+                "source_profile_id": SOURCE_PROFILE_ID,
+                "source_profile_attestation_sha256": self.source_profile_attestation_sha256,
+                "prior_checkpoint_id": self.prior_checkpoint_id,
+                "poll_seq": self.poll_seq,
+                "monotonic_request_seq": self.monotonic_request_seq,
+                "record_seq": self.record_seq,
+                "accounted_root_bytes": self.accounted_root_bytes,
+                "stream_offsets": self.stream_offsets,
+                "stream_last_hashes": self.stream_last_hashes,
+                "candidate_states": cand_states_dict,
+                "heartbeat_at_ms": now_ms,
+                "last_index_poll_status": status,
+                "last_index_poll_coverage": coverage,
+                "pending_terminal_failure_reason": pending_terminal_failure_reason,
+            }
+            checkpoint_id = compute_live_v3_checkpoint_id(raw_record)
+        else:
+            schema_version = "stage1_6b_observer_checkpoint_v2"
+            cand_states_dict = {
+                k: v.to_dict("stage1_6b_observer_checkpoint_v2")
+                for k, v in self.candidate_states.items()
+            }
+            chk_seed = f"{self.run_id}|{self.poll_seq}|{self.monotonic_request_seq}|{self.record_seq}|{self.accounted_root_bytes}"
+            checkpoint_id = hashlib.sha256(chk_seed.encode("utf-8")).hexdigest()
 
         chk_rec = ObserverCheckpointRecord(
-            schema_version="stage1_6b_observer_checkpoint_v2",
+            schema_version=schema_version,
             run_id=self.run_id,
             capture_mode=self.capture_mode,
             source_profile_id=SOURCE_PROFILE_ID,
@@ -162,10 +206,13 @@ class Stage16BObserver:
             accounted_root_bytes=self.accounted_root_bytes,
             stream_offsets=self.stream_offsets,
             stream_last_hashes=self.stream_last_hashes,
-            candidate_states={k: v.to_dict() for k, v in self.candidate_states.items()},
+            candidate_states=cand_states_dict,
             heartbeat_at_ms=now_ms,
             last_index_poll_status=status,
             last_index_poll_coverage=coverage,
+            pending_terminal_failure_reason=pending_terminal_failure_reason
+            if self.capture_mode == CaptureMode.LIVE_OBSERVED.value
+            else None,
         )
 
         delta_chk = write_observer_checkpoint(
@@ -178,19 +225,52 @@ class Stage16BObserver:
         self.prior_checkpoint_id = checkpoint_id
         return chk_rec
 
+    def write_failure_intent_checkpoint(
+        self,
+        now_ms: int,
+        failure_reason: str,
+    ) -> ObserverCheckpointRecord:
+        """Write v3 failure-intent checkpoint with pending_terminal_failure_reason."""
+        return self._write_checkpoint(
+            now_ms=now_ms,
+            status="malformed_index_schema"
+            if failure_reason == "source_profile_schema_drift"
+            else "trusted",
+            coverage="degraded_not_successful"
+            if failure_reason == "source_profile_schema_drift"
+            else "successful",
+            pending_terminal_failure_reason=failure_reason,
+        )
+
     def execute_poll(self, now_ms: Optional[int] = None) -> ObserverCheckpointRecord:
         """Execute one deterministic observation poll."""
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-        today_str = datetime.datetime.fromtimestamp(now_ms / 1000.0, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.datetime.fromtimestamp(
+            now_ms / 1000.0, tz=datetime.timezone.utc
+        ).strftime("%Y-%m-%d")
         self.poll_seq += 1
 
-        # 1. Check Lane A SLA
+        # 1. Check Lane A SLA / deadline
         for aid, cand in self.candidate_states.items():
-            if cand.lane == CandidateLane.LANE_A.value and cand.detail_attempt_count == 0 and cand.terminal_reason is None:
-                if (self.poll_seq - cand.first_discovered_poll_seq) >= base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_FIRST_ATTEMPT_MAX_POLLS:
-                    raise ObserverSLAError(
-                        f"detail_first_attempt_sla_exceeded: candidate {aid} discovered at poll {cand.first_discovered_poll_seq}, current poll {self.poll_seq}"
-                    )
+            if (
+                cand.lane == CandidateLane.LANE_A.value
+                and cand.detail_attempt_count == 0
+                and cand.terminal_reason is None
+            ):
+                if cand.first_attempt_deadline_poll_seq is not None:
+                    if self.poll_seq > cand.first_attempt_deadline_poll_seq:
+                        raise ObserverSLAError(
+                            f"detail_first_attempt_deadline_missed: candidate {aid} deadline {cand.first_attempt_deadline_poll_seq} < current poll {self.poll_seq}",
+                            code="detail_first_attempt_deadline_missed",
+                        )
+                else:
+                    if (
+                        self.poll_seq - cand.first_discovered_poll_seq
+                    ) >= base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_FIRST_ATTEMPT_MAX_POLLS:
+                        raise ObserverSLAError(
+                            f"detail_first_attempt_sla_exceeded: candidate {aid} discovered at poll {cand.first_discovered_poll_seq}, current poll {self.poll_seq}",
+                            code="detail_first_attempt_sla_exceeded",
+                        )
 
         # 2. Fetch exactly one index page
         self.monotonic_request_seq += 1
@@ -241,7 +321,8 @@ class Stage16BObserver:
                     coverage="degraded_not_successful",
                 )
                 raise Stage16BSchemaDriftError(
-                    f"source_profile_schema_drift: malformed_index_schema - {res_idx.error_message}"
+                    f"source_profile_schema_drift: malformed_index_schema - {res_idx.error_message}",
+                    code="source_profile_schema_drift",
                 )
             else:
                 # Degraded checkpoint for other transport errors
@@ -269,7 +350,9 @@ class Stage16BObserver:
             )
             self.accounted_root_bytes += raw_b_written
         else:
-            idx_raw_sha = hashlib.sha256(res_idx.raw_payload).hexdigest() if res_idx.raw_payload else ""
+            idx_raw_sha = (
+                hashlib.sha256(res_idx.raw_payload).hexdigest() if res_idx.raw_payload else ""
+            )
 
         list_payload_id = compute_list_payload_id(
             source_surface=INDEX_SOURCE_SURFACE,
@@ -320,6 +403,7 @@ class Stage16BObserver:
         self.accounted_root_bytes += delta_lc
 
         # 3. Derive candidates from selected catalog articles
+        newly_admitted_aids: List[str] = []
         for item in articles_list:
             aid = str(item.get("code") or item.get("id") or "")
             title = str(item.get("title") or "")
@@ -338,7 +422,9 @@ class Stage16BObserver:
                         discovery_title=title,
                         discovery_rule_version=CANDIDATE_DISCOVERY_RULE_VERSION,
                         first_list_capture_id=list_capture_id,
-                        notice_lineage_first_detected_at_ms=now_ms if self.capture_mode == CaptureMode.LIVE_OBSERVED.value else None,
+                        notice_lineage_first_detected_at_ms=now_ms
+                        if self.capture_mode == CaptureMode.LIVE_OBSERVED.value
+                        else None,
                         captured_at_ms=now_ms,
                         record_seq=self.record_seq,
                         source_catalog_id=SELECTED_CATALOG_ID,
@@ -350,42 +436,75 @@ class Stage16BObserver:
                         "normal_data",
                     )
                     self.accounted_root_bytes += delta_disc
+                    newly_admitted_aids.append(aid)
 
-                    self.candidate_states[aid] = CandidateState(
-                        source_article_id=aid,
-                        first_discovered_poll_seq=self.poll_seq,
-                        first_discovered_at_ms=now_ms,
-                        lane=CandidateLane.LANE_A.value,
-                        detail_attempt_count=0,
-                        retry_cycle_count=0,
-                        first_attempt_at_ms=None,
-                        last_attempt_at_ms=None,
-                        next_retry_at_ms=None,
-                        terminal_reason=None,
-                        trusted_detail_revision_id=None,
-                    )
+        if newly_admitted_aids:
+            newly_admitted_aids.sort(key=lambda a: (self.poll_seq, a))
+            existing_unattempted_count = sum(
+                1
+                for c in self.candidate_states.values()
+                if c.lane == CandidateLane.LANE_A.value
+                and c.detail_attempt_count == 0
+                and c.first_discovered_poll_seq < self.poll_seq
+            )
+            live_budget = base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL
+            for idx, aid in enumerate(newly_admitted_aids):
+                ahead_count = existing_unattempted_count + idx
+                deadline_poll_seq = self.poll_seq + (ahead_count // live_budget)
+                self.candidate_states[aid] = CandidateState(
+                    source_article_id=aid,
+                    first_discovered_poll_seq=self.poll_seq,
+                    first_discovered_at_ms=now_ms,
+                    lane=CandidateLane.LANE_A.value,
+                    detail_attempt_count=0,
+                    retry_cycle_count=0,
+                    first_attempt_at_ms=None,
+                    last_attempt_at_ms=None,
+                    next_retry_at_ms=None,
+                    terminal_reason=None,
+                    trusted_detail_revision_id=None,
+                    first_attempt_ahead_count_at_admission=ahead_count,
+                    first_attempt_deadline_poll_seq=deadline_poll_seq,
+                )
 
         # 4. Detail candidate selection
+        live_budget = (
+            base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL
+            if self.capture_mode == CaptureMode.LIVE_OBSERVED.value
+            else 1
+        )
         lane_a = [
-            c for c in self.candidate_states.values()
-            if c.lane == CandidateLane.LANE_A.value and c.detail_attempt_count == 0 and c.terminal_reason is None
+            c
+            for c in self.candidate_states.values()
+            if c.lane == CandidateLane.LANE_A.value
+            and c.detail_attempt_count == 0
+            and c.terminal_reason is None
         ]
         lane_a.sort(key=lambda c: (c.first_discovered_poll_seq, c.source_article_id))
 
-        selected: Optional[CandidateState] = None
+        selected_candidates: List[CandidateState] = []
         if lane_a:
-            selected = lane_a[0]
+            selected_candidates = lane_a[:live_budget]
         else:
             lane_b = [
-                c for c in self.candidate_states.values()
-                if c.lane == CandidateLane.LANE_B.value and c.terminal_reason is None and (c.next_retry_at_ms is not None and c.next_retry_at_ms <= now_ms)
+                c
+                for c in self.candidate_states.values()
+                if c.lane == CandidateLane.LANE_B.value
+                and c.terminal_reason is None
+                and (c.next_retry_at_ms is not None and c.next_retry_at_ms <= now_ms)
             ]
-            lane_b.sort(key=lambda c: (c.next_retry_at_ms or 0, c.first_discovered_poll_seq, c.source_article_id))
+            lane_b.sort(
+                key=lambda c: (
+                    c.next_retry_at_ms or 0,
+                    c.first_discovered_poll_seq,
+                    c.source_article_id,
+                )
+            )
             if lane_b:
-                selected = lane_b[0]
+                selected_candidates = lane_b[:live_budget]
 
-        # 5. Execute detail fetch if candidate selected
-        if selected is not None:
+        # 5. Execute detail fetches sequentially
+        for selected in selected_candidates:
             self.monotonic_request_seq += 1
             req_obs_id_det = compute_request_observation_id(
                 self.run_id,
@@ -411,7 +530,9 @@ class Stage16BObserver:
                 )
                 self.accounted_root_bytes += det_b_written
             else:
-                det_raw_sha = hashlib.sha256(res_det.raw_payload).hexdigest() if res_det.raw_payload else ""
+                det_raw_sha = (
+                    hashlib.sha256(res_det.raw_payload).hexdigest() if res_det.raw_payload else ""
+                )
 
             self.record_seq += 1
             det_obs_rec = DetailObservationRecord(
@@ -430,7 +551,9 @@ class Stage16BObserver:
                 http_status=res_det.http_status,
                 content_type=res_det.content_type,
                 raw_payload_sha256=det_raw_sha or None,
-                raw_payload_bytes=res_det.raw_payload_bytes if res_det.raw_payload_bytes > 0 else None,
+                raw_payload_bytes=res_det.raw_payload_bytes
+                if res_det.raw_payload_bytes > 0
+                else None,
                 raw_payload_relative_path=det_rel_raw or None,
                 trust_validation_status=res_det.trust_validation_status,
                 t_detail_receive_ms=res_det.t_receive_ms,
@@ -487,18 +610,24 @@ class Stage16BObserver:
                     next_retry_at_ms=None,
                     terminal_reason="trusted_detail_observed",
                     trusted_detail_revision_id=rev_id,
+                    first_attempt_ahead_count_at_admission=selected.first_attempt_ahead_count_at_admission,
+                    first_attempt_deadline_poll_seq=selected.first_attempt_deadline_poll_seq,
                 )
             else:
                 new_retry_cycles = selected.retry_cycle_count + 1
                 age_ms = now_ms - selected.first_discovered_at_ms
-                if new_retry_cycles >= base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MAX_CYCLES or age_ms >= (base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MAX_AGE_SEC * 1000):
+                if (
+                    new_retry_cycles >= base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MAX_CYCLES
+                    or age_ms >= (base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MAX_AGE_SEC * 1000)
+                ):
                     term_reason = "terminal_detail_failure"
                     next_retry = None
                 else:
                     term_reason = None
                     interval_sec = min(
                         base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MAX_INTERVAL_SEC,
-                        base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MIN_INTERVAL_SEC * (2 ** (new_retry_cycles - 1)),
+                        base.EXTERNAL_SIGNAL_STAGE1_6B_DETAIL_RETRY_MIN_INTERVAL_SEC
+                        * (2 ** (new_retry_cycles - 1)),
                     )
                     next_retry = now_ms + int(interval_sec * 1000)
 
@@ -514,13 +643,18 @@ class Stage16BObserver:
                     next_retry_at_ms=next_retry,
                     terminal_reason=term_reason,
                     trusted_detail_revision_id=None,
+                    first_attempt_ahead_count_at_admission=selected.first_attempt_ahead_count_at_admission,
+                    first_attempt_deadline_poll_seq=selected.first_attempt_deadline_poll_seq,
                 )
 
         # 6. Check pending candidate capacity
-        non_terminal_count = sum(1 for c in self.candidate_states.values() if c.terminal_reason is None)
+        non_terminal_count = sum(
+            1 for c in self.candidate_states.values() if c.terminal_reason is None
+        )
         if non_terminal_count > base.EXTERNAL_SIGNAL_STAGE1_6B_MAX_PENDING_DETAIL_CANDIDATES:
             raise ObserverCapacityError(
-                f"max_pending_detail_candidates_exceeded: {non_terminal_count} > {base.EXTERNAL_SIGNAL_STAGE1_6B_MAX_PENDING_DETAIL_CANDIDATES}"
+                f"max_pending_detail_candidates_exceeded: {non_terminal_count} > {base.EXTERNAL_SIGNAL_STAGE1_6B_MAX_PENDING_DETAIL_CANDIDATES}",
+                code="pending_detail_candidate_capacity_exceeded",
             )
 
         # 7. Append heartbeat

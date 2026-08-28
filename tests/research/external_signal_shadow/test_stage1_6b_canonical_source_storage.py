@@ -80,7 +80,9 @@ def test_cross_implementation_lock_equivalence(tmp_path):
     for r in [root_1_5d, root_1_5f, root_1_6b]:
         r.mkdir(parents=True, exist_ok=True)
 
-    guard_d = StorageGuard(output_root=root_1_5d, stage="1.5D", disk_usage_func=create_mock_disk_usage())
+    guard_d = StorageGuard(
+        output_root=root_1_5d, stage="1.5D", disk_usage_func=create_mock_disk_usage()
+    )
     lock_1_6b = derive_shared_storage_lock_path(root_1_6b)
 
     assert guard_d.lock_file_path.resolve() == lock_1_6b.resolve()
@@ -111,7 +113,12 @@ def test_validate_probe_and_run_root_paths(tmp_path):
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
 
     # Valid probe path
-    probe_p = stage1_6b_dir / "source_profile_attestations" / "abc123sha" / "source_profile_probe_attestation.json"
+    probe_p = (
+        stage1_6b_dir
+        / "source_profile_attestations"
+        / "abc123sha"
+        / "source_profile_probe_attestation.json"
+    )
     assert validate_probe_attestation_path(probe_p, project_root=tmp_path) == probe_p.resolve()
 
     # Invalid probe path (wrong file name or missing parent)
@@ -120,25 +127,59 @@ def test_validate_probe_and_run_root_paths(tmp_path):
 
     # Valid fresh historical root
     hist_root = stage1_6b_dir / "historical_backfill" / "run_hist_1"
-    assert validate_run_root_path(hist_root, capture_mode=CaptureMode.HISTORICAL_BACKFILL.value, require_fresh=True, project_root=tmp_path) == hist_root.resolve()
+    assert (
+        validate_run_root_path(
+            hist_root,
+            capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
+            require_fresh=True,
+            project_root=tmp_path,
+        )
+        == hist_root.resolve()
+    )
 
     # Reject non-fresh when require_fresh=True
     hist_root.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match="root_already_exists"):
-        validate_run_root_path(hist_root, capture_mode=CaptureMode.HISTORICAL_BACKFILL.value, require_fresh=True, project_root=tmp_path)
+        validate_run_root_path(
+            hist_root,
+            capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
+            require_fresh=True,
+            project_root=tmp_path,
+        )
 
     # Valid fresh live root
     live_root = stage1_6b_dir / "live_observation" / "run_live_1"
-    assert validate_run_root_path(live_root, capture_mode=CaptureMode.LIVE_OBSERVED.value, require_fresh=True, project_root=tmp_path) == live_root.resolve()
+    assert (
+        validate_run_root_path(
+            live_root,
+            capture_mode=CaptureMode.LIVE_OBSERVED.value,
+            require_fresh=True,
+            project_root=tmp_path,
+        )
+        == live_root.resolve()
+    )
 
     # Valid resume live root (when exists)
     live_root.mkdir(parents=True, exist_ok=True)
-    assert validate_run_root_path(live_root, capture_mode=CaptureMode.LIVE_OBSERVED.value, require_fresh=False, project_root=tmp_path) == live_root.resolve()
+    assert (
+        validate_run_root_path(
+            live_root,
+            capture_mode=CaptureMode.LIVE_OBSERVED.value,
+            require_fresh=False,
+            project_root=tmp_path,
+        )
+        == live_root.resolve()
+    )
 
     # Reject symlink escape or wrong family
     wrong_family = stage1_6b_dir / "historical_backfill" / "run_live_wrong"
     with pytest.raises(ValueError, match="invalid_root_family"):
-        validate_run_root_path(wrong_family, capture_mode=CaptureMode.LIVE_OBSERVED.value, require_fresh=True, project_root=tmp_path)
+        validate_run_root_path(
+            wrong_family,
+            capture_mode=CaptureMode.LIVE_OBSERVED.value,
+            require_fresh=True,
+            project_root=tmp_path,
+        )
 
 
 def test_guarded_writer_quota_formulas(tmp_path):
@@ -148,23 +189,42 @@ def test_guarded_writer_quota_formulas(tmp_path):
     run_root.mkdir(parents=True, exist_ok=True)
 
     # Normal disk usage: 20 GB free
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
     guard.validate_startup_free_space()
 
     # Normal write within quota succeeds
-    guard.check_write_admission(write_class="normal_data", persistent_delta_bytes=1000, transient_peak_bytes=2000, current_root_bytes=0)
+    guard.check_write_admission(
+        write_class="normal_data",
+        persistent_delta_bytes=1000,
+        transient_peak_bytes=2000,
+        current_root_bytes=0,
+    )
 
     # Normal write exceeding root max (minus reserves) fails
     # root max 256MB, ordinary 4MB, emergency 1MB -> max normal is 251MB
     with pytest.raises(Stage16BStorageBlocked, match="root_budget_exceeded"):
-        guard.check_write_admission(write_class="normal_data", persistent_delta_bytes=252 * 1024 * 1024, transient_peak_bytes=252 * 1024 * 1024, current_root_bytes=0)
+        guard.check_write_admission(
+            write_class="normal_data",
+            persistent_delta_bytes=252 * 1024 * 1024,
+            transient_peak_bytes=252 * 1024 * 1024,
+            current_root_bytes=0,
+        )
 
     # Terminal peak > 256 KiB fails
     with pytest.raises(Stage16BStorageBlocked, match="terminal_peak_exceeded"):
-        guard.check_write_admission(write_class="terminal_control_plane", persistent_delta_bytes=100, transient_peak_bytes=300 * 1024, current_root_bytes=0)
+        guard.check_write_admission(
+            write_class="terminal_control_plane",
+            persistent_delta_bytes=100,
+            transient_peak_bytes=300 * 1024,
+            current_root_bytes=0,
+        )
 
     # Host start free space < 8 GB fails startup
-    guard_low_disk = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 7))
+    guard_low_disk = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 7)
+    )
     with pytest.raises(Stage16BStorageBlocked, match="host_start_free_space_insufficient"):
         guard_low_disk.validate_startup_free_space()
 
@@ -174,7 +234,9 @@ def test_atomic_writer_holds_shared_lock_until_replace(tmp_path, monkeypatch):
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
     run_root = stage1_6b_dir / "live_observation" / "run_lock_during_write"
     run_root.mkdir(parents=True, exist_ok=True)
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
     original_replace = storage.os.replace
 
     def replace_while_asserting_lock(source, destination):
@@ -223,10 +285,12 @@ def test_guarded_write_primitives_inventory(tmp_path):
     run_root = stage1_6b_dir / "live_observation" / "run_prim"
     run_root.mkdir(parents=True, exist_ok=True)
 
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # 1. Raw payload write
-    payload = b"{\"test\":\"data\"}"
+    payload = b'{"test":"data"}'
     raw_sha, raw_rel_path, bytes_written = write_content_addressed_raw_payload(
         run_root=run_root,
         payload_bytes=payload,
@@ -278,7 +342,9 @@ def test_guarded_write_primitives_inventory(tmp_path):
         candidate_states={},
         heartbeat_at_ms=1700000000000,
     )
-    chk_delta = write_observer_checkpoint(run_root, chk, guard, current_root_bytes=bytes_written + delta)
+    chk_delta = write_observer_checkpoint(
+        run_root, chk, guard, current_root_bytes=bytes_written + delta
+    )
     assert (run_root / "observer_checkpoint.json").is_file()
 
     # 4. Terminal status
@@ -292,23 +358,27 @@ def test_guarded_write_primitives_inventory(tmp_path):
         final_checkpoint_id="chk_001",
         terminated_at_ms=1700000001000,
     )
-    write_terminal_status(run_root, term, guard, current_root_bytes=bytes_written + delta + chk_delta)
+    write_terminal_status(
+        run_root, term, guard, current_root_bytes=bytes_written + delta + chk_delta
+    )
     assert (run_root / "terminal_status.json").is_file()
 
 
 def test_checkpoint_reconciliation_and_recovery(tmp_path):
     """Verify bounded-tail reconciliation on restart, detecting extra raw or JSONL appended bytes."""
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
-    run_root = stage1_6b_dir / "live_observation" / "run_rec"
+    run_root = stage1_6b_dir / "historical_backfill" / "run_rec"
     run_root.mkdir(parents=True, exist_ok=True)
 
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # Setup contract
     contract = CaptureRunContract(
         schema_version="stage1_6b_capture_run_contract_v1",
         run_id="run_rec",
-        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
         source_profile_id=SOURCE_PROFILE_ID,
         source_profile_attestation_sha256="att_sha",
         run_started_at_ms=1700000000000,
@@ -319,7 +389,7 @@ def test_checkpoint_reconciliation_and_recovery(tmp_path):
     chk = ObserverCheckpointRecord(
         schema_version="stage1_6b_observer_checkpoint_v2",
         run_id="run_rec",
-        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
         source_profile_id=SOURCE_PROFILE_ID,
         source_profile_attestation_sha256="att_sha",
         checkpoint_id="chk_001",
@@ -340,14 +410,16 @@ def test_checkpoint_reconciliation_and_recovery(tmp_path):
     # Append some JSONL record after checkpoint (simulating crash before next checkpoint)
     record = {
         "schema_version": "stage1_6b_list_capture_v2",
-        "capture_mode": "live_observed",
+        "capture_mode": "historical_backfill",
         "source_profile_id": SOURCE_PROFILE_ID,
         "selected_catalog_id": 161,
         "selected_catalog_name": "Delisting",
         "selected_catalog_total": 10,
         "article_count": 1,
     }
-    append_jsonl_record(run_root, "list_captures/2026-08-20.jsonl", record, "normal_data", guard, 200)
+    append_jsonl_record(
+        run_root, "list_captures/2026-08-20.jsonl", record, "normal_data", guard, 200
+    )
 
     # Reconcile and load checkpoint
     reconciled_chk, reconciled_root_bytes = reconcile_and_load_checkpoint(run_root, guard)
@@ -358,36 +430,48 @@ def test_checkpoint_reconciliation_and_recovery(tmp_path):
 def test_checkpoint_reconciliation_verifies_prefix_hash_and_reads_only_tail(tmp_path, monkeypatch):
     """A resume must validate the committed boundary without rereading the full JSONL stream."""
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
-    run_root = stage1_6b_dir / "live_observation" / "run_rec_prefix"
+    run_root = stage1_6b_dir / "historical_backfill" / "run_rec_prefix"
     run_root.mkdir(parents=True, exist_ok=True)
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
     stream_rel = "list_captures/2026-08-20.jsonl"
     stream_path = run_root / stream_rel
     stream_path.parent.mkdir(parents=True)
-    committed_line = json.dumps({
-        "schema_version": "stage1_6b_list_capture_v2",
-        "capture_mode": "live_observed",
-        "source_profile_id": SOURCE_PROFILE_ID,
-        "selected_catalog_id": 161,
-        "selected_catalog_name": "Delisting",
-        "selected_catalog_total": 10,
-        "article_count": 1,
-    }).encode("utf-8") + b"\n"
-    tail_line = json.dumps({
-        "schema_version": "stage1_6b_list_capture_v2",
-        "capture_mode": "live_observed",
-        "source_profile_id": SOURCE_PROFILE_ID,
-        "selected_catalog_id": 161,
-        "selected_catalog_name": "Delisting",
-        "selected_catalog_total": 10,
-        "article_count": 1,
-    }).encode("utf-8") + b"\n"
+    committed_line = (
+        json.dumps(
+            {
+                "schema_version": "stage1_6b_list_capture_v2",
+                "capture_mode": "historical_backfill",
+                "source_profile_id": SOURCE_PROFILE_ID,
+                "selected_catalog_id": 161,
+                "selected_catalog_name": "Delisting",
+                "selected_catalog_total": 10,
+                "article_count": 1,
+            }
+        ).encode("utf-8")
+        + b"\n"
+    )
+    tail_line = (
+        json.dumps(
+            {
+                "schema_version": "stage1_6b_list_capture_v2",
+                "capture_mode": "historical_backfill",
+                "source_profile_id": SOURCE_PROFILE_ID,
+                "selected_catalog_id": 161,
+                "selected_catalog_name": "Delisting",
+                "selected_catalog_total": 10,
+                "article_count": 1,
+            }
+        ).encode("utf-8")
+        + b"\n"
+    )
     stream_path.write_bytes(committed_line + tail_line)
 
     chk = ObserverCheckpointRecord(
         schema_version="stage1_6b_observer_checkpoint_v2",
         run_id="run_rec_prefix",
-        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        capture_mode=CaptureMode.HISTORICAL_BACKFILL.value,
         source_profile_id=SOURCE_PROFILE_ID,
         source_profile_attestation_sha256="att_sha",
         checkpoint_id="chk_001",
@@ -415,7 +499,10 @@ def test_checkpoint_reconciliation_verifies_prefix_hash_and_reads_only_tail(tmp_
     monkeypatch.setattr(Path, "read_text", reject_full_stream_read)
     reconciled, _ = reconcile_and_load_checkpoint(run_root, guard)
     assert reconciled.stream_offsets[stream_rel] == len(committed_line + tail_line)
-    assert reconciled.stream_last_hashes[stream_rel] == hashlib.sha256(tail_line.rstrip(b"\n")).hexdigest()
+    assert (
+        reconciled.stream_last_hashes[stream_rel]
+        == hashlib.sha256(tail_line.rstrip(b"\n")).hexdigest()
+    )
 
     bad_chk = ObserverCheckpointRecord(
         **{**chk.to_dict(), "stream_last_hashes": {stream_rel: "0" * 64}}
@@ -425,14 +512,15 @@ def test_checkpoint_reconciliation_verifies_prefix_hash_and_reads_only_tail(tmp_
         reconcile_and_load_checkpoint(run_root, guard)
 
 
-
 def test_seal_export_and_load_sealed_export(tmp_path):
     """Verify sealed export creation with streaming guarded copy and independent consumer verification."""
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
     run_root = stage1_6b_dir / "live_observation" / "run_seal_ok"
     run_root.mkdir(parents=True, exist_ok=True)
 
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # Setup run contract, attestation, raw payloads, records, checkpoint, terminal status
     contract = CaptureRunContract(
@@ -446,7 +534,7 @@ def test_seal_export_and_load_sealed_export(tmp_path):
     b0 = write_capture_run_contract(run_root, contract, guard, 0)
 
     raw_sha, raw_rel, b1 = write_content_addressed_raw_payload(
-        run_root, b"{\"test\":1}", "index", guard, b0
+        run_root, b'{"test":1}', "index", guard, b0
     )
 
     lc_rec = {
@@ -527,7 +615,9 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
     run_root = stage1_6b_dir / "live_observation" / "run_seal_val"
     run_root.mkdir(parents=True, exist_ok=True)
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # Create baseline valid live root
     contract = CaptureRunContract(
@@ -539,16 +629,35 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
         run_started_at_ms=1700000000000,
     )
     write_capture_run_contract(run_root, contract, guard, 0)
-    raw_sha, _, _ = write_content_addressed_raw_payload(run_root, b"{\"test\":1}", "index", guard, 10)
+    raw_sha, _, _ = write_content_addressed_raw_payload(run_root, b'{"test":1}', "index", guard, 10)
     append_jsonl_record(
-        run_root, "list_captures/2026-08-20.jsonl",
-        {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1},
-        "normal_data", guard, 20,
+        run_root,
+        "list_captures/2026-08-20.jsonl",
+        {
+            "schema_version": "stage1_6b_list_capture_v2",
+            "source_profile_id": SOURCE_PROFILE_ID,
+            "selected_catalog_id": 161,
+            "selected_catalog_name": "Delisting",
+            "selected_catalog_total": 10,
+            "article_count": 1,
+        },
+        "normal_data",
+        guard,
+        20,
     )
     append_jsonl_record(
-        run_root, "article_discoveries.jsonl",
-        {"schema_version": "stage1_6b_article_discovery_v2", "source_profile_id": SOURCE_PROFILE_ID, "source_catalog_id": 161, "source_catalog_name": "Delisting", "source_article_id": "a" * 32},
-        "normal_data", guard, 30,
+        run_root,
+        "article_discoveries.jsonl",
+        {
+            "schema_version": "stage1_6b_article_discovery_v2",
+            "source_profile_id": SOURCE_PROFILE_ID,
+            "source_catalog_id": 161,
+            "source_catalog_name": "Delisting",
+            "source_article_id": "a" * 32,
+        },
+        "normal_data",
+        guard,
+        30,
     )
     chk = ObserverCheckpointRecord(
         schema_version="stage1_6b_observer_checkpoint_v2",
@@ -608,7 +717,11 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
         load_sealed_export(export_dir)
 
     # 3. Checkpoint status/coverage contradiction
-    bad_chk2 = dict(chk.to_dict(), last_index_poll_status="malformed_index_schema", last_index_poll_coverage="successful")
+    bad_chk2 = dict(
+        chk.to_dict(),
+        last_index_poll_status="malformed_index_schema",
+        last_index_poll_coverage="successful",
+    )
     chk_p.write_text(json.dumps(bad_chk2))
     new_sha2 = hashlib.sha256(chk_p.read_bytes()).hexdigest()
     for a in m_patched["authoritative_artifacts"]:
@@ -629,7 +742,14 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
 
     # 4. List capture with wrong catalog id
     lc_p = export_dir / "list_captures" / "2026-08-20.jsonl"
-    bad_lc = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 999, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1}
+    bad_lc = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 999,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 10,
+        "article_count": 1,
+    }
     lc_p.write_text(json.dumps(bad_lc) + "\n")
     new_lc_sha = hashlib.sha256(lc_p.read_bytes()).hexdigest()
     for a in m_patched["authoritative_artifacts"]:
@@ -641,7 +761,14 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
         load_sealed_export(export_dir)
 
     # 5. List capture with total < article_count
-    bad_lc_total = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 0, "article_count": 5}
+    bad_lc_total = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 0,
+        "article_count": 5,
+    }
     lc_p.write_text(json.dumps(bad_lc_total) + "\n")
     new_lc_sha2 = hashlib.sha256(lc_p.read_bytes()).hexdigest()
     for a in m_patched["authoritative_artifacts"]:
@@ -653,7 +780,14 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
         load_sealed_export(export_dir)
 
     # Restore valid list capture
-    valid_lc = {"schema_version": "stage1_6b_list_capture_v2", "source_profile_id": SOURCE_PROFILE_ID, "selected_catalog_id": 161, "selected_catalog_name": "Delisting", "selected_catalog_total": 10, "article_count": 1}
+    valid_lc = {
+        "schema_version": "stage1_6b_list_capture_v2",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "selected_catalog_id": 161,
+        "selected_catalog_name": "Delisting",
+        "selected_catalog_total": 10,
+        "article_count": 1,
+    }
     lc_p.write_text(json.dumps(valid_lc) + "\n")
     for a in m_patched["authoritative_artifacts"]:
         if a["relative_path"] == "list_captures/2026-08-20.jsonl":
@@ -663,7 +797,13 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
 
     # 6. Article discovery profile mismatch.
     ad_p = export_dir / "article_discoveries.jsonl"
-    valid_ad = {"schema_version": "stage1_6b_article_discovery_v2", "source_profile_id": SOURCE_PROFILE_ID, "source_catalog_id": 161, "source_catalog_name": "Delisting", "source_article_id": "a" * 32}
+    valid_ad = {
+        "schema_version": "stage1_6b_article_discovery_v2",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_catalog_id": 161,
+        "source_catalog_name": "Delisting",
+        "source_article_id": "a" * 32,
+    }
     bad_ad_profile = {**valid_ad, "source_profile_id": "binance_public_web_bapi_en_v1"}
     ad_p.write_text(json.dumps(bad_ad_profile) + "\n")
     new_ad_sha = hashlib.sha256(ad_p.read_bytes()).hexdigest()
@@ -687,14 +827,15 @@ def test_load_sealed_export_v2_consumer_validations(tmp_path):
         load_sealed_export(export_dir)
 
 
-
 def test_seal_export_rejects_incomplete_root(tmp_path):
     """Verify seal_export refuses to seal when terminal status is absent or failure."""
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
     run_root = stage1_6b_dir / "live_observation" / "run_incomplete"
     run_root.mkdir(parents=True, exist_ok=True)
 
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # Missing terminal status -> raises ValueError
     with pytest.raises(ValueError, match="terminal_status_missing_or_failed"):
@@ -704,16 +845,18 @@ def test_seal_export_rejects_incomplete_root(tmp_path):
 def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path):
     """Task 4.5: Reconcile and load checkpoint must reject v1 schema/profile/records before network admission."""
     stage1_6b_dir = setup_test_hierarchy(tmp_path)
-    run_root = stage1_6b_dir / "live_observation" / "run_reconcile_test"
+    run_root = stage1_6b_dir / "historical_backfill" / "run_reconcile_test"
     run_root.mkdir(parents=True, exist_ok=True)
-    guard = Stage16BStorageGuard(output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20))
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
 
     # 1. Rejection on v1 checkpoint schema
     chk_file = run_root / "observer_checkpoint.json"
     chk_v1 = {
         "schema_version": "stage1_6b_observer_checkpoint_v1",
         "run_id": "run_reconcile_test",
-        "capture_mode": "live_observed",
+        "capture_mode": "historical_backfill",
         "source_profile_id": SOURCE_PROFILE_ID,
         "source_profile_attestation_sha256": "att_sha",
         "checkpoint_id": "chk_1",
@@ -726,9 +869,14 @@ def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path)
         "stream_last_hashes": {},
         "candidate_states": {},
         "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
     }
     chk_file.write_text(json.dumps(chk_v1), encoding="utf-8")
-    with pytest.raises(ValueError, match="checkpoint_schema_version_invalid"):
+
+    with pytest.raises(
+        ValueError, match="checkpoint_schema_version_invalid|historical_requires_v2"
+    ):
         reconcile_and_load_checkpoint(run_root, guard)
 
     # 2. Rejection on legacy profile ID
@@ -744,7 +892,7 @@ def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path)
     lc_file.parent.mkdir(parents=True, exist_ok=True)
     v1_lc_row = {
         "schema_version": "stage1_6b_list_capture_v1",
-        "capture_mode": "live_observed",
+        "capture_mode": "historical_backfill",
         "source_profile_id": SOURCE_PROFILE_ID,
         "article_count": 1,
     }
@@ -765,7 +913,7 @@ def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path)
     # 4. Valid v2 records in prefix batch succeeds
     v2_lc_row = {
         "schema_version": "stage1_6b_list_capture_v2",
-        "capture_mode": "live_observed",
+        "capture_mode": "historical_backfill",
         "source_profile_id": SOURCE_PROFILE_ID,
         "selected_catalog_id": 161,
         "selected_catalog_name": "Delisting",
@@ -782,3 +930,631 @@ def test_reconcile_and_load_checkpoint_v2_restart_preflight_rejections(tmp_path)
     reconciled, root_bytes = reconcile_and_load_checkpoint(run_root, guard)
     assert reconciled.schema_version == "stage1_6b_observer_checkpoint_v2"
     assert reconciled.source_profile_id == SOURCE_PROFILE_ID
+
+
+def test_reconcile_and_load_checkpoint_v3_historical_vs_live_schemas(tmp_path):
+    """Task 3.1: Historical accepts only v2; Live accepts v3 and rejects unsealed v2."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+
+    # 1. Historical run with v2 checkpoint succeeds
+    hist_root = stage1_6b_dir / "historical_backfill" / "run_hist_v2"
+    hist_root.mkdir(parents=True, exist_ok=True)
+    guard_hist = Stage16BStorageGuard(
+        output_root=hist_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+    chk_v2_data = {
+        "schema_version": "stage1_6b_observer_checkpoint_v2",
+        "run_id": "run_hist_v2",
+        "capture_mode": "historical_backfill",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "checkpoint_id": "chk_v2",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+    }
+    (hist_root / "observer_checkpoint.json").write_text(json.dumps(chk_v2_data), encoding="utf-8")
+    reconciled_hist, _ = reconcile_and_load_checkpoint(hist_root, guard_hist)
+    assert reconciled_hist.schema_version == "stage1_6b_observer_checkpoint_v2"
+
+    # 2. Historical run with v3 checkpoint is rejected
+    chk_v3_for_hist = dict(
+        chk_v2_data,
+        schema_version="stage1_6b_observer_checkpoint_v3",
+        pending_terminal_failure_reason=None,
+    )
+    (hist_root / "observer_checkpoint.json").write_text(
+        json.dumps(chk_v3_for_hist), encoding="utf-8"
+    )
+    with pytest.raises(
+        ValueError, match="checkpoint_schema_version_invalid|historical_requires_v2"
+    ):
+        reconcile_and_load_checkpoint(hist_root, guard_hist)
+
+    # 3. Live run with v2 checkpoint (unsealed) is rejected
+    live_root = stage1_6b_dir / "live_observation" / "run_live_v2"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard_live = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+    chk_v2_live = dict(chk_v2_data, run_id="run_live_v2", capture_mode="live_observed")
+    (live_root / "observer_checkpoint.json").write_text(json.dumps(chk_v2_live), encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="live_v2_unsealed_resume_rejected|checkpoint_schema_version_invalid"
+    ):
+        reconcile_and_load_checkpoint(live_root, guard_live)
+
+    # 4. Live run with valid v3 checkpoint succeeds
+    live_v3_root = stage1_6b_dir / "live_observation" / "run_live_v3"
+    live_v3_root.mkdir(parents=True, exist_ok=True)
+    guard_live_v3 = Stage16BStorageGuard(
+        output_root=live_v3_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+    chk_v3_raw = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_live_v3",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    chk_v3_id = compute_live_v3_checkpoint_id(chk_v3_raw)
+    chk_v3_dict = dict(chk_v3_raw, checkpoint_id=chk_v3_id)
+    (live_v3_root / "observer_checkpoint.json").write_text(
+        json.dumps(chk_v3_dict), encoding="utf-8"
+    )
+    reconciled_live, _ = reconcile_and_load_checkpoint(live_v3_root, guard_live_v3)
+    assert reconciled_live.schema_version == "stage1_6b_observer_checkpoint_v3"
+    assert reconciled_live.checkpoint_id == chk_v3_id
+
+
+def test_reconcile_and_load_checkpoint_v3_rejects_pending_terminal_failure_intent(tmp_path):
+    """Task 3.2: Reconcile rejects resuming from a checkpoint with non-null failure intent."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_failure_intent"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+
+    chk_raw = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_failure_intent",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": "detail_first_attempt_deadline_missed",
+    }
+    chk_id = compute_live_v3_checkpoint_id(chk_raw)
+    chk_dict = dict(chk_raw, checkpoint_id=chk_id)
+    (live_root / "observer_checkpoint.json").write_text(json.dumps(chk_dict), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot_resume_with_pending_terminal_failure_intent"):
+        reconcile_and_load_checkpoint(live_root, guard)
+
+
+def test_reconcile_rejects_v3_lane_b_missing_immutable_fields_and_bad_status_coverage(tmp_path):
+    """Resume rejects malformed v3 state before any reconciliation write."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_v3_invalid_candidate"
+    live_root.mkdir(parents=True)
+    guard = Stage16BStorageGuard(output_root=live_root)
+    aid = "a" * 32
+    candidate = {
+        "source_article_id": aid,
+        "first_discovered_poll_seq": 1,
+        "first_discovered_at_ms": 1700000000000,
+        "lane": "lane_b",
+        "detail_attempt_count": 1,
+        "retry_cycle_count": 1,
+        "first_attempt_at_ms": 1700000000001,
+        "last_attempt_at_ms": 1700000000001,
+        "next_retry_at_ms": 1700000300001,
+        "terminal_reason": None,
+        "trusted_detail_revision_id": None,
+        "first_attempt_ahead_count_at_admission": None,
+        "first_attempt_deadline_poll_seq": None,
+    }
+    chk = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_v3_invalid_candidate",
+        "capture_mode": CaptureMode.LIVE_OBSERVED.value,
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "a" * 64,
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 0,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {aid: candidate},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    chk["checkpoint_id"] = compute_live_v3_checkpoint_id(chk)
+    (live_root / "observer_checkpoint.json").write_text(json.dumps(chk), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid_candidate_v3_ahead_count"):
+        reconcile_and_load_checkpoint(live_root, guard)
+
+
+def test_reconcile_and_load_checkpoint_v3_checkpoint_id_mismatch_rejected(tmp_path):
+    """Task 3.3: Reconcile rejects checkpoint when checkpoint_id does not match Section 4.2 computed ID."""
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_tampered_id"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+
+    chk_dict = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_tampered_id",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "checkpoint_id": "bad_tampered_hash" * 4,
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    (live_root / "observer_checkpoint.json").write_text(json.dumps(chk_dict), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checkpoint_id_mismatch"):
+        reconcile_and_load_checkpoint(live_root, guard)
+
+
+def test_reconcile_and_load_checkpoint_v3_bounded_tail_candidate_state_reconstruction(tmp_path):
+    """Task 3.4: Reconciling tail discoveries reconstructs candidates in canonical (poll_seq, source_article_id) order with ahead_count and deadline."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_tail_recon"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+
+    # C(0) checkpoint; tail discoveries belong to poll 1, not checkpoint poll 0.
+    chk_raw = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_tail_recon",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "prior_checkpoint_id": None,
+        "poll_seq": 0,
+        "monotonic_request_seq": 0,
+        "record_seq": 0,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {"article_discoveries.jsonl": 0},
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    chk_id = compute_live_v3_checkpoint_id(chk_raw)
+    (live_root / "observer_checkpoint.json").write_text(
+        json.dumps(dict(chk_raw, checkpoint_id=chk_id)), encoding="utf-8"
+    )
+
+    # Tail discoveries written in reverse order: zzz, then aaa (record_seq=1, 2)
+    disc_z = {
+        "schema_version": "stage1_6b_article_discovery_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_article_id": "f" * 32,
+        "discovery_title": "Binance Futures Will Delist F",
+        "discovery_rule_version": "candidate_discovery_rule_v1",
+        "first_list_capture_id": "lc_1",
+        "notice_lineage_first_detected_at_ms": 1700000001000,
+        "captured_at_ms": 1700000001000,
+        "record_seq": 1,
+        "source_catalog_id": 161,
+        "source_catalog_name": "Delisting",
+    }
+    disc_a = {
+        "schema_version": "stage1_6b_article_discovery_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_article_id": "a" * 32,
+        "discovery_title": "Binance Futures Will Delist A",
+        "discovery_rule_version": "candidate_discovery_rule_v1",
+        "first_list_capture_id": "lc_1",
+        "notice_lineage_first_detected_at_ms": 1700000001000,
+        "captured_at_ms": 1700000001000,
+        "record_seq": 2,
+        "source_catalog_id": 161,
+        "source_catalog_name": "Delisting",
+    }
+    ad_p = live_root / "article_discoveries.jsonl"
+    ad_p.write_text(json.dumps(disc_z) + "\n" + json.dumps(disc_a) + "\n", encoding="utf-8")
+
+    reconciled, _ = reconcile_and_load_checkpoint(live_root, guard)
+    # Sorted order of candidates must be "a" * 32 (ahead=0, deadline=1) then "f" * 32 (ahead=1, deadline=1).
+    assert "a" * 32 in reconciled.candidate_states
+    assert "f" * 32 in reconciled.candidate_states
+    ca = reconciled.candidate_states["a" * 32]
+    cf = reconciled.candidate_states["f" * 32]
+    assert ca["first_attempt_ahead_count_at_admission"] == 0
+    assert ca["first_discovered_poll_seq"] == 1
+    assert ca["first_attempt_deadline_poll_seq"] == 1
+    assert cf["first_attempt_ahead_count_at_admission"] == 1
+    assert cf["first_discovered_poll_seq"] == 1
+    assert cf["first_attempt_deadline_poll_seq"] == 1
+
+
+def test_reconcile_v3_replays_trusted_detail_tail_with_persisted_linkage(tmp_path):
+    """A tail trusted detail/revision commits the candidate state before resume."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_tail_detail_recon"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+    aid = "a" * 32
+    raw = b'{"code":"000000","data":{"body":"ok"}}'
+    raw_sha = hashlib.sha256(raw).hexdigest()
+    raw_rel = f"raw_payloads/detail/{aid}/{raw_sha}.bin"
+    raw_path = live_root / raw_rel
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(raw)
+
+    checkpoint = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_tail_detail_recon",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 0,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {
+            "article_discoveries.jsonl": 0,
+            "detail_observations/2026-08-27.jsonl": 0,
+            "detail_revisions.jsonl": 0,
+        },
+        "stream_last_hashes": {},
+        "candidate_states": {},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    checkpoint["checkpoint_id"] = compute_live_v3_checkpoint_id(checkpoint)
+    (live_root / "observer_checkpoint.json").write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    discovery = {
+        "schema_version": "stage1_6b_article_discovery_v2",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_article_id": aid,
+        "discovery_title": "Binance Futures Will Delist A",
+        "discovery_rule_version": "candidate_discovery_rule_v1",
+        "first_list_capture_id": "lc_1",
+        "notice_lineage_first_detected_at_ms": 1700000002000,
+        "captured_at_ms": 1700000002000,
+        "record_seq": 1,
+        "source_catalog_id": 161,
+        "source_catalog_name": "Delisting",
+    }
+    observation = {
+        "schema_version": "stage1_6b_detail_observation_v1",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "request_headers_profile_sha256": "headers_sha",
+        "run_id": "run_tail_detail_recon",
+        "poll_seq": 2,
+        "record_seq": 2,
+        "request_observation_id": "obs_1",
+        "source_article_id": aid,
+        "request_variant": "bapi_article_detail_query_v1",
+        "requested_url": "https://www.binance.com/detail",
+        "final_url": "https://www.binance.com/detail",
+        "http_status": 200,
+        "content_type": "application/json",
+        "raw_payload_sha256": raw_sha,
+        "raw_payload_bytes": len(raw),
+        "raw_payload_relative_path": raw_rel,
+        "trust_validation_status": "trusted",
+        "t_detail_receive_ms": 1700000002001,
+        "captured_at_ms": 1700000002002,
+    }
+    revision = {
+        "schema_version": "stage1_6b_detail_revision_v1",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_article_id": aid,
+        "source_surface": "announcement_detail",
+        "source_locale": "en",
+        "request_variant": "bapi_article_detail_query_v1",
+        "detail_revision_id": "revision_1",
+        "detail_raw_sha256": raw_sha,
+        "raw_payload_relative_path": raw_rel,
+        "t_detail_trusted_ms": 1700000002001,
+        "t_raw_persisted_ms": 1700000002002,
+        "captured_at_ms": 1700000002002,
+        "record_seq": 3,
+    }
+    (live_root / "article_discoveries.jsonl").write_text(json.dumps(discovery) + "\n")
+    detail_path = live_root / "detail_observations/2026-08-27.jsonl"
+    detail_path.parent.mkdir()
+    detail_path.write_text(json.dumps(observation) + "\n")
+    (live_root / "detail_revisions.jsonl").write_text(json.dumps(revision) + "\n")
+
+    reconciled, _ = reconcile_and_load_checkpoint(live_root, guard)
+
+    state = reconciled.candidate_states[aid]
+    assert state["first_discovered_poll_seq"] == 2
+    assert state["first_attempt_ahead_count_at_admission"] == 0
+    assert state["first_attempt_deadline_poll_seq"] == 2
+    assert state["detail_attempt_count"] == 1
+    assert state["terminal_reason"] == "trusted_detail_observed"
+    assert state["trusted_detail_revision_id"] == "revision_1"
+    assert reconciled.monotonic_request_seq == 2
+
+    detail_path.write_text("")
+    with pytest.raises(ValueError, match="tail_detail_revision_orphan"):
+        reconcile_and_load_checkpoint(live_root, guard)
+
+
+def test_reconcile_and_write_checkpoint_v3_preserves_immutable_fields_and_computes_id(tmp_path):
+    """Task 3.5: reconcile_and_write_checkpoint persists v3 checkpoint with computed ID and preserves immutable candidate fields."""
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_storage import (
+        reconcile_and_write_checkpoint,
+    )
+
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    live_root = stage1_6b_dir / "live_observation" / "run_write_recon"
+    live_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=live_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+
+    chk_raw = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_write_recon",
+        "capture_mode": "live_observed",
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {
+            "a" * 32: {
+                "source_article_id": "a" * 32,
+                "first_discovered_poll_seq": 1,
+                "first_discovered_at_ms": 1000,
+                "lane": "lane_a",
+                "detail_attempt_count": 0,
+                "retry_cycle_count": 0,
+                "first_attempt_at_ms": None,
+                "last_attempt_at_ms": None,
+                "next_retry_at_ms": None,
+                "terminal_reason": None,
+                "trusted_detail_revision_id": None,
+                "first_attempt_ahead_count_at_admission": 0,
+                "first_attempt_deadline_poll_seq": 1,
+            }
+        },
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    chk_id = compute_live_v3_checkpoint_id(chk_raw)
+    (live_root / "observer_checkpoint.json").write_text(
+        json.dumps(dict(chk_raw, checkpoint_id=chk_id)), encoding="utf-8"
+    )
+
+    reconciled, total_bytes = reconcile_and_write_checkpoint(live_root, guard)
+    assert reconciled.schema_version == "stage1_6b_observer_checkpoint_v3"
+    assert reconciled.checkpoint_id == compute_live_v3_checkpoint_id(reconciled.to_dict())
+    assert reconciled.prior_checkpoint_id == chk_id
+    assert reconciled.candidate_states["a" * 32]["first_attempt_ahead_count_at_admission"] == 0
+    assert reconciled.candidate_states["a" * 32]["first_attempt_deadline_poll_seq"] == 1
+
+
+def test_load_sealed_export_v3_live_dispatch_and_rejections(tmp_path):
+    """Task 3.7: load_sealed_export verifies live v3 exports and rejects invalid/failure-intent v3."""
+    stage1_6b_dir = setup_test_hierarchy(tmp_path)
+    run_root = stage1_6b_dir / "live_observation" / "run_seal_v3"
+    run_root.mkdir(parents=True, exist_ok=True)
+    guard = Stage16BStorageGuard(
+        output_root=run_root, disk_usage_func=create_mock_disk_usage(30, 20)
+    )
+
+    from src.research.external_signal_shadow.stage1_6b_canonical_source_models import (
+        compute_live_v3_checkpoint_id,
+    )
+
+    contract = CaptureRunContract(
+        schema_version="stage1_6b_capture_run_contract_v1",
+        run_id="run_seal_v3",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        source_profile_attestation_sha256="att_sha_123",
+        run_started_at_ms=1700000000000,
+    )
+    write_capture_run_contract(run_root, contract, guard, 0)
+    raw_sha, _, _ = write_content_addressed_raw_payload(run_root, b'{"test":1}', "index", guard, 10)
+    append_jsonl_record(
+        run_root,
+        "list_captures/2026-08-20.jsonl",
+        {
+            "schema_version": "stage1_6b_list_capture_v2",
+            "source_profile_id": SOURCE_PROFILE_ID,
+            "selected_catalog_id": 161,
+            "selected_catalog_name": "Delisting",
+            "selected_catalog_total": 10,
+            "article_count": 1,
+        },
+        "normal_data",
+        guard,
+        20,
+    )
+    append_jsonl_record(
+        run_root,
+        "article_discoveries.jsonl",
+        {
+            "schema_version": "stage1_6b_article_discovery_v2",
+            "source_profile_id": SOURCE_PROFILE_ID,
+            "source_catalog_id": 161,
+            "source_catalog_name": "Delisting",
+            "source_article_id": "a" * 32,
+        },
+        "normal_data",
+        guard,
+        30,
+    )
+
+    cand_state = {
+        "source_article_id": "a" * 32,
+        "first_discovered_poll_seq": 1,
+        "first_discovered_at_ms": 1700000000000,
+        "lane": "lane_a",
+        "detail_attempt_count": 1,
+        "retry_cycle_count": 0,
+        "first_attempt_at_ms": 1700000000100,
+        "last_attempt_at_ms": 1700000000100,
+        "next_retry_at_ms": None,
+        "terminal_reason": "trusted_detail_observed",
+        "trusted_detail_revision_id": "rev_1",
+        "first_attempt_ahead_count_at_admission": 0,
+        "first_attempt_deadline_poll_seq": 1,
+    }
+
+    chk_raw = {
+        "schema_version": "stage1_6b_observer_checkpoint_v3",
+        "run_id": "run_seal_v3",
+        "capture_mode": CaptureMode.LIVE_OBSERVED.value,
+        "source_profile_id": SOURCE_PROFILE_ID,
+        "source_profile_attestation_sha256": "att_sha_123",
+        "prior_checkpoint_id": None,
+        "poll_seq": 1,
+        "monotonic_request_seq": 1,
+        "record_seq": 1,
+        "accounted_root_bytes": 100,
+        "stream_offsets": {},
+        "stream_last_hashes": {},
+        "candidate_states": {"a" * 32: cand_state},
+        "heartbeat_at_ms": 1700000000000,
+        "last_index_poll_status": "trusted",
+        "last_index_poll_coverage": "successful",
+        "pending_terminal_failure_reason": None,
+    }
+    chk_id = compute_live_v3_checkpoint_id(chk_raw)
+    chk = ObserverCheckpointRecord(**dict(chk_raw, checkpoint_id=chk_id))
+    write_observer_checkpoint(run_root, chk, guard, 40)
+
+    term = TerminalStatusRecord(
+        schema_version="stage1_6b_terminal_status_v1",
+        run_id="run_seal_v3",
+        capture_mode=CaptureMode.LIVE_OBSERVED.value,
+        source_profile_id=SOURCE_PROFILE_ID,
+        status="complete",
+        terminal_reason=TerminalReason.EPOCH_COMPLETE.value,
+        final_checkpoint_id=chk_id,
+        terminated_at_ms=1700000001000,
+    )
+    write_terminal_status(run_root, term, guard, 50)
+    export_dir, manifest, _ = seal_export(run_root, guard, 60)
+
+    # 1. Valid v3 live export loads successfully
+    loaded = load_sealed_export(export_dir)
+    assert loaded["status"] == "complete"
+
+    # 2. Checkpoint v3 with pending_terminal_failure_reason rejects
+    chk_p = export_dir / "observer_checkpoint.json"
+    bad_chk = dict(
+        chk_raw,
+        checkpoint_id="any",
+        pending_terminal_failure_reason="detail_first_attempt_deadline_missed",
+    )
+    bad_chk["checkpoint_id"] = compute_live_v3_checkpoint_id(bad_chk)
+    chk_p.write_text(json.dumps(bad_chk), encoding="utf-8")
+    # update manifest sha
+    manifest_p = export_dir / "sealed_export_manifest.json"
+    m_data = json.loads(manifest_p.read_text(encoding="utf-8"))
+    for a in m_data["authoritative_artifacts"]:
+        if a["relative_path"] == "observer_checkpoint.json":
+            a["sha256"] = hashlib.sha256(chk_p.read_bytes()).hexdigest()
+            a["byte_count"] = chk_p.stat().st_size
+    manifest_p.write_text(json.dumps(m_data), encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="checkpoint_v3_pending_terminal_failure_reason_not_null|checkpoint_v3_schema_invalid",
+    ):
+        load_sealed_export(export_dir)

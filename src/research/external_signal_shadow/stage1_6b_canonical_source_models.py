@@ -5,7 +5,9 @@ import json
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from configs import base
 
 # Frozen Candidate Discovery Rule Version (copied from Stage 1.6A, independent contract)
 CANDIDATE_DISCOVERY_RULE_VERSION = "candidate_discovery_rule_v1"
@@ -26,7 +28,9 @@ INDEX_REQUEST_VARIANT = "bapi_article_list_type_1_delisting_catalog_161_page_50_
 SELECTED_CATALOG_ID = 161
 SELECTED_CATALOG_NAME = "Delisting"
 SELECTED_ARTICLE_PATH = 'data.catalogs[?catalogId==161 && catalogName=="Delisting"].articles[]'
-SELECTED_ARTICLE_ID_PATH = 'data.catalogs[?catalogId==161 && catalogName=="Delisting"].articles[].code'
+SELECTED_ARTICLE_ID_PATH = (
+    'data.catalogs[?catalogId==161 && catalogName=="Delisting"].articles[].code'
+)
 
 DETAIL_PATH = "/bapi/composite/v1/public/cms/article/detail/query"
 DETAIL_QUERY_TEMPLATE = "articleCode={article_code}"
@@ -69,6 +73,7 @@ def compute_request_headers_profile_sha256() -> str:
 # Enums and Checkpoint Pair Validator
 # -----------------------------------------------------------------------------
 
+
 class CaptureMode(str, Enum):
     HISTORICAL_BACKFILL = "historical_backfill"
     LIVE_OBSERVED = "live_observed"
@@ -95,9 +100,25 @@ class TerminalReason(str, Enum):
     HISTORICAL_BACKFILL_COMPLETE = "historical_backfill_complete"
     STORAGE_EXHAUSTED = "storage_exhausted"
     DETAIL_FIRST_ATTEMPT_SLA_EXCEEDED = "detail_first_attempt_sla_exceeded"
+    DETAIL_FIRST_ATTEMPT_DEADLINE_MISSED = "detail_first_attempt_deadline_missed"
+    PENDING_DETAIL_CANDIDATE_CAPACITY_EXCEEDED = "pending_detail_candidate_capacity_exceeded"
+    SOURCE_PROFILE_SCHEMA_DRIFT = "source_profile_schema_drift"
     HTTP_FAILURE = "http_failure"
     TERMINAL_DETAIL_FAILURE = "terminal_detail_failure"
     PRECONDITION_FAILED = "precondition_failed"
+
+
+ALLOWED_PENDING_TERMINAL_FAILURE_REASONS = {
+    "source_profile_schema_drift",
+    "detail_first_attempt_deadline_missed",
+    "pending_detail_candidate_capacity_exceeded",
+    "storage_exhausted",
+}
+
+TERMINAL_REASON_SCHEMA_DRIFT = "source_profile_schema_drift"
+TERMINAL_REASON_DEADLINE_MISSED = "detail_first_attempt_deadline_missed"
+TERMINAL_REASON_CAPACITY_EXCEEDED = "pending_detail_candidate_capacity_exceeded"
+TERMINAL_REASON_STORAGE_EXHAUSTED = "storage_exhausted"
 
 
 ALLOWED_CHECKPOINT_STATUS_COVERAGE_PAIRS: Dict[str, str] = {
@@ -125,6 +146,7 @@ def validate_observer_checkpoint_status_coverage(status: str, coverage: str) -> 
 # -----------------------------------------------------------------------------
 # Identity Computations
 # -----------------------------------------------------------------------------
+
 
 def compute_list_payload_id(
     source_surface: str,
@@ -198,6 +220,7 @@ def compute_export_id(
 # Discovery Helpers
 # -----------------------------------------------------------------------------
 
+
 def normalize_discovery_text(text: str) -> str:
     """Normalize text using Unicode NFKC and casefold for robust match."""
     return unicodedata.normalize("NFKC", text).casefold()
@@ -211,6 +234,7 @@ def is_delisting_candidate(normalized_title: str) -> bool:
 # -----------------------------------------------------------------------------
 # Record Dataclasses
 # -----------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ListCaptureRecord:
@@ -281,7 +305,9 @@ class DetailObservationRecord:
     raw_payload_sha256: Optional[str]
     raw_payload_bytes: Optional[int]
     raw_payload_relative_path: Optional[str]
-    trust_validation_status: str  # e.g., "trusted", "waf_rejected", "empty_payload", "wrong_locale", "http_error"
+    trust_validation_status: (
+        str  # e.g., "trusted", "waf_rejected", "empty_payload", "wrong_locale", "http_error"
+    )
     t_detail_receive_ms: int
     captured_at_ms: int
 
@@ -323,9 +349,15 @@ class CandidateState:
     next_retry_at_ms: Optional[int]
     terminal_reason: Optional[str]  # e.g., "trusted_detail_observed", "terminal_detail_failure"
     trusted_detail_revision_id: Optional[str]
+    first_attempt_ahead_count_at_admission: Optional[int] = None
+    first_attempt_deadline_poll_seq: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+    def to_dict(self, schema_version: str = "stage1_6b_observer_checkpoint_v3") -> Dict[str, Any]:
+        d = asdict(self)
+        if schema_version == "stage1_6b_observer_checkpoint_v2":
+            d.pop("first_attempt_ahead_count_at_admission", None)
+            d.pop("first_attempt_deadline_poll_seq", None)
+        return d
 
 
 @dataclass(frozen=True)
@@ -347,9 +379,144 @@ class ObserverCheckpointRecord:
     heartbeat_at_ms: int
     last_index_poll_status: str = "trusted"
     last_index_poll_coverage: str = "successful"
+    pending_terminal_failure_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        if self.schema_version == "stage1_6b_observer_checkpoint_v2":
+            d.pop("pending_terminal_failure_reason", None)
+            cleaned_cands = {}
+            for k, v in d.get("candidate_states", {}).items():
+                if isinstance(v, dict):
+                    v_clean = dict(v)
+                    v_clean.pop("first_attempt_ahead_count_at_admission", None)
+                    v_clean.pop("first_attempt_deadline_poll_seq", None)
+                    cleaned_cands[k] = v_clean
+                else:
+                    cleaned_cands[k] = v
+            d["candidate_states"] = cleaned_cands
+        return d
+
+
+V3_CHECKPOINT_ID_PROJECTION_KEYS: Tuple[str, ...] = (
+    "schema_version",
+    "run_id",
+    "capture_mode",
+    "source_profile_id",
+    "source_profile_attestation_sha256",
+    "prior_checkpoint_id",
+    "poll_seq",
+    "monotonic_request_seq",
+    "record_seq",
+    "accounted_root_bytes",
+    "stream_offsets",
+    "stream_last_hashes",
+    "candidate_states",
+    "heartbeat_at_ms",
+    "last_index_poll_status",
+    "last_index_poll_coverage",
+    "pending_terminal_failure_reason",
+)
+
+
+def validate_observer_checkpoint_v3(
+    record: Union[ObserverCheckpointRecord, Dict[str, Any]],
+) -> None:
+    """Validate Stage 1.6B v3 checkpoint schema, live capture mode, candidate deadlines and failure intent."""
+    if isinstance(record, ObserverCheckpointRecord):
+        schema_version = record.schema_version
+        capture_mode = record.capture_mode
+        pending_terminal_failure_reason = record.pending_terminal_failure_reason
+        candidate_states = record.candidate_states
+    elif isinstance(record, dict):
+        schema_version = record.get("schema_version")
+        capture_mode = record.get("capture_mode")
+        pending_terminal_failure_reason = record.get("pending_terminal_failure_reason")
+        candidate_states = record.get("candidate_states", {})
+    else:
+        raise ValueError(f"unsupported_checkpoint_type: {type(record)}")
+
+    if schema_version != "stage1_6b_observer_checkpoint_v3":
+        raise ValueError(f"expected_v3_schema: {schema_version}")
+    if capture_mode != CaptureMode.LIVE_OBSERVED.value:
+        raise ValueError("v3_checkpoint_only_valid_for_live_observed")
+    validate_observer_checkpoint_status_coverage(
+        record.last_index_poll_status
+        if isinstance(record, ObserverCheckpointRecord)
+        else record.get("last_index_poll_status", ""),
+        record.last_index_poll_coverage
+        if isinstance(record, ObserverCheckpointRecord)
+        else record.get("last_index_poll_coverage", ""),
+    )
+    if pending_terminal_failure_reason is not None:
+        if not isinstance(pending_terminal_failure_reason, str):
+            raise ValueError("invalid_pending_terminal_failure_reason: must be string or None")
+        if pending_terminal_failure_reason not in ALLOWED_PENDING_TERMINAL_FAILURE_REASONS:
+            raise ValueError(
+                f"invalid_pending_terminal_failure_reason: {pending_terminal_failure_reason}"
+            )
+
+    expected_candidate_keys = set(CandidateState.__dataclass_fields__)
+    max_budget = base.EXTERNAL_SIGNAL_STAGE1_6B_LIVE_MAX_DETAIL_REQUESTS_PER_POLL
+    for cid, cand in candidate_states.items():
+        if isinstance(cand, dict):
+            candidate_data = cand
+        elif isinstance(cand, CandidateState):
+            candidate_data = cand.to_dict("stage1_6b_observer_checkpoint_v3")
+        else:
+            raise ValueError(f"invalid_candidate_v3_type: candidate {cid}")
+
+        if set(candidate_data) != expected_candidate_keys:
+            raise ValueError(f"invalid_candidate_v3_keys: candidate {cid}")
+
+        ahead = candidate_data["first_attempt_ahead_count_at_admission"]
+        deadline = candidate_data["first_attempt_deadline_poll_seq"]
+        discovered_poll = candidate_data["first_discovered_poll_seq"]
+        if type(ahead) is not int or ahead < 0:
+            raise ValueError(f"invalid_candidate_v3_ahead_count: candidate {cid} ahead={ahead}")
+        if type(discovered_poll) is not int or discovered_poll <= 0:
+            raise ValueError(
+                f"invalid_candidate_v3_discovered_poll: candidate {cid} poll={discovered_poll}"
+            )
+        if type(deadline) is not int or deadline <= 0:
+            raise ValueError(f"invalid_candidate_v3_deadline: candidate {cid} deadline={deadline}")
+        expected_deadline = discovered_poll + (ahead // max_budget)
+        if deadline != expected_deadline:
+            raise ValueError(
+                f"invalid_candidate_v3_deadline: candidate {cid} deadline={deadline} != expected {expected_deadline}"
+            )
+
+
+def compute_live_v3_checkpoint_id(
+    checkpoint_dict_or_record: Union[ObserverCheckpointRecord, Dict[str, Any]],
+) -> str:
+    """Pure v3 checkpoint identity computation binding all 17 authoritative fields."""
+    if isinstance(checkpoint_dict_or_record, ObserverCheckpointRecord):
+        data = checkpoint_dict_or_record.to_dict()
+    elif isinstance(checkpoint_dict_or_record, dict):
+        data = dict(checkpoint_dict_or_record)
+    else:
+        raise ValueError(f"unsupported_checkpoint_type: {type(checkpoint_dict_or_record)}")
+
+    if data.get("schema_version") != "stage1_6b_observer_checkpoint_v3":
+        raise ValueError(
+            f"invalid_schema_version_for_v3_checkpoint_id: {data.get('schema_version')}"
+        )
+    if data.get("capture_mode") != CaptureMode.LIVE_OBSERVED.value:
+        raise ValueError(f"invalid_capture_mode_for_v3_checkpoint_id: {data.get('capture_mode')}")
+
+    actual_keys = set(data.keys())
+    expected_proj_keys = set(V3_CHECKPOINT_ID_PROJECTION_KEYS)
+    if actual_keys != expected_proj_keys and actual_keys != (
+        expected_proj_keys | {"checkpoint_id"}
+    ):
+        missing = expected_proj_keys - actual_keys
+        extra = actual_keys - (expected_proj_keys | {"checkpoint_id"})
+        raise ValueError(f"invalid_v3_checkpoint_keys: missing={missing}, extra={extra}")
+
+    projection = {k: data[k] for k in V3_CHECKPOINT_ID_PROJECTION_KEYS}
+    canonical_str = canonical_json(projection)
+    return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -360,7 +527,9 @@ class HistoricalCoverageRecord:
     source_profile_attestation_sha256: str
     from_ms: int
     to_ms: int
-    sweep_a_transcript: List[Tuple[int, int, str, int]]  # (page_no, selected_catalog_id, source_article_id, source_published_at_ms)
+    sweep_a_transcript: List[
+        Tuple[int, int, str, int]
+    ]  # (page_no, selected_catalog_id, source_article_id, source_published_at_ms)
     sweep_b_transcript: List[Tuple[int, int, str, int]]
     page_failures: List[Dict[str, Any]]
     candidate_terminal_counts: Dict[str, int]
@@ -456,7 +625,9 @@ class SealedExportManifest:
     historical_range_from_ms: Optional[int]
     historical_range_to_ms: Optional[int]
     historical_coverage_sha256: Optional[str]
-    authoritative_artifacts: List[Dict[str, Any]]  # List of {"relative_path": ..., "sha256": ..., "byte_count": ...}
+    authoritative_artifacts: List[
+        Dict[str, Any]
+    ]  # List of {"relative_path": ..., "sha256": ..., "byte_count": ...}
     sealed_at_ms: int
 
     # Explicit safety caps - ALL HARDCODED FALSE
