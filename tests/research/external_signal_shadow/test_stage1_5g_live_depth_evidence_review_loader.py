@@ -1,7 +1,27 @@
+import hashlib
 import json
-import pytest
 from pathlib import Path
-from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import load_stage1_5g_inputs
+
+from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+    load_stage1_5g_inputs,
+)
+
+
+def _write_source_manifest(root: Path) -> None:
+    manifest = root / "SHA256SUMS"
+    entries = [
+        path.resolve()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path != manifest
+    ]
+    lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path}"
+        for path in entries
+    ]
+    # The retained archive format has a stale self-entry; production verifies
+    # the manifest bytes separately and excludes this one recursive digest.
+    lines.append(f"{'0' * 64}  {manifest.resolve()}")
+    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def make_stage1_5f_fixture_root(tmp_path: Path) -> Path:
@@ -86,6 +106,8 @@ def make_stage1_5f_fixture_root(tmp_path: Path) -> Path:
     (root / "heartbeat").mkdir(exist_ok=True)
     hb = {"poll_index": 1}
     (root / "heartbeat" / "20260706.jsonl").write_text(json.dumps(hb) + "\n", encoding="utf-8")
+
+    _write_source_manifest(root)
 
     return root
 

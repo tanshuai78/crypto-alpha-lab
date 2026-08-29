@@ -1,6 +1,12 @@
+import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
+from src.research.external_signal_shadow.safety import canonical_json_dumps
+from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+    write_stage1_5g_review_manifest,
+)
 from src.research.external_signal_shadow.stage1_5h_read_only_report_generator import (
     build_stage1_5h_report_summary,
     generate_stage1_5h_chinese_report,
@@ -120,6 +126,74 @@ def make_stage1_5h_fixture(tmp_path: Path):
     governance_review_path.parent.mkdir(parents=True, exist_ok=True)
     governance_review_path.write_text(governance_review_text(), encoding="utf-8")
     return summary_path, quarantine_path, valid_rows_path, invalid_rows_path, governance_review_path
+
+
+def make_stage1_5h_v2_fixture(tmp_path: Path):
+    paths = list(make_stage1_5h_fixture(tmp_path))
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    legacy_quarantine = summary["quarantine"]
+    ids = ["es1"]
+    source_hash = "a" * 64
+    formal_hash = hashlib.sha256(
+        canonical_json_dumps(ids).encode("utf-8")
+    ).hexdigest()
+    review_id = hashlib.sha256(
+        canonical_json_dumps({
+            "formal_completed_event_symbol_ids": ids,
+            "schema_version": 2,
+            "source_evidence_manifest_sha256": source_hash,
+        }).encode("utf-8")
+    ).hexdigest()
+    sole_metrics = {
+        key: deepcopy(legacy_quarantine[key])
+        for key in (
+            "blockers",
+            "clean_depth_evidence_pass",
+            "quarantined_depth_evidence_pass",
+            "valid_snapshot_count_after_quarantine",
+            "invalid_book_row_count",
+            "book_availability_ratio",
+            "book_unavailable_ratio",
+            "invalid_book_by_phase",
+            "invalid_book_by_reason",
+            "max_consecutive_invalid",
+            "max_consecutive_invalid_after_warmup",
+            "first_valid_book_latency_ms",
+        )
+    }
+    sole_metrics["quarantined_depth_quality"] = deepcopy(
+        summary["depth_quality"]["quarantined_depth_quality"]
+    )
+    quarantine = {
+        "schema_version": 2,
+        "stage1_5g_review_id": review_id,
+        "source_evidence_manifest_sha256": source_hash,
+        "formal_completed_event_symbol_ids_sha256": formal_hash,
+        "blockers": [],
+        "warnings": legacy_quarantine["warnings"],
+        "clean_depth_evidence_pass": False,
+        "quarantined_depth_evidence_pass": True,
+        "quarantine_candidate": True,
+        "formal_completed_symbol_count": 1,
+        "eligible_event_symbol_ids": ids,
+        "per_symbol_quarantine_metrics": {"es1": sole_metrics},
+    }
+    summary.update({
+        "schema_version": 2,
+        "stage1_5g_review_id": review_id,
+        "source_evidence_manifest_sha256": source_hash,
+        "formal_completed_event_symbol_ids_sha256": formal_hash,
+        "quarantine": quarantine,
+    })
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+    write_stage1_5g_review_manifest(paths[0].parent, summary, {
+        "summary": paths[0],
+        "quarantine_summary": paths[1],
+        "depth_quality_input_rows": paths[2],
+        "quarantined_invalid_book_rows": paths[3],
+    })
+    return paths
 
 
 def load_fixture_bundle(tmp_path: Path):
@@ -495,3 +569,240 @@ def test_report_generator_returns_safe_noop_when_governance_fails(tmp_path):
     assert result["paper_trading_allowed"] is False
     assert result["live_trading_allowed"] is False
     assert "governance_approval_missing" in result["blockers"]
+
+
+def test_stage1_5h_fails_closed_on_legacy_v1_multi_symbol_review(tmp_path):
+    paths = list(make_stage1_5h_fixture(tmp_path))
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    summary["schema_version"] = 1
+    summary["formal_announcement_and_launch_count"] = 2
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+
+    bundle = load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    )
+    result = build_stage1_5h_report_summary(bundle)
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5g_v1_multi_symbol_denominator_unsafe" in result["blockers"]
+
+
+def test_stage1_5h_rejects_v2_bundle_without_manifest(tmp_path):
+    paths = list(make_stage1_5h_fixture(tmp_path))
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    summary.update({
+        "schema_version": 2,
+        "stage1_5g_review_id": "review-v2",
+        "source_evidence_manifest_sha256": "source",
+        "formal_completed_event_symbol_ids_sha256": "formal",
+    })
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    quarantine.update({
+        "stage1_5g_review_id": "review-v2",
+        "formal_completed_symbol_count": 1,
+        "eligible_event_symbol_ids": ["es1"],
+    })
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5g_quarantine_v2_artifact_mismatch" in result["blockers"]
+
+
+def test_stage1_5h_rejects_v2_clean_bundle_without_a_new_consumer_path(tmp_path):
+    paths = make_stage1_5h_v2_fixture(tmp_path)
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    summary.update({
+        "decision": "stage1_5g_depth_evidence_clean_pass",
+        "clean_depth_evidence_pass": True,
+        "quarantined_depth_evidence_pass": False,
+    })
+    quarantine.update({
+        "clean_depth_evidence_pass": True,
+        "quarantined_depth_evidence_pass": False,
+    })
+    summary["quarantine"] = quarantine
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+    write_stage1_5g_review_manifest(paths[0].parent, summary, {
+        "summary": paths[0],
+        "quarantine_summary": paths[1],
+        "depth_quality_input_rows": paths[2],
+        "quarantined_invalid_book_rows": paths[3],
+    })
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5h_stage1_5g_clean_v2_input_not_authorized" in result["blockers"]
+
+
+def test_stage1_5h_rejects_v2_multi_symbol_bundle(tmp_path):
+    paths = list(make_stage1_5h_fixture(tmp_path))
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    summary.update({
+        "schema_version": 2,
+        "stage1_5g_review_id": "review-v2",
+        "source_evidence_manifest_sha256": "source",
+        "formal_completed_event_symbol_ids_sha256": "formal",
+        "reviewed_event_symbols": ["es1", "es2"],
+    })
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    quarantine.update({
+        "stage1_5g_review_id": "review-v2",
+        "formal_completed_symbol_count": 2,
+        "eligible_event_symbol_ids": ["es1", "es2"],
+    })
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5h_multi_symbol_input_not_authorized" in result["blockers"]
+
+
+def test_stage1_5h_rejects_v2_bundle_with_failed_sole_symbol(tmp_path):
+    paths = make_stage1_5h_v2_fixture(tmp_path)
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    sole_metrics = quarantine["per_symbol_quarantine_metrics"]["es1"]
+    sole_metrics["blockers"] = ["snapshot_gap_exceeded"]
+    sole_metrics["quarantined_depth_evidence_pass"] = False
+    summary["quarantine"] = quarantine
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+    write_stage1_5g_review_manifest(paths[0].parent, summary, {
+        "summary": paths[0],
+        "quarantine_summary": paths[1],
+        "depth_quality_input_rows": paths[2],
+        "quarantined_invalid_book_rows": paths[3],
+    })
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5g_quarantine_v2_artifact_mismatch" in result["blockers"]
+
+
+def test_stage1_5h_preserves_v1_quarantined_invalid_row_count_alias(tmp_path):
+    paths = list(make_stage1_5h_fixture(tmp_path))
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    summary["quarantine"].pop("invalid_book_row_count")
+    quarantine.pop("invalid_book_row_count")
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_single_event_static_proxy_report_generated"
+    assert result["invalid_book_row_count"] == 12
+
+
+def test_stage1_5h_accepts_valid_v2_review_with_manifest(tmp_path):
+    paths = make_stage1_5h_v2_fixture(tmp_path)
+
+    bundle = load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    )
+    result = build_stage1_5h_report_summary(bundle)
+
+    assert result["decision"] == "stage1_5h_single_event_static_proxy_report_generated"
+    assert result["blockers"] == []
+
+
+def test_stage1_5h_fails_closed_when_v2_manifest_corrupted(tmp_path):
+    paths = make_stage1_5h_v2_fixture(tmp_path)
+
+    # Tamper with invalid rows file
+    paths[3].write_text("corrupted jsonl row\n", encoding="utf-8")
+
+    bundle = load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    )
+    result = build_stage1_5h_report_summary(bundle)
+
+    assert result["decision"] == "stage1_5h_input_rejected"
+    assert "stage1_5g_quarantine_v2_artifact_mismatch" in result["blockers"]
+
+
+def test_stage1_5h_v2_report_uses_only_sole_symbol_compatibility_view(tmp_path):
+    paths = make_stage1_5h_v2_fixture(tmp_path)
+    summary = json.loads(paths[0].read_text(encoding="utf-8"))
+    quarantine = json.loads(paths[1].read_text(encoding="utf-8"))
+    quarantine.update({
+        "aggregate_book_availability_ratio": 0.0,
+        "aggregate_valid_snapshot_count_after_quarantine": 1,
+        "aggregate_invalid_book_row_count": 999,
+    })
+    summary["quarantine"] = quarantine
+    summary["depth_quality"]["quarantined_depth_quality"]["spread_bps_p95"] = 99.0
+    paths[0].write_text(json.dumps(summary), encoding="utf-8")
+    paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+    write_stage1_5g_review_manifest(paths[0].parent, summary, {
+        "summary": paths[0],
+        "quarantine_summary": paths[1],
+        "depth_quality_input_rows": paths[2],
+        "quarantined_invalid_book_rows": paths[3],
+    })
+
+    result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
+        stage1_5g_summary_path=paths[0],
+        quarantine_summary_path=paths[1],
+        depth_quality_input_rows_path=paths[2],
+        quarantined_invalid_book_rows_path=paths[3],
+        governance_review_path=paths[4],
+    ))
+
+    assert result["decision"] == "stage1_5h_single_event_static_proxy_report_generated"
+    assert result["book_availability_ratio"] == 0.9805555555555555
+    assert result["valid_snapshot_count_after_quarantine"] == 706
+    assert result["invalid_book_row_count"] == 12
+    assert result["static_proxy_metrics"]["spread_bps_p95"] == 2.948591635308917
+    assert "spread_p95_too_high" not in result["static_proxy_blockers"]

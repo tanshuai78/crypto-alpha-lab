@@ -1028,6 +1028,110 @@ PY
 
 **与 Stage 1.6B 的顺序：** UNITREE 已完成采集与本地 1.5G 复核，因此不需要等待它。推荐先完成本节的新 F root 首检，确认 D/F 共享锁、心跳和存储遥测正常；随后才按 [Stage 1.6B deployment checklist](2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md) 的独立操作工单部署 1.6B live observer。1.6B 绝不读取/写入本节任何 D/F root，且其 checklist 本身不包含启动授权。
 
+### 7.11 Shared-Checkout Commit Change: F-Only Runtime-Attestation Rebind
+
+本节只适用于以下已验证情形：健康的唯一 1.5D collector 仍在运行；旧 1.5F 的 `active_observation_count=0`；其 `consumer_runtime_attestation_compromised=true`，且 `consumer_startup_commit_sha` 与当前已审查 `DEPLOY_COMMIT` 不同。原因是部署在同一 Git checkout 中切换了 `HEAD`；旧 F 的 runtime attestation 已永久 latch，不能通过等待恢复。
+
+本节不恢复或修改旧 F root，也不停止或重启 D。它只停止旧 F，针对当前运行中的 D root 建立一个 fresh F root、bootstrap 并重新建立 attestation。若旧 F 有 active observation、D gate 不健康、存在多个 D/F Python writer、磁盘不足 8 GiB，或 compromised 原因不能由 startup commit mismatch 证明，必须 STOP 并另行处理。bootstrap 前的 D events 会被新 watermark 忽略，不能通过复用旧 F root 消除这个窗口。
+
+在 VPS 同一个交互 shell 中手工填入 exact `DEPLOY_COMMIT` 与唯一旧 F session 后执行：
+
+```bash
+export DEPLOY_COMMIT='<exact-reviewed-40-character-commit-sha>'
+export OLD_5F_SESSION='<exact-old-compromised-1.5F-tmux-session>'
+
+bash <<'BASH'
+set -euo pipefail
+cd /root/crypto-alpha-lab || { echo 'STOP: repository root unavailable' >&2; exit 1; }
+test -d .git || { echo 'STOP: not a Git repository' >&2; exit 1; }
+: "${DEPLOY_COMMIT:?STOP: export exact DEPLOY_COMMIT}"
+: "${OLD_5F_SESSION:?STOP: export exact old 1.5F session}"
+test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" || { echo 'STOP: DEPLOY_COMMIT mismatch' >&2; exit 1; }
+test -z "$(git status --short --untracked-files=all)" || { echo 'STOP: target worktree is dirty' >&2; exit 1; }
+
+D_ROOTS="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5d_live_event_source_smoke_collector.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}')"
+test "$(printf '%s\n' "$D_ROOTS" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 || { echo 'STOP: exactly one active 1.5D writer is required' >&2; exit 1; }
+D_ROOT="$(printf '%s\n' "$D_ROOTS" | sed -n '1p')"
+OLD_F_ROOT="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}')"
+test "$(printf '%s\n' "$OLD_F_ROOT" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 || { echo 'STOP: exactly one old 1.5F writer is required' >&2; exit 1; }
+
+PYTHONPATH=src:. .venv/bin/python - "$D_ROOT" "$OLD_F_ROOT" "$DEPLOY_COMMIT" <<'PY'
+import json, sys
+from pathlib import Path
+d_root = Path(sys.argv[1])
+f_root = Path(sys.argv[2])
+deploy_commit = sys.argv[3]
+gate = json.loads((d_root / 'live_safety_gate_summary.json').read_text(encoding='utf-8'))
+summary = json.loads((f_root / 'live_depth_observer_summary.json').read_text(encoding='utf-8'))
+assert gate.get('status') == 'READY' and gate.get('decision') == 'stage1_5d_runtime_gate_ready'
+assert gate.get('consumable_by_stage1_5f') is True and gate.get('storage_blocker') is None
+assert summary.get('active_observation_count') == 0
+assert summary.get('consumer_runtime_attestation_compromised') is True
+assert summary.get('consumer_startup_commit_sha') != deploy_commit
+print({'d_root': str(d_root), 'old_f_root': str(f_root), 'old_f_startup_commit': summary.get('consumer_startup_commit_sha')})
+PY
+
+python3 - <<'PY'
+import shutil
+required = 8 * 1024 * 1024 * 1024
+free = shutil.disk_usage('.').free
+print({'storage_free_bytes': free, 'required_start_free_bytes': required})
+assert free >= required, 'STOP: host free space is below 8 GiB'
+PY
+
+tmux has-session -t "$OLD_5F_SESSION" || { echo 'STOP: old 1.5F tmux session is absent' >&2; exit 1; }
+tmux kill-session -t "$OLD_5F_SESSION"
+sleep 2
+if ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {found=1} END {exit !found}'; then
+  echo 'STOP: old 1.5F Python writer still running' >&2
+  exit 1
+fi
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+F_ROOT="data/external_signal_shadow/stage1_5f/live_depth_observer_${RUN_ID}_7d_runtime_attestation_rebind"
+F_SESSION="stage1_5f_live_depth_${RUN_ID}_7d_runtime_attestation_rebind"
+STAGE1_5E_SUMMARY='data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json'
+test ! -e "$F_ROOT" || { echo 'STOP: fresh F root already exists' >&2; exit 1; }
+if tmux has-session -t "$F_SESSION" 2>/dev/null; then
+  echo 'STOP: fresh F session already exists' >&2
+  exit 1
+fi
+test -f "$STAGE1_5E_SUMMARY" || { echo 'STOP: missing Stage 1.5E summary' >&2; exit 1; }
+test -n "$(find "$D_ROOT/events" -maxdepth 1 -type f -name '*.jsonl' -print -quit)" || { echo 'STOP: D events stream is absent' >&2; exit 1; }
+
+PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py \
+  --stage1-5d-events-glob "$D_ROOT/events/*.jsonl" \
+  --stage1-5d-runtime-gate "$D_ROOT/live_safety_gate_summary.json" \
+  --stage1-5e-summary "$STAGE1_5E_SUMMARY" \
+  --output-root "$F_ROOT" \
+  --bootstrap-watermark
+
+tmux new-session -d -s "$F_SESSION" \
+  "cd /root/crypto-alpha-lab && exec env PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py --stage1-5d-events-glob '$D_ROOT/events/*.jsonl' --stage1-5d-runtime-gate '$D_ROOT/live_safety_gate_summary.json' --stage1-5e-summary '$STAGE1_5E_SUMMARY' --output-root '$F_ROOT' --live-public-readonly"
+
+sleep 90
+PYTHONPATH=src:. .venv/bin/python - "$D_ROOT" "$F_ROOT" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+d_root, f_root = map(Path, sys.argv[1:])
+gate = json.loads((d_root / 'live_safety_gate_summary.json').read_text(encoding='utf-8'))
+contract = json.loads((f_root / 'observer_root_contract.json').read_text(encoding='utf-8'))
+summary = json.loads((f_root / 'live_depth_observer_summary.json').read_text(encoding='utf-8'))
+root_id = hashlib.sha256(str(d_root.resolve()).encode()).hexdigest()
+assert gate.get('status') == 'READY' and gate.get('consumable_by_stage1_5f') is True
+assert all(contract.get(key) == root_id for key in ('source_stage1_5d_output_root_id', 'source_stage1_5d_events_root_id', 'source_stage1_5d_runtime_gate_root_id'))
+assert summary.get('consumer_runtime_attestation_verified') is True
+assert summary.get('consumer_runtime_attestation_compromised') is False
+assert summary.get('block_new_event_admission') is False
+assert summary.get('storage_guard_status') == 'ready' and summary.get('storage_blocker') is None
+print({'f_only_reattest_restart': 'PASS', 'd_root': str(d_root), 'f_root': str(f_root)})
+PY
+printf 'F_ONLY_REATTEST_RESTART=PASS D_ROOT=%s F_ROOT=%s F_SESSION=%s\n' "$D_ROOT" "$F_ROOT" "$F_SESSION"
+BASH
+```
+
+任何失败都不得重新启动旧 F、复用或修改旧 F root，或停止健康 D。保留输出并先定位；只有输出 `F_ONLY_REATTEST_RESTART=PASS` 后，才可重新执行 Stage 1.6D Runbook Section 4 的 co-tenancy gate。
+
 ## 8. 日常监控
 
 ### 8.1 当前 root 快速定位
@@ -1381,6 +1485,35 @@ paper/live trading readiness。
 
 允许的下一步是编写 Stage 1.5H clean-input design / shadow simulator design plan；不允许直接接入 paper/live 或声明执行可行性。
 
+### 10.2 Stage 1.5G v2 multi-symbol 审阅与 Stage 1.5H 边界（2026-08-29）
+
+Stage 1.5G v2 对同一公告的多标的 root 采用逐 symbol gate。`formal_completed_event_symbol_ids` 是唯一 evidence set；每个 symbol 必须独立通过既有 coverage、gap、request-health、quarantine 和 depth-quality gate。聚合 `aggregate_*` 比例只用于算术审计，不能覆盖任一 symbol 的 blocker。
+
+```text
+v2 multi-symbol review:
+  total_expected_snapshot_count = symbol_count * per_symbol_expected_snapshot_count
+  aggregate ratio is diagnostic only
+  any per-symbol blocker -> overall cannot pass
+
+v2 quarantine bundle:
+  main summary + stage1_5g_quarantine_summary.json
+  + depth_quality_input_rows.jsonl
+  + quarantined_invalid_book_rows.jsonl
+  + stage1_5g_review_manifest.json
+  are one closed local bundle when quarantine analysis writes artifacts.
+```
+
+Stage 1.5H 的当前输入边界不因此扩大：
+
+```text
+v1 single-symbol quarantined bundle -> existing legacy path only
+v2 single-symbol quarantined bundle + valid closed manifest -> existing single-symbol path only
+v2 clean bundle -> current 1.5H has no authorized input path
+any v1/v2 multi-symbol bundle -> reject; no Stage 1.5H report, proxy aggregation or reducer
+```
+
+因此，2026-08-29 的五标的 evidence 即使完成有效的 v2 Stage 1.5G review，也只能作为本地、只读审计证据；不得进入 Stage 1.5H，更不得推出 execution feasibility、alpha、paper trading 或 live trading 结论。历史 `20260829T024637Z_local` 是 defect evidence，必须保留且不能覆盖；任何重审必须使用新目录。
+
 后续新 root 完成 12h observation 后，**只在本地工作站**运行 Stage 1.5G。VPS 只允许读取和传输完整的 1.5F evidence；不得在 VPS 上执行 `review_stage1_5g_live_depth_evidence.py`。
 
 在本地工作站执行。先填写服务器上已完成的 1.5F root 绝对路径；这不会修改 VPS 或原始 root：
@@ -1393,7 +1526,7 @@ export SERVER="root@47.82.4.85"
 export REMOTE_STAGE1_5F_OUT="/root/crypto-alpha-lab/替换为已完成的 live_depth_observer root"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export LOCAL_EVIDENCE_ROOT="$PWD/data/external_signal_shadow/local_evidence/${RUN_ID}_stage1_5f"
-export STAGE1_5G_OUT="$PWD/data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}_local"
+export STAGE1_5G_OUT="$PWD/data/external_signal_shadow/stage1_5g/reviews/${RUN_ID}_local_v2"
 
 mkdir -p "$LOCAL_EVIDENCE_ROOT"
 # A complete F root is bounded to 2GiB and avoids missing optional-directory errors.
@@ -1401,9 +1534,10 @@ rsync -aP --partial "$SERVER:$REMOTE_STAGE1_5F_OUT/" "$LOCAL_EVIDENCE_ROOT/"
 
 find "$LOCAL_EVIDENCE_ROOT" -type f -exec shasum -a 256 {} \; | sort > "$LOCAL_EVIDENCE_ROOT/SHA256SUMS"
 wc -l "$LOCAL_EVIDENCE_ROOT/observer_state.jsonl"
+test ! -e "$STAGE1_5G_OUT" || { echo "STOP: review output root already exists: $STAGE1_5G_OUT" >&2; exit 1; }
 ```
 
-同步完成后仍在本地执行 review。`STAGE1_5G_OUT` 是本地生成物，不提交、不回传 VPS：
+同步完成后仍在本地执行 review。reviewer 会验证 `SHA256SUMS` 的 manifest bytes、每个非 self-entry、完整 source file set 和 symlink/type 边界；验证失败即 fail-closed。source root 与已完成 review root 均不可修改。`STAGE1_5G_OUT` 是本地生成物，不提交、不回传 VPS：
 
 ```bash
 PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5g_live_depth_evidence.py \
@@ -1419,6 +1553,11 @@ PYTHONPATH=src:. .venv/bin/python scripts/external_signal_shadow/review_stage1_5
 stage1_5g_depth_evidence_clean_pass -> 可写 1.5H design / shadow simulator design plan，但仍不能 paper/live。
 stage1_5g_depth_evidence_quarantined_pass -> 只允许 write_stage1_5h_design_only。
 stage1_5g_depth_evidence_invalid -> continue_observation。
+
+补充的 v2 cardinality gate:
+  N == 1 + quarantined pass + valid closed manifest -> 才可能进入现有 1.5H single-symbol path。
+  N == 1 + clean pass -> 当前 1.5H 不授权消费。
+  N > 1 -> Stage 1.5H 必须拒绝；Stage 1.5G 结果仅为离线审计 evidence。
 ```
 
 ## 11. 历史问题索引

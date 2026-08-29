@@ -1,4 +1,3 @@
-import pytest
 from configs import base
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     compute_coverage_metrics,
@@ -295,3 +294,76 @@ def test_quarantined_depth_quality_computes_correctly():
     assert quality["depth_quality_input_row_count"] == 706
     assert quality["excluded_invalid_book_row_count"] == 12
     assert quality["book_availability_quality"]["availability_ratio"] == 706/720
+
+
+def test_metrics_per_symbol_coverage_failure_with_other_symbols_passing():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        build_stage1_5g_review_summary,
+    )
+    symbols = ["SYM1", "SYM2"]
+    states = [
+        {"event_symbol_id": "es_SYM1", "status": "completed", "depth_snapshot_count": 720, "max_gap_ms": 60000},
+        {"event_symbol_id": "es_SYM2", "status": "completed", "depth_snapshot_count": 500, "max_gap_ms": 60000},
+    ]
+    accepted_events = [
+        {"event_symbol_id": f"es_{s}", "symbol": s, "evidence_label": "announcement_and_launch_time", "watermark_version": 1, "watermark_max_seen_detected_at_ms": 1000, "symbol_effective_launch_times_ms": {s: 1_000_000}}
+        for s in symbols
+    ]
+    snapshots = [
+        {"event_symbol_id": "es_SYM1", "symbol": "SYM1", "fetched_at_ms": 1_000_000 + i * 60000, "best_bid": 100.0, "best_ask": 100.1, "mid_price": 100.05, "spread_bps": 10.0, "buy_slippage_bps": 5.0, "sell_slippage_bps": 5.0, "top_bid_depth_usdt": 1000.0, "top_ask_depth_usdt": 1000.0}
+        for i in range(720)
+    ] + [
+        {"event_symbol_id": "es_SYM2", "symbol": "SYM2", "fetched_at_ms": 1_000_000 + i * 60000, "best_bid": 100.0, "best_ask": 100.1, "mid_price": 100.05, "spread_bps": 10.0, "buy_slippage_bps": 5.0, "sell_slippage_bps": 5.0, "top_bid_depth_usdt": 1000.0, "top_ask_depth_usdt": 1000.0}
+        for i in range(500)
+    ]
+    request_rows = [
+        {"request_type": "depth_snapshot", "event_symbol_id": f"es_{s}", "symbol": s, "http_status": 200}
+        for s in symbols for _ in range(720 if s == "SYM1" else 500)
+    ]
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 2, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000, "min_snapshot_coverage_ratio": 0.95},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=states,
+        accepted_events=accepted_events,
+        snapshots=snapshots,
+        request_manifest_rows=request_rows,
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "insufficient_depth_snapshot_count" in result["blockers"]
+
+
+def test_metrics_per_symbol_max_gap_failure_with_other_symbols_passing():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        build_stage1_5g_review_summary,
+    )
+    symbols = ["SYM1", "SYM2"]
+    states = [
+        {"event_symbol_id": "es_SYM1", "status": "completed", "depth_snapshot_count": 720, "max_gap_ms": 60000},
+        {"event_symbol_id": "es_SYM2", "status": "completed", "depth_snapshot_count": 720, "max_gap_ms": 700000},
+    ]
+    accepted_events = [
+        {"event_symbol_id": f"es_{s}", "symbol": s, "evidence_label": "announcement_and_launch_time", "watermark_version": 1, "watermark_max_seen_detected_at_ms": 1000, "symbol_effective_launch_times_ms": {s: 1_000_000}}
+        for s in symbols
+    ]
+    snapshots = [
+        {"event_symbol_id": f"es_{s}", "symbol": s, "fetched_at_ms": 1_000_000 + i * 60000, "best_bid": 100.0, "best_ask": 100.1, "mid_price": 100.05, "spread_bps": 10.0, "buy_slippage_bps": 5.0, "sell_slippage_bps": 5.0, "top_bid_depth_usdt": 1000.0, "top_ask_depth_usdt": 1000.0}
+        for s in symbols for i in range(720)
+    ]
+    request_rows = [
+        {"request_type": "depth_snapshot", "event_symbol_id": f"es_{s}", "symbol": s, "http_status": 200}
+        for s in symbols for _ in range(720)
+    ]
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 2, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000, "min_snapshot_coverage_ratio": 0.95},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=states,
+        accepted_events=accepted_events,
+        snapshots=snapshots,
+        request_manifest_rows=request_rows,
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "snapshot_gap_exceeded" in result["blockers"]

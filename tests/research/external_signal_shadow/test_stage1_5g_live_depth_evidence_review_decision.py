@@ -201,6 +201,12 @@ def test_live_depth_evidence_basis_alias_can_drive_formal_completed_evidence():
 
 
 def test_summary_includes_audit_replay_fields_for_sufficient_decision(tmp_path):
+    source_root = tmp_path / "stage1_5f_root"
+    source_root.mkdir()
+    (source_root / "SHA256SUMS").write_text(
+        f"{'0' * 64}  {(source_root / 'SHA256SUMS').resolve()}\n",
+        encoding="utf-8",
+    )
     result = build_stage1_5g_review_summary(
         summary={"completed_observation_count": 1},
         watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
@@ -226,10 +232,10 @@ def test_summary_includes_audit_replay_fields_for_sufficient_decision(tmp_path):
         ],
         snapshots=make_depth_snapshots(count=700),
         request_manifest_rows=[{"event_symbol_id": "es1", "http_status": 200}],
-        output_root=tmp_path / "stage1_5f_root",
+        output_root=source_root,
     )
     assert result["config_version"] == "configs/base.py:EXTERNAL_SIGNAL_STAGE1_5G_*"
-    assert result["stage1_5f_output_root"] == str(tmp_path / "stage1_5f_root")
+    assert result["stage1_5f_output_root"] == str(source_root)
     assert result["watermark_max_seen_detected_at_ms"] == 1000
     assert result["reviewed_event_symbols"] == ["es1"]
     assert result["event_level_decisions"] == [
@@ -621,12 +627,12 @@ def test_skhyusdt_quarantine_candidate_allows_design_only_not_execution():
     assert result["execution_feasibility_claim_allowed"] is False
     assert result["paper_trading_allowed"] is False
     assert result["live_trading_allowed"] is False
-    assert result["raw_integrity"]["invalid_book_count"] == 12
-    assert result["quarantine"]["observed_snapshot_count"] == 718
-    assert result["quarantine"]["expected_snapshot_count"] == 720
-    assert result["quarantine"]["expected_snapshot_count"] == result["coverage_metrics"]["expected_snapshot_count"]
-    assert result["quarantine"]["invalid_book_ratio_observed"] == result["quarantine"]["invalid_book_ratio"]
-    assert result["quarantine"]["book_availability_ratio"] >= 0.98
+    assert result["quarantine"]["formal_completed_symbol_count"] == 1
+    assert result["quarantine"]["aggregate_observed_snapshot_count"] == 718
+    assert result["quarantine"]["per_symbol_expected_snapshot_count"] == 720
+    assert result["quarantine"]["per_symbol_expected_snapshot_count"] == result["coverage_metrics"]["expected_snapshot_count"]
+    assert result["quarantine"]["aggregate_invalid_book_ratio"] == 12 / 718
+    assert result["quarantine"]["aggregate_book_availability_ratio"] >= 0.98
     assert result["quarantine"]["midrun_invalid_book_count"] == 1
     assert "depth_quality_input_rows" not in result["quarantine"]
     assert "quarantined_invalid_book_rows" not in result["quarantine"]
@@ -745,5 +751,154 @@ def test_chinese_review_includes_quarantine_section_for_quarantined_pass():
     })
 
     assert "Quarantine" in markdown or "隔离" in markdown
-    assert "partial_not_clean" in markdown
     assert "write_stage1_5h_design_only" in markdown
+    assert "formal_completed_symbol_count" in markdown
+
+
+def test_chinese_review_includes_per_symbol_table_for_multi_symbol_quarantine():
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        generate_stage1_5g_chinese_review,
+    )
+
+    markdown = generate_stage1_5g_chinese_review({
+        "decision": "stage1_5g_depth_evidence_quarantined_pass",
+        "allowed_next_action": "write_stage1_5h_design_only",
+        "evidence_scope": "event_family",
+        "event_family_conclusion_allowed": True,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "execution_feasibility_claim_allowed": False,
+        "blockers": [],
+        "warnings": [],
+        "formal_announcement_and_launch_count": 2,
+        "evidence_label_counts": {"announcement_and_launch_time": 2},
+        "coverage_metrics": {},
+        "raw_integrity": {},
+        "depth_quality": {},
+        "quarantine": {
+            "formal_completed_symbol_count": 2,
+            "aggregate_invalid_book_row_count": 2,
+            "aggregate_book_availability_ratio": 0.99,
+            "per_symbol_quarantine_metrics": {
+                "es1": {"observed_snapshot_count": 720, "valid_snapshot_count_after_quarantine": 719, "invalid_book_row_count": 1, "book_availability_ratio": 0.998, "first_valid_book_latency_ms": 60000, "quarantined_depth_evidence_pass": True},
+                "es2": {"observed_snapshot_count": 720, "valid_snapshot_count_after_quarantine": 719, "invalid_book_row_count": 1, "book_availability_ratio": 0.998, "first_valid_book_latency_ms": 60000, "quarantined_depth_evidence_pass": True},
+            },
+        },
+    })
+
+    assert "逐币 Quarantine 明细" in markdown
+    assert "es1" in markdown
+    assert "es2" in markdown
+
+
+
+def test_decision_aggregate_camouflage_one_symbol_insufficient_snapshots():
+    symbols = [f"SYM{i}" for i in range(5)]
+    states = [
+        {"event_symbol_id": f"es_{s}", "status": "completed", "depth_snapshot_count": 720 if s != "SYM4" else 650, "max_gap_ms": 60000}
+        for s in symbols
+    ]
+    accepted_events = [
+        {
+            "event_symbol_id": f"es_{s}",
+            "symbol": s,
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {s: 1_000_000},
+        }
+        for s in symbols
+    ]
+    snapshots = []
+    for s in symbols:
+        cnt = 720 if s != "SYM4" else 650
+        for i in range(cnt):
+            snapshots.append({
+                "event_symbol_id": f"es_{s}",
+                "symbol": s,
+                "fetched_at_ms": 1_000_000 + i * 60000,
+                "best_bid": 100.0,
+                "best_ask": 100.1,
+                "mid_price": 100.05,
+                "spread_bps": 10.0,
+                "buy_slippage_bps": 5.0,
+                "sell_slippage_bps": 5.0,
+                "top_bid_depth_usdt": 1000.0,
+                "top_ask_depth_usdt": 1000.0,
+            })
+    request_rows = [
+        {"request_type": "depth_snapshot", "event_symbol_id": f"es_{s}", "symbol": s, "http_status": 200}
+        for s in symbols for _ in range(720 if s != "SYM4" else 650)
+    ]
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 5, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000, "min_snapshot_coverage_ratio": 0.95},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=states,
+        accepted_events=accepted_events,
+        snapshots=snapshots,
+        request_manifest_rows=request_rows,
+    )
+
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "insufficient_depth_snapshot_count" in result["blockers"]
+
+
+def test_decision_aggregate_camouflage_invalid_rows_concentrated_in_one_symbol():
+    symbols = [f"SYM{i}" for i in range(5)]
+    states = [
+        {"event_symbol_id": f"es_{s}", "status": "completed", "depth_snapshot_count": 718, "max_gap_ms": 60000}
+        for s in symbols
+    ]
+    accepted_events = [
+        {
+            "event_symbol_id": f"es_{s}",
+            "symbol": s,
+            "evidence_label": "announcement_and_launch_time",
+            "watermark_version": 1,
+            "watermark_max_seen_detected_at_ms": 1000,
+            "symbol_effective_launch_times_ms": {s: 1_000_000},
+        }
+        for s in symbols
+    ]
+    snapshots = []
+    for s in symbols:
+        for i in range(718):
+            row = {
+                "event_symbol_id": f"es_{s}",
+                "symbol": s,
+                "fetched_at_ms": 1_000_000 + i * 60000,
+                "best_bid": 100.0,
+                "best_ask": 100.1,
+                "mid_price": 100.05,
+                "spread_bps": 10.0,
+                "buy_slippage_bps": 5.0,
+                "sell_slippage_bps": 5.0,
+                "top_bid_depth_usdt": 1000.0,
+                "top_ask_depth_usdt": 1000.0,
+            }
+            # Add 2 midrun invalid rows only to SYM0
+            if s == "SYM0" and i in (100, 200):
+                row.update({"best_bid": None, "best_ask": None, "spread_bps": None})
+            snapshots.append(row)
+
+    request_rows = [
+        {"request_type": "depth_snapshot", "event_symbol_id": f"es_{s}", "symbol": s, "http_status": 200}
+        for s in symbols for _ in range(718)
+    ]
+
+    result = build_stage1_5g_review_summary(
+        summary={"completed_observation_count": 5, "observation_window_ms": 43_200_000, "snapshot_interval_ms": 60_000, "min_snapshot_coverage_ratio": 0.95},
+        watermark={"watermark_version": 1, "max_seen_detected_at_ms": 1000},
+        states=states,
+        accepted_events=accepted_events,
+        snapshots=snapshots,
+        request_manifest_rows=request_rows,
+    )
+
+    # SYM0 has 2 midrun invalid rows exceeding limit 1 -> must fail
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "per_symbol_quarantine_gate_failed" in result["blockers"] or "midrun_invalid_book_count_exceeded" in result["blockers"]

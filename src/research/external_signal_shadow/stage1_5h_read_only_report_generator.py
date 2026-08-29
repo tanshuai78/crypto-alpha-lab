@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from configs import base
+from src.research.external_signal_shadow.safety import canonical_json_dumps
+from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+    verify_stage1_5g_review_manifest,
+)
 
 
 @dataclass(frozen=True)
@@ -18,6 +23,10 @@ class Stage1_5HInputBundle:
     governance_review_text: str
     loader_blockers: list[str]
     loader_warnings: list[str]
+    stage1_5g_summary_path: Path | None = None
+    quarantine_summary_path: Path | None = None
+    depth_quality_input_rows_path: Path | None = None
+    quarantined_invalid_book_rows_path: Path | None = None
 
 
 def _load_json(path: Path, blocker_name: str, blockers: list[str]) -> dict[str, Any]:
@@ -62,15 +71,23 @@ def load_stage1_5h_inputs(
     governance_text = gov_path.read_text(encoding="utf-8") if gov_path.exists() else ""
     if not governance_text:
         blockers.append("missing_or_unreadable_governance_review")
+    sum_path = Path(stage1_5g_summary_path)
+    quarantine_path = Path(quarantine_summary_path)
+    depth_quality_path = Path(depth_quality_input_rows_path)
+    invalid_rows_path = Path(quarantined_invalid_book_rows_path)
     return Stage1_5HInputBundle(
-        stage1_5g_summary=_load_json(Path(stage1_5g_summary_path), "missing_or_unreadable_stage1_5g_summary", blockers),
-        quarantine_summary=_load_json(Path(quarantine_summary_path), "missing_or_unreadable_quarantine_summary", blockers),
-        depth_quality_input_rows=_load_jsonl(Path(depth_quality_input_rows_path), "missing_or_unreadable_depth_quality_input_rows", blockers),
-        quarantined_invalid_book_rows=_load_jsonl(Path(quarantined_invalid_book_rows_path), "missing_or_unreadable_quarantined_invalid_book_rows", blockers),
+        stage1_5g_summary=_load_json(sum_path, "missing_or_unreadable_stage1_5g_summary", blockers),
+        quarantine_summary=_load_json(quarantine_path, "missing_or_unreadable_quarantine_summary", blockers),
+        depth_quality_input_rows=_load_jsonl(depth_quality_path, "missing_or_unreadable_depth_quality_input_rows", blockers),
+        quarantined_invalid_book_rows=_load_jsonl(invalid_rows_path, "missing_or_unreadable_quarantined_invalid_book_rows", blockers),
         governance_review_path=gov_path,
         governance_review_text=governance_text,
         loader_blockers=blockers,
         loader_warnings=warnings,
+        stage1_5g_summary_path=sum_path,
+        quarantine_summary_path=quarantine_path,
+        depth_quality_input_rows_path=depth_quality_path,
+        quarantined_invalid_book_rows_path=invalid_rows_path,
     )
 
 
@@ -129,24 +146,186 @@ def _values_equal(left: Any, right: Any) -> bool:
     return left == right
 
 
+def _invalid_book_row_count(quarantine: dict[str, Any]) -> Any:
+    value = quarantine.get("invalid_book_row_count")
+    return value if value is not None else quarantine.get(
+        "quarantined_invalid_book_row_count", 0
+    )
+
+
 def _validate_quarantine_consistency(summary: dict[str, Any], quarantine: dict[str, Any], blockers: list[str]) -> None:
     embedded = summary.get("quarantine") or {}
-    for key in (
-        "valid_snapshot_count_after_quarantine",
-        "invalid_book_row_count",
-        "book_availability_ratio",
-        "first_valid_book_latency_ms",
-    ):
-        if not _values_equal(embedded.get(key), quarantine.get(key)):
+    keys_to_check = [
+        ("aggregate_valid_snapshot_count_after_quarantine", "valid_snapshot_count_after_quarantine"),
+        ("aggregate_invalid_book_row_count", "invalid_book_row_count"),
+        ("aggregate_book_availability_ratio", "book_availability_ratio"),
+        ("first_valid_book_latency_ms", "first_valid_book_latency_ms"),
+    ]
+    for v2_key, v1_key in keys_to_check:
+        emb_val = embedded.get(v2_key) if v2_key in embedded else embedded.get(v1_key)
+        qua_val = quarantine.get(v2_key) if v2_key in quarantine else quarantine.get(v1_key)
+        if not _values_equal(emb_val, qua_val):
             _append_once(blockers, "stage1_5h_upstream_artifact_mismatch")
 
 
-def _validate_stage1_5g_source_of_truth(bundle: Stage1_5HInputBundle, blockers: list[str]) -> None:
+def _v2_single_symbol_quarantine_view(
+    bundle: Stage1_5HInputBundle,
+    blockers: list[str],
+) -> dict[str, Any] | None:
     summary = bundle.stage1_5g_summary
     quarantine = bundle.quarantine_summary
+    required_paths = {
+        "summary": bundle.stage1_5g_summary_path,
+        "quarantine_summary": bundle.quarantine_summary_path,
+        "depth_quality_input_rows": bundle.depth_quality_input_rows_path,
+        "quarantined_invalid_book_rows": bundle.quarantined_invalid_book_rows_path,
+    }
+    if (
+        bundle.stage1_5g_summary_path is None
+        or any(path is None for path in required_paths.values())
+    ):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+
+    ids = quarantine.get("eligible_event_symbol_ids")
+    formal_count = quarantine.get("formal_completed_symbol_count")
+    if (
+        not isinstance(ids, list)
+        or not all(isinstance(item, str) and item for item in ids)
+        or ids != sorted(set(ids))
+        or not isinstance(formal_count, int)
+        or isinstance(formal_count, bool)
+        or formal_count <= 0
+        or formal_count != len(ids)
+    ):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+    if formal_count > 1:
+        _append_once(blockers, "stage1_5h_multi_symbol_input_not_authorized")
+        return None
+
+    root = bundle.stage1_5g_summary_path.resolve().parent
+    manifest_path = root / "stage1_5g_review_manifest.json"
+    if not manifest_path.is_file():
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+    manifest_ok, manifest_blockers = verify_stage1_5g_review_manifest(root)
+    if not manifest_ok:
+        for blocker in manifest_blockers:
+            _append_once(blockers, blocker)
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+
+    if (
+        summary.get("quarantine") != quarantine
+        or quarantine.get("schema_version") != 2
+        or quarantine.get("clean_depth_evidence_pass") is not False
+        or quarantine.get("quarantined_depth_evidence_pass") is not True
+    ):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+    formal_hash = hashlib.sha256(
+        canonical_json_dumps(ids).encode("utf-8")
+    ).hexdigest()
+    review_payload = {
+        "formal_completed_event_symbol_ids": ids,
+        "schema_version": 2,
+        "source_evidence_manifest_sha256": summary.get(
+            "source_evidence_manifest_sha256", ""
+        ),
+    }
+    review_id = hashlib.sha256(
+        canonical_json_dumps(review_payload).encode("utf-8")
+    ).hexdigest()
+    for key, expected in {
+        "stage1_5g_review_id": review_id,
+        "formal_completed_event_symbol_ids_sha256": formal_hash,
+    }.items():
+        if summary.get(key) != expected or quarantine.get(key) != expected:
+            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            return None
+    if quarantine.get("source_evidence_manifest_sha256") != summary.get(
+        "source_evidence_manifest_sha256"
+    ):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+    for key, supplied_path in required_paths.items():
+        meta = (manifest.get("artifacts") or {}).get(key) or {}
+        relative_path = meta.get("relative_path")
+        if not isinstance(relative_path, str) or Path(relative_path).is_absolute():
+            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            return None
+        artifact_path = (root / relative_path).resolve()
+        try:
+            artifact_path.relative_to(root)
+        except ValueError:
+            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            return None
+        if artifact_path != supplied_path.resolve():
+            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            return None
+    for key in (
+        "stage1_5g_review_id",
+        "source_evidence_manifest_sha256",
+        "formal_completed_event_symbol_ids_sha256",
+    ):
+        if manifest.get(key) != summary.get(key):
+            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            return None
+
+    sole_metrics = (quarantine.get("per_symbol_quarantine_metrics") or {}).get(ids[0])
+    if (
+        not isinstance(sole_metrics, dict)
+        or sole_metrics.get("blockers") not in ([], None)
+        or sole_metrics.get("clean_depth_evidence_pass") is not False
+        or sole_metrics.get("quarantined_depth_evidence_pass") is not True
+    ):
+        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        return None
+    return {
+        "blockers": sole_metrics.get("blockers", []),
+        "warnings": quarantine.get("warnings", []),
+        "clean_depth_evidence_pass": sole_metrics.get("clean_depth_evidence_pass"),
+        "quarantined_depth_evidence_pass": sole_metrics.get(
+            "quarantined_depth_evidence_pass"
+        ),
+        "valid_snapshot_count_after_quarantine": sole_metrics.get(
+            "valid_snapshot_count_after_quarantine"
+        ),
+        "invalid_book_row_count": sole_metrics.get("invalid_book_row_count"),
+        "book_availability_ratio": sole_metrics.get("book_availability_ratio"),
+        "book_unavailable_ratio": sole_metrics.get("book_unavailable_ratio"),
+        "invalid_book_by_phase": sole_metrics.get("invalid_book_by_phase"),
+        "invalid_book_by_reason": sole_metrics.get("invalid_book_by_reason"),
+        "max_consecutive_invalid": sole_metrics.get("max_consecutive_invalid"),
+        "max_consecutive_invalid_after_warmup": sole_metrics.get(
+            "max_consecutive_invalid_after_warmup"
+        ),
+        "first_valid_book_latency_ms": sole_metrics.get(
+            "first_valid_book_latency_ms"
+        ),
+        "quarantined_depth_quality": sole_metrics.get(
+            "quarantined_depth_quality"
+        ),
+    }
+
+
+def _validate_stage1_5g_source_of_truth(
+    bundle: Stage1_5HInputBundle,
+    blockers: list[str],
+) -> dict[str, Any]:
+    summary = bundle.stage1_5g_summary
+    quarantine = bundle.quarantine_summary
+    schema_version = summary.get("schema_version")
     if summary.get("decision") != "stage1_5g_depth_evidence_quarantined_pass":
         _append_once(blockers, "invalid_stage1_5g_decision")
-    if summary.get("clean_depth_evidence_pass") is not False:
+    if schema_version == 2 and summary.get("clean_depth_evidence_pass") is True:
+        _append_once(blockers, "stage1_5h_stage1_5g_clean_v2_input_not_authorized")
+    elif summary.get("clean_depth_evidence_pass") is not False:
         _append_once(blockers, "clean_pass_state_unexpected")
     if summary.get("quarantined_depth_evidence_pass") is not True:
         _append_once(blockers, "quarantined_pass_missing")
@@ -158,17 +337,36 @@ def _validate_stage1_5g_source_of_truth(bundle: Stage1_5HInputBundle, blockers: 
     if quarantine.get("blockers") not in ([], None):
         _append_once(blockers, "quarantine_blockers_present")
 
-    _validate_quarantine_consistency(summary, quarantine, blockers)
+    if schema_version in (None, 1):
+        formal_count = summary.get("formal_announcement_and_launch_count")
+        if not isinstance(formal_count, int) or isinstance(formal_count, bool):
+            _append_once(blockers, "stage1_5g_schema_version_unsupported")
+        elif formal_count > 1:
+            _append_once(blockers, "stage1_5g_v1_multi_symbol_denominator_unsafe")
+        quarantine_view = quarantine
+        _validate_quarantine_consistency(summary, quarantine_view, blockers)
+    elif schema_version == 2:
+        quarantine_view = _v2_single_symbol_quarantine_view(bundle, blockers) or {}
+    else:
+        _append_once(blockers, "unsupported_stage1_5g_schema_version")
+        quarantine_view = {}
 
-    expected_valid = int(quarantine.get("valid_snapshot_count_after_quarantine") or -1)
-    expected_invalid = int(quarantine.get("quarantined_invalid_book_row_count") or quarantine.get("invalid_book_row_count") or -1)
-    summary_depth_count = int((summary.get("depth_quality") or {}).get("depth_quality_input_row_count") or -1)
+    expected_valid = int(
+        quarantine_view.get("valid_snapshot_count_after_quarantine") or -1
+    )
+    expected_invalid = int(_invalid_book_row_count(quarantine_view) or -1)
     if len(bundle.depth_quality_input_rows) != expected_valid:
-        _append_once(blockers, "stage1_5h_upstream_artifact_mismatch")
-    if len(bundle.depth_quality_input_rows) != summary_depth_count:
         _append_once(blockers, "stage1_5h_upstream_artifact_mismatch")
     if len(bundle.quarantined_invalid_book_rows) != expected_invalid:
         _append_once(blockers, "stage1_5h_upstream_artifact_mismatch")
+    summary_quality_count = (summary.get("depth_quality") or {}).get(
+        "depth_quality_input_row_count"
+    )
+    if summary_quality_count is not None and summary_quality_count != len(
+        bundle.depth_quality_input_rows
+    ):
+        _append_once(blockers, "stage1_5h_upstream_artifact_mismatch")
+    return quarantine_view
 
 
 def validate_stage1_5h_governance(bundle: Stage1_5HInputBundle) -> dict[str, Any]:
@@ -198,7 +396,7 @@ def _merge_unique(first: list[str], second: list[str]) -> list[str]:
 
 def _fallback_clean_pass_missing_reason(summary: dict[str, Any], quarantine: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
-    if quarantine.get("invalid_book_row_count", 0) > 0:
+    if _invalid_book_row_count(quarantine) > 0:
         reasons.append("invalid_book_present")
     reasons_by_name = quarantine.get("invalid_book_by_reason", {}) or {}
     if reasons_by_name.get("launch_warmup_empty_book", 0) > 0:
@@ -219,8 +417,12 @@ def _clean_pass_missing_reason(summary: dict[str, Any], quarantine: dict[str, An
     return _fallback_clean_pass_missing_reason(summary, quarantine)
 
 
-def _build_static_proxy_metrics(summary: dict[str, Any]) -> dict[str, Any]:
-    quality = ((summary.get("depth_quality") or {}).get("quarantined_depth_quality") or {})
+def _build_static_proxy_metrics(
+    summary: dict[str, Any], quarantine: dict[str, Any]
+) -> dict[str, Any]:
+    quality = quarantine.get("quarantined_depth_quality") or (
+        (summary.get("depth_quality") or {}).get("quarantined_depth_quality") or {}
+    )
     buy_p95 = float(quality.get("buy_slippage_bps_500usdt_p95") or 0.0)
     sell_p95 = float(quality.get("sell_slippage_bps_500usdt_p95") or 0.0)
     observed = buy_p95 + sell_p95
@@ -255,7 +457,8 @@ def _static_proxy_blockers(metrics: dict[str, Any], quarantine: dict[str, Any]) 
         blockers.append("top_bid_depth_p05_too_low")
     if float(metrics.get("top_ask_depth_usdt_p05") or 0.0) < base.EXTERNAL_SIGNAL_STAGE1_5H_MIN_TOP_ASK_DEPTH_USDT_P05:
         blockers.append("top_ask_depth_p05_too_low")
-    if float(quarantine.get("book_availability_ratio") or 0.0) < base.EXTERNAL_SIGNAL_STAGE1_5H_MIN_BOOK_AVAILABILITY_RATIO:
+    avail_ratio = float(quarantine.get("book_availability_ratio") or 0.0)
+    if avail_ratio < base.EXTERNAL_SIGNAL_STAGE1_5H_MIN_BOOK_AVAILABILITY_RATIO:
         blockers.append("book_availability_ratio_below_threshold")
     if int(quarantine.get("first_valid_book_latency_ms") or 0) > base.EXTERNAL_SIGNAL_STAGE1_5H_MAX_FIRST_VALID_BOOK_LATENCY_MS:
         blockers.append("first_valid_book_latency_too_high")
@@ -265,15 +468,23 @@ def _static_proxy_blockers(metrics: dict[str, Any], quarantine: dict[str, Any]) 
 def build_stage1_5h_report_summary(bundle: Stage1_5HInputBundle) -> dict[str, Any]:
     governance = validate_stage1_5h_governance(bundle)
     summary = bundle.stage1_5g_summary
-    quarantine = bundle.quarantine_summary
     if governance["blockers"]:
         return {
             **governance,
             "decision": "stage1_5h_input_rejected",
             "allowed_next_action": "revise_inputs_or_continue_observation",
         }
+    validation_blockers: list[str] = []
+    quarantine = _validate_stage1_5g_source_of_truth(bundle, validation_blockers)
+    if validation_blockers:
+        return {
+            **governance,
+            "decision": "stage1_5h_input_rejected",
+            "allowed_next_action": "revise_inputs_or_continue_observation",
+            "blockers": sorted(set(validation_blockers)),
+        }
     warnings = _merge_unique(quarantine.get("warnings", []), summary.get("warnings", []))
-    metrics = _build_static_proxy_metrics(summary)
+    metrics = _build_static_proxy_metrics(summary, quarantine)
     static_blockers = _static_proxy_blockers(metrics, quarantine)
     return {
         "decision": "stage1_5h_single_event_static_proxy_report_generated",
@@ -291,7 +502,7 @@ def build_stage1_5h_report_summary(bundle: Stage1_5HInputBundle) -> dict[str, An
         "book_availability_ratio": quarantine.get("book_availability_ratio"),
         "book_unavailable_ratio": quarantine.get("book_unavailable_ratio"),
         "valid_snapshot_count_after_quarantine": quarantine.get("valid_snapshot_count_after_quarantine"),
-        "invalid_book_row_count": quarantine.get("invalid_book_row_count"),
+        "invalid_book_row_count": _invalid_book_row_count(quarantine),
         "invalid_book_by_phase": quarantine.get("invalid_book_by_phase"),
         "invalid_book_by_reason": quarantine.get("invalid_book_by_reason"),
         "max_consecutive_invalid": quarantine.get("max_consecutive_invalid"),

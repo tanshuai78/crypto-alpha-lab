@@ -2,8 +2,9 @@ from configs import base
 
 
 def test_stage1_5g_config_constants_exist_and_are_observation_only():
-    assert base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION == 1
+    assert base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION == 2
     assert base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_REQUEST_SUCCESS_RATE == 0.98
+
     assert base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_PER_SYMBOL_REQUEST_SUCCESS_RATE == 0.98
     assert base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_SNAPSHOT_COVERAGE_RATIO == 0.95
     assert base.EXTERNAL_SIGNAL_STAGE1_5G_SLIPPAGE_TEST_NOTIONAL_USDT == 500.0

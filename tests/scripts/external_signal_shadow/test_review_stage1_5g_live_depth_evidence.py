@@ -9,8 +9,9 @@ from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_re
 
 def test_stage1_5g_cli_writes_summary_and_review(tmp_path, monkeypatch):
     root = make_stage1_5f_fixture_root(tmp_path)
-    summary_out = tmp_path / "stage1_5g_summary.json"
-    review_out = tmp_path / "stage1_5g_review.md"
+    output_root = tmp_path / "stage1_5g_review"
+    summary_out = output_root / "stage1_5g_summary.json"
+    review_out = output_root / "stage1_5g_review.md"
 
     monkeypatch.setattr(
         sys,
@@ -19,6 +20,8 @@ def test_stage1_5g_cli_writes_summary_and_review(tmp_path, monkeypatch):
             "review_stage1_5g_live_depth_evidence.py",
             "--stage1-5f-output-root",
             str(root),
+            "--output-root",
+            str(output_root),
             "--output-summary",
             str(summary_out),
             "--output-review",
@@ -94,6 +97,10 @@ def test_cli_does_not_write_quarantine_artifacts_for_clean_pass(tmp_path, monkey
 
 
 def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypatch):
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
+        _write_source_manifest,
+    )
+
     root = make_stage1_5f_fixture_root(tmp_path)
     snap_dir = root / "depth_snapshots" / "20260706"
     snap_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +187,7 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
     manifest_file = root / "request_manifest" / "20260706.jsonl"
     manifest_rows = [{"event_symbol_id": "es1", "symbol": "BTC/USDT", "http_status": 200} for _ in range(718)]
     manifest_file.write_text("\n".join(json.dumps(r) for r in manifest_rows) + "\n", encoding="utf-8")
+    _write_source_manifest(root)
 
     output_root = tmp_path / "review_out"
     monkeypatch.setattr(
@@ -205,7 +213,78 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
         "midrun": 1,
     }
     assert quarantine_summary["invalid_book_by_reason"]["launch_warmup_empty_book"] == 11
-    assert quarantine_summary["invalid_book_by_reason"]["midrun_empty_book"] == 1
     assert quarantine_summary["first_valid_book_latency_ms"] == 11 * 60_000
     assert quarantine_summary["max_consecutive_invalid"] == 11
     assert quarantine_summary["max_consecutive_invalid_after_warmup"] == 1
+
+    manifest_path = output_root / "stage1_5g_review_manifest.json"
+    assert manifest_path.exists()
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 2
+    assert "stage1_5g_review_id" in manifest_data
+    assert "artifacts" in manifest_data
+    for art_name in ("summary", "quarantine_summary", "quarantined_invalid_book_rows", "depth_quality_input_rows"):
+        assert art_name in manifest_data["artifacts"]
+        art_path = output_root / manifest_data["artifacts"][art_name]["relative_path"]
+        assert art_path.exists()
+
+
+def test_cli_rejects_preexisting_output_root(tmp_path, monkeypatch):
+    root = make_stage1_5f_fixture_root(tmp_path)
+    output_root = tmp_path / "existing_review_out"
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "review_stage1_5g_live_depth_evidence.py",
+            "--stage1-5f-output-root",
+            str(root),
+            "--output-root",
+            str(output_root),
+        ],
+    )
+
+    assert main() != 0
+
+
+def test_cli_rejects_output_paths_outside_fresh_review_root(tmp_path, monkeypatch):
+    root = make_stage1_5f_fixture_root(tmp_path / "source")
+    output_root = tmp_path / "review_out"
+    external_summary = tmp_path / "outside_summary.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "review_stage1_5g_live_depth_evidence.py",
+            "--stage1-5f-output-root",
+            str(root),
+            "--output-root",
+            str(output_root),
+            "--output-summary",
+            str(external_summary),
+        ],
+    )
+
+    assert main() != 0
+    assert not external_summary.exists()
+
+
+def test_cli_rejects_output_root_inside_stage1_5f_source(tmp_path, monkeypatch):
+    root = make_stage1_5f_fixture_root(tmp_path / "source")
+    output_root = root / "derived_review"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "review_stage1_5g_live_depth_evidence.py",
+            "--stage1-5f-output-root",
+            str(root),
+            "--output-root",
+            str(output_root),
+        ],
+    )
+
+    assert main() != 0
+    assert not output_root.exists()

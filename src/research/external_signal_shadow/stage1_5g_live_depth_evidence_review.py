@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+from src.research.external_signal_shadow.safety import canonical_json_dumps
 
 
 @dataclass(frozen=True)
@@ -282,9 +287,9 @@ def _validate_formal_v2_lineage(
         ("source_anchor_contract_hash", None),
         ("admission_anchor_contract_hash", None),
     )
-    for field, expected in required_pairs:
-        accepted_value = accepted_event.get(field)
-        state_value = latest_st.get(field)
+    for field_name, expected in required_pairs:
+        accepted_value = accepted_event.get(field_name)
+        state_value = latest_st.get(field_name)
         if not accepted_value or not state_value or accepted_value != state_value:
             return False, "formal_v2_lineage_incomplete_or_mismatch"
         if expected is not None and accepted_value != expected:
@@ -528,6 +533,7 @@ class DepthRequestHealthResult:
 def compute_depth_request_health(
     request_manifest_rows: list[dict],
     completed_states: list[dict] = None,
+    event_symbol_ids: set[str] | list[str] | None = None,
 ) -> DepthRequestHealthResult:
     from configs import base
     completed_states = completed_states or []
@@ -553,6 +559,19 @@ def compute_depth_request_health(
             if is_depth:
                 depth_manifest_rows.append(r)
 
+    if completed_states and any(
+        not (r.get("event_symbol_id") or r.get("symbol"))
+        for r in depth_manifest_rows
+    ):
+        blockers.append("request_manifest_symbol_key_missing")
+
+    if event_symbol_ids is not None:
+        event_symbol_ids_set = set(event_symbol_ids)
+        depth_manifest_rows = [
+            r for r in depth_manifest_rows
+            if (r.get("event_symbol_id") in event_symbol_ids_set or (not r.get("event_symbol_id") and r.get("symbol") in event_symbol_ids_set))
+        ]
+
     total_requests = len(depth_manifest_rows)
     success_requests = sum(
         1 for r in depth_manifest_rows
@@ -565,11 +584,6 @@ def compute_depth_request_health(
     if total_requests > 0 and global_request_success_rate < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_REQUEST_SUCCESS_RATE:
         blockers.append("global_request_success_rate_below_threshold")
 
-    if completed_states and any(
-        not (r.get("event_symbol_id") or r.get("symbol"))
-        for r in depth_manifest_rows
-    ):
-        blockers.append("request_manifest_symbol_key_missing")
 
     symbol_success = {}
     symbol_total = {}
@@ -611,7 +625,7 @@ def compute_coverage_metrics(
     states: list[dict],
     request_manifest_rows: list[dict],
     summary: dict | None = None,
-    event_symbol_ids: set[str] | None = None,
+    event_symbol_ids: set[str] | list[str] | None = None,
 ) -> dict:
     from configs import base
 
@@ -649,10 +663,11 @@ def compute_coverage_metrics(
 
     states_to_check = list(latest_state_by_id.values()) if latest_state_by_id else states
     if event_symbol_ids is not None:
+        event_symbol_ids_set = set(event_symbol_ids)
         states_to_check = [
             st
             for st in states_to_check
-            if st.get("event_symbol_id") in event_symbol_ids
+            if st.get("event_symbol_id") in event_symbol_ids_set
         ]
 
     # Validate formal completed event-symbol states only when caller supplies
@@ -671,10 +686,11 @@ def compute_coverage_metrics(
 
     if request_manifest_rows:
         completed_states = [st for st in states_to_check if st.get("status") == "completed"]
-        health = compute_depth_request_health(request_manifest_rows, completed_states)
+        health = compute_depth_request_health(request_manifest_rows, completed_states, event_symbol_ids=event_symbol_ids)
         per_symbol_request_success_rate_min = health.per_symbol_request_success_rate_min if health.per_symbol_request_success_rate_min is not None else 1.0
         global_request_success_rate = health.global_request_success_rate
         blockers.extend(health.blockers)
+
 
     return {
         "expected_snapshot_count": expected_snapshot_count,
@@ -734,6 +750,12 @@ class RawSnapshotQuarantineResult:
     first_valid_book_latency_ms: int | None
     depth_quality_input_rows: list[dict]
     quarantined_invalid_book_rows: list[dict]
+    formal_completed_symbol_count: int = 1
+    eligible_event_symbol_ids: list[str] = field(default_factory=list)
+    ignored_nonformal_snapshot_row_count: int = 0
+    per_symbol_expected_snapshot_count: int = 720
+    total_expected_snapshot_count: int = 720
+    per_symbol_quarantine_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 def _minute_bucket_ms(ts_ms: int) -> int:
@@ -766,8 +788,8 @@ def _is_crossed_or_negative_book(row: dict) -> bool:
 
 def _resolve_event_launch_time_ms(event: dict, state: dict | None = None) -> int | None:
     symbol = event.get("symbol") or (state or {}).get("symbol")
-    for field in ("symbol_effective_launch_times_ms", "symbol_onboard_times_ms"):
-        mapping = event.get(field) or (state or {}).get(field) or {}
+    for field_name in ("symbol_effective_launch_times_ms", "symbol_onboard_times_ms"):
+        mapping = event.get(field_name) or (state or {}).get(field_name) or {}
         if symbol and isinstance(mapping, dict) and mapping.get(symbol) is not None:
             return int(mapping[symbol])
     for obj in (event, state or {}):
@@ -779,9 +801,9 @@ def _resolve_event_launch_time_ms(event: dict, state: dict | None = None) -> int
 
 def _resolve_observation_start_ms(event_symbol_id: str, snapshots: list[dict], event: dict, state: dict | None = None) -> int | None:
     for obj in (state or {}, event):
-        for field in ("observation_started_at_ms", "accepted_at_ms"):
-            if obj.get(field) is not None:
-                return int(obj[field])
+        for field_name in ("observation_started_at_ms", "accepted_at_ms"):
+            if obj.get(field_name) is not None:
+                return int(obj[field_name])
     times = [int(s["fetched_at_ms"]) for s in snapshots if s.get("event_symbol_id") == event_symbol_id and s.get("fetched_at_ms") is not None]
     return min(times) if times else None
 
@@ -791,31 +813,78 @@ def compute_raw_snapshot_quarantine_metrics(
     states: list[dict],
     accepted_events: list[dict],
     expected_snapshot_count: int,
+    formal_completed_event_symbol_ids: list[str] | set[str] | None = None,
+    request_manifest_rows: list[dict] | None = None,
+    summary: dict | None = None,
 ) -> RawSnapshotQuarantineResult:
+    from collections import defaultdict
+
     from configs import base
 
     blockers: list[str] = []
     warnings: list[str] = []
 
+    # Determine S
+    if formal_completed_event_symbol_ids is not None:
+        S = sorted(set(formal_completed_event_symbol_ids))
+    else:
+        completed_ids = sorted(
+            set(
+                s.get("event_symbol_id")
+                for s in states
+                if s.get("status") == "completed" and s.get("event_symbol_id")
+            )
+        )
+        if completed_ids:
+            S = completed_ids
+        else:
+            S = sorted(
+                set(
+                    s.get("event_symbol_id")
+                    for s in states
+                    if s.get("event_symbol_id")
+                )
+            )
+            if not S:
+                S = sorted(
+                    set(
+                        e.get("event_symbol_id")
+                        for e in accepted_events
+                        if e.get("event_symbol_id")
+                    )
+                )
+
+    formal_completed_symbol_count = len(S)
+    if formal_completed_symbol_count == 0:
+        blockers.append("formal_completed_symbol_count_missing_or_zero")
+
+    per_symbol_expected_snapshot_count = expected_snapshot_count
+    if per_symbol_expected_snapshot_count <= 0:
+        blockers.append("authoritative_per_symbol_expected_snapshot_count_missing")
+        total_expected_snapshot_count = 0
+    else:
+        total_expected_snapshot_count = formal_completed_symbol_count * per_symbol_expected_snapshot_count
+
     events_by_id = {e["event_symbol_id"]: e for e in accepted_events if e.get("event_symbol_id")}
     states_by_id = {s["event_symbol_id"]: s for s in states if s.get("event_symbol_id")}
 
-    # Group valid snapshots by event_symbol_id
+    # Segregate snapshots: check schema invalid first
     schema_invalid_rows = []
-    valid_schema_rows = []
+    eligible_snapshots = []
+    ignored_nonformal_snapshots = []
     for r in snapshots:
         if _is_schema_invalid_snapshot(r):
             schema_invalid_rows.append(r)
+        elif S and r.get("event_symbol_id") in S:
+            eligible_snapshots.append(r)
         else:
-            valid_schema_rows.append(r)
+            ignored_nonformal_snapshots.append(r)
 
     schema_invalid_count = len(schema_invalid_rows)
+    ignored_nonformal_snapshot_row_count = len(ignored_nonformal_snapshots)
+    valid_schema_rows = list(eligible_snapshots)
 
-    # Sort valid_schema_rows by (event_symbol_id, fetched_at_ms)
-    valid_schema_rows.sort(key=lambda x: (x["event_symbol_id"], x["fetched_at_ms"]))
-
-    # Group valid rows by event_symbol_id
-    from collections import defaultdict
+    # Group by event_symbol_id
     rows_by_symbol = defaultdict(list)
     for r in valid_schema_rows:
         rows_by_symbol[r["event_symbol_id"]].append(r)
@@ -837,22 +906,26 @@ def compute_raw_snapshot_quarantine_metrics(
         "schema_invalid": 0,
     }
 
-    # Track consecutive invalid rows
     max_consecutive_invalid = 0
     max_consecutive_invalid_after_warmup = 0
 
-    # Calculate first valid book latency
     first_valid_book_ts_by_symbol = {}
     launch_ts_by_symbol = {}
     observation_start_ts_by_symbol = {}
 
-    for event_symbol_id, symbol_rows in rows_by_symbol.items():
-        # Get event and state
+    per_symbol_quarantine_metrics = {}
+    any_symbol_failed = False
+
+    # Process each formal symbol in S independently
+    for event_symbol_id in S:
+        symbol_rows = rows_by_symbol.get(event_symbol_id, [])
+        symbol_rows.sort(key=lambda x: x.get("fetched_at_ms", 0))
+
         event = events_by_id.get(event_symbol_id, {})
         state = states_by_id.get(event_symbol_id, {})
 
         launch_time_ms = _resolve_event_launch_time_ms(event, state)
-        observation_start_ms = _resolve_observation_start_ms(event_symbol_id, snapshots, event, state)
+        observation_start_ms = _resolve_observation_start_ms(event_symbol_id, eligible_snapshots, event, state)
 
         launch_ts_by_symbol[event_symbol_id] = launch_time_ms
         observation_start_ts_by_symbol[event_symbol_id] = observation_start_ms
@@ -860,15 +933,31 @@ def compute_raw_snapshot_quarantine_metrics(
         if launch_time_ms is None:
             warnings.append("launch_time_missing_warmup_anchor_degraded")
 
-        # Track consecutive counts for this symbol
-        curr_consec = 0
-        curr_consec_after_warmup = 0
+        sym_curr_consec = 0
+        sym_curr_consec_after_warmup = 0
+        sym_max_consec = 0
+        sym_max_consec_after_warmup = 0
+        sym_first_valid_ts = None
 
-        first_valid_ts = None
+        sym_valid_rows = []
+        sym_invalid_rows = []
+        sym_crossed_count = 0
+        sym_warmup_invalid_row_count = 0
+        sym_midrun_invalid_count = 0
+        sym_invalid_by_phase = {"launch_warmup": 0, "observation_initial": 0, "midrun": 0}
+        sym_invalid_by_reason = {
+            "launch_warmup_empty_book": 0,
+            "observation_initial_empty_book": 0,
+            "midrun_empty_book": 0,
+            "crossed_or_negative_book": 0,
+            "schema_invalid": 0,
+        }
+        sym_invalid_buckets = set()
+        sym_warmup_invalid_buckets = set()
+        sym_midrun_invalid_buckets = set()
 
         for r in symbol_rows:
             fetched_at_ms = r["fetched_at_ms"]
-            # Determine phase
             if launch_time_ms is not None:
                 is_warmup = (
                     launch_time_ms
@@ -880,57 +969,146 @@ def compute_raw_snapshot_quarantine_metrics(
                 is_warmup = observation_start_ms is not None and fetched_at_ms < observation_start_ms + base.EXTERNAL_SIGNAL_STAGE1_5G_LAUNCH_WARMUP_WINDOW_MS
                 phase = "observation_initial" if is_warmup else "midrun"
 
-            # Check validity
             is_crossed = _is_crossed_or_negative_book(r)
             is_empty = _is_empty_book_snapshot(r)
 
             if is_crossed or is_empty:
-                # Invalid book
                 invalid_book_row_count += 1
-                curr_consec += 1
+                sym_invalid_rows.append(r)
+                sym_curr_consec += 1
                 if phase == "midrun":
-                    curr_consec_after_warmup += 1
+                    sym_curr_consec_after_warmup += 1
                 else:
-                    curr_consec_after_warmup = 0
+                    sym_curr_consec_after_warmup = 0
 
                 reason = ""
                 if is_crossed:
                     reason = "crossed_or_negative_book"
                     crossed_or_negative_book_count += 1
+                    sym_crossed_count += 1
                 else:
-                    # is_empty
                     if phase == "launch_warmup":
                         reason = "launch_warmup_empty_book"
                         launch_warmup_invalid_row_count += 1
+                        sym_warmup_invalid_row_count += 1
                     elif phase == "observation_initial":
                         reason = "observation_initial_empty_book"
                     else:
                         reason = "midrun_empty_book"
                         midrun_invalid_book_count += 1
+                        sym_midrun_invalid_count += 1
 
                 invalid_book_by_phase[phase] += 1
                 invalid_book_by_reason[reason] += 1
+                sym_invalid_by_phase[phase] += 1
+                sym_invalid_by_reason[reason] += 1
 
-                # Keep copy of row and attach reason & phase
                 quarantined_row = dict(r)
                 quarantined_row["quarantine_reason"] = reason
                 quarantined_row["quarantine_phase"] = phase
                 quarantined_invalid_book_rows.append(quarantined_row)
+
+                bucket = _minute_bucket_ms(fetched_at_ms)
+                sym_invalid_buckets.add(bucket)
+                if phase == "launch_warmup":
+                    sym_warmup_invalid_buckets.add(bucket)
+                elif phase == "midrun":
+                    sym_midrun_invalid_buckets.add(bucket)
             else:
-                # Valid book
                 depth_quality_input_rows.append(r)
-                curr_consec = 0
-                curr_consec_after_warmup = 0
-                if first_valid_ts is None:
-                    first_valid_ts = fetched_at_ms
+                sym_valid_rows.append(r)
+                sym_curr_consec = 0
+                sym_curr_consec_after_warmup = 0
+                if sym_first_valid_ts is None:
+                    sym_first_valid_ts = fetched_at_ms
 
-            max_consecutive_invalid = max(max_consecutive_invalid, curr_consec)
-            max_consecutive_invalid_after_warmup = max(max_consecutive_invalid_after_warmup, curr_consec_after_warmup)
+            sym_max_consec = max(sym_max_consec, sym_curr_consec)
+            sym_max_consec_after_warmup = max(sym_max_consec_after_warmup, sym_curr_consec_after_warmup)
 
-        if first_valid_ts is not None:
-            first_valid_book_ts_by_symbol[event_symbol_id] = first_valid_ts
+        max_consecutive_invalid = max(max_consecutive_invalid, sym_max_consec)
+        max_consecutive_invalid_after_warmup = max(max_consecutive_invalid_after_warmup, sym_max_consec_after_warmup)
 
-    # Add schema invalid rows to quarantined_invalid_book_rows
+        if sym_first_valid_ts is not None:
+            first_valid_book_ts_by_symbol[event_symbol_id] = sym_first_valid_ts
+
+        sym_latency = None
+        if sym_first_valid_ts is not None:
+            anchor = launch_time_ms if launch_time_ms is not None else observation_start_ms
+            if anchor is not None:
+                sym_latency = sym_first_valid_ts - anchor
+
+        sym_observed_count = len(symbol_rows)
+        sym_valid_count = len(sym_valid_rows)
+        sym_invalid_count = len(sym_invalid_rows)
+        sym_avail_ratio = sym_valid_count / per_symbol_expected_snapshot_count if per_symbol_expected_snapshot_count > 0 else 0.0
+        sym_unavail_ratio = sym_invalid_count / per_symbol_expected_snapshot_count if per_symbol_expected_snapshot_count > 0 else 0.0
+        sym_invalid_ratio = sym_invalid_count / sym_observed_count if sym_observed_count > 0 else 0.0
+
+        sym_blockers = []
+        if sym_avail_ratio < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_BOOK_AVAILABILITY_RATIO:
+            sym_blockers.append("book_availability_ratio_below_threshold")
+        if sym_invalid_ratio > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_INVALID_BOOK_RATIO:
+            sym_blockers.append("invalid_book_ratio_above_threshold")
+        if sym_latency is not None and sym_latency > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_FIRST_VALID_BOOK_LATENCY_MS:
+            sym_blockers.append("first_valid_book_latency_too_high")
+        if sym_warmup_invalid_row_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_ROW_COUNT:
+            sym_blockers.append("launch_warmup_invalid_row_count_exceeded")
+        if len(sym_warmup_invalid_buckets) > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_MINUTE_BUCKET_COUNT:
+            sym_blockers.append("launch_warmup_invalid_minute_bucket_count_exceeded")
+        if sym_observed_count > 0 and (sym_midrun_invalid_count / sym_observed_count) > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_RATIO:
+            sym_blockers.append("midrun_invalid_book_ratio_exceeded")
+        if sym_midrun_invalid_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_COUNT:
+            sym_blockers.append("midrun_invalid_book_count_exceeded")
+        if sym_max_consec_after_warmup > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_CONSECUTIVE_INVALID_AFTER_WARMUP:
+            sym_blockers.append("max_consecutive_invalid_after_warmup_exceeded")
+        if sym_valid_count < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_VALID_SNAPSHOTS_AFTER_QUARANTINE:
+            sym_blockers.append("valid_snapshot_count_after_quarantine_below_threshold")
+        if sym_crossed_count > 0 and not base.EXTERNAL_SIGNAL_STAGE1_5G_CROSSED_OR_NEGATIVE_BOOK_ALLOWED:
+            sym_blockers.append("crossed_or_negative_book")
+
+        state_s = [states_by_id[event_symbol_id]] if event_symbol_id in states_by_id else []
+        request_s = [r for r in (request_manifest_rows or []) if r.get("event_symbol_id") == event_symbol_id]
+        cov_s = compute_coverage_metrics(state_s, request_s, summary, event_symbol_ids={event_symbol_id})
+        for cb in cov_s.get("blockers", []):
+            sym_blockers.append(cb)
+
+        qual_s = compute_depth_quality_metrics(sym_valid_rows)
+        for qb in qual_s.get("blockers", []):
+            sym_blockers.append(qb)
+
+        if sym_blockers:
+            any_symbol_failed = True
+            blockers.extend(sym_blockers)
+
+        per_symbol_quarantine_metrics[event_symbol_id] = {
+            "coverage_metrics": cov_s,
+            "request_health": cov_s.get("per_symbol_request_success_rate_min"),
+            "quarantined_depth_quality": qual_s,
+            "observed_snapshot_count": sym_observed_count,
+            "valid_snapshot_count_after_quarantine": sym_valid_count,
+            "invalid_book_row_count": sym_invalid_count,
+            "book_availability_ratio": sym_avail_ratio,
+            "book_unavailable_ratio": sym_unavail_ratio,
+            "invalid_book_ratio": sym_invalid_ratio,
+            "invalid_book_by_phase": sym_invalid_by_phase,
+            "invalid_book_by_reason": sym_invalid_by_reason,
+            "max_consecutive_invalid": sym_max_consec,
+            "max_consecutive_invalid_after_warmup": sym_max_consec_after_warmup,
+            "first_valid_book_latency_ms": sym_latency,
+            "launch_warmup_invalid_row_count": sym_warmup_invalid_row_count,
+            "launch_warmup_invalid_minute_bucket_count": len(sym_warmup_invalid_buckets),
+            "midrun_invalid_book_count": sym_midrun_invalid_count,
+            "midrun_invalid_minute_bucket_count": len(sym_midrun_invalid_buckets),
+            "crossed_or_negative_book_count": sym_crossed_count,
+            "blockers": sorted(set(sym_blockers)),
+            "clean_depth_evidence_pass": sym_invalid_count == 0 and not sym_blockers,
+            "quarantined_depth_evidence_pass": sym_invalid_count > 0 and sym_crossed_count == 0 and not sym_blockers,
+        }
+
+    if any_symbol_failed:
+        blockers.append("per_symbol_quarantine_gate_failed")
+
+    # Add schema invalid rows
     for r in schema_invalid_rows:
         quarantined_row = dict(r)
         quarantined_row["quarantine_reason"] = "schema_invalid"
@@ -939,12 +1117,9 @@ def compute_raw_snapshot_quarantine_metrics(
         invalid_book_by_reason["schema_invalid"] += 1
         invalid_book_row_count += 1
 
-    # Let's count minute buckets for invalid rows
-    # A minute bucket is identified by _minute_bucket_ms(fetched_at_ms)
     invalid_buckets = set()
     launch_warmup_invalid_buckets = set()
     midrun_invalid_buckets = set()
-
     for r in quarantined_invalid_book_rows:
         fetched_at_ms = r.get("fetched_at_ms")
         if fetched_at_ms is not None:
@@ -960,64 +1135,44 @@ def compute_raw_snapshot_quarantine_metrics(
     launch_warmup_invalid_minute_bucket_count = len(launch_warmup_invalid_buckets)
     midrun_invalid_minute_bucket_count = len(midrun_invalid_buckets)
 
-    # First valid book latency
     first_valid_book_latency_ms = None
     if first_valid_book_ts_by_symbol:
         latencies = []
-        for event_symbol_id, first_ts in first_valid_book_ts_by_symbol.items():
-            anchor = launch_ts_by_symbol.get(event_symbol_id)
-            if anchor is None:
-                anchor = observation_start_ts_by_symbol.get(event_symbol_id)
+        for es_id, first_ts in first_valid_book_ts_by_symbol.items():
+            anchor = launch_ts_by_symbol.get(es_id) or observation_start_ts_by_symbol.get(es_id)
             if anchor is not None:
                 latencies.append(first_ts - anchor)
         if latencies:
             first_valid_book_latency_ms = max(latencies)
 
-    observed_snapshot_count = len(snapshots)
+    # Layer B Aggregate counts and ratios
+    observed_snapshot_count = len(eligible_snapshots)
     valid_snapshot_count_after_quarantine = len(depth_quality_input_rows)
 
-    # Ratios
     invalid_book_ratio = invalid_book_row_count / observed_snapshot_count if observed_snapshot_count > 0 else 0.0
     invalid_book_ratio_observed = invalid_book_ratio
-    book_availability_ratio = valid_snapshot_count_after_quarantine / expected_snapshot_count if expected_snapshot_count > 0 else 0.0
-    book_unavailable_ratio = invalid_book_row_count / expected_snapshot_count if expected_snapshot_count > 0 else 0.0
+    book_availability_ratio = valid_snapshot_count_after_quarantine / total_expected_snapshot_count if total_expected_snapshot_count > 0 else 0.0
+    book_unavailable_ratio = invalid_book_row_count / total_expected_snapshot_count if total_expected_snapshot_count > 0 else 0.0
 
-    # Gates & Blockers
-    if expected_snapshot_count <= 0:
-        blockers.append("expected_snapshot_count_missing")
-    else:
-        if book_availability_ratio < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_BOOK_AVAILABILITY_RATIO:
-            blockers.append("book_availability_ratio_below_threshold")
+    for r_val in (invalid_book_ratio, book_availability_ratio, book_unavailable_ratio):
+        if not math.isfinite(r_val) or r_val < 0.0 or r_val > 1.0:
+            blockers.append("quarantine_ratio_out_of_range")
+
+    if total_expected_snapshot_count <= 0:
+        if "expected_snapshot_count_missing" not in blockers and "authoritative_per_symbol_expected_snapshot_count_missing" not in blockers:
+            blockers.append("expected_snapshot_count_missing")
+
+    if book_availability_ratio < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_BOOK_AVAILABILITY_RATIO:
+        blockers.append("book_availability_ratio_below_threshold")
 
     if invalid_book_ratio > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_INVALID_BOOK_RATIO:
         blockers.append("invalid_book_ratio_above_threshold")
 
-    if first_valid_book_latency_ms is not None and first_valid_book_latency_ms > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_FIRST_VALID_BOOK_LATENCY_MS:
-        blockers.append("first_valid_book_latency_too_high")
-
-    if launch_warmup_invalid_row_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_ROW_COUNT:
-        blockers.append("launch_warmup_invalid_row_count_exceeded")
-
-    if launch_warmup_invalid_minute_bucket_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_LAUNCH_WARMUP_INVALID_MINUTE_BUCKET_COUNT:
-        blockers.append("launch_warmup_invalid_minute_bucket_count_exceeded")
-
-    if observed_snapshot_count > 0 and (midrun_invalid_book_count / observed_snapshot_count) > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_RATIO:
-        blockers.append("midrun_invalid_book_ratio_exceeded")
-
-    if midrun_invalid_book_count > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_MIDRUN_INVALID_BOOK_COUNT:
-        blockers.append("midrun_invalid_book_count_exceeded")
-
-    if max_consecutive_invalid_after_warmup > base.EXTERNAL_SIGNAL_STAGE1_5G_MAX_CONSECUTIVE_INVALID_AFTER_WARMUP:
-        blockers.append("max_consecutive_invalid_after_warmup_exceeded")
-
-    if valid_snapshot_count_after_quarantine < base.EXTERNAL_SIGNAL_STAGE1_5G_MIN_VALID_SNAPSHOTS_AFTER_QUARANTINE:
-        blockers.append("valid_snapshot_count_after_quarantine_below_threshold")
+    if schema_invalid_count > 0:
+        blockers.append("schema_invalid")
 
     if crossed_or_negative_book_count > 0 and not base.EXTERNAL_SIGNAL_STAGE1_5G_CROSSED_OR_NEGATIVE_BOOK_ALLOWED:
         blockers.append("crossed_or_negative_book")
-
-    if schema_invalid_count > 0:
-        blockers.append("schema_invalid")
 
     clean_depth_evidence_pass = (invalid_book_row_count == 0) and (not blockers)
     quarantine_candidate = (invalid_book_row_count > 0) and (crossed_or_negative_book_count == 0) and (schema_invalid_count == 0)
@@ -1030,7 +1185,7 @@ def compute_raw_snapshot_quarantine_metrics(
         quarantined_depth_evidence_pass=quarantined_depth_evidence_pass,
         quarantine_candidate=quarantine_candidate,
         observed_snapshot_count=observed_snapshot_count,
-        expected_snapshot_count=expected_snapshot_count,
+        expected_snapshot_count=per_symbol_expected_snapshot_count,
         invalid_book_row_count=invalid_book_row_count,
         invalid_book_minute_bucket_count=invalid_book_minute_bucket_count,
         invalid_book_ratio=invalid_book_ratio,
@@ -1051,6 +1206,12 @@ def compute_raw_snapshot_quarantine_metrics(
         first_valid_book_latency_ms=first_valid_book_latency_ms,
         depth_quality_input_rows=depth_quality_input_rows,
         quarantined_invalid_book_rows=quarantined_invalid_book_rows,
+        formal_completed_symbol_count=formal_completed_symbol_count,
+        eligible_event_symbol_ids=S,
+        ignored_nonformal_snapshot_row_count=ignored_nonformal_snapshot_row_count,
+        per_symbol_expected_snapshot_count=per_symbol_expected_snapshot_count,
+        total_expected_snapshot_count=total_expected_snapshot_count,
+        per_symbol_quarantine_metrics=per_symbol_quarantine_metrics,
     )
 
 
@@ -1372,8 +1533,9 @@ def _with_stage1_5g_audit_fields(
     watermark: dict,
     accepted_events: list[dict],
     states: list[dict],
-    formal_completed_event_symbol_ids: set[str] | None = None,
+    formal_completed_event_symbol_ids: set[str] | list[str] | None = None,
 ) -> dict:
+    S = sorted(formal_completed_event_symbol_ids or set())
     reviewed_event_symbols = sorted(
         {
             event.get("event_symbol_id")
@@ -1381,7 +1543,29 @@ def _with_stage1_5g_audit_fields(
             if event.get("event_symbol_id")
         }
     )
+    source_evidence_manifest_sha256 = ""
+    if output_root is not None:
+        source_manifest = Path(output_root) / "SHA256SUMS"
+        if source_manifest.is_file():
+            source_evidence_manifest_sha256 = hashlib.sha256(source_manifest.read_bytes()).hexdigest()
+
+    formal_completed_event_symbol_ids_sha256 = hashlib.sha256(
+        canonical_json_dumps(S).encode("utf-8")
+    ).hexdigest()
+    review_id_payload = {
+        "formal_completed_event_symbol_ids": S,
+        "schema_version": 2,
+        "source_evidence_manifest_sha256": source_evidence_manifest_sha256,
+    }
+    stage1_5g_review_id = hashlib.sha256(
+        canonical_json_dumps(review_id_payload).encode("utf-8")
+    ).hexdigest()
+
     enriched = {
+        "schema_version": 2,
+        "stage1_5g_review_id": stage1_5g_review_id,
+        "source_evidence_manifest_sha256": source_evidence_manifest_sha256,
+        "formal_completed_event_symbol_ids_sha256": formal_completed_event_symbol_ids_sha256,
         "config_version": "configs/base.py:EXTERNAL_SIGNAL_STAGE1_5G_*",
         "stage1_5f_output_root": str(output_root) if output_root is not None else "",
         "watermark_max_seen_detected_at_ms": watermark.get("max_seen_detected_at_ms") if watermark else None,
@@ -1393,6 +1577,11 @@ def _with_stage1_5g_audit_fields(
         ),
     }
     enriched.update(result)
+    if "quarantine" in enriched and isinstance(enriched["quarantine"], dict):
+        enriched["quarantine"]["schema_version"] = 2
+        enriched["quarantine"]["stage1_5g_review_id"] = stage1_5g_review_id
+        enriched["quarantine"]["source_evidence_manifest_sha256"] = source_evidence_manifest_sha256
+        enriched["quarantine"]["formal_completed_event_symbol_ids_sha256"] = formal_completed_event_symbol_ids_sha256
     return enriched
 
 
@@ -1403,15 +1592,18 @@ def summarize_raw_snapshot_quarantine_result(quarantine_result: RawSnapshotQuara
         "clean_depth_evidence_pass": quarantine_result.clean_depth_evidence_pass,
         "quarantined_depth_evidence_pass": quarantine_result.quarantined_depth_evidence_pass,
         "quarantine_candidate": quarantine_result.quarantine_candidate,
-        "observed_snapshot_count": quarantine_result.observed_snapshot_count,
-        "expected_snapshot_count": quarantine_result.expected_snapshot_count,
-        "invalid_book_row_count": quarantine_result.invalid_book_row_count,
+        "formal_completed_symbol_count": quarantine_result.formal_completed_symbol_count,
+        "eligible_event_symbol_ids": quarantine_result.eligible_event_symbol_ids,
+        "ignored_nonformal_snapshot_row_count": quarantine_result.ignored_nonformal_snapshot_row_count,
+        "per_symbol_expected_snapshot_count": quarantine_result.per_symbol_expected_snapshot_count,
+        "total_expected_snapshot_count": quarantine_result.total_expected_snapshot_count,
+        "aggregate_observed_snapshot_count": quarantine_result.observed_snapshot_count,
+        "aggregate_valid_snapshot_count_after_quarantine": quarantine_result.valid_snapshot_count_after_quarantine,
+        "aggregate_invalid_book_row_count": quarantine_result.invalid_book_row_count,
+        "aggregate_book_availability_ratio": quarantine_result.book_availability_ratio,
+        "aggregate_book_unavailable_ratio": quarantine_result.book_unavailable_ratio,
+        "aggregate_invalid_book_ratio": quarantine_result.invalid_book_ratio,
         "invalid_book_minute_bucket_count": quarantine_result.invalid_book_minute_bucket_count,
-        "invalid_book_ratio": quarantine_result.invalid_book_ratio,
-        "invalid_book_ratio_observed": quarantine_result.invalid_book_ratio_observed,
-        "valid_snapshot_count_after_quarantine": quarantine_result.valid_snapshot_count_after_quarantine,
-        "book_availability_ratio": quarantine_result.book_availability_ratio,
-        "book_unavailable_ratio": quarantine_result.book_unavailable_ratio,
         "invalid_book_by_phase": quarantine_result.invalid_book_by_phase,
         "invalid_book_by_reason": quarantine_result.invalid_book_by_reason,
         "launch_warmup_invalid_row_count": quarantine_result.launch_warmup_invalid_row_count,
@@ -1425,10 +1617,15 @@ def summarize_raw_snapshot_quarantine_result(quarantine_result: RawSnapshotQuara
         "first_valid_book_latency_ms": quarantine_result.first_valid_book_latency_ms,
         "depth_quality_input_row_count": len(quarantine_result.depth_quality_input_rows),
         "quarantined_invalid_book_row_count": len(quarantine_result.quarantined_invalid_book_rows),
+        "per_symbol_quarantine_metrics": quarantine_result.per_symbol_quarantine_metrics,
     }
 
 
-def write_stage1_5g_quarantine_artifacts(review_output_root: Path, quarantine_result: RawSnapshotQuarantineResult) -> dict[str, str]:
+def write_stage1_5g_quarantine_artifacts(
+    review_output_root: Path,
+    quarantine_result: RawSnapshotQuarantineResult,
+    quarantine_summary: dict,
+) -> dict[str, str]:
     review_output_root.mkdir(parents=True, exist_ok=True)
     invalid_path = review_output_root / "quarantined_invalid_book_rows.jsonl"
     valid_path = review_output_root / "depth_quality_input_rows.jsonl"
@@ -1443,13 +1640,157 @@ def write_stage1_5g_quarantine_artifacts(review_output_root: Path, quarantine_re
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     with summary_path.open("w", encoding="utf-8") as fh:
-        json.dump(summarize_raw_snapshot_quarantine_result(quarantine_result), fh, indent=2, ensure_ascii=False)
+        json.dump(quarantine_summary, fh, indent=2, ensure_ascii=False)
 
     return {
         "quarantined_rows_path": str(invalid_path),
         "depth_quality_input_rows_path": str(valid_path),
         "quarantine_summary_path": str(summary_path),
     }
+
+
+def verify_source_evidence_manifest(stage1_5f_root: Path) -> tuple[bool, str, list[str]]:
+    stage1_5f_root = stage1_5f_root.resolve()
+    manifest_path = stage1_5f_root / "SHA256SUMS"
+    if not manifest_path.is_file():
+        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
+
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError:
+        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+
+    try:
+        content = manifest_bytes.decode("utf-8")
+    except Exception:
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    manifest_files: dict[Path, str] = {}
+    for line in content.splitlines():
+        if not line or line.lstrip().startswith("#"):
+            continue
+        expected_sha, separator, raw_path = line.partition("  ")
+        if (
+            not separator
+            or len(expected_sha) != 64
+            or any(char not in "0123456789abcdef" for char in expected_sha)
+        ):
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        file_path = Path(raw_path).resolve()
+        try:
+            file_path.relative_to(stage1_5f_root)
+        except ValueError:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if file_path in manifest_files:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        manifest_files[file_path] = expected_sha
+
+    if manifest_path not in manifest_files:
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    for file_path, expected_sha in manifest_files.items():
+        if file_path == manifest_path:
+            continue
+        if not file_path.is_file() or file_path.is_symlink():
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if hashlib.sha256(file_path.read_bytes()).hexdigest() != expected_sha:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    actual_files = set()
+    for path in stage1_5f_root.rglob("*"):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if path.is_file():
+            actual_files.add(path.resolve())
+    if actual_files != set(manifest_files):
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    return True, manifest_sha256, []
+
+
+def write_stage1_5g_review_manifest(
+    review_output_root: Path,
+    summary: dict,
+    artifact_paths: dict[str, Path],
+) -> Path:
+    manifest_path = review_output_root / "stage1_5g_review_manifest.json"
+    artifacts_meta = {}
+    for key, p in sorted(artifact_paths.items()):
+        rel_path = p.relative_to(review_output_root).as_posix()
+        file_bytes = p.read_bytes()
+        file_sha256 = hashlib.sha256(file_bytes).hexdigest()
+        artifacts_meta[key] = {
+            "relative_path": rel_path,
+            "sha256": file_sha256,
+            "byte_count": len(file_bytes),
+        }
+
+    manifest_payload = {
+        "schema_version": 2,
+        "stage1_5g_review_id": summary.get("stage1_5g_review_id", ""),
+        "source_evidence_manifest_sha256": summary.get("source_evidence_manifest_sha256", ""),
+        "formal_completed_event_symbol_ids_sha256": summary.get("formal_completed_event_symbol_ids_sha256", ""),
+        "artifacts": artifacts_meta,
+    }
+
+    with manifest_path.open("w", encoding="utf-8") as fh:
+        json.dump(manifest_payload, fh, indent=2, ensure_ascii=False)
+
+    return manifest_path
+
+
+def verify_stage1_5g_review_manifest(review_output_root: Path) -> tuple[bool, list[str]]:
+    manifest_path = review_output_root / "stage1_5g_review_manifest.json"
+    if not manifest_path.is_file():
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    try:
+        with manifest_path.open("r", encoding="utf-8") as fh:
+            manifest_data = json.load(fh)
+    except Exception:
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    if manifest_data.get("schema_version") != 2:
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    review_id = manifest_data.get("stage1_5g_review_id")
+    artifacts = manifest_data.get("artifacts", {})
+    if not isinstance(artifacts, dict):
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    required_artifacts = {"summary", "quarantine_summary", "quarantined_invalid_book_rows", "depth_quality_input_rows"}
+    if not required_artifacts.issubset(artifacts.keys()):
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    for key in required_artifacts:
+        art = artifacts[key]
+        rel_p = art.get("relative_path")
+        exp_sha = art.get("sha256")
+        if not rel_p or not exp_sha:
+            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        target_p = review_output_root / rel_p
+        if not target_p.is_file():
+            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        actual_sha = hashlib.sha256(target_p.read_bytes()).hexdigest()
+        if actual_sha != exp_sha:
+            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    summary_p = review_output_root / artifacts["summary"]["relative_path"]
+    quarantine_p = review_output_root / artifacts["quarantine_summary"]["relative_path"]
+    try:
+        with summary_p.open("r", encoding="utf-8") as fh:
+            summary_data = json.load(fh)
+        with quarantine_p.open("r", encoding="utf-8") as fh:
+            quarantine_data = json.load(fh)
+    except Exception:
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    if summary_data.get("stage1_5g_review_id") != review_id or quarantine_data.get("stage1_5g_review_id") != review_id:
+        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+
+    return True, []
+
 
 
 def build_stage1_5g_review_summary(
@@ -1461,25 +1802,29 @@ def build_stage1_5g_review_summary(
     request_manifest_rows: list[dict],
     output_root: str | Path | None = None,
     loader_blockers: list[str] | None = None,
-    *,
-    review_output_root: str | Path | None = None,
 ) -> dict:
     """
     Build Stage 1.5G review summary.
 
     :param output_root: Stage 1.5F source artifact root (read-only audit provenance).
-    :param review_output_root: Stage 1.5G review output root (where derived quarantine artifacts may be written).
     """
     from configs import base
 
     all_blockers: list[str] = []
     all_warnings: list[str] = []
+    quarantine_result: RawSnapshotQuarantineResult | None = None
 
     if loader_blockers:
         all_blockers.extend(loader_blockers)
+    if output_root is not None:
+        source_ok, _, source_blockers = verify_source_evidence_manifest(
+            Path(output_root)
+        )
+        if not source_ok:
+            all_blockers.extend(source_blockers)
 
     def finish(result: dict, formal_completed_event_symbol_ids: set[str] | None = None) -> dict:
-        return _with_stage1_5g_audit_fields(
+        finished = _with_stage1_5g_audit_fields(
             result,
             output_root=output_root,
             watermark=watermark,
@@ -1487,9 +1832,17 @@ def build_stage1_5g_review_summary(
             states=states,
             formal_completed_event_symbol_ids=formal_completed_event_symbol_ids,
         )
+        if quarantine_result and quarantine_result.invalid_book_row_count > 0:
+            finished["_stage1_5g_quarantine_result"] = quarantine_result
+        return finished
 
     # 1. Loader Blockers Check
-    if any(b in all_blockers for b in ["jsonl_parse_error", "missing_or_unreadable_summary", "duplicate_stable_event_symbol_identity"]):
+    if any(b in all_blockers for b in [
+        "jsonl_parse_error",
+        "missing_or_unreadable_summary",
+        "duplicate_stable_event_symbol_identity",
+        "source_evidence_manifest_missing_or_unreadable",
+    ]):
         return finish({
             "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
             "decision": "stage1_5g_depth_evidence_invalid",
@@ -1675,17 +2028,15 @@ def build_stage1_5g_review_summary(
         states=states,
         accepted_events=accepted_events,
         expected_snapshot_count=expected_snapshot_count,
+        formal_completed_event_symbol_ids=integrity_result.formal_completed_event_symbol_ids,
+        request_manifest_rows=request_manifest_rows,
+        summary=summary,
     )
 
     has_invalid_book = (raw_integrity_result.invalid_book_count > 0)
     raw_integrity_blockers_other_than_invalid = [b for b in raw_integrity_result.blockers if b != "invalid_book"]
 
-    # Write quarantine artifacts if there are invalid rows and output root is given
     quarantine_dict = summarize_raw_snapshot_quarantine_result(quarantine_result) if quarantine_result else {}
-    if quarantine_result and quarantine_result.invalid_book_row_count > 0 and review_output_root is not None:
-        from pathlib import Path
-        paths = write_stage1_5g_quarantine_artifacts(Path(review_output_root), quarantine_result)
-        quarantine_dict.update(paths)
 
     # 7a. Hard Fail on raw integrity other than invalid_book
     if raw_integrity_blockers_other_than_invalid:
@@ -1989,17 +2340,46 @@ def generate_stage1_5g_chinese_review(summary: dict) -> str:
     if quarantine:
         lines.append("## 6. Quarantine 审计")
         lines.append("")
-        lines.append(f"- **隔离的无效订单簿行数 (invalid_book_row_count):** `{quarantine.get('invalid_book_row_count')}`")
-        lines.append(f"- **隔离的无效订单簿分钟数 (invalid_book_minute_bucket_count):** `{quarantine.get('invalid_book_minute_bucket_count')}`")
-        lines.append(f"- **订单簿可用率 (book_availability_ratio):** `{quarantine.get('book_availability_ratio')}`")
-        lines.append(f"- **订单簿不可用率 (book_unavailable_ratio):** `{quarantine.get('book_unavailable_ratio')}`")
+        formal_count = quarantine.get("formal_completed_symbol_count", 1)
+        per_sym_exp = quarantine.get("per_symbol_expected_snapshot_count", quarantine.get("expected_snapshot_count"))
+        tot_exp = quarantine.get("total_expected_snapshot_count", quarantine.get("expected_snapshot_count"))
+        obs_count = quarantine.get("aggregate_observed_snapshot_count", quarantine.get("observed_snapshot_count"))
+        val_count = quarantine.get("aggregate_valid_snapshot_count_after_quarantine", quarantine.get("valid_snapshot_count_after_quarantine"))
+        inv_count = quarantine.get("aggregate_invalid_book_row_count", quarantine.get("invalid_book_row_count"))
+        avail_ratio = quarantine.get("aggregate_book_availability_ratio", quarantine.get("book_availability_ratio"))
+        unavail_ratio = quarantine.get("aggregate_book_unavailable_ratio", quarantine.get("book_unavailable_ratio"))
+        inv_ratio = quarantine.get("aggregate_invalid_book_ratio", quarantine.get("invalid_book_ratio"))
+
+        lines.append(f"- **正式完成币种数 (formal_completed_symbol_count):** `{formal_count}`")
+        lines.append(f"- **单币预期快照数 (per_symbol_expected_snapshot_count):** `{per_sym_exp}`")
+        lines.append(f"- **总预期快照数 (total_expected_snapshot_count):** `{tot_exp}`")
+        lines.append(f"- **汇总观测快照总数 (aggregate_observed_snapshot_count):** `{obs_count}`")
+        lines.append(f"- **隔离后有效快照总数 (aggregate_valid_snapshot_count_after_quarantine):** `{val_count}`")
+        lines.append(f"- **汇总隔离无效订单簿行数 (aggregate_invalid_book_row_count):** `{inv_count}`")
+        lines.append(f"- **汇总订单簿可用率 (aggregate_book_availability_ratio):** `{avail_ratio}`")
+        lines.append(f"- **汇总订单簿不可用率 (aggregate_book_unavailable_ratio):** `{unavail_ratio}`")
+        lines.append(f"- **汇总无效订单簿比例 (aggregate_invalid_book_ratio):** `{inv_ratio}`")
         lines.append(f"- **首个有效订单簿延迟时间 (first_valid_book_latency_ms):** `{quarantine.get('first_valid_book_latency_ms')} ms`")
         lines.append(f"- **最大连续无效行数 (max_consecutive_invalid):** `{quarantine.get('max_consecutive_invalid')}`")
         lines.append(f"- **Warmup后最大连续无效行数 (max_consecutive_invalid_after_warmup):** `{quarantine.get('max_consecutive_invalid_after_warmup')}`")
-        lines.append(f"- **执行可用性声明 (execution_availability_claim):** `{quarantine.get('execution_availability_claim')}`")
-        lines.append(f"- **隔离无效行路径 (quarantined_rows_path):** `{quarantine.get('quarantined_rows_path')}`")
-        lines.append(f"- **深度质量输入行路径 (depth_quality_input_rows_path):** `{quarantine.get('depth_quality_input_rows_path')}`")
         lines.append("")
+
+        per_symbol_metrics = quarantine.get("per_symbol_quarantine_metrics") or {}
+        if per_symbol_metrics:
+            lines.append("### 逐币 Quarantine 明细 (Per-Symbol Quarantine Metrics)")
+            lines.append("")
+            lines.append("| 币种 (Event Symbol ID) | 观测数 (Observed) | 有效数 (Valid) | 无效数 (Invalid) | 可用率 (Avail Ratio) | 延迟 (Latency ms) | 状态 (Status) |")
+            lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+            for sym_id, sm in sorted(per_symbol_metrics.items()):
+                sym_obs = sm.get("observed_snapshot_count")
+                sym_val = sm.get("valid_snapshot_count_after_quarantine")
+                sym_inv = sm.get("invalid_book_row_count")
+                sym_avail = sm.get("book_availability_ratio")
+                sym_lat = sm.get("first_valid_book_latency_ms")
+                sym_status = "quarantined_pass" if sm.get("quarantined_depth_evidence_pass") else ("clean_pass" if sm.get("clean_depth_evidence_pass") else "blocked")
+                lines.append(f"| `{sym_id}` | `{sym_obs}` | `{sym_val}` | `{sym_inv}` | `{sym_avail}` | `{sym_lat}` | `{sym_status}` |")
+            lines.append("")
+
         lines.append("> [!WARNING]")
         lines.append("> quarantined pass 只能支持 1.5H design，不允许 execution feasibility claim / paper / live。")
         lines.append("")
