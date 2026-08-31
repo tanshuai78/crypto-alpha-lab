@@ -30,8 +30,9 @@ ETF Flow、Prediction Market、Token Unlock、Exchange Flow 和 Security Inciden
 | 1.6A | 冻结官方来源、USD-M perpetual scope、时间与证据语义 | `completed` | 2026-08-18 baseline Design；不产生交易结论 |
 | 1.6B | 本地历史公告抓取、双 sweep、详情 raw bytes、terminal status 与 sealed export | `completed` | 冻结 export `e9ec315753ea...b2007734`；历史下载不证明 PIT |
 | 1.6C | 用独立 adapter 重新计算候选、语义、指标与 completion verdict | `completed` | G2 root `h2_g2_remediated_20260824T061701Z`；`source_audit_passed=true` |
-| 1.6D | VPS 持续观察官方公告首次发现与可信详情可得时间 | `not_deployed` | live observer code exists; no `live_observation` root; deployment authorization required |
-| 1.6E | 验证价格、L2、资金费、OI、费率等市场数据覆盖与 PIT 可用性 | `not_started` | 不得由 1.6A--C 的 source pass 推断为已通过 |
+| 1.6D | VPS 持续观察官方公告首次发现与可信详情可得时间 | `deployed_observing` | Operator 于 2026-08-30 报告 tmux 会话 `stage1_6d_live_stage1_6d_live_20260828T075150Z` 正在运行；仍仅记录 public source observation，runbook health gate 是持续运行事实的唯一验证方式 |
+| 1.6E-A | 验证固定公开 REST market-data source profile 的单次有界能力与血统 | `design_draft` | 不读取 1.6D active root；不产生事件 PIT 或 coverage 结论 |
+| 1.6E-B | live semantic trigger 与事件级 market-data observer | `not_started` | 仅在 E-A 批准后另行设计；不得由 1.6D raw source evidence 直接触发 |
 | 1.6F | 以匹配控制组检验强制流/流动性机制，并另行设计 replay | `not_started` | 不得直接生成方向或收益结论 |
 | 1.6G | 对研究路线作 stop / diagnostic-only / separate-alpha-design 决定 | `not_started` | 仅在 1.6E--F 完成后讨论 |
 
@@ -74,6 +75,6 @@ execution_engine_allowed = false
 
 ## 5. 下一项唯一工作
 
-下一项是 **1.6D VPS live-source-observation target preflight**：按 current runbook 记录当前 VPS、Stage 1.5 co-tenancy、disk、lock、attestation 和 `DEPLOY_COMMIT` 的实际事实；只有 transcript PASS 且用户对命名 facts 明确授权后才可执行部署。
+下一项是 **Stage 1.6E-A market-data source capability audit Design**。1.6D 保持运行并按 current runbook 做只读 health gate；不得为开始 1.6E-A 而重启、复用、修改或重新密封任何 1.6D root。
 
-它不是重新历史回填，不是重新运行 1.6C，不是市场数据采集，不是 replay，也不是交易授权。
+1.6E-A 仅冻结公开 REST profile、单次有界 capability probe、来源血统、存储边界和 fail-closed 条件。它不读取 1.6D active root，不产生事件 PIT 或 coverage 结论。实时 semantic trigger、checkpoint-consistent transport、revision lifecycle 和事件市场观察属于后续独立的 1.6E-B Design。两者都不是历史回填、1.6C 重跑、replay 或交易授权。
