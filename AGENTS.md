@@ -109,17 +109,18 @@ These govern how work is executed.
    invariants, YAGNI, or risk controls.
 8. Completion requires hard verification through tests, logs, or reproducible evidence.
 9. Always sync state from `configs/base.py` and the relevant strategy module at session start.
-10. Convert every non-trivial task into verifiable goals before implementation.
+10. When revising a high-risk Design or Implementation Plan after Closure Audit or Closure Confirmation findings, load and follow `.agent/skills/closure-revision/SKILL.md` before editing. With a frozen proof graph, trust boundary, and scope, build the complete blocker ledger, Mutable/No-Touch sets, and impact cones first; produce one coherent revision with author-side mini Closure Confirmation. Do not self-approve, expand scope, or enable implementation, deployment, runtime, execution, paper-trading, or live-trading authority.
+11. Convert every non-trivial task into verifiable goals before implementation.
     Examples:
     - "fix bug" → reproduce with a failing test or minimal log evidence, then make it pass.
     - "add validation" → write invalid-input tests, then implement validation.
     - "refactor" → capture current behavior with tests first, then preserve behavior.
-11. For multi-step work, each step must include:
+12. For multi-step work, each step must include:
     - intended change;
     - verification command;
     - expected result.
-12. Do not continue to later steps if an earlier gate fails, unless the user explicitly approves a reduced scope.
-13. If a task starts to exceed its approved scope, stop and split it into a new plan before continuing.
+13. Do not continue to later steps if an earlier gate fails, unless the user explicitly approves a reduced scope.
+14. If a task starts to exceed its approved scope, stop and split it into a new plan before continuing.
 
 ## Workflow Mapping
 

@@ -122,6 +122,34 @@ runtime_action_allowed
 
 Workspace facts override memory.
 
+### Review Findings Are Investigation Inputs, Not Absolute Authority
+
+A review finding must be investigated, but it must not mechanically override a
+real frozen source contract or parent invariant.
+
+Revision authority order:
+
+```text
+1. approved parent/frozen source contracts and their invariants (including bound SHA256 bytes)
+2. current workspace source, artifact, and lifecycle-owner evidence that proves those contracts
+3. applicable project safety and authority rules
+4. reviewer finding
+```
+
+Before adopting a finding that changes a lifecycle owner, state machine,
+artifact grammar, authority boundary, or invariant, trace the real
+producer/consumer topology and verify compatibility with the higher-authority
+contracts. Adopt only the compatible portion.
+
+If a finding conflicts with a higher-authority contract:
+
+```text
+do not implement it mechanically
+→ record the conflict and supporting evidence in the blocker ledger
+→ retain the frozen contract, or STOP = approved_authority_change_required
+  when that contract itself must change
+```
+
 Project source priority:
 
 ```text
