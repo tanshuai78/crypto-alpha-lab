@@ -1203,3 +1203,393 @@ def test_selector_legacy_fallback_when_cycle_count_absent():
         endpoint_degraded_until_ms=0,
         overdue_attempted_retry_budget_per_poll=1,
     ) == [ARTICLE]
+
+
+# =====================================================================
+# Stage 1.5D V3 Scheduler State & Contract Tests
+# =====================================================================
+
+TEST_PROVENANCE = {
+    "root_id": "test_root_20260901_000000",
+    "scheduler_contract_version": 3,
+    "producer_startup_head_sha": "0" * 40,
+    "protected_tree_manifest_sha256": "1" * 64,
+    "configs_base_sha256": "2" * 64,
+}
+
+
+def make_valid_v3_article(article_id: str = "0123456789abcdef0123456789abcdef") -> dict:
+    return {
+        "source_article_id": article_id,
+        "title": "Binance Will Launch Perpetual Contract",
+        "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{article_id}",
+        "source_parent_url": "https://www.binance.com/en/support/announcement/list",
+        "source_published_at_ms": 1780000000000,
+        "detected_at_ms": 1780000001000,
+        "first_detected_at_ms": 1780000001000,
+        "event_type": "futures_contract_launch",
+        "detail_work_type": None,
+        "catalog_id": "catalog_1",
+        "catalog_title": "Catalog Title",
+        "symbol_extraction_source": "none",
+        "symbol_parse_failed_reason": None,
+        "pending_reason": "title_symbol_missing",
+        "source_published_at_ms_confidence": "high",
+        "detail_http_request_count": 0,
+        "detail_retry_cycle_count": 0,
+        "detail_fetch_attempt_count": 0,
+        "transient_detail_error_count": 0,
+        "non_transient_detail_error_count": 0,
+        "last_retry_at_ms": 0,
+        "next_detail_retry_at_ms": 0,
+        "first_deferred_at_ms": None,
+        "last_deferred_at_ms": None,
+        "last_deferred_manifest_at_ms": 0,
+        "defer_count": 0,
+        "terminal_state": False,
+        "terminal_failure_type": None,
+        "candidate_symbols": None,
+        "symbol_derivation_method": None,
+        "symbol_validation_status": None,
+        "symbol_launch_times_ms": None,
+        "symbol_onboard_times_ms": None,
+        "symbol_effective_launch_times_ms": None,
+        "launch_time_source": None,
+        "last_detail_failure_class": None,
+        "detail_retryable": None,
+        "last_bapi_detail_status": None,
+        "last_bapi_payload_hash": None,
+        "last_bapi_parser_version": None,
+        "last_bapi_parser_status": None,
+        "last_bapi_parser_failure_reason": None,
+        "last_bapi_parse_attempt_at_ms": None,
+        "last_support_detail_status": None,
+        "last_support_failure_class": None,
+        "parsed_candidate_symbols": None,
+        "candidate_provenance": None,
+        "launch_time_resolution_status": None,
+        "launch_anchor_policy": None,
+        "required_launch_anchor_source": None,
+        "consumable_event_allowed": None,
+        "symbol_launch_time_candidates_ms": None,
+        "launch_time_conflict_ms": None,
+        "status": None,
+        "terminal_reason": None,
+        "terminal_at_ms": None,
+        "emission_id": None,
+        "candidate_symbol_set_hash": None,
+        "candidate_symbol_set_hash_version": None,
+        "candidate_symbols_ordered": None,
+        "candidate_symbols_normalized": None,
+        "event_id": None,
+        "event_stream_path": None,
+        "parser_payload_hash": None,
+        "symbol_effective_launch_time_sources": None,
+        "exchangeinfo_visible_symbols": None,
+        "exchangeinfo_missing_symbols": None,
+        "hard_rejected_symbols": None,
+        "symbol_exchangeinfo_statuses": None,
+        "inflight_cycle": None,
+        "detail_budget_deferred_count": 0,
+        "detail_fetch_attempted": None,
+        "detail_fetch_status": None,
+        "detail_fetch_url_used": None,
+        "detail_fetch_variant": None,
+        "detail_fetched_at_ms": None,
+        "detail_parse_status": None,
+        "detail_payload_hash": None,
+        "detail_payload_trusted": None,
+        "exchangeinfo_validation_attempt_count": 0,
+        "exchangeinfo_validation_retryable": None,
+        "last_exchangeinfo_validation_at_ms": None,
+        "next_exchangeinfo_validation_at_ms": None,
+        "quote_derivation_source": None,
+        "retry_count": 0,
+        "schedule_revision_producer_status": None,
+    }
+
+
+def make_valid_v3_endpoint_health() -> dict:
+    return {
+        "recent_detail_attempt_results": ["success"],
+        "detail_endpoint_degraded_until_ms": 0,
+        "detail_endpoint_transient_error_rate": 0.0,
+        "by_variant": {
+            "bapi_article_detail_query": {
+                "recent_detail_attempt_results": ["success"],
+                "detail_endpoint_degraded_until_ms": 0,
+                "detail_endpoint_transient_error_rate": 0.0,
+            }
+        },
+        "endpoint_health_by_source": {
+            "bapi_article_detail_query": {
+                "recent_detail_attempt_results": ["success"],
+                "detail_endpoint_degraded_until_ms": 0,
+                "detail_endpoint_transient_error_rate": 0.0,
+            }
+        },
+    }
+
+
+def make_valid_v3_state(article_id: str = "0123456789abcdef0123456789abcdef") -> dict:
+    return {
+        "metadata_version": 3,
+        "catalog_bootstrap_cutoff_ms": 1780000000000,
+        "resume_provenance": dict(TEST_PROVENANCE),
+        "articles": {article_id: make_valid_v3_article(article_id)},
+        "endpoint_health": make_valid_v3_endpoint_health(),
+    }
+
+
+def test_validate_stage1_5d_v3_scheduler_state_valid():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    state = make_valid_v3_state()
+    blockers = validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE)
+    assert blockers == []
+
+
+def test_validate_stage1_5d_v3_scheduler_state_candidate_symbols_invariants():
+    import hashlib
+    import json
+
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    state = make_valid_v3_state()
+    art_id = list(state["articles"].keys())[0]
+    row = state["articles"][art_id]
+
+    ordered = ["BTCUSDT", "ETHUSDT"]
+    normalized = ["BTCUSDT", "ETHUSDT"]
+    norm_bytes = json.dumps(normalized, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    h = hashlib.sha256(norm_bytes).hexdigest()
+
+    row["candidate_symbols_ordered"] = ordered
+    row["candidate_symbols_normalized"] = normalized
+    row["candidate_symbol_set_hash_version"] = 1
+    row["candidate_symbol_set_hash"] = h
+
+    assert validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE) == []
+
+    # normalized mismatch (keep hash matching normalized to isolate error)
+    row["candidate_symbols_normalized"] = ["ETHUSDT"]
+    row["candidate_symbol_set_hash"] = hashlib.sha256(
+        json.dumps(["ETHUSDT"], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE) == [
+        "candidate_symbols_normalized_mismatch"
+    ]
+
+    # hash mismatch
+    row["candidate_symbols_normalized"] = normalized
+    row["candidate_symbol_set_hash"] = "0" * 64
+    assert validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE) == [
+        "candidate_symbol_set_hash_mismatch"
+    ]
+
+
+def test_validate_stage1_5d_v3_scheduler_state_detail_request_counter_alias():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    state = make_valid_v3_state()
+    art_id = list(state["articles"].keys())[0]
+    row = state["articles"][art_id]
+
+    row["detail_http_request_count"] = 2
+    row["detail_fetch_attempt_count"] = 3
+    blockers = validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE)
+    assert "detail_request_counter_alias_mismatch" in blockers
+
+    # distinct retry_cycle_count is valid
+    row["detail_fetch_attempt_count"] = 2
+    row["detail_retry_cycle_count"] = 5
+    assert validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE) == []
+
+
+def test_validate_stage1_5d_v3_scheduler_state_endpoint_health_source_mirror():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    state = make_valid_v3_state()
+    health = state["endpoint_health"]
+
+    health["endpoint_health_by_source"]["bapi_article_detail_query"]["detail_endpoint_degraded_until_ms"] = 1000
+    blockers = validate_stage1_5d_v3_scheduler_state(state, expected_resume_provenance=TEST_PROVENANCE)
+    assert "endpoint_health_source_mirror_mismatch" in blockers
+
+
+def test_serialize_stage1_5d_v3_articles():
+    import pytest
+
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_stage1_5d_v3_articles,
+    )
+
+    art_id = "0123456789abcdef0123456789abcdef"
+    art = make_valid_v3_article(art_id)
+    # Add allowed runtime-only aliases
+    art["raw"] = {"some": "data"}
+    art["symbols"] = ["BTCUSDT"]
+    art["payload_sha256"] = "a" * 64
+    art["last_bapi_payload_sha256"] = "b" * 64
+    art["symbol_launch_times_utc"] = {"BTCUSDT": "2026-09-01T00:00:00Z"}
+    art["symbol_effective_launch_times_utc"] = {"BTCUSDT": "2026-09-01T00:00:00Z"}
+
+    serialized = serialize_stage1_5d_v3_articles({art_id: art})
+    assert art_id in serialized
+    res_row = serialized[art_id]
+    assert "raw" not in res_row
+    assert "symbols" not in res_row
+    assert "payload_sha256" not in res_row
+    assert "last_bapi_payload_sha256" not in res_row
+    assert "symbol_launch_times_utc" not in res_row
+    assert "symbol_effective_launch_times_utc" not in res_row
+    assert len(res_row) == 86
+
+    # Unknown runtime key raises ValueError
+    art["unknown_bad_key"] = 123
+    with pytest.raises(ValueError, match="unknown_runtime_article_key"):
+        serialize_stage1_5d_v3_articles({art_id: art})
+
+
+def test_validate_stage1_5d_v3_scheduler_state_negative_cases():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    # 1. State not dict
+    assert validate_stage1_5d_v3_scheduler_state([], expected_resume_provenance=TEST_PROVENANCE) == ["state_not_dict"]
+
+    # 2. Top-level key omissions/extras
+    st = make_valid_v3_state()
+    del st["metadata_version"]
+    assert any("top_level_missing_keys" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+    st = make_valid_v3_state()
+    st["extra_top_key"] = "bad"
+    assert any("top_level_unknown_keys" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+    # 3. metadata_version invalid
+    st = make_valid_v3_state()
+    st["metadata_version"] = 2
+    assert "metadata_version_not_3" in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE)
+    st["metadata_version"] = True
+    assert "metadata_version_not_3" in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE)
+
+    # 4. catalog_bootstrap_cutoff_ms invalid
+    st = make_valid_v3_state()
+    st["catalog_bootstrap_cutoff_ms"] = 0
+    assert "catalog_bootstrap_cutoff_ms_invalid" in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE)
+
+    # 5. resume_provenance mismatch
+    st = make_valid_v3_state()
+    st["resume_provenance"]["producer_startup_head_sha"] = "f" * 40
+    assert "resume_provenance_mismatch" in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE)
+
+    # 6. article key mismatch or invalid
+    st = make_valid_v3_state()
+    art_id = list(st["articles"].keys())[0]
+    st["articles"]["bad_key_not_32_hex"] = st["articles"].pop(art_id)
+    assert any("article_key_not_32_hex" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+
+def test_validate_stage1_5d_v3_scheduler_state_terminal_matrix():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    # Non-terminal row with terminal fields populated
+    st = make_valid_v3_state()
+    art_id = list(st["articles"].keys())[0]
+    row = st["articles"][art_id]
+    row["terminal_state"] = False
+    row["terminal_reason"] = "catalog_bootstrap_preexisting"
+    assert any("article_non_terminal_has_terminal_fields" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+    # Terminal row with valid bootstrap reason
+    st = make_valid_v3_state()
+    row = st["articles"][art_id]
+    row["terminal_state"] = True
+    row["terminal_reason"] = "catalog_bootstrap_preexisting"
+    row["terminal_failure_type"] = None
+    row["terminal_at_ms"] = 1780000002000
+    row["inflight_cycle"] = None
+    assert validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE) == []
+
+    # Terminal row with valid starvation reason
+    row["terminal_reason"] = "detail_never_attempted_budget_starved"
+    row["terminal_failure_type"] = "detail_never_attempted_budget_starved"
+    assert validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE) == []
+
+    # Terminal row with invalid reason
+    row["terminal_reason"] = "unknown_reason_xyz"
+    assert any("article_terminal_reason_invalid" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+    # Terminal row with failure_type mismatch
+    row["terminal_reason"] = "detail_never_attempted_budget_starved"
+    row["terminal_failure_type"] = None
+    assert any("article_terminal_failure_type_mismatch" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+
+def test_validate_stage1_5d_v3_scheduler_state_inflight_cycle_matrix():
+    import hashlib
+    import json
+
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    st = make_valid_v3_state()
+    art_id = list(st["articles"].keys())[0]
+    row = st["articles"][art_id]
+
+    target = {
+        "endpoint_kind": "bapi_article_detail_query",
+        "source_article_id": art_id,
+        "detail_fetch_variant": "bapi_article_detail_query",
+        "requested_url": "https://www.binance.com/bapi/test",
+    }
+    ident_payload = {
+        "cycle": 1,
+        "operation": "detail_request",
+        "request_ordinal": 1,
+        "request_target": target,
+        "source_article_id": art_id,
+        "symbol": None,
+    }
+    ident = hashlib.sha256(
+        json.dumps(ident_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+    row["inflight_cycle"] = {
+        "operation": "detail_request",
+        "cycle": 1,
+        "request_ordinal": 1,
+        "reserved_at_ms": 1780000001000,
+        "symbol": None,
+        "request_target": target,
+        "request_identity": ident,
+    }
+    assert validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE) == []
+
+    # identity mismatch
+    row["inflight_cycle"]["request_identity"] = "0" * 64
+    assert any("article_inflight_request_identity_mismatch" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))
+
+
+def test_stage1_5d_v3_durable_article_keys_ast_inventory():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        STAGE1_5D_V3_DURABLE_ARTICLE_KEYS,
+        STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES,
+    )
+
+    assert len(STAGE1_5D_V3_DURABLE_ARTICLE_KEYS) == 86
+    assert len(STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES) == 6
+    assert STAGE1_5D_V3_DURABLE_ARTICLE_KEYS.isdisjoint(STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES)

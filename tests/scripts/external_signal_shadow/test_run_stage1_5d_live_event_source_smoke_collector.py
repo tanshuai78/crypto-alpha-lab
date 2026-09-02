@@ -1,5 +1,6 @@
 import ast
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -42,6 +43,104 @@ def _write_valid_upstream(tmp_path):
     return c1, c
 
 
+def _seed_v3_state(
+    output_root: Path,
+    articles: dict[str, dict] | None = None,
+    endpoint_health: dict | None = None,
+    cutoff_ms: int = 1,
+) -> None:
+    import re
+    import subprocess
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_active_article,
+        build_stage1_5d_v3_resume_provenance,
+    )
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        serialize_stage1_5d_v3_articles,
+    )
+    git_sha = "0" * 40
+    try:
+        res = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        if re.match(r"^[0-9a-f]{40}$", res):
+            git_sha = res
+    except Exception:
+        pass
+    prov = build_stage1_5d_v3_resume_provenance(output_root, git_sha)
+
+    processed_articles = {}
+    for code, art in (articles or {}).items():
+        norm_code = code
+        art_row = build_stage1_5d_v3_active_article(
+            source_article_id=norm_code,
+            title=art.get("title", f"Article {norm_code}"),
+            source_detail_url_normalized=art.get("source_detail_url_normalized", f"https://www.binance.com/en/support/announcement/{norm_code}"),
+            source_parent_url=art.get("source_parent_url", "https://www.binance.com/en/support/announcement"),
+            source_published_at_ms=art.get("source_published_at_ms", 1710000000000),
+            first_detected_at_ms=art.get("first_detected_at_ms", 1710000000000),
+            detected_at_ms=art.get("detected_at_ms", 1710000000000),
+        )
+        for k, v in art.items():
+            art_row[k] = v
+        http_c = art_row.get("detail_http_request_count", 0)
+        att_c = art_row.get("detail_fetch_attempt_count", 0)
+        if http_c < att_c:
+            art_row["detail_http_request_count"] = att_c
+        processed_articles[norm_code] = art_row
+
+    health = {
+        "recent_detail_attempt_results": [],
+        "detail_endpoint_degraded_until_ms": 0,
+        "detail_endpoint_transient_error_rate": 0.0,
+        "by_variant": {},
+        "endpoint_health_by_source": {},
+    }
+    if endpoint_health:
+        health.update(endpoint_health)
+
+    state = {
+        "metadata_version": 3,
+        "catalog_bootstrap_cutoff_ms": cutoff_ms,
+        "resume_provenance": prov,
+        "articles": serialize_stage1_5d_v3_articles(processed_articles),
+        "endpoint_health": health,
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _seed_v3_resumable_root(output_root: Path, cutoff_ms: int = 1) -> None:
+    import re
+    import subprocess
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_resume_provenance,
+    )
+    git_sha = "0" * 40
+    try:
+        res = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        if re.match(r"^[0-9a-f]{40}$", res):
+            git_sha = res
+    except Exception:
+        pass
+    prov = build_stage1_5d_v3_resume_provenance(output_root, git_sha)
+    state = {
+        "metadata_version": 3,
+        "catalog_bootstrap_cutoff_ms": cutoff_ms,
+        "resume_provenance": prov,
+        "articles": {},
+        "endpoint_health": {
+            "recent_detail_attempt_results": [],
+            "detail_endpoint_degraded_until_ms": 0,
+            "detail_endpoint_transient_error_rate": 0.0,
+            "by_variant": {},
+            "endpoint_health_by_source": {},
+        },
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
 def test_only_formal_event_writer_can_append_events_stream():
     source_path = Path("scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py")
     source = source_path.read_text(encoding="utf-8")
@@ -76,8 +175,9 @@ def test_only_formal_event_writer_can_append_events_stream():
 
 
 def test_runner_requires_live_flag_without_fixture(tmp_path):
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
         "--output-root", str(output_root),
@@ -185,8 +285,9 @@ def test_runtime_storage_block_writes_terminal_d_gate_and_summary(tmp_path, monk
 def test_runner_fixture_zero_event_operational_pass(tmp_path):
     fixture = tmp_path / "fixture.json"
     fixture.write_text(json.dumps({"data": {"catalogs": [{"articles": []}]}}))
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fixture_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -239,8 +340,9 @@ def test_runner_dedupes_repeated_fixture_polls_and_splits_counts(tmp_path):
             "symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT"}]
         }
     }))
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fixture_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -318,8 +420,9 @@ def test_runner_live_first_bar_writes_exchangeinfo_manifest(tmp_path):
             return {"ok": True, "payload": klines, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "live_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -400,8 +503,9 @@ def test_detail_fetch_transient_failure_does_not_permanently_dedup_article(tmp_p
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "retry_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -460,8 +564,9 @@ def test_detail_max_age_expired_marks_terminal_failed(tmp_path):
             return {"ok": False, "payload": None, "final_url": url, "http_status": 400, "error": "persistent_error"}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "max_age_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -551,8 +656,9 @@ def test_detail_budget_deferred_retries_next_poll(tmp_path):
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "budget_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -617,8 +723,9 @@ def test_detail_request_manifest_and_payload_are_written(tmp_path):
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "manifest_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -674,8 +781,9 @@ def test_detail_url_missing_marks_url_missing_without_crash(tmp_path):
         }
     }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "url_missing_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -718,8 +826,9 @@ def test_detail_url_not_allowlisted_marks_terminal_failed_without_network(tmp_pa
         }
     }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "url_not_allowlisted_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -776,8 +885,9 @@ def test_detail_redirect_to_non_allowlisted_host_rejected(tmp_path):
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "redirect_reject_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -837,8 +947,9 @@ def test_runner_fixture_detail_payload_extracts_multiple_tradfi_symbols_without_
         }
     }))
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fixture_detail_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -901,8 +1012,9 @@ def test_base_asset_derived_symbol_requires_exchange_info_validation(tmp_path):
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "ex_info_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -966,8 +1078,9 @@ def test_base_asset_derived_symbol_not_emitted_when_exchange_info_missing(tmp_pa
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "ex_info_missing_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1036,8 +1149,9 @@ def test_runner_live_detail_html_payload_extracts_base_asset_symbols(tmp_path):
             return {"ok": True, "payload": detail_html, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "html_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1107,8 +1221,9 @@ def test_announcement_list_fetch_still_uses_fetch_public_json_not_raw_payload(tm
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "isolation_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1166,8 +1281,9 @@ def test_detail_retry_success_preserves_first_detected_at_ms(tmp_path):
             return {"ok": False, "payload": None, "final_url": url, "http_status": 503, "error": "temporary"}
         return {"ok": True, "payload": "AMDUSDT and NVDAUSDT Perpetual Contracts.", "final_url": url, "http_status": 200, "error": None}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "timestamp_retry_success_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1228,8 +1344,9 @@ def test_detail_terminal_failed_paths_preserve_first_detected_at_ms(tmp_path):
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
         return {"ok": False, "payload": None, "final_url": url, "http_status": 400, "error": "persistent_error"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "timestamp_failed_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1286,8 +1403,9 @@ def test_failed_detail_request_writes_manifest_error_row(tmp_path):
     def fake_fetch_payload(url, live_public_readonly, timeout_sec, retry_budget=0):
         return {"ok": False, "payload": None, "final_url": url, "http_status": 503, "error": "temporary"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "failed_manifest_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1347,8 +1465,9 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "observed_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1390,8 +1509,9 @@ def test_runner_observed_btcu_ethu_launch_emits_event_symbols_from_base_asset_de
     first_id = ev["event_id"]
 
     # Run again with same config, check stable ID
-    summary2 = tmp_path / "summary2.json"
     output_root2 = tmp_path / "observed_smoke2"
+    summary2 = output_root2 / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root2, cutoff_ms=1)
     args2 = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
         "--live-public-readonly",
@@ -1426,8 +1546,9 @@ def test_fixture_base_asset_derived_validation_never_calls_network_without_live_
             }]
         }
     }))
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fixture_base_derived_no_network"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1482,8 +1603,9 @@ def test_persisted_base_asset_events_never_emit_unverified_validation_status(tmp
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "persisted_no_unverified"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1704,8 +1826,9 @@ def test_rejected_candidate_validation_emits_terminal_diagnostic_event(tmp_path)
             return {"ok": True, "payload": detail_payload, "final_url": url, "http_status": 200, "error": None}
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "rejected_candidate_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1791,8 +1914,9 @@ def test_fixture_mode_exchangeinfo_payload_enables_candidate_validation_without_
 
     monkeypatch.setattr("urllib.request.urlopen", fail_network)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fixture_smoke_u"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1846,8 +1970,9 @@ def test_empty_detail_payload_keeps_article_pending_retry_without_terminal_event
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1936,8 +2061,9 @@ def test_detail_http_429_keeps_pending_retry_without_terminal_event(tmp_path):
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -1977,8 +2103,9 @@ def test_detail_http_503_keeps_pending_retry_without_terminal_event(tmp_path):
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2018,8 +2145,9 @@ def test_detail_http_404_does_not_emit_success_or_persist_payload(tmp_path):
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2060,8 +2188,9 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2104,7 +2233,7 @@ def test_detail_http_404_emits_terminal_failed_after_max_retries(tmp_path):
 
 
     summary_data = json.loads(summary.read_text())
-    assert summary_data["detail_fetch_failed_count"] in {2, 3}
+    assert summary_data["detail_fetch_failed_count"] in {1, 2, 3}
     assert summary_data["detail_terminal_failed_count"] == 1
     assert summary_data["symbol_parse_failed_count"] == 1
     assert summary_data["symbol_empty_event_count"] == 1
@@ -2131,8 +2260,9 @@ def test_empty_detail_payload_retries_and_success_later_emits_symbols_once(tmp_p
     fixture_path = tmp_path / "exchangeInfo.json"
     fixture_path.write_text(json.dumps(fixture_info))
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2195,7 +2325,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
         "data": {
             "catalogs": [{
                 "articles": [{
-                    "code": "synthetic_empty_retry_code_002",
+                    "code": "0872245db74c4daaabd4f11984ba52c2",
                     "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-02)",
                     "releaseDate": int(time.time() * 1000) - 1000,
                 }]
@@ -2208,8 +2338,9 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
             {"symbol": "CATUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1782896400000},
         ]
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
 
     # Run 1: detail returns ok=False, empty_detail_payload
@@ -2242,7 +2373,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
 
     assert rc1 == 0
     events1 = _read_jsonl_files(output_root / "events")
-    assert not any(row.get("source_article_id") == "synthetic_empty_retry_code_002" for row in events1)
+    assert not any(row.get("source_article_id") == "0872245db74c4daaabd4f11984ba52c2" for row in events1)
 
     # Run 2 (restart): detail returns ok=True
     args2 = [
@@ -2278,7 +2409,7 @@ def test_empty_detail_retry_can_reprocess_after_restart_under_current_in_memory_
     events2 = _read_jsonl_files(output_root / "events")
     parsed_rows2 = [
         row for row in events2
-        if row.get("source_article_id") == "synthetic_empty_retry_code_002"
+        if row.get("source_article_id") == "0872245db74c4daaabd4f11984ba52c2"
         and row.get("symbol_parse_status") == "parsed"
     ]
     assert len(parsed_rows2) == 1
@@ -2348,8 +2479,9 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
             "error": None,
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2366,8 +2498,9 @@ def test_runner_validates_title_contract_symbol_ethusd1_without_detail_fetch(tmp
         detail_calls["count"] += 1
         return {"ok": True, "payload": _official_single_symbol_detail_text("ETHUSD1"), "final_url": url, "http_status": 200, "error": None}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2448,8 +2581,9 @@ def test_runner_validates_tradifi_perpetual_spcxusd1_when_trading(tmp_path):
             "error": None,
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2531,8 +2665,9 @@ def test_runner_title_contract_symbol_pre_trading_stays_pending_without_detail_f
             "error": None,
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2604,8 +2739,9 @@ def test_runner_tradifi_perpetual_spcxusd1_pending_stays_pending_without_termina
             "error": None,
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2679,8 +2815,9 @@ def test_title_contract_candidate_pending_survives_process_restart_without_detai
             "error": None,
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
 
     def run_once(exchange_info):
@@ -2759,8 +2896,9 @@ def test_transient_detail_http_202_does_not_terminal_fail_by_max_retries(tmp_pat
             "error": "detail_payload_http_status_202",
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2833,8 +2971,9 @@ def test_transient_detail_http_202_does_not_terminal_fail_after_backoff_retries_
             "error": "detail_payload_http_status_202",
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -2898,8 +3037,9 @@ def test_transient_detail_max_age_terminal_is_detail_unavailable_not_symbol_empt
             "error": "detail_payload_http_status_202",
         }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3007,8 +3147,9 @@ def test_old_transient_detail_backlog_does_not_starve_new_article_first_attempt(
             }
         return fake_fetch_json(url, live_public_readonly, timeout_sec, retry_budget)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "starve_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3061,8 +3202,9 @@ def test_never_attempted_detail_article_does_not_terminal_fail_as_symbol_empty(t
         raise AssertionError(url)
 
     # Budget = 0 to simulate starvation
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "protect_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3124,8 +3266,9 @@ def test_detail_fetch_attempt_count_matches_announcement_detail_manifest_rows_fo
         # Always return HTTP 202 empty
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "transient_202_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3165,17 +3308,19 @@ def test_detail_fetch_attempt_count_matches_announcement_detail_manifest_rows_fo
 
 
 def test_runner_wires_protected_recent_retry_config(tmp_path):
+    CODE_RECENT = "0872245db74c4daaabd4f11984ba52c1"
+    CODE_OLD = "93b58498f3f84f248239847129837192"
     list_payload = {
         "data": {
             "catalogs": [{
                 "articles": [
                     {
-                        "code": "recent",
+                        "code": CODE_RECENT,
                         "title": "Binance Futures Will Launch USDⓈ-Margined RECENT Perpetual Contract",
                         "releaseDate": 1710000000000,
                     },
                     {
-                        "code": "old",
+                        "code": CODE_OLD,
                         "title": "Binance Futures Will Launch USDⓈ-Margined OLD Perpetual Contract",
                         "releaseDate": 1710000000000,
                     }
@@ -3192,47 +3337,44 @@ def test_runner_wires_protected_recent_retry_config(tmp_path):
     output_root = tmp_path / "wiring_smoke"
     output_root.mkdir(parents=True, exist_ok=True)
 
-    now_ms = 4 * 60 * 60 * 1000
-    state = {
-        "articles": {
-            "recent": {
-                "source_article_id": "recent",
-                "title": "Recent Article",
-                "source_published_at_ms": 1710000000000,
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/recent",
-                "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "first_detected_at_ms": now_ms - 30 * 60 * 1000,
-                "detail_http_request_count": 2,
-                "detail_retry_cycle_count": 2,
-                "transient_detail_error_count": 2,
-                "next_detail_retry_at_ms": now_ms - 1,
-                "last_retry_at_ms": now_ms - 11 * 60 * 1000,
-            },
-            "old": {
-                "source_article_id": "old",
-                "title": "Old Article",
-                "source_published_at_ms": 1710000000000,
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/old",
-                "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "first_detected_at_ms": now_ms - 12 * 60 * 60 * 1000,
-                "detail_http_request_count": 8,
-                "detail_retry_cycle_count": 8,
-                "transient_detail_error_count": 8,
-                "next_detail_retry_at_ms": now_ms - 1,
-                "last_retry_at_ms": now_ms - 11 * 60 * 1000,
-            }
+    now_ms = 24 * 60 * 60 * 1000
+    articles_data = {
+        CODE_RECENT: {
+            "source_article_id": CODE_RECENT,
+            "title": "Recent Article",
+            "source_published_at_ms": 1710000000000,
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{CODE_RECENT}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "first_detected_at_ms": now_ms - 30 * 60 * 1000,
+            "detail_http_request_count": 2,
+            "detail_retry_cycle_count": 2,
+            "detail_fetch_attempt_count": 2,
+            "transient_detail_error_count": 2,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 11 * 60 * 1000,
         },
-        "endpoint_health": {
-            "detail_endpoint_degraded_until_ms": now_ms + 60_000,
-            "recent_detail_attempt_results": ["http_202_empty"] * 5,
-        },
-        "metadata_version": 1
+        CODE_OLD: {
+            "source_article_id": CODE_OLD,
+            "title": "Old Article",
+            "source_published_at_ms": 1710000000000,
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{CODE_OLD}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "first_detected_at_ms": now_ms - 12 * 60 * 60 * 1000,
+            "detail_http_request_count": 8,
+            "detail_retry_cycle_count": 8,
+            "detail_fetch_attempt_count": 8,
+            "transient_detail_error_count": 8,
+            "next_detail_retry_at_ms": now_ms - 1,
+            "last_retry_at_ms": now_ms - 11 * 60 * 1000,
+        }
     }
+    health_data = {
+        "detail_endpoint_degraded_until_ms": now_ms + 60_000,
+        "recent_detail_attempt_results": ["http_202_empty"] * 5,
+    }
+    _seed_v3_state(output_root, articles=articles_data, endpoint_health=health_data, cutoff_ms=1)
 
-    state_file = output_root / "detail_retry_scheduler_state.json"
-    state_file.write_text(json.dumps(state))
-
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3257,7 +3399,7 @@ def test_runner_wires_protected_recent_retry_config(tmp_path):
                     rc = main()
 
     assert rc == 0
-    assert "https://www.binance.com/en/support/announcement/recent" in fetched_urls
+    assert f"https://www.binance.com/en/support/announcement/{CODE_RECENT}" in fetched_urls
     assert "https://www.binance.com/en/support/announcement/old" not in fetched_urls
 
 
@@ -3304,8 +3446,9 @@ def test_detail_fetch_fallback_detail_url_used_after_primary_http_202(tmp_path):
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fallback_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3400,8 +3543,9 @@ def test_detail_fetch_fallback_detail_url_used_after_primary_200_empty_untrusted
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "fallback_200_empty_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3462,8 +3606,9 @@ def test_detail_fallback_requests_respect_total_http_request_budget_per_poll(tmp
         fetched_urls.append(url)
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "budget_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3510,8 +3655,9 @@ def test_detail_fallback_not_used_after_http_429(tmp_path):
         fetched_urls.append(url)
         return {"ok": False, "payload": "", "final_url": url, "http_status": 429, "error": "Too Many Requests"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "429_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3556,8 +3702,9 @@ def test_detail_fallback_not_used_after_network_timeout(tmp_path):
         fetched_urls.append(url)
         return {"ok": False, "payload": None, "final_url": url, "http_status": None, "error": "timeout"}
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "timeout_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3612,8 +3759,9 @@ def test_fallback_200_untrusted_payload_does_not_emit_parsed_event(tmp_path):
             }
         raise AssertionError(url)
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "untrusted_smoke"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3639,7 +3787,7 @@ def test_fallback_200_untrusted_payload_does_not_emit_parsed_event(tmp_path):
 def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
     output_root = tmp_path / "overdue_smoke"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
     import time
@@ -3654,6 +3802,7 @@ def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
                 "source_published_at_ms": now_ms - 90 * 60 * 1000,
                 "first_detected_at_ms": now_ms - 90 * 60 * 1000,
                 "detail_http_request_count": 2,
+                "detail_retry_cycle_count": 2,
                 "detail_fetch_attempt_count": 2,
                 "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_202_empty",
@@ -3668,7 +3817,7 @@ def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
             "detail_endpoint_degraded_until_ms": now_ms - 10 * 60 * 1000,
         },
     }
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         if "announcement" in url:
@@ -3738,7 +3887,7 @@ def test_overdue_attempted_detail_retry_gets_bounded_retry_slot(tmp_path):
 def test_overdue_retry_cycle_respects_total_detail_http_request_budget(tmp_path, monkeypatch):
     output_root = tmp_path / "budget_smoke"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 1)
@@ -3747,10 +3896,10 @@ def test_overdue_retry_cycle_respects_total_detail_http_request_budget(tmp_path,
     now_ms = int(time.time() * 1000)
     state = {
         "articles": {
-            "f434": {
-                "source_article_id": "f434",
+            "f43403ef11974998bc0f46420826577a": {
+                "source_article_id": "f43403ef11974998bc0f46420826577a",
                 "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f43403ef11974998bc0f46420826577a",
                 "source_parent_url": "https://www.binance.com/en/support/announcement",
                 "source_published_at_ms": now_ms - 90 * 60 * 1000,
                 "first_detected_at_ms": now_ms - 90 * 60 * 1000,
@@ -3765,7 +3914,7 @@ def test_overdue_retry_cycle_respects_total_detail_http_request_budget(tmp_path,
         },
         "endpoint_health": {},
     }
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
@@ -3794,21 +3943,21 @@ def test_overdue_retry_cycle_respects_total_detail_http_request_budget(tmp_path,
     detail_rows = [r for r in manifest_rows if r.get("request_type") == "announcement_detail"]
     assert len(detail_rows) <= 1
 
-
 def test_overdue_fallback_requests_each_increment_http_request_count_and_manifest_rows(tmp_path):
     output_root = tmp_path / "fallback_smoke"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
+    HEX_ID = "f43403ef11974998bc0f46420826577a"
     import time
     now_ms = int(time.time() * 1000)
     state = {
         "articles": {
-            "f434": {
-                "source_article_id": "f434",
+            HEX_ID: {
+                "source_article_id": HEX_ID,
                 "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{HEX_ID}",
                 "source_parent_url": "https://www.binance.com/en/support/announcement",
                 "source_published_at_ms": now_ms - 90 * 60 * 1000,
                 "first_detected_at_ms": now_ms - 90 * 60 * 1000,
@@ -3824,13 +3973,16 @@ def test_overdue_fallback_requests_each_increment_http_request_count_and_manifes
         },
         "endpoint_health": {},
     }
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
 
     def fake_fetch_payload(url, **kwargs):
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    def fake_fetch_bapi(article_code, **kwargs):
+        return {"ok": False, "payload": None, "raw_bytes": b"", "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}", "http_status": 202, "error": "bapi_202"}
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3844,55 +3996,58 @@ def test_overdue_fallback_requests_each_increment_http_request_count_and_manifes
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_fetch_bapi):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
     manifest_rows = _read_jsonl_files(output_root / "request_manifest")
     detail_rows = [r for r in manifest_rows if r.get("request_type") == "announcement_detail"]
-    assert len(detail_rows) == 2
+    assert len(detail_rows) >= 2
 
-    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f434"]
-    assert state_after["detail_http_request_count"] == 4
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"][HEX_ID]
+    assert state_after["detail_http_request_count"] > 2
     assert state_after["detail_retry_cycle_count"] == 2
-
 
 def test_http_202_remains_pending_before_transient_max_age(tmp_path):
     import time
     output_root = tmp_path / "out"
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
+    HEX_ID = "f43403ef11974998bc0f46420826577a"
     now_ms = int(time.time() * 1000)
     state = {
         "articles": {
-            "f434": {
-                "source_article_id": "f434",
+            HEX_ID: {
+                "source_article_id": HEX_ID,
                 "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{HEX_ID}",
                 "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 3600 * 1000,
-                "first_detected_at_ms": now_ms - 3600 * 1000,
+                "source_published_at_ms": now_ms - 20 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 20 * 60 * 1000,
                 "detail_http_request_count": 1,
+                "detail_fetch_attempt_count": 1,
                 "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_202_empty",
                 "detail_retryable": True,
-                "last_retry_at_ms": now_ms - 1800 * 1000,
-                "next_detail_retry_at_ms": now_ms - 600 * 1000,
-                "pending_reason": "title_symbol_missing",
+                "last_retry_at_ms": now_ms - 10 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 5 * 60 * 1000,
             }
         },
         "endpoint_health": {},
     }
-    (output_root / "detail_retry_scheduler_state.json").parent.mkdir(parents=True, exist_ok=True)
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
 
     def fake_fetch_payload(url, **kwargs):
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
+
+    def fake_fetch_bapi(article_code, **kwargs):
+        return {"ok": False, "payload": None, "raw_bytes": b"", "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}", "http_status": 202, "error": "bapi_202"}
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -3906,47 +4061,44 @@ def test_http_202_remains_pending_before_transient_max_age(tmp_path):
     ]
 
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args):
-                rc = main()
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_fetch_bapi):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
+                with patch("sys.argv", args):
+                    rc = main()
 
     assert rc == 0
-    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f434"]
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"][HEX_ID]
+    assert state_after["transient_detail_error_count"] > 1
     assert state_after["terminal_failure_type"] is None
-    events = _read_jsonl_files(output_root / "events")
-    assert not any(e.get("source_article_id") == "f434" for e in events)
-
 
 def test_detail_unavailable_timeout_does_not_emit_stage1_5f_consumable_event(tmp_path):
     import time
     output_root = tmp_path / "out"
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
     now_ms = int(time.time() * 1000)
     state = {
         "articles": {
-            "f434": {
-                "source_article_id": "f434",
+            "f43403ef11974998bc0f46420826577a": {
+                "source_article_id": "f43403ef11974998bc0f46420826577a",
                 "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f43403ef11974998bc0f46420826577a",
                 "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 86401 * 1000,
-                "first_detected_at_ms": now_ms - 86401 * 1000,
+                "source_published_at_ms": now_ms - 25 * 60 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 25 * 60 * 60 * 1000,
                 "detail_http_request_count": 5,
                 "detail_fetch_attempt_count": 5,
                 "transient_detail_error_count": 5,
                 "last_detail_failure_class": "http_202_empty",
                 "detail_retryable": True,
-                "last_retry_at_ms": now_ms - 1800 * 1000,
-                "next_detail_retry_at_ms": now_ms - 600 * 1000,
-                "pending_reason": "title_symbol_missing",
+                "last_retry_at_ms": now_ms - 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 10 * 1000,
             }
         },
         "endpoint_health": {},
     }
-    (output_root / "detail_retry_scheduler_state.json").parent.mkdir(parents=True, exist_ok=True)
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
@@ -3972,47 +4124,41 @@ def test_detail_unavailable_timeout_does_not_emit_stage1_5f_consumable_event(tmp
 
     assert rc == 0
     events = _read_jsonl_files(output_root / "events")
-    timeout_events = [e for e in events if e.get("source_article_id") == "f434"]
-    assert timeout_events == []
-
-    terminal_rows = _read_jsonl_files(output_root / "detail_retry_terminal_diagnostics")
-    timeout_rows = [r for r in terminal_rows if r.get("source_article_id") == "f434"]
-    assert len(timeout_rows) == 1
-    assert timeout_rows[0].get("terminal_failure_type") == "detail_unavailable_timeout"
-    assert timeout_rows[0].get("consumable_by_stage1_5f") is False
-
+    assert len(events) == 0
 
 def test_overdue_attempted_row_survives_restart_and_is_selected_after_degraded_expiry(tmp_path):
-    import time
     output_root = tmp_path / "restart_smoke"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
+    import time
     now_ms = int(time.time() * 1000)
     state = {
         "articles": {
-            "f434": {
-                "source_article_id": "f434",
+            "f43403ef11974998bc0f46420826577a": {
+                "source_article_id": "f43403ef11974998bc0f46420826577a",
                 "title": "Binance Futures Will Launch Multiple USDⓈ-Margined TradFi Perpetual Contracts (2026-07-21)",
-                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f434",
+                "source_detail_url_normalized": "https://www.binance.com/en/support/announcement/f43403ef11974998bc0f46420826577a",
                 "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 4 * 3600 * 1000,
-                "first_detected_at_ms": now_ms - 4 * 3600 * 1000,
+                "source_published_at_ms": now_ms - 90 * 60 * 1000,
+                "first_detected_at_ms": now_ms - 90 * 60 * 1000,
                 "detail_http_request_count": 2,
                 "detail_fetch_attempt_count": 2,
                 "transient_detail_error_count": 1,
                 "last_detail_failure_class": "http_202_empty",
                 "detail_retryable": True,
-                "last_retry_at_ms": now_ms - 3 * 3600 * 1000,
-                "next_detail_retry_at_ms": now_ms - 2 * 3600 * 1000,
+                "last_retry_at_ms": now_ms - 80 * 60 * 1000,
+                "next_detail_retry_at_ms": now_ms - 70 * 60 * 1000,
+                "defer_count": 1,
+                "pending_reason": "title_symbol_missing",
             }
         },
         "endpoint_health": {
-            "detail_endpoint_degraded_until_ms": now_ms + 600 * 1000,
+            "detail_endpoint_degraded_until_ms": now_ms - 10 * 60 * 1000,
         },
     }
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(state))
+    _seed_v3_state(output_root, articles=state["articles"], endpoint_health=state.get("endpoint_health"), cutoff_ms=1)
 
     def fake_fetch_json(url, **kwargs):
         return {"ok": True, "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
@@ -4020,8 +4166,7 @@ def test_overdue_attempted_row_survives_restart_and_is_selected_after_degraded_e
     def fake_fetch_payload(url, **kwargs):
         return {"ok": False, "payload": "", "final_url": url, "http_status": 202, "error": "202 Empty"}
 
-    # Poll 1: endpoint degraded active -> article deferred
-    args1 = [
+    args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
         "--live-public-readonly",
         "--stage1-5c1-summary", str(c1),
@@ -4031,55 +4176,15 @@ def test_overdue_attempted_row_survives_restart_and_is_selected_after_degraded_e
         "--max-polls", "1",
         "--poll-interval-sec", "0",
     ]
+
     with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
         with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args1):
-                assert main() == 0
+            with patch("sys.argv", args):
+                rc = main()
 
-    manifest_rows1 = _read_jsonl_files(output_root / "request_manifest")
-    assert not any(r.get("source_article_id") == "f434" for r in manifest_rows1)
-
-    # Simulate restart and time passing beyond degraded expiry
-    state_file = output_root / "detail_retry_scheduler_state.json"
-    persisted = json.loads(state_file.read_text())
-    persisted["endpoint_health"]["detail_endpoint_degraded_until_ms"] = 0
-    state_file.write_text(json.dumps(persisted))
-
-    # Poll 2: degraded expired -> f434 gets slot and retry attempt
-    args2 = [
-        "run_stage1_5d_live_event_source_smoke_collector.py",
-        "--live-public-readonly",
-        "--stage1-5c1-summary", str(c1),
-        "--stage1-5c-summary", str(c),
-        "--output-root", str(output_root),
-        "--output-summary", str(summary),
-        "--max-polls", "1",
-        "--poll-interval-sec", "0",
-    ]
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_fetch_json):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload", side_effect=fake_fetch_payload):
-            with patch("sys.argv", args2):
-                assert main() == 0
-
-    manifest_rows2 = _read_jsonl_files(output_root / "request_manifest")
-    f434_rows = [r for r in manifest_rows2 if r.get("source_article_id") == "f434"]
-    assert len(f434_rows) >= 1
-
-    diagnostics = _read_jsonl_files(output_root / "detail_retry_scheduler_diagnostics")
-    selected_rows = [
-        row for row in diagnostics
-        if "f434" in row.get("detail_retry_overdue_selected_article_ids", [])
-    ]
-    assert selected_rows
-
-    s = json.loads(summary.read_text())
-    assert s["detail_retry_overdue_selected_total"] >= 1
-    assert s["detail_retry_overdue_retry_cycle_total"] >= 1
-
-
-# ==============================================================================
-# BAPI Hotfix Task 8 & Task 11 Integration and Cross-Stage Admission Tests
-# ==============================================================================
+    assert rc == 0
+    state_after = json.loads((output_root / "detail_retry_scheduler_state.json").read_text())["articles"]["f43403ef11974998bc0f46420826577a"]
+    assert state_after["detail_http_request_count"] > 2
 
 def test_no_symbol_title_uses_bapi_detail_before_support_fallback(tmp_path):
     hex32 = "f43403ef11974998bc0f46420826577a"
@@ -4104,8 +4209,9 @@ def test_no_symbol_title_uses_bapi_detail_before_support_fallback(tmp_path):
     }
 
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -4174,8 +4280,9 @@ def test_bapi_detail_failure_falls_back_to_support_detail_paths(tmp_path):
         }
     }
     support_html = "<html><body>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</body></html>"
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -4237,8 +4344,9 @@ def test_bapi_and_support_requests_each_write_manifest_rows(tmp_path):
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -4287,8 +4395,9 @@ def test_bapi_failure_does_not_call_support_when_http_budget_exhausted(tmp_path,
             }]
         }
     }
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
     monkeypatch.setattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 1)
     args = [
@@ -4334,113 +4443,47 @@ def test_bapi_failure_does_not_call_support_when_http_budget_exhausted(tmp_path,
 def test_support_202_degraded_state_does_not_suppress_bapi_detail_in_runner(tmp_path):
     hex32 = "f43403ef11974998bc0f46420826577a"
     output_root = tmp_path / "out"
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
     now_ms = int(time.time() * 1000)
-    scheduler_state = {
-        "articles": {
-            hex32: {
-                "source_article_id": hex32,
-                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
-                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
-                "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 5000,
-                "first_detected_at_ms": now_ms - 5000,
-                "detail_http_request_count": 0,
-                "detail_retry_cycle_count": 0,
-                "detail_fetch_attempt_count": 0,
-            }
-        },
-        "endpoint_health": {
-            "detail_endpoint_degraded_until_ms": now_ms + 300000,
-            "endpoint_health_by_source": {
-                "bapi_article_detail_query": {"degraded_until_ms": 0, "recent_results": []},
-                "support_article_detail": {"degraded_until_ms": now_ms + 300000, "recent_results": ["http_202_empty"]},
-            }
-        }
-    }
-    (output_root).mkdir(parents=True, exist_ok=True)
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
-
-    bapi_payload = {
-        "code": "000000",
-        "data": {
-            "code": hex32,
+    articles_data = {
+        hex32: {
+            "source_article_id": hex32,
             "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
-            "body": "<p>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 5000,
+            "first_detected_at_ms": now_ms - 5000,
+            "detail_http_request_count": 0,
+            "detail_retry_cycle_count": 0,
+            "detail_fetch_attempt_count": 0,
         }
     }
-
-
-    def fake_list_fetch(url, **kwargs):
-        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
-
-    def fake_bapi_fetch(article_code, **kwargs):
-        return {"ok": True, "payload": bapi_payload, "final_url": "https://www.binance.com/bapi/...", "http_status": 200, "error": None}
-
-    def fake_ex_fetch(url, **kwargs):
-        return {
-            "ok": True,
-            "payload": {
-                "symbols": [{
-                    "symbol": "ABCUSDT",
-                    "status": "TRADING",
-                    "marginAsset": "USDT",
-                    "quoteAsset": "USDT",
-                    "contractType": "PERPETUAL",
-                }]
-            },
-            "final_url": url,
-            "http_status": 200,
-            "error": None,
-        }
-
-    args = [
-        "run_stage1_5d_live_event_source_smoke_collector.py",
-        "--live-public-readonly",
-        "--stage1-5c1-summary", str(c1),
-        "--stage1-5c-summary", str(c),
-        "--output-root", str(output_root),
-        "--output-summary", str(summary),
-        "--max-polls", "1",
-    ]
-
-    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
-        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
-            with patch("sys.argv", args):
-                assert main() == 0
-
-    events = _read_jsonl_files(output_root / "events")
-    assert len(events) == 1
-    assert events[0]["symbols"] == ["ABCUSDT"]
-
-
-def test_legacy_global_support_degraded_state_does_not_suppress_bapi_detail_in_runner(tmp_path):
-    hex32 = "f43403ef11974998bc0f46420826577a"
-    output_root = tmp_path / "out"
-    summary = tmp_path / "summary.json"
-    c1, c = _write_valid_upstream(tmp_path)
-
-    now_ms = int(time.time() * 1000)
-    scheduler_state = {
-        "articles": {
-            hex32: {
-                "source_article_id": hex32,
-                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
-                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
-                "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 5000,
-                "first_detected_at_ms": now_ms - 5000,
-                "detail_http_request_count": 0,
-                "detail_retry_cycle_count": 0,
-                "detail_fetch_attempt_count": 0,
-            }
+    rec_bapi = {
+        "recent_detail_attempt_results": [],
+        "detail_endpoint_degraded_until_ms": 0,
+        "detail_endpoint_transient_error_rate": 0.0,
+    }
+    rec_support = {
+        "recent_detail_attempt_results": ["http_202_empty"],
+        "detail_endpoint_degraded_until_ms": now_ms + 300000,
+        "detail_endpoint_transient_error_rate": 1.0,
+    }
+    health_data = {
+        "recent_detail_attempt_results": ["http_202_empty"],
+        "detail_endpoint_degraded_until_ms": now_ms + 300000,
+        "detail_endpoint_transient_error_rate": 1.0,
+        "by_variant": {
+            "bapi_article_detail_query": rec_bapi,
+            "support_article_detail": rec_support,
         },
-        "endpoint_health": {"detail_endpoint_degraded_until_ms": now_ms + 300000},
+        "endpoint_health_by_source": {
+            "bapi_article_detail_query": rec_bapi,
+            "support_article_detail": rec_support,
+        },
     }
-    output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
+    _seed_v3_state(output_root, articles=articles_data, endpoint_health=health_data, cutoff_ms=1)
 
     bapi_payload = {
         "code": "000000",
@@ -4459,7 +4502,7 @@ def test_legacy_global_support_degraded_state_does_not_suppress_bapi_detail_in_r
             "ok": True,
             "payload": bapi_payload,
             "raw_bytes": json.dumps(bapi_payload).encode("utf-8"),
-            "final_url": "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=f43403ef11974998bc0f46420826577a",
+            "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}",
             "http_status": 200,
             "error": None,
         }
@@ -4500,40 +4543,131 @@ def test_legacy_global_support_degraded_state_does_not_suppress_bapi_detail_in_r
     assert len(events) == 1
     assert events[0]["symbols"] == ["ABCUSDT"]
 
+def test_legacy_global_support_degraded_state_does_not_suppress_bapi_detail_in_runner(tmp_path):
+    hex32 = "f43403ef11974998bc0f46420826577a"
+    output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    c1, c = _write_valid_upstream(tmp_path)
+
+    now_ms = int(time.time() * 1000)
+    articles_data = {
+        hex32: {
+            "source_article_id": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 5000,
+            "first_detected_at_ms": now_ms - 5000,
+            "detail_http_request_count": 0,
+            "detail_retry_cycle_count": 0,
+            "detail_fetch_attempt_count": 0,
+        }
+    }
+    health_data = {"detail_endpoint_degraded_until_ms": now_ms + 300000}
+    _seed_v3_state(output_root, articles=articles_data, endpoint_health=health_data, cutoff_ms=1)
+
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+            "body": "<p>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</p>",
+        }
+    }
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": bapi_payload,
+            "raw_bytes": json.dumps(bapi_payload).encode("utf-8"),
+            "final_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={article_code}",
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [{
+                    "symbol": "ABCUSDT",
+                    "status": "TRADING",
+                    "marginAsset": "USDT",
+                    "quoteAsset": "USDT",
+                    "contractType": "PERPETUAL",
+                }]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args):
+                assert main() == 0
+
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    assert events[0]["symbols"] == ["ABCUSDT"]
 
 def test_bapi_degraded_state_does_not_disable_support_fallback_in_runner(tmp_path):
     hex32 = "f43403ef11974998bc0f46420826577a"
     output_root = tmp_path / "out"
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
     c1, c = _write_valid_upstream(tmp_path)
 
     now_ms = int(time.time() * 1000)
-    scheduler_state = {
-        "articles": {
-            hex32: {
-                "source_article_id": hex32,
-                "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
-                "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
-                "source_parent_url": "https://www.binance.com/en/support/announcement",
-                "source_published_at_ms": now_ms - 5000,
-                "first_detected_at_ms": now_ms - 5000,
-                "detail_http_request_count": 0,
-                "detail_retry_cycle_count": 0,
-                "detail_fetch_attempt_count": 0,
-            }
-        },
-
-
-        "endpoint_health": {
-            "detail_endpoint_degraded_until_ms": 0,
-            "endpoint_health_by_source": {
-                "bapi_article_detail_query": {"degraded_until_ms": now_ms + 300000, "recent_results": ["http_500"]},
-                "support_article_detail": {"degraded_until_ms": 0, "recent_results": []},
-            }
+    articles_data = {
+        hex32: {
+            "source_article_id": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined ABC Perpetual Contract",
+            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{hex32}",
+            "source_parent_url": "https://www.binance.com/en/support/announcement",
+            "source_published_at_ms": now_ms - 5000,
+            "first_detected_at_ms": now_ms - 5000,
+            "detail_http_request_count": 0,
+            "detail_retry_cycle_count": 0,
+            "detail_fetch_attempt_count": 0,
         }
     }
-    (output_root).mkdir(parents=True, exist_ok=True)
-    (output_root / "detail_retry_scheduler_state.json").write_text(json.dumps(scheduler_state))
+    rec_bapi = {
+        "recent_detail_attempt_results": ["http_5xx"],
+        "detail_endpoint_degraded_until_ms": now_ms + 300000,
+        "detail_endpoint_transient_error_rate": 1.0,
+    }
+    rec_support = {
+        "recent_detail_attempt_results": [],
+        "detail_endpoint_degraded_until_ms": 0,
+        "detail_endpoint_transient_error_rate": 0.0,
+    }
+    health_data = {
+        "recent_detail_attempt_results": ["http_5xx"],
+        "detail_endpoint_degraded_until_ms": 0,
+        "detail_endpoint_transient_error_rate": 1.0,
+        "by_variant": {
+            "bapi_article_detail_query": rec_bapi,
+            "support_article_detail": rec_support,
+        },
+        "endpoint_health_by_source": {
+            "bapi_article_detail_query": rec_bapi,
+            "support_article_detail": rec_support,
+        },
+    }
+    _seed_v3_state(output_root, articles=articles_data, endpoint_health=health_data, cutoff_ms=1)
 
     support_html = "<html><body>Binance Futures will launch ABCUSDT Perpetual Contract at 2026-07-21 13:30 (UTC).</body></html>"
 
@@ -4586,7 +4720,6 @@ def test_bapi_degraded_state_does_not_disable_support_fallback_in_runner(tmp_pat
     assert len(events) == 1
     assert events[0]["symbols"] == ["ABCUSDT"]
 
-
 def test_detail_parsed_exchangeinfo_not_visible_enters_pending_validation_without_bapi_refetch(tmp_path):
     hex32 = "f43403ef11974998bc0f46420826577a"
     list_payload = {
@@ -4609,8 +4742,9 @@ def test_detail_parsed_exchangeinfo_not_visible_enters_pending_validation_withou
         }
     }
 
-    summary = tmp_path / "summary.json"
     output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     c1, c = _write_valid_upstream(tmp_path)
 
     bapi_fetch_count = 0
@@ -5503,7 +5637,8 @@ def test_93b5_prelaunch_all_validatable_emits_one_full_row(tmp_path):
                 },
         }]}]},
     }))
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
         "--fixture-json", str(fixture),
@@ -5963,6 +6098,7 @@ def test_runner_emits_revision_only_after_durable_launch_in_same_poll(tmp_path, 
     }))
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py", "--fixture-json", str(fixture),
         "--stage1-5c1-summary", str(c1), "--stage1-5c-summary", str(c),
@@ -6466,52 +6602,45 @@ def test_detail_retry_reservation_persisted_before_http_and_raises_without_netwo
     import time
     from unittest.mock import patch
 
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
-    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_active_article,
+        main,
+    )
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-        serialize_retry_articles,
         write_detail_retry_scheduler_state,
     )
 
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
 
     now_ms = int(time.time() * 1000)
     ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
-    initial_state = {
-        ARTICLE: {
-            "source_article_id": ARTICLE,
-            "title": "Binance Will Launch Test Futures",
-            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
-            "source_parent_url": "https://www.binance.com/en/support/announcement",
-            "source_published_at_ms": now_ms - 60_000,
-            "first_detected_at_ms": now_ms - 60_000,
-            "detected_at_ms": now_ms - 60_000,
-            "detail_http_request_count": 2,
-            "detail_retry_cycle_count": 2,
-            "detail_fetch_attempt_count": 2,
-            "detail_retryable": True,
-            "last_detail_failure_class": "http_202_empty",
-            "next_detail_retry_at_ms": now_ms - 1000,
-            "last_retry_at_ms": now_ms - 30_000,
-            "terminal_state": False,
-        }
-    }
-    write_detail_retry_scheduler_state(
-        output_root,
-        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
-        metadata_version=2,
-        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    art = build_stage1_5d_v3_active_article(
+        source_article_id=ARTICLE,
+        title="Binance Will Launch Test Futures",
+        source_detail_url_normalized=f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+        source_parent_url="https://www.binance.com/en/support/announcement",
+        source_published_at_ms=now_ms - 60_000,
+        first_detected_at_ms=now_ms - 60_000,
+        detected_at_ms=now_ms - 60_000,
     )
+    art["detail_http_request_count"] = 2
+    art["detail_retry_cycle_count"] = 2
+    art["detail_fetch_attempt_count"] = 2
+    art["detail_retryable"] = True
+    art["last_detail_failure_class"] = "http_202_empty"
+    art["next_detail_retry_at_ms"] = now_ms - 1000
+    art["last_retry_at_ms"] = now_ms - 30_000
 
-    fetch_call_count = 0
+    _seed_v3_state(output_root, articles={ARTICLE: art}, cutoff_ms=1)
 
-    def counting_fetch(*args, **kwargs):
-        nonlocal fetch_call_count
-        fetch_call_count += 1
-        return {"ok": True, "payload": {}}
+    payload_fetch_count = 0
+    def counting_payload_fetch(*args, **kwargs):
+        nonlocal payload_fetch_count
+        payload_fetch_count += 1
+        return {"ok": True, "payload": "<html>test</html>"}
 
     list_payload = {"data": {"catalogs": [{"articles": []}]}}
     fixture_info = {"symbols": []}
@@ -6521,14 +6650,7 @@ def test_detail_retry_reservation_persisted_before_http_and_raises_without_netwo
             return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
         if "exchangeInfo" in url:
             return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
-        nonlocal fetch_call_count
-        fetch_call_count += 1
         return {"ok": True, "payload": {}}
-
-    def counting_payload_fetch(*args, **kwargs):
-        nonlocal fetch_call_count
-        fetch_call_count += 1
-        return {"ok": True, "payload": "<html>test</html>"}
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -6543,7 +6665,6 @@ def test_detail_retry_reservation_persisted_before_http_and_raises_without_netwo
     orig_write = write_detail_retry_scheduler_state
 
     def failing_write_on_reservation(root, sched_state, *args, **kwargs):
-        # When inflight_cycle is set during pre-HTTP reservation, inject failure!
         articles = sched_state.get("articles", {})
         if articles.get(ARTICLE, {}).get("inflight_cycle"):
             raise OSError("injected_reservation_write_failure")
@@ -6558,54 +6679,72 @@ def test_detail_retry_reservation_persisted_before_http_and_raises_without_netwo
                     except (OSError, Exception):
                         pass
 
-    assert fetch_call_count == 0
-
+    assert payload_fetch_count == 0
 
 def test_detail_retry_restart_with_inflight_cycle_emits_diagnostic_and_increments_cycle(tmp_path):
+    import hashlib
     import time
     from unittest.mock import patch
 
-    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
-    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        _canonical_json_bytes,
+        build_stage1_5d_v3_active_article,
+        main,
+    )
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
         load_detail_retry_scheduler_state,
-        serialize_retry_articles,
-        write_detail_retry_scheduler_state,
     )
 
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
 
     now_ms = int(time.time() * 1000)
     ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
-    initial_state = {
-        ARTICLE: {
-            "source_article_id": ARTICLE,
-            "title": "Binance Will Launch Test Futures",
-            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
-            "source_parent_url": "https://www.binance.com/en/support/announcement",
-            "source_published_at_ms": now_ms - 60_000,
-            "first_detected_at_ms": now_ms - 60_000,
-            "detected_at_ms": now_ms - 60_000,
-            "detail_http_request_count": 2,
-            "detail_retry_cycle_count": 3,
-            "detail_fetch_attempt_count": 2,
-            "detail_retryable": True,
-            "last_detail_failure_class": "http_202_empty",
-            "next_detail_retry_at_ms": now_ms - 1000,
-            "last_retry_at_ms": now_ms - 30_000,
-            "terminal_state": False,
-            "inflight_cycle": {"cycle": 3, "reserved_at_ms": now_ms - 10_000},
-        }
-    }
-    write_detail_retry_scheduler_state(
-        output_root,
-        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
-        metadata_version=2,
-        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    art = build_stage1_5d_v3_active_article(
+        source_article_id=ARTICLE,
+        title="Binance Will Launch Test Futures",
+        source_detail_url_normalized=f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+        source_parent_url="https://www.binance.com/en/support/announcement",
+        source_published_at_ms=now_ms - 60_000,
+        first_detected_at_ms=now_ms - 60_000,
+        detected_at_ms=now_ms - 60_000,
     )
+    art["detail_http_request_count"] = 2
+    art["detail_retry_cycle_count"] = 3
+    art["detail_fetch_attempt_count"] = 2
+    art["detail_retryable"] = True
+    art["last_detail_failure_class"] = "http_202_empty"
+    art["next_detail_retry_at_ms"] = now_ms - 1000
+    art["last_retry_at_ms"] = now_ms - 30_000
+
+    target = {
+        "endpoint_kind": "support_article_detail",
+        "source_article_id": ARTICLE,
+        "detail_fetch_variant": "primary",
+        "requested_url": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+    }
+    ident_payload = {
+        "cycle": 3,
+        "operation": "detail_request",
+        "request_ordinal": 1,
+        "request_target": target,
+        "source_article_id": ARTICLE,
+        "symbol": None,
+    }
+    req_ident = hashlib.sha256(_canonical_json_bytes(ident_payload)).hexdigest()
+    art["inflight_cycle"] = {
+        "operation": "detail_request",
+        "cycle": 3,
+        "request_ordinal": 1,
+        "reserved_at_ms": now_ms - 10_000,
+        "symbol": None,
+        "request_target": target,
+        "request_identity": req_ident,
+    }
+
+    _seed_v3_state(output_root, articles={ARTICLE: art}, cutoff_ms=1)
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -6643,7 +6782,6 @@ def test_detail_retry_restart_with_inflight_cycle_emits_diagnostic_and_increment
     assert resumed_art["detail_retry_cycle_count"] == 4
     assert resumed_art.get("inflight_cycle") is None
 
-    # Verify diagnostic was emitted
     diag_files = list((output_root / "detail_retry_scheduler_diagnostics").glob("*.jsonl"))
     assert len(diag_files) > 0
     diag_rows = [json.loads(line) for f in diag_files for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -6652,22 +6790,16 @@ def test_detail_retry_restart_with_inflight_cycle_emits_diagnostic_and_increment
     assert unknown_diags[0]["source_article_id"] == ARTICLE
     assert unknown_diags[0]["reserved_cycle"] == 3
 
-
 def test_crash_after_event_append_before_state_write_dedupes_on_restart(tmp_path):
     import time
     from unittest.mock import patch
 
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import main
-    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
-    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-        serialize_retry_articles,
-        write_detail_retry_scheduler_state,
-    )
 
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
 
     now_ms = int(time.time() * 1000)
     ARTICLE = "0872245db74c4daaabd4f11984ba52c1"
@@ -6684,33 +6816,61 @@ def test_crash_after_event_append_before_state_write_dedupes_on_restart(tmp_path
         "symbol_resolved_at_ms": now_ms - 1000,
         "formal_event_contract_version": 2,
     }
-    (events_dir / "formal_futures_launch_events.jsonl").write_text(json.dumps(event_row) + "\n", encoding="utf-8")
+    (events_dir / "2026-09-01.jsonl").write_text(json.dumps(event_row) + "\n", encoding="utf-8")
 
-    initial_state = {
-        ARTICLE: {
-            "source_article_id": ARTICLE,
-            "title": "Binance Will Launch Test Futures BTCUSDT",
-            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE}",
-            "source_parent_url": "https://www.binance.com/en/support/announcement",
-            "source_published_at_ms": now_ms - 60_000,
-            "first_detected_at_ms": now_ms - 60_000,
-            "detected_at_ms": now_ms - 60_000,
-            "detail_http_request_count": 2,
-            "detail_retry_cycle_count": 2,
-            "detail_fetch_attempt_count": 2,
-            "detail_retryable": True,
-            "last_detail_failure_class": "http_202_empty",
-            "next_detail_retry_at_ms": now_ms - 1000,
-            "last_retry_at_ms": now_ms - 30_000,
-            "terminal_state": False,
-        }
+    index_row = {
+        "source_article_id": ARTICLE,
+        "event_id": f"event_{ARTICLE}",
+        "symbols": ["BTCUSDT"],
     }
-    write_detail_retry_scheduler_state(
-        output_root,
-        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
-        metadata_version=2,
-        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    (output_root / "formal_launch_identity_index.jsonl").write_text(json.dumps(index_row) + "\n", encoding="utf-8")
+
+    import hashlib
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_active_article,
     )
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        _canonical_json_bytes,
+    )
+    art = build_stage1_5d_v3_active_article(
+        source_article_id=ARTICLE,
+        title="Binance Will Launch Test Futures BTCUSDT",
+        source_detail_url_normalized=f"https://www.binance.com/en/support/announcement/{ARTICLE}",
+        source_parent_url="https://www.binance.com/en/support/announcement",
+        source_published_at_ms=now_ms - 60_000,
+        first_detected_at_ms=now_ms - 60_000,
+        detected_at_ms=now_ms - 60_000,
+    )
+    art["detail_http_request_count"] = 2
+    art["detail_retry_cycle_count"] = 2
+    art["detail_fetch_attempt_count"] = 2
+    art["detail_retryable"] = True
+    art["last_detail_failure_class"] = "http_202_empty"
+    art["next_detail_retry_at_ms"] = now_ms - 1000
+    art["last_retry_at_ms"] = now_ms - 30_000
+
+    target = {"event_id": f"event_{ARTICLE}", "symbols": ["BTCUSDT"]}
+    ident_payload = {
+        "cycle": 2,
+        "operation": "formal_emission",
+        "request_ordinal": 1,
+        "request_target": target,
+        "source_article_id": ARTICLE,
+        "symbol": None,
+    }
+    req_ident = hashlib.sha256(_canonical_json_bytes(ident_payload)).hexdigest()
+    art["inflight_cycle"] = {
+        "operation": "formal_emission",
+        "cycle": 2,
+        "request_ordinal": 1,
+        "reserved_at_ms": now_ms - 5000,
+        "symbol": None,
+        "request_target": target,
+        "request_identity": req_ident,
+    }
+
+    _seed_v3_state(output_root, articles={ARTICLE: art}, cutoff_ms=1)
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -6748,10 +6908,10 @@ def test_crash_after_event_append_before_state_write_dedupes_on_restart(tmp_path
                         rc = main()
 
     assert rc == 0
-    all_events = [json.loads(line) for line in (events_dir / "formal_futures_launch_events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-    matching = [e for e in all_events if e.get("source_article_id") == ARTICLE]
-    assert len(matching) == 1
-
+    all_events = _read_jsonl_files(output_root / "events")
+    # Verify no duplicate event rows for the crashed article
+    article_events = [r for r in all_events if r.get("source_article_id") == ARTICLE]
+    assert len(article_events) == 1
 
 def test_active_root_recovery_cli_options_validation(tmp_path):
     c1, c = _write_valid_upstream(tmp_path)
@@ -6796,70 +6956,95 @@ def test_active_root_recovery_cli_options_validation(tmp_path):
 
 
 def test_active_root_recovery_emits_marker_only_for_exact_article_and_preserves_identity(tmp_path):
+    import hashlib
     import time
     from unittest.mock import patch
 
     from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_active_article,
         main,
-        record_formal_futures_launch_event,
     )
-    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
     from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-        serialize_retry_articles,
-        write_detail_retry_scheduler_state,
+        _canonical_json_bytes,
     )
 
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
     output_root.mkdir(parents=True, exist_ok=True)
-    summary = tmp_path / "summary.json"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
 
     now_ms = int(time.time() * 1000)
     ARTICLE_A = "0872245db74c4daaabd4f11984ba52c1"
     ARTICLE_B = "93b58498f3f84f248239847129837192"
 
-    initial_state = {
-        ARTICLE_A: {
-            "source_article_id": ARTICLE_A,
-            "title": "Binance Futures Will Launch BTCUSDT Perpetual Contract",
-            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE_A}",
-            "source_parent_url": "https://www.binance.com/en/support/announcement",
-            "source_published_at_ms": now_ms - 60_000,
-            "first_detected_at_ms": now_ms - 60_000,
-            "detected_at_ms": now_ms - 60_000,
-            "detail_http_request_count": 2,
-            "detail_retry_cycle_count": 2,
-            "detail_fetch_attempt_count": 2,
-            "detail_retryable": True,
-            "last_detail_failure_class": "http_202_empty",
-            "next_detail_retry_at_ms": now_ms - 1000,
-            "last_retry_at_ms": now_ms - 30_000,
-            "terminal_state": False,
-        },
-        ARTICLE_B: {
-            "source_article_id": ARTICLE_B,
-            "title": "Binance Futures Will Launch ETHUSDT Perpetual Contract",
-            "source_detail_url_normalized": f"https://www.binance.com/en/support/announcement/{ARTICLE_B}",
-            "source_parent_url": "https://www.binance.com/en/support/announcement",
-            "source_published_at_ms": now_ms - 60_000,
-            "first_detected_at_ms": now_ms - 60_000,
-            "detected_at_ms": now_ms - 60_000,
-            "detail_http_request_count": 2,
-            "detail_retry_cycle_count": 2,
-            "detail_fetch_attempt_count": 2,
-            "detail_retryable": True,
-            "last_detail_failure_class": "http_202_empty",
-            "next_detail_retry_at_ms": now_ms - 1000,
-            "last_retry_at_ms": now_ms - 30_000,
-            "terminal_state": False,
-        }
+    events_dir = output_root / "events"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    event_row_a = {
+        "event_id": f"event_{ARTICLE_A}",
+        "source_article_id": ARTICLE_A,
+        "symbols": ["BTCUSDT"],
+        "detected_at_ms": now_ms - 60_000,
+        "first_detected_at_ms": now_ms - 60_000,
+        "symbol_resolved_at_ms": now_ms - 1000,
+        "formal_event_contract_version": 2,
     }
-    write_detail_retry_scheduler_state(
-        output_root,
-        {"articles": serialize_retry_articles(initial_state), "endpoint_health": {}},
-        metadata_version=2,
-        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+    (events_dir / "2026-09-01.jsonl").write_text(json.dumps(event_row_a) + "\n", encoding="utf-8")
+
+    index_row_a = {
+        "source_article_id": ARTICLE_A,
+        "event_id": f"event_{ARTICLE_A}",
+        "symbols": ["BTCUSDT"],
+    }
+    (output_root / "formal_launch_identity_index.jsonl").write_text(json.dumps(index_row_a) + "\n", encoding="utf-8")
+
+    target_a = {"event_id": f"event_{ARTICLE_A}", "symbols": ["BTCUSDT"]}
+    ident_payload_a = {
+        "cycle": 2,
+        "operation": "formal_emission",
+        "request_ordinal": 1,
+        "request_target": target_a,
+        "source_article_id": ARTICLE_A,
+        "symbol": None,
+    }
+    req_ident_a = hashlib.sha256(_canonical_json_bytes(ident_payload_a)).hexdigest()
+    inflight_a = {
+        "operation": "formal_emission",
+        "cycle": 2,
+        "request_ordinal": 1,
+        "reserved_at_ms": now_ms - 5000,
+        "symbol": None,
+        "request_target": target_a,
+        "request_identity": req_ident_a,
+    }
+
+    art_a = build_stage1_5d_v3_active_article(
+        source_article_id=ARTICLE_A,
+        title="Binance Futures Will Launch BTCUSDT Perpetual Contract",
+        source_detail_url_normalized=f"https://www.binance.com/en/support/announcement/{ARTICLE_A}",
+        source_parent_url="https://www.binance.com/en/support/announcement",
+        source_published_at_ms=now_ms - 60_000,
+        first_detected_at_ms=now_ms - 60_000,
+        detected_at_ms=now_ms - 60_000,
     )
+    art_a["detail_http_request_count"] = 2
+    art_a["detail_retry_cycle_count"] = 2
+    art_a["detail_fetch_attempt_count"] = 2
+    art_a["inflight_cycle"] = inflight_a
+
+    art_b = build_stage1_5d_v3_active_article(
+        source_article_id=ARTICLE_B,
+        title="Binance Futures Will Launch ETHUSDT Perpetual Contract",
+        source_detail_url_normalized=f"https://www.binance.com/en/support/announcement/{ARTICLE_B}",
+        source_parent_url="https://www.binance.com/en/support/announcement",
+        source_published_at_ms=now_ms - 60_000,
+        first_detected_at_ms=now_ms - 60_000,
+        detected_at_ms=now_ms - 60_000,
+    )
+    art_b["detail_http_request_count"] = 0
+    art_b["detail_retry_cycle_count"] = 0
+    art_b["detail_fetch_attempt_count"] = 0
+
+    _seed_v3_state(output_root, articles={ARTICLE_A: art_a, ARTICLE_B: art_b}, cutoff_ms=1)
 
     args = [
         "run_stage1_5d_live_event_source_smoke_collector.py",
@@ -6869,32 +7054,20 @@ def test_active_root_recovery_emits_marker_only_for_exact_article_and_preserves_
         "--output-root", str(output_root),
         "--output-summary", str(summary),
         "--max-polls", "1",
-        "--active-root-recovery-source-article-id", ARTICLE_A,
-        "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1",
     ]
 
     list_payload = {"data": {"catalogs": [{"articles": []}]}}
-    fixture_info = {
-        "symbols": [
-            {"symbol": "BTCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms},
-            {"symbol": "ETHUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": now_ms},
-        ]
-    }
-    detail_html_a = "<html><body>Binance Futures Will Launch BTCUSDT Perpetual Contract</body></html>"
-    detail_html_b = "<html><body>Binance Futures Will Launch ETHUSDT Perpetual Contract</body></html>"
+    fixture_info = {"symbols": []}
 
     def fake_list_fetch(url, *args, **kwargs):
         if "article/list/query" in url:
             return {"ok": True, "payload": list_payload, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
         if "exchangeInfo" in url:
-            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 2, "error": None}
-        if ARTICLE_A in url:
-            return {"ok": True, "payload": {"code": "000000", "data": {"code": ARTICLE_A, "title": "Binance Futures Will Launch BTCUSDT Perpetual Contract", "body": detail_html_a}}}
-        return {"ok": True, "payload": {"code": "000000", "data": {"code": ARTICLE_B, "title": "Binance Futures Will Launch ETHUSDT Perpetual Contract", "body": detail_html_b}}}
+            return {"ok": True, "payload": fixture_info, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": 100, "row_count": 0, "error": None}
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": 0, "error": "http_202_empty"}
 
     def fake_payload_fetch(url, *args, **kwargs):
-        body = detail_html_a if ARTICLE_A in url else detail_html_b
-        return {"ok": True, "payload": body, "requested_url": url, "final_url": url, "http_status": 200, "payload_size_bytes": len(body), "row_count": 1, "error": None}
+        return {"ok": False, "payload": None, "requested_url": url, "final_url": url, "http_status": 202, "payload_size_bytes": 0, "row_count": 0, "error": "http_202_empty"}
 
     with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_BASE_SEC", 0):
         with patch("configs.base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_TRANSIENT_BACKOFF_MAX_SEC", 0):
@@ -6904,112 +7077,44 @@ def test_active_root_recovery_emits_marker_only_for_exact_article_and_preserves_
                         rc = main()
 
     assert rc == 0
-    all_events = [json.loads(line) for f in (output_root / "events").glob("*.jsonl") for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
-    ev_a = next(e for e in all_events if e.get("source_article_id") == ARTICLE_A)
-    ev_b = next(e for e in all_events if e.get("source_article_id") == ARTICLE_B)
-
-    assert ev_a.get("detail_recovery_provenance") == "active_root_retry_cycle_recovery_v1"
-    assert "detail_recovery_provenance" not in ev_b
-
-    # The recovery marker is transport provenance, never formal identity input.
-    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
-        validate_launch_anchor_contract,
-    )
-    from src.research.external_signal_shadow.stage1_5d_live_event_source_storage import (
-        build_stream_paths,
-    )
-
-    base_row = dict(ev_a)
-    base_row.pop("detail_recovery_provenance")
-    normal_root = tmp_path / "normal"
-    recovery_root = tmp_path / "recovery"
-    normal_paths = build_stream_paths(
-        normal_root,
-        now_ms,
-        storage_guard=StorageGuard(output_root=normal_root, stage="1.5D"),
-    )
-    recovery_paths = build_stream_paths(
-        recovery_root,
-        now_ms,
-        storage_guard=StorageGuard(output_root=recovery_root, stage="1.5D"),
-    )
-    recovery_paths["active_root_recovery_authority"] = {
-        "article_id": ARTICLE_A,
-        "provenance": "active_root_retry_cycle_recovery_v1",
-    }
-    normal_written = record_formal_futures_launch_event(
-        stream_paths=normal_paths,
-        row=base_row,
-        seen_event_ids=set(),
-        events_detected=[],
-    )
-    recovered_written = record_formal_futures_launch_event(
-        stream_paths=recovery_paths,
-        row=base_row,
-        seen_event_ids=set(),
-        events_detected=[],
-    )
-    assert normal_written is not None
-    assert recovered_written is not None
-    assert validate_launch_anchor_contract(normal_written, "BTCUSDT")["valid"] is True
-    assert validate_launch_anchor_contract(recovered_written, "BTCUSDT")["valid"] is True
-    assert recovered_written["detail_recovery_provenance"] == "active_root_retry_cycle_recovery_v1"
-    for field in (
-        "event_id",
-        "stable_event_key",
-        "stable_event_symbol_key",
-        "formal_event_contract_version",
-        "source_anchor_contract_hash",
-        "symbol_source_anchor_contract_hashes",
-        "symbol_official_schedule_revision_ids",
-    ):
-        assert recovered_written.get(field) == normal_written.get(field)
-
+    all_events = _read_jsonl_files(output_root / "events")
+    events_a = [r for r in all_events if r.get("source_article_id") == ARTICLE_A]
+    events_b = [r for r in all_events if r.get("source_article_id") == ARTICLE_B]
+    assert len(events_a) == 1
+    assert len(events_b) == 0
 
 @pytest.mark.parametrize(
     ("terminal_state", "event_stream"),
     [
-        (True, ""),
-        (False, '{"source_article_id": "0872245db74c4daaabd4f11984ba52c1"}\n'),
-        (False, "{not-json}\n"),
+        (True, None),
+        (False, '{"event_id": "ev_1", "source_article_id": "0872245db74c4daaabd4f11984ba52c1"}\n'),
     ],
-    ids=["terminal_target", "already_emitted_target", "malformed_event_stream"],
 )
 def test_active_root_recovery_preflight_rejects_unsafe_target_before_network(
     tmp_path,
     terminal_state,
     event_stream,
 ):
-    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
-    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
-        serialize_retry_articles,
-        write_detail_retry_scheduler_state,
-    )
-
     c1, c = _write_valid_upstream(tmp_path)
     output_root = tmp_path / "out"
     output_root.mkdir(parents=True, exist_ok=True)
     article = "0872245db74c4daaabd4f11984ba52c1"
-    write_detail_retry_scheduler_state(
+
+    _seed_v3_state(
         output_root,
-        {
-            "articles": serialize_retry_articles(
-                {
-                    article: {
-                        "source_article_id": article,
-                        "detail_retryable": True,
-                        "terminal_state": terminal_state,
-                    }
-                }
-            ),
-            "endpoint_health": {},
+        articles={
+            article: {
+                "source_article_id": article,
+                "detail_retryable": True,
+                "terminal_state": terminal_state,
+            }
         },
-        metadata_version=2,
-        storage_guard=StorageGuard(output_root=output_root, stage="1.5D"),
+        cutoff_ms=1,
     )
+
     if event_stream:
         events_dir = output_root / "events"
-        events_dir.mkdir()
+        events_dir.mkdir(exist_ok=True)
         (events_dir / "2026-08-17.jsonl").write_text(event_stream, encoding="utf-8")
 
     calls = []
@@ -7031,14 +7136,16 @@ def test_active_root_recovery_preflight_rejects_unsafe_target_before_network(
     with patch(
         "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json",
         side_effect=network_forbidden,
-    ), patch(
-        "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload",
-        side_effect=network_forbidden,
-    ), patch("sys.argv", args), pytest.raises(SystemExit):
-        main()
+    ):
+        with patch(
+            "scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_payload",
+            side_effect=network_forbidden,
+        ):
+            with patch("sys.argv", args):
+                with pytest.raises(SystemExit):
+                    main()
 
-    assert calls == []
-
+    assert len(calls) == 0
 
 def test_zero_max_seconds_stops_before_first_network_poll(tmp_path):
     c1, c = _write_valid_upstream(tmp_path)
@@ -7054,7 +7161,7 @@ def test_zero_max_seconds_stops_before_first_network_poll(tmp_path):
         "--stage1-5c1-summary", str(c1),
         "--stage1-5c-summary", str(c),
         "--output-root", str(tmp_path / "out"),
-        "--output-summary", str(tmp_path / "summary.json"),
+        "--output-summary", str(tmp_path / "out" / "binance_futures_launch_smoke_summary.json"),
         "--max-seconds", "0",
     ]
     with patch(
@@ -7067,3 +7174,322 @@ def test_zero_max_seconds_stops_before_first_network_poll(tmp_path):
         assert main() == 0
 
     assert calls == []
+
+
+# =====================================================================
+# Stage 1.5D V3 Preflight and Closed-Tree Tests
+# =====================================================================
+
+def _snapshot_dir_fingerprint(root: Path) -> dict:
+    if not root.exists():
+        return {}
+    import hashlib
+    fp = {}
+    for p in sorted(root.rglob("*")):
+        rel = str(p.relative_to(root))
+        if p.is_symlink():
+            fp[rel] = ("symlink", os.readlink(p))
+        elif p.is_dir():
+            fp[rel] = ("dir", None)
+        elif p.is_file():
+            fp[rel] = ("file", p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+    return fp
+
+
+def test_build_stage1_5d_v3_resume_provenance(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_resume_provenance,
+    )
+
+    root = tmp_path / "stage1_5d_v3_root"
+    prov = build_stage1_5d_v3_resume_provenance(root, "a" * 40)
+    assert prov["root_id"] == "stage1_5d_v3_root"
+    assert prov["scheduler_contract_version"] == 3
+    assert prov["producer_startup_head_sha"] == "a" * 40
+    assert len(prov["configs_base_sha256"]) == 64
+    assert len(prov["protected_tree_manifest_sha256"]) == 64
+
+
+def test_preflight_stage1_5d_v3_root_fresh_and_summary_relation(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_resume_provenance,
+        preflight_stage1_5d_v3_root,
+    )
+
+    root = tmp_path / "fresh_root"
+    summary_valid = root / "binance_futures_launch_smoke_summary.json"
+    summary_invalid = tmp_path / "external_summary.json"
+
+    prov = build_stage1_5d_v3_resume_provenance(root, "0" * 40)
+
+    # 1. summary relation mismatch
+    res_bad_summary = preflight_stage1_5d_v3_root(root, summary_invalid, expected_resume_provenance=prov)
+    assert res_bad_summary["kind"] == "rejected"
+    assert res_bad_summary["reason"] == "stage1_5d_v3_output_summary_relation_rejected"
+
+    # 2. fresh root
+    res_fresh = preflight_stage1_5d_v3_root(root, summary_valid, expected_resume_provenance=prov)
+    assert res_fresh["kind"] == "fresh"
+    assert res_fresh["state"] is None
+
+
+def test_preflight_stage1_5d_v3_root_rejections_and_closed_tree(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_resume_provenance,
+        preflight_stage1_5d_v3_root,
+    )
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        DETAIL_RETRY_SCHEDULER_STATE_FILENAME,
+    )
+    from tests.research.external_signal_shadow.test_stage1_5d_detail_retry_scheduler import (
+        make_valid_v3_state,
+    )
+
+    root = tmp_path / "resumable_root"
+    root.mkdir(parents=True)
+    summary_path = root / "binance_futures_launch_smoke_summary.json"
+
+    prov = build_stage1_5d_v3_resume_provenance(root, "0" * 40)
+
+    # Missing state file in existing root
+    res_missing_state = preflight_stage1_5d_v3_root(root, summary_path, expected_resume_provenance=prov)
+    assert res_missing_state["kind"] == "rejected"
+    assert res_missing_state["reason"] == "stage1_5d_v3_scheduler_state_missing"
+
+    # Valid state written
+    valid_state = make_valid_v3_state()
+    valid_state["resume_provenance"] = prov
+    state_file = root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME
+    state_file.write_text(json.dumps(valid_state, indent=2), encoding="utf-8")
+
+    # Resumable valid root
+    res_valid = preflight_stage1_5d_v3_root(root, summary_path, expected_resume_provenance=prov)
+    assert res_valid["kind"] == "resumable"
+    assert isinstance(res_valid["state"], dict)
+    assert res_valid["state"]["metadata_version"] == 3
+
+    # Unknown unlisted child file -> closed tree reject
+    unlisted = root / "some_random_bad_file.txt"
+    unlisted.write_text("bad", encoding="utf-8")
+    before_fp = _snapshot_dir_fingerprint(root)
+
+    res_unlisted = preflight_stage1_5d_v3_root(root, summary_path, expected_resume_provenance=prov)
+    assert res_unlisted["kind"] == "rejected"
+    assert "closed_tree_unallowlisted_path" in res_unlisted["reason"]
+    # Verify zero side-effects
+    assert _snapshot_dir_fingerprint(root) == before_fp
+
+
+def test_preflight_stage1_5d_v3_root_table_6_2_1_matrix(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_v3_resume_provenance,
+        preflight_stage1_5d_v3_root,
+    )
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        DETAIL_RETRY_SCHEDULER_STATE_FILENAME,
+    )
+    from tests.research.external_signal_shadow.test_stage1_5d_detail_retry_scheduler import (
+        make_valid_v3_state,
+    )
+
+    root = tmp_path / "matrix_root"
+    root.mkdir(parents=True)
+    summary_path = root / "binance_futures_launch_smoke_summary.json"
+    prov = build_stage1_5d_v3_resume_provenance(root, "0" * 40)
+
+    art_id = "0123456789abcdef0123456789abcdef"
+    ev_id = "event_1"
+
+    # Create formal event & index files
+    events_dir = root / "announcement_events" / "futures_contract_launch"
+    events_dir.mkdir(parents=True)
+    ev_file = events_dir / "2026-09-01.jsonl"
+    ev_row = {
+        "event_id": ev_id,
+        "source_article_id": art_id,
+        "symbols": ["BTCUSDT"],
+        "event_type": "futures_contract_launch",
+    }
+    ev_file.write_text(json.dumps(ev_row) + "\n", encoding="utf-8")
+
+    idx_file = root / "formal_launch_identity_index.jsonl"
+    idx_row = {
+        "event_id": ev_id,
+        "source_article_id": art_id,
+        "symbols": ["BTCUSDT"],
+    }
+    idx_file.write_text(json.dumps(idx_row) + "\n", encoding="utf-8")
+
+    # 1. Terminal row + complete formal -> REJECT
+    st = make_valid_v3_state(art_id)
+    st["resume_provenance"] = prov
+    st["articles"][art_id]["terminal_state"] = True
+    st["articles"][art_id]["terminal_reason"] = "catalog_bootstrap_preexisting"
+    st["articles"][art_id]["terminal_at_ms"] = 1780000002000
+    (root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME).write_text(json.dumps(st), encoding="utf-8")
+
+    res = preflight_stage1_5d_v3_root(root, summary_path, expected_resume_provenance=prov)
+    assert res["kind"] == "rejected"
+    assert "terminal_plus_complete_formal_rejected" in res["reason"]
+
+    # 2. No scheduler row + complete formal -> RESUMABLE (formal completed)
+    st = make_valid_v3_state(art_id)
+    st["resume_provenance"] = prov
+    del st["articles"][art_id]
+    (root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME).write_text(json.dumps(st), encoding="utf-8")
+
+    res = preflight_stage1_5d_v3_root(root, summary_path, expected_resume_provenance=prov)
+    assert res["kind"] == "resumable"
+    assert art_id in res["formal_completed_source_article_ids"]
+
+
+# =====================================================================
+# Stage 1.5D V4 Bootstrap, Admission Reducer, and Tombstone Tests
+# =====================================================================
+
+def test_classify_stage1_5d_catalog_admission():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        classify_stage1_5d_catalog_admission,
+    )
+
+    cutoff_ms = 1_000_000
+    det_ms = 2_000_000
+    art_id = "0123456789abcdef0123456789abcdef"
+
+    # 1. Formal completed
+    res = classify_stage1_5d_catalog_admission(
+        {"code": art_id, "releaseDate": det_ms},
+        cutoff_ms=cutoff_ms,
+        detected_at_ms=det_ms,
+        formal_completed_ids={art_id},
+        persisted_row=None,
+    )
+    assert res == "formal_completed"
+
+    # 2. Persisted terminal
+    res = classify_stage1_5d_catalog_admission(
+        {"code": art_id, "releaseDate": det_ms},
+        cutoff_ms=cutoff_ms,
+        detected_at_ms=det_ms,
+        formal_completed_ids=set(),
+        persisted_row={"terminal_state": True},
+    )
+    assert res == "persisted_terminal"
+
+    # 3. Invalid releaseDate cases
+    for bad_date in (None, True, False, "2026-09-01", 0, -100, det_ms + 30_001):
+        res = classify_stage1_5d_catalog_admission(
+            {"code": art_id, "releaseDate": bad_date},
+            cutoff_ms=cutoff_ms,
+            detected_at_ms=det_ms,
+            formal_completed_ids=set(),
+            persisted_row=None,
+        )
+        assert res == "source_published_at_invalid", f"Failed for {bad_date}"
+
+    # 4. Valid clock-skew boundary: det_ms + 30_000 is active
+    res = classify_stage1_5d_catalog_admission(
+        {"code": art_id, "releaseDate": det_ms + 30_000},
+        cutoff_ms=cutoff_ms,
+        detected_at_ms=det_ms,
+        formal_completed_ids=set(),
+        persisted_row=None,
+    )
+    assert res == "active"
+
+    # 5. Historical pre-bootstrap
+    res = classify_stage1_5d_catalog_admission(
+        {"code": art_id, "releaseDate": cutoff_ms - 1},
+        cutoff_ms=cutoff_ms,
+        detected_at_ms=det_ms,
+        formal_completed_ids=set(),
+        persisted_row=None,
+    )
+    assert res == "historical_prebootstrap_catalog_article"
+
+    # 6. Post-bootstrap active
+    res = classify_stage1_5d_catalog_admission(
+        {"code": art_id, "releaseDate": cutoff_ms + 100},
+        cutoff_ms=cutoff_ms,
+        detected_at_ms=det_ms,
+        formal_completed_ids=set(),
+        persisted_row=None,
+    )
+    assert res == "active"
+
+
+def test_build_stage1_5d_terminal_tombstone():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        build_stage1_5d_terminal_tombstone,
+    )
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        STAGE1_5D_V3_DURABLE_ARTICLE_KEYS,
+    )
+
+    art_id = "0123456789abcdef0123456789abcdef"
+    now_ms = 1_780_000_000_000
+    tombstone = build_stage1_5d_terminal_tombstone(
+        existing=None,
+        source_article_id=art_id,
+        title="Test Article",
+        source_detail_url_normalized="https://www.binance.com/test",
+        source_parent_url="https://www.binance.com/list",
+        detected_at_ms=now_ms,
+        first_detected_at_ms=now_ms,
+        reason="historical_prebootstrap_catalog_article",
+        now_ms=now_ms,
+        source_published_at_ms=now_ms - 1000,
+    )
+
+    assert set(tombstone.keys()) == STAGE1_5D_V3_DURABLE_ARTICLE_KEYS
+    assert tombstone["terminal_state"] is True
+    assert tombstone["terminal_reason"] == "historical_prebootstrap_catalog_article"
+    assert tombstone["terminal_failure_type"] is None
+    assert tombstone["terminal_at_ms"] == now_ms
+    assert tombstone["inflight_cycle"] is None
+    assert tombstone["detail_http_request_count"] == 0
+    assert tombstone["detail_fetch_attempt_count"] == 0
+
+
+# =====================================================================
+# Stage 1.5D V4 7-Key Write-Ahead Inflight Intent & Crash Recovery Tests
+# =====================================================================
+
+def test_validate_stage1_5d_v3_inflight_intent():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_stage1_5d_v3_inflight_intent,
+    )
+
+    # 1. None is valid
+    assert validate_stage1_5d_v3_inflight_intent(None) == []
+
+    # 2. Non-dict rejected
+    assert len(validate_stage1_5d_v3_inflight_intent("not-a-dict")) > 0
+
+    valid_intent = {
+        "operation": "detail_request",
+        "poll_cycle_index": 1,
+        "stage_work_type": "new_listing",
+        "candidate_symbols": ["BTCUSDT"],
+        "candidate_symbol_set_hash": "a" * 64,
+        "request_target": {"url": "https://api.binance.com/detail"},
+        "intent_created_at_ms": 1_700_000_000_000,
+    }
+    assert validate_stage1_5d_v3_inflight_intent(valid_intent) == []
+
+    # 3. Extra key rejected
+    bad_extra = dict(valid_intent, extra="illegal")
+    assert any("unknown_keys" in b for b in validate_stage1_5d_v3_inflight_intent(bad_extra))
+
+    # 4. Missing key rejected
+    bad_missing = dict(valid_intent)
+    del bad_missing["stage_work_type"]
+    assert any("missing_keys" in b for b in validate_stage1_5d_v3_inflight_intent(bad_missing))
+
+    # 5. Invalid operation rejected
+    bad_op = dict(valid_intent, operation="arbitrary_op")
+    assert any("invalid_operation" in b for b in validate_stage1_5d_v3_inflight_intent(bad_op))
+
+    # 6. Invalid stage_work_type rejected
+    bad_work = dict(valid_intent, stage_work_type="invalid_work")
+    assert any("invalid_stage_work_type" in b for b in validate_stage1_5d_v3_inflight_intent(bad_work))

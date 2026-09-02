@@ -2357,3 +2357,52 @@ def test_formal_v2_source_projection_and_validated_schedule_selection():
     replayed = re_resolve_pending_anchor(updated_rev, [valid_rev], {}, now_ms + 1000)
     assert replayed.applied_schedule_revision_ids == ["rev_1_id"]
     assert replayed.anchor_contract_revision_count == 1
+
+
+def test_stage1_5f_synthetic_v3_root_binding_and_admission_rejection(tmp_path):
+    from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
+        build_stage1_5d_runtime_gate,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        validate_stage1_5d_runtime_gate,
+    )
+
+    d_root = tmp_path / "stage1_5d_v3_root"
+    d_root.mkdir(parents=True)
+    events_glob = str(d_root / "*.jsonl")
+
+    gate_ctx = {
+        "output_root": d_root,
+        "run_id": "stage1_5d_v3_root",
+        "events_stream_relative_path": "*.jsonl",
+        "generated_at_ms": 100_000,
+        "first_poll_started_at_ms": 10_000,
+        "last_poll_finished_at_ms": 90_000,
+        "poll_attempt_count": 10,
+        "successful_poll_count": 10,
+        "failed_poll_count": 0,
+        "consecutive_failed_polls": 0,
+        "fatal_blockers": [],
+        "prior_stage_safety_prerequisite_met": True,
+        "fixture_run": False,
+        "source_format_drift_active": False,
+        "schema_parse_error_active": False,
+        "storage_budget_passed": True,
+        "detail_endpoint_degraded_active": False,
+        "bapi_trusted_payload_rate": 1.0,
+        "symbol_parse_success_rate": 1.0,
+        "symbol_validation_success_rate": 1.0,
+        "scheduler_starved_expired_count": 0,
+    }
+    gate_data = build_stage1_5d_runtime_gate(gate_ctx)
+    gate_file = d_root / "live_safety_gate_summary.json"
+    gate_file.write_text(json.dumps(gate_data, indent=2), encoding="utf-8")
+
+    # Gate validation passes for valid READY D gate
+    res = validate_stage1_5d_runtime_gate(
+        d_root,
+        expected_events_glob=events_glob,
+        now_ms=100_000,
+    )
+    assert res["valid"] is True
+    assert res["status"] == "READY"

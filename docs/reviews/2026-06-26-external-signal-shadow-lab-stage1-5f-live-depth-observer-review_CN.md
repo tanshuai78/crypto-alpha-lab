@@ -1132,6 +1132,47 @@ BASH
 
 任何失败都不得重新启动旧 F、复用或修改旧 F root，或停止健康 D。保留输出并先定位；只有输出 `F_ONLY_REATTEST_RESTART=PASS` 后，才可重新执行 Stage 1.6D Runbook Section 4 的 co-tenancy gate。
 
+### 7.12 Stage 1.5D V3 Historical Catalog Re-admission Cutover (Authorization-Gated)
+
+本节是 `7d_historical_catalog_re_admission_hotfix_v3` 的唯一操作入口。授权边界、停止条件和回滚语义由 [V3 VPS Deployment Authorization](2026-09-02-external-signal-shadow-lab-stage1-5d-v3-1-5f-vps-deployment-authorization_CN.md) 冻结；该文档仍为 draft 时，本节不得在 VPS 执行。
+
+本切换不是 F-only rebind，也不得套用第 7.11 节。它必须按以下顺序复用第 7.2--7.8 节的既有 Git、存储、tmux、D/F bootstrap 和 root-binding checks：
+
+```text
+1. 本地：完成 completion-audited code 的 commit/push，记录 exact DEPLOY_COMMIT。
+2. VPS：先运行第 7.3 节只读 Git preflight 和第 7.5 节只读 D/F/root/storage snapshot。
+3. 若旧 F active_observation_count > 0，STOP；不得中断进行中的 12h observation。
+4. 手工指定并停止旧 F session，随后旧 D session；ps 必须证明 zero D/F writer。
+5. 仅在 zero writer 后执行第 7.4 节 detached checkout，并证明 SERVER_HEAD == DEPLOY_COMMIT。
+6. 使用下列 V3 variables 运行第 7.6、7.7 和 7.8 节；不得复用旧 output root。
+```
+
+```bash
+export ROOT_SUFFIX="7d_historical_catalog_re_admission_hotfix_v3"
+export STAGE1_5D_SESSION="stage1_5d_continuous_${ROOT_SUFFIX}"
+export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
+```
+
+在第 7.6 节 D gate 检查 `READY` 后、启动 F 前，额外运行以下 V3 bootstrap 验收。任何失败均 STOP，且不得启动 F：
+
+```bash
+python3 - "$STAGE1_5D_EVENTS_OUT/detail_retry_scheduler_state.json" <<'PY'
+import json, sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+state = json.loads(p.read_text(encoding="utf-8"))
+assert state.get("metadata_version") == 3
+cutoff = state.get("catalog_bootstrap_cutoff_ms")
+assert isinstance(cutoff, int) and not isinstance(cutoff, bool) and cutoff > 0
+print({"stage1_5d_v3_bootstrap": "PASS", "catalog_bootstrap_cutoff_ms": cutoff})
+PY
+```
+
+第 7.8 节 D/F root-binding 检查通过后，保存其完整输出、`DEPLOY_COMMIT`、旧/new session 名与两条 root 路径。MARSCOIN 或任何 bootstrap 时已出现的文章只能被记录为 preexisting，不得补写为实时 12h L2 evidence。牛来 article 的 parser/source-shape coverage 缺口不构成本次 V3 cutover 的修复对象。
+
+**新会话失败处置：** 只停止新建的 D/F session，保留新旧 root；不得在 shared checkout 已切换后重启旧 session，不得删除任何 artifact。随后按授权文档第 5 节记录失败并停止。
+
 ## 8. 日常监控
 
 ### 8.1 当前 root 快速定位

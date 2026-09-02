@@ -30,17 +30,20 @@ from src.research.external_signal_shadow.stage1_5_storage_guard import (
 )
 from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
     ALLOWED_OVERDUE_DETAIL_RETRY_FAILURE_CLASSES,
+    DETAIL_RETRY_SCHEDULER_STATE_FILENAME,
+    STAGE1_5D_V3_ALLOWED_TERMINAL_REASONS,
+    _canonical_json_bytes,
     classify_never_attempted_defer_state,
     compute_detail_transient_backoff_ms,
     is_detail_source_degraded,
-    load_detail_retry_scheduler_state,
     select_detail_retry_attempts,
-    serialize_retry_articles,
+    serialize_stage1_5d_v3_articles,
     summarize_detail_retry_overdue_state,
     summarize_detail_source_health,
     update_detail_endpoint_health,
     update_detail_endpoint_health_by_source,
     update_detail_endpoint_health_by_variant,
+    validate_stage1_5d_v3_scheduler_state,
     write_detail_retry_scheduler_state,
 )
 from src.research.external_signal_shadow.stage1_5d_live_event_source_client import (
@@ -156,6 +159,595 @@ def canonical_root_contract_sha256(root_contract: dict) -> str:
         ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+_DATE_JSONL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
+_BIN_PAYLOAD_RE = re.compile(r"^(bapi_article_detail_query|primary|detail_path_fallback)\.[0-9a-f]{64}\.bin$")
+_SAFE_ARTICLE_ID_RE = re.compile(r"^[0-9a-zA-Z_\-]+$")
+
+
+def build_stage1_5d_v3_resume_provenance(output_root: Path, startup_head_sha: str) -> dict[str, object]:
+    configs_base_path = Path("configs/base.py")
+    cfg_sha = hashlib.sha256(configs_base_path.read_bytes()).hexdigest() if configs_base_path.exists() else "0" * 64
+
+    manifest_path = output_root / "protected_tree_manifest.json"
+    if manifest_path.exists():
+        tree_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    else:
+        tree_sha = hashlib.sha256(
+            json.dumps(PROTECTED_TREE_MANIFEST, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    return {
+        "root_id": output_root.name,
+        "scheduler_contract_version": 3,
+        "producer_startup_head_sha": startup_head_sha,
+        "protected_tree_manifest_sha256": tree_sha,
+        "configs_base_sha256": cfg_sha,
+    }
+
+
+def _is_allowlisted_relative_path(rel_path: Path, is_dir: bool) -> bool:
+    parts = rel_path.parts
+    if not parts:
+        return True
+
+    stream_dirs = {
+        "raw_payloads",
+        "announcement_events",
+        "events",
+        "heartbeats",
+        "request_manifest",
+        "detail_retry_scheduler_diagnostics",
+        "detail_retry_terminal_diagnostics",
+        "detail_retry_deferred_diagnostics",
+        "schedule_revision_diagnostics",
+        "bapi_parse_results",
+        "first_bar_observations",
+    }
+
+    if len(parts) == 1:
+        name = parts[0]
+        if is_dir:
+            return name in stream_dirs
+        else:
+            return name in {
+                DETAIL_RETRY_SCHEDULER_STATE_FILENAME,
+                "live_safety_gate_summary.json",
+                "binance_futures_launch_smoke_summary.json",
+                "formal_launch_identity_index.jsonl",
+                "protected_tree_manifest.json",
+                "storage_failure_diagnostic.json",
+                "revision_payload_versions.jsonl",
+            }
+
+    if len(parts) == 2:
+        top, child = parts
+        if top in stream_dirs:
+            if not is_dir and _DATE_JSONL_RE.match(child):
+                return True
+        if top == "raw_payloads" and child == "announcement_detail" and is_dir:
+            return True
+        if top == "announcement_events" and child == "futures_contract_launch" and is_dir:
+            return True
+        return False
+
+    if len(parts) == 3:
+        p0, p1, p2 = parts
+        if p0 == "announcement_events" and p1 == "futures_contract_launch" and not is_dir:
+            return bool(_DATE_JSONL_RE.match(p2))
+        if p0 == "raw_payloads" and p1 == "announcement_detail" and is_dir:
+            return bool(_SAFE_ARTICLE_ID_RE.match(p2))
+        return False
+
+    if len(parts) == 4:
+        p0, p1, p2, p3 = parts
+        if p0 == "raw_payloads" and p1 == "announcement_detail" and not is_dir:
+            return bool(_SAFE_ARTICLE_ID_RE.match(p2) and _BIN_PAYLOAD_RE.match(p3))
+        return False
+
+    return False
+
+
+def preflight_stage1_5d_v3_root(
+    output_root: Path,
+    output_summary_path: Path,
+    *,
+    expected_resume_provenance: dict[str, object],
+) -> dict[str, object]:
+    # 1. Output summary relation check
+    expected_summary_path = (output_root.resolve(strict=False) / "binance_futures_launch_smoke_summary.json")
+    if output_summary_path.resolve(strict=False) != expected_summary_path:
+        return {
+            "kind": "rejected",
+            "reason": "stage1_5d_v3_output_summary_relation_rejected",
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    # 2. Fresh check
+    if not output_root.exists():
+        return {
+            "kind": "fresh",
+            "reason": None,
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    # 3. Existing check
+    if output_root.is_symlink() or not output_root.is_dir():
+        return {
+            "kind": "rejected",
+            "reason": "stage1_5d_v3_output_root_not_regular_dir",
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    # 4. Closed tree check
+    for p in output_root.rglob("*"):
+        if p.is_symlink():
+            return {
+                "kind": "rejected",
+                "reason": f"stage1_5d_v3_symlink_discovered:{p.relative_to(output_root)}",
+                "state": None,
+                "formal_completed_source_article_ids": set(),
+                "crash_cleanup_row": None,
+            }
+        rel = p.relative_to(output_root)
+        if not _is_allowlisted_relative_path(rel, is_dir=p.is_dir()):
+            return {
+                "kind": "rejected",
+                "reason": f"closed_tree_unallowlisted_path:{rel}",
+                "state": None,
+                "formal_completed_source_article_ids": set(),
+                "crash_cleanup_row": None,
+            }
+
+    # 5. Read state file
+    state_path = output_root / DETAIL_RETRY_SCHEDULER_STATE_FILENAME
+    if not state_path.exists() or not state_path.is_file():
+        return {
+            "kind": "rejected",
+            "reason": "stage1_5d_v3_scheduler_state_missing",
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    try:
+        raw_state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "kind": "rejected",
+            "reason": f"stage1_5d_v3_scheduler_state_json_decode_error:{exc}",
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    blockers = validate_stage1_5d_v3_scheduler_state(raw_state, expected_resume_provenance=expected_resume_provenance)
+    if blockers:
+        return {
+            "kind": "rejected",
+            "reason": f"stage1_5d_v3_scheduler_state_invalid:{blockers}",
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+
+    # 6. Read formal event and index projection
+    formal_projections = {}
+    index_path = output_root / "formal_launch_identity_index.jsonl"
+    if index_path.exists() and index_path.is_file():
+        for line in index_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                return {
+                    "kind": "rejected",
+                    "reason": "stage1_5d_v3_formal_index_malformed",
+                    "state": None,
+                    "formal_completed_source_article_ids": set(),
+                    "crash_cleanup_row": None,
+                }
+            src_id = row.get("source_article_id")
+            ev_id = row.get("event_id")
+            syms = row.get("symbols")
+            if not (src_id and ev_id and isinstance(syms, list) and syms):
+                return {
+                    "kind": "rejected",
+                    "reason": f"stage1_5d_v3_formal_index_row_invalid:{src_id}",
+                    "state": None,
+                    "formal_completed_source_article_ids": set(),
+                    "crash_cleanup_row": None,
+                }
+            formal_projections[src_id] = {"event_id": ev_id, "symbols": sorted(syms)}
+
+    # Check Table 6.2.1 exclusivity matrix
+    formal_completed_ids = set()
+    crash_cleanup_row = None
+    articles = raw_state.get("articles", {})
+
+    for src_id, f_proj in formal_projections.items():
+        if src_id not in articles:
+            formal_completed_ids.add(src_id)
+        else:
+            row = articles[src_id]
+            if row.get("terminal_state"):
+                return {
+                    "kind": "rejected",
+                    "reason": f"terminal_plus_complete_formal_rejected:{src_id}",
+                    "state": None,
+                    "formal_completed_source_article_ids": set(),
+                    "crash_cleanup_row": None,
+                }
+            inflight = row.get("inflight_cycle")
+            if inflight is None:
+                return {
+                    "kind": "rejected",
+                    "reason": f"active_null_plus_complete_formal_rejected:{src_id}",
+                    "state": None,
+                    "formal_completed_source_article_ids": set(),
+                    "crash_cleanup_row": None,
+                }
+            op = inflight.get("operation")
+            if op in ("detail_request", "exchangeinfo_request"):
+                return {
+                    "kind": "rejected",
+                    "reason": f"active_intent_plus_complete_formal_rejected:{src_id}:{op}",
+                    "state": None,
+                    "formal_completed_source_article_ids": set(),
+                    "crash_cleanup_row": None,
+                }
+            if op == "formal_emission":
+                target = inflight.get("request_target") or {}
+                t_ev_id = target.get("event_id")
+                t_syms = sorted(target.get("symbols") or [])
+                if t_ev_id == f_proj["event_id"] and t_syms == f_proj["symbols"]:
+                    crash_cleanup_row = row
+                    formal_completed_ids.add(src_id)
+                else:
+                    return {
+                        "kind": "rejected",
+                        "reason": f"formal_intent_projection_mismatch_rejected:{src_id}",
+                        "state": None,
+                        "formal_completed_source_article_ids": set(),
+                        "crash_cleanup_row": None,
+                    }
+
+    detached_state = json.loads(json.dumps(raw_state))
+    return {
+        "kind": "resumable",
+        "reason": None,
+        "state": detached_state,
+        "formal_completed_source_article_ids": formal_completed_ids,
+        "crash_cleanup_row": crash_cleanup_row,
+    }
+
+
+_STAGE1_5D_V3_INFLIGHT_KEYS = {
+    "operation",
+    "poll_cycle_index",
+    "stage_work_type",
+    "candidate_symbols",
+    "candidate_symbol_set_hash",
+    "request_target",
+    "intent_created_at_ms",
+}
+
+_STAGE1_5D_V3_ALLOWED_INFLIGHT_OPERATIONS = {
+    "detail_request",
+    "exchangeinfo_request",
+    "formal_emission",
+}
+
+_STAGE1_5D_V3_ALLOWED_INFLIGHT_STAGE_WORK_TYPES = {
+    "catalog_bootstrap",
+    "new_listing",
+    "launch_schedule_revision_detail",
+    "retry_backoff",
+}
+
+
+def validate_stage1_5d_v3_inflight_intent(intent: dict | None) -> list[str]:
+    if intent is None:
+        return []
+    if not isinstance(intent, dict):
+        return ["inflight_intent_not_dict"]
+
+    blockers = []
+    keys = set(intent.keys())
+    extra_keys = keys - _STAGE1_5D_V3_INFLIGHT_KEYS
+    if extra_keys:
+        blockers.append(f"inflight_intent_unknown_keys:{sorted(extra_keys)}")
+    missing_keys = _STAGE1_5D_V3_INFLIGHT_KEYS - keys
+    if missing_keys:
+        blockers.append(f"inflight_intent_missing_keys:{sorted(missing_keys)}")
+        return blockers
+
+    op = intent.get("operation")
+    if op not in _STAGE1_5D_V3_ALLOWED_INFLIGHT_OPERATIONS:
+        blockers.append(f"inflight_intent_invalid_operation:{op}")
+
+    p_idx = intent.get("poll_cycle_index")
+    if not isinstance(p_idx, int) or isinstance(p_idx, bool) or p_idx < 0:
+        blockers.append(f"inflight_intent_invalid_poll_cycle_index:{p_idx}")
+
+    swt = intent.get("stage_work_type")
+    if swt not in _STAGE1_5D_V3_ALLOWED_INFLIGHT_STAGE_WORK_TYPES:
+        blockers.append(f"inflight_intent_invalid_stage_work_type:{swt}")
+
+    c_syms = intent.get("candidate_symbols")
+    if not isinstance(c_syms, list) or not all(isinstance(s, str) and s.isupper() for s in c_syms):
+        blockers.append(f"inflight_intent_invalid_candidate_symbols:{c_syms}")
+
+    c_hash = intent.get("candidate_symbol_set_hash")
+    if not isinstance(c_hash, str) or not re.match(r"^[0-9a-f]{64}$", c_hash):
+        blockers.append(f"inflight_intent_invalid_candidate_symbol_set_hash:{c_hash}")
+
+    req_target = intent.get("request_target")
+    if not isinstance(req_target, dict):
+        blockers.append(f"inflight_intent_invalid_request_target:{req_target}")
+
+    c_at = intent.get("intent_created_at_ms")
+    if not isinstance(c_at, int) or isinstance(c_at, bool) or c_at <= 0:
+        blockers.append(f"inflight_intent_invalid_intent_created_at_ms:{c_at}")
+
+    return blockers
+
+
+def classify_stage1_5d_catalog_admission(
+    article: dict,
+    *,
+    cutoff_ms: int | None,
+    detected_at_ms: int,
+    formal_completed_ids: set[str],
+    persisted_row: dict | None,
+) -> str:
+    code = article.get("code") or article.get("source_article_id")
+    if code and code in formal_completed_ids:
+        return "formal_completed"
+    if persisted_row is not None and persisted_row.get("terminal_state") is True:
+        return "persisted_terminal"
+
+    raw_date = article.get("releaseDate")
+    if raw_date is None or isinstance(raw_date, bool) or not isinstance(raw_date, int) or raw_date <= 0:
+        return "source_published_at_invalid"
+
+    max_skew_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_CATALOG_RELEASEDATE_MAX_CLOCK_SKEW_MS", 30 * 1000)
+    if raw_date > detected_at_ms + max_skew_ms:
+        return "source_published_at_invalid"
+
+    if cutoff_ms is not None and raw_date < cutoff_ms:
+        return "historical_prebootstrap_catalog_article"
+
+    return "active"
+
+
+def build_stage1_5d_terminal_tombstone(
+    existing: dict | None,
+    *,
+    source_article_id: str,
+    title: str,
+    source_detail_url_normalized: str,
+    source_parent_url: str,
+    detected_at_ms: int,
+    first_detected_at_ms: int,
+    reason: str,
+    now_ms: int,
+    source_published_at_ms: int | None,
+) -> dict:
+    row = {
+        "source_article_id": source_article_id,
+        "title": title,
+        "source_detail_url_normalized": source_detail_url_normalized,
+        "source_parent_url": source_parent_url,
+        "source_published_at_ms": source_published_at_ms,
+        "detected_at_ms": detected_at_ms,
+        "first_detected_at_ms": first_detected_at_ms,
+        "event_type": "futures_contract_launch",
+        "detail_work_type": None,
+        "catalog_id": None,
+        "catalog_title": None,
+        "symbol_extraction_source": "none",
+        "symbol_parse_failed_reason": None,
+        "pending_reason": None,
+        "source_published_at_ms_confidence": "high" if source_published_at_ms is not None else None,
+        "detail_http_request_count": int((existing.get("detail_http_request_count") if existing else 0) or 0),
+        "detail_retry_cycle_count": int((existing.get("detail_retry_cycle_count") if existing else 0) or 0),
+        "detail_fetch_attempt_count": int((existing.get("detail_fetch_attempt_count") if existing else 0) or 0),
+        "transient_detail_error_count": int((existing.get("transient_detail_error_count") if existing else 0) or 0),
+        "non_transient_detail_error_count": int((existing.get("non_transient_detail_error_count") if existing else 0) or 0),
+        "last_retry_at_ms": int((existing.get("last_retry_at_ms") if existing else 0) or 0),
+        "next_detail_retry_at_ms": int((existing.get("next_detail_retry_at_ms") if existing else 0) or 0),
+        "first_deferred_at_ms": None,
+        "last_deferred_at_ms": None,
+        "last_deferred_manifest_at_ms": 0,
+        "defer_count": 0,
+        "terminal_state": True,
+        "terminal_failure_type": STAGE1_5D_V3_ALLOWED_TERMINAL_REASONS.get(reason),
+        "candidate_symbols": None,
+        "symbol_derivation_method": None,
+        "symbol_validation_status": None,
+        "symbol_launch_times_ms": None,
+        "symbol_onboard_times_ms": None,
+        "symbol_effective_launch_times_ms": None,
+        "launch_time_source": None,
+        "last_detail_failure_class": None,
+        "detail_retryable": False,
+        "last_bapi_detail_status": None,
+        "last_bapi_payload_hash": None,
+        "last_bapi_parser_version": None,
+        "last_bapi_parser_status": None,
+        "last_bapi_parser_failure_reason": None,
+        "last_bapi_parse_attempt_at_ms": None,
+        "last_support_detail_status": None,
+        "last_support_failure_class": None,
+        "parsed_candidate_symbols": None,
+        "candidate_provenance": None,
+        "launch_time_resolution_status": None,
+        "launch_anchor_policy": None,
+        "required_launch_anchor_source": None,
+        "consumable_event_allowed": None,
+        "symbol_launch_time_candidates_ms": None,
+        "launch_time_conflict_ms": None,
+        "status": None,
+        "terminal_reason": reason,
+        "terminal_at_ms": now_ms,
+        "emission_id": None,
+        "candidate_symbol_set_hash": None,
+        "candidate_symbol_set_hash_version": None,
+        "candidate_symbols_ordered": None,
+        "candidate_symbols_normalized": None,
+        "event_id": None,
+        "event_stream_path": None,
+        "parser_payload_hash": None,
+        "symbol_effective_launch_time_sources": None,
+        "exchangeinfo_visible_symbols": None,
+        "exchangeinfo_missing_symbols": None,
+        "hard_rejected_symbols": None,
+        "symbol_exchangeinfo_statuses": None,
+        "inflight_cycle": None,
+        "detail_budget_deferred_count": 0,
+        "detail_fetch_attempted": None,
+        "detail_fetch_status": None,
+        "detail_fetch_url_used": None,
+        "detail_fetch_variant": None,
+        "detail_fetched_at_ms": None,
+        "detail_parse_status": None,
+        "detail_payload_hash": None,
+        "detail_payload_trusted": None,
+        "exchangeinfo_validation_attempt_count": 0,
+        "exchangeinfo_validation_retryable": None,
+        "last_exchangeinfo_validation_at_ms": None,
+        "next_exchangeinfo_validation_at_ms": None,
+        "quote_derivation_source": None,
+        "retry_count": int((existing.get("retry_count") if existing else 0) or 0),
+        "schedule_revision_producer_status": None,
+    }
+    return row
+
+
+def build_stage1_5d_v3_active_article(
+    existing: dict | None = None,
+    *,
+    source_article_id: str,
+    title: str,
+    source_detail_url_normalized: str,
+    source_parent_url: str,
+    detected_at_ms: int,
+    first_detected_at_ms: int,
+    source_published_at_ms: int | None,
+    raw: dict | None = None,
+    event_type: str = "futures_contract_launch",
+    detail_work_type: str | None = None,
+    candidate_symbols: list[str] | None = None,
+    symbol_extraction_source: str = "none",
+    symbol_derivation_method: str | None = None,
+    symbol_validation_status: str | None = None,
+    quote_derivation_source: str | None = None,
+    symbol_launch_times_ms: dict | None = None,
+    symbol_onboard_times_ms: dict | None = None,
+    source_published_at_ms_confidence: str = "high",
+    pending_reason: str | None = None,
+    detail_fetch_attempted: bool | None = None,
+    detail_fetch_status: str | None = None,
+) -> dict:
+    row = {
+        "raw": raw or {},
+        "source_article_id": source_article_id,
+        "title": title,
+        "source_detail_url_normalized": source_detail_url_normalized,
+        "source_parent_url": source_parent_url,
+        "source_published_at_ms": source_published_at_ms,
+        "detected_at_ms": detected_at_ms,
+        "first_detected_at_ms": first_detected_at_ms,
+        "event_type": event_type,
+        "detail_work_type": detail_work_type,
+        "catalog_id": existing.get("catalog_id") if existing else None,
+        "catalog_title": existing.get("catalog_title") if existing else None,
+        "symbol_extraction_source": symbol_extraction_source,
+        "symbol_parse_failed_reason": existing.get("symbol_parse_failed_reason") if existing else None,
+        "pending_reason": pending_reason,
+        "source_published_at_ms_confidence": source_published_at_ms_confidence,
+        "detail_http_request_count": int((existing.get("detail_http_request_count") if existing else 0) or 0),
+        "detail_retry_cycle_count": int((existing.get("detail_retry_cycle_count") if existing else 0) or 0),
+        "detail_fetch_attempt_count": int((existing.get("detail_fetch_attempt_count") if existing else 0) or 0),
+        "transient_detail_error_count": int((existing.get("transient_detail_error_count") if existing else 0) or 0),
+        "non_transient_detail_error_count": int((existing.get("non_transient_detail_error_count") if existing else 0) or 0),
+        "last_retry_at_ms": int((existing.get("last_retry_at_ms") if existing else 0) or 0),
+        "next_detail_retry_at_ms": int((existing.get("next_detail_retry_at_ms") if existing else 0) or 0),
+        "first_deferred_at_ms": existing.get("first_deferred_at_ms") if existing else None,
+        "last_deferred_at_ms": existing.get("last_deferred_at_ms") if existing else None,
+        "last_deferred_manifest_at_ms": int((existing.get("last_deferred_manifest_at_ms") if existing else 0) or 0),
+        "defer_count": int((existing.get("defer_count") if existing else 0) or 0),
+        "terminal_state": False,
+        "terminal_failure_type": None,
+        "candidate_symbols": candidate_symbols,
+        "symbol_derivation_method": symbol_derivation_method,
+        "symbol_validation_status": symbol_validation_status,
+        "symbol_launch_times_ms": symbol_launch_times_ms,
+        "symbol_onboard_times_ms": symbol_onboard_times_ms,
+        "symbol_effective_launch_times_ms": existing.get("symbol_effective_launch_times_ms") if existing else None,
+        "launch_time_source": existing.get("launch_time_source") if existing else None,
+        "last_detail_failure_class": existing.get("last_detail_failure_class") if existing else None,
+        "detail_retryable": existing.get("detail_retryable", True) if existing else True,
+        "last_bapi_detail_status": existing.get("last_bapi_detail_status") if existing else None,
+        "last_bapi_payload_hash": existing.get("last_bapi_payload_hash") if existing else None,
+        "last_bapi_parser_version": existing.get("last_bapi_parser_version") if existing else None,
+        "last_bapi_parser_status": existing.get("last_bapi_parser_status") if existing else None,
+        "last_bapi_parser_failure_reason": existing.get("last_bapi_parser_failure_reason") if existing else None,
+        "last_bapi_parse_attempt_at_ms": existing.get("last_bapi_parse_attempt_at_ms") if existing else None,
+        "last_support_detail_status": existing.get("last_support_detail_status") if existing else None,
+        "last_support_failure_class": existing.get("last_support_failure_class") if existing else None,
+        "parsed_candidate_symbols": existing.get("parsed_candidate_symbols") if existing else None,
+        "candidate_provenance": existing.get("candidate_provenance") if existing else None,
+        "launch_time_resolution_status": existing.get("launch_time_resolution_status") if existing else None,
+        "launch_anchor_policy": existing.get("launch_anchor_policy") if existing else None,
+        "required_launch_anchor_source": existing.get("required_launch_anchor_source") if existing else None,
+        "consumable_event_allowed": existing.get("consumable_event_allowed") if existing else None,
+        "symbol_launch_time_candidates_ms": existing.get("symbol_launch_time_candidates_ms") if existing else None,
+        "launch_time_conflict_ms": existing.get("launch_time_conflict_ms") if existing else None,
+        "status": existing.get("status") if existing else None,
+        "terminal_reason": None,
+        "terminal_at_ms": None,
+        "emission_id": existing.get("emission_id") if existing else None,
+        "candidate_symbol_set_hash": existing.get("candidate_symbol_set_hash") if existing else None,
+        "candidate_symbol_set_hash_version": existing.get("candidate_symbol_set_hash_version") if existing else None,
+        "candidate_symbols_ordered": existing.get("candidate_symbols_ordered") if existing else None,
+        "candidate_symbols_normalized": existing.get("candidate_symbols_normalized") if existing else None,
+        "event_id": existing.get("event_id") if existing else None,
+        "event_stream_path": existing.get("event_stream_path") if existing else None,
+        "parser_payload_hash": existing.get("parser_payload_hash") if existing else None,
+        "symbol_effective_launch_time_sources": existing.get("symbol_effective_launch_time_sources") if existing else None,
+        "exchangeinfo_visible_symbols": existing.get("exchangeinfo_visible_symbols") if existing else None,
+        "exchangeinfo_missing_symbols": existing.get("exchangeinfo_missing_symbols") if existing else None,
+        "hard_rejected_symbols": existing.get("hard_rejected_symbols") if existing else None,
+        "symbol_exchangeinfo_statuses": existing.get("symbol_exchangeinfo_statuses") if existing else None,
+        "inflight_cycle": existing.get("inflight_cycle") if existing else None,
+        "detail_budget_deferred_count": int((existing.get("detail_budget_deferred_count") if existing else 0) or 0),
+        "detail_fetch_attempted": detail_fetch_attempted,
+        "detail_fetch_status": detail_fetch_status,
+        "detail_fetch_url_used": existing.get("detail_fetch_url_used") if existing else None,
+        "detail_fetch_variant": existing.get("detail_fetch_variant") if existing else None,
+        "detail_fetched_at_ms": existing.get("detail_fetched_at_ms") if existing else None,
+        "detail_parse_status": existing.get("detail_parse_status") if existing else None,
+        "detail_payload_hash": existing.get("detail_payload_hash") if existing else None,
+        "detail_payload_trusted": existing.get("detail_payload_trusted") if existing else None,
+        "exchangeinfo_validation_attempt_count": int((existing.get("exchangeinfo_validation_attempt_count") if existing else 0) or 0),
+        "exchangeinfo_validation_retryable": existing.get("exchangeinfo_validation_retryable") if existing else None,
+        "last_exchangeinfo_validation_at_ms": existing.get("last_exchangeinfo_validation_at_ms") if existing else None,
+        "next_exchangeinfo_validation_at_ms": existing.get("next_exchangeinfo_validation_at_ms") if existing else None,
+        "quote_derivation_source": quote_derivation_source,
+        "retry_count": int((existing.get("retry_count") if existing else 0) or 0),
+        "schedule_revision_producer_status": existing.get("schedule_revision_producer_status") if existing else None,
+    }
+    return row
 
 
 def validate_configs_base_ast_delta(content_a: str, content_b: str) -> bool:
@@ -1683,6 +2275,35 @@ def _main():
         else output_root / "binance_futures_launch_smoke_summary.json"
     )
 
+    startup_head_sha = "0" * 40
+    try:
+        git_res = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        if re.match(r"^[0-9a-f]{40}$", git_res):
+            startup_head_sha = git_res
+    except Exception:
+        pass
+
+    expected_resume_provenance = build_stage1_5d_v3_resume_provenance(output_root, startup_head_sha)
+    preflight_res = preflight_stage1_5d_v3_root(
+        output_root,
+        output_summary_path,
+        expected_resume_provenance=expected_resume_provenance,
+    )
+
+    if preflight_res["kind"] == "rejected":
+        print(f"stage1_5d_v3_resume_preflight_rejected: {preflight_res['reason']}")
+        sys.exit(1)
+
+    if preflight_res["kind"] == "fresh":
+        try:
+            output_root.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            print("stage1_5d_v3_fresh_root_creation_rejected: root already exists")
+            sys.exit(1)
+        if not output_root.is_dir() or output_root.is_symlink():
+            print("stage1_5d_v3_fresh_root_creation_rejected: root not regular directory")
+            sys.exit(1)
+
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
     startup_gate, startup_summary, startup_diagnostic = _build_storage_failure_artifacts(
         output_root,
@@ -1802,7 +2423,27 @@ def _main():
 
 
     detail_retry_state = {}
-    scheduler_state = load_detail_retry_scheduler_state(output_root)
+    if preflight_res["kind"] == "resumable":
+        scheduler_state = preflight_res["state"]
+        catalog_bootstrap_cutoff_ms = scheduler_state.get("catalog_bootstrap_cutoff_ms")
+        formal_completed_source_article_ids = set(preflight_res.get("formal_completed_source_article_ids") or set())
+    else:
+        scheduler_state = {
+            "metadata_version": 3,
+            "catalog_bootstrap_cutoff_ms": None,
+            "resume_provenance": expected_resume_provenance,
+            "articles": {},
+            "endpoint_health": {
+                "recent_detail_attempt_results": [],
+                "detail_endpoint_degraded_until_ms": 0,
+                "detail_endpoint_transient_error_rate": 0.0,
+                "by_variant": {},
+                "endpoint_health_by_source": {},
+            },
+        }
+        catalog_bootstrap_cutoff_ms = None
+        formal_completed_source_article_ids = set()
+
     payload_version_first_observed = load_payload_version_first_observed(
         output_root / "revision_payload_versions.jsonl"
     )
@@ -1825,58 +2466,9 @@ def _main():
             "title": article["title"],
             "releaseDate": article.get("source_published_at_ms"),
         }
-        detail_retry_state[code] = {
-            "raw": raw_art,
-            "source_article_id": code,
-            "title": article["title"],
-            "source_detail_url_normalized": article["source_detail_url_normalized"],
-            "source_parent_url": article["source_parent_url"],
-            "source_published_at_ms": article["source_published_at_ms"],
-            "detected_at_ms": article.get("detected_at_ms", startup_now_ms),
-            "event_type": article.get("event_type") or "futures_contract_launch",
-            "detail_work_type": article.get("detail_work_type"),
-            "first_detected_at_ms": article.get("first_detected_at_ms", startup_now_ms),
-            "detail_http_request_count": article.get("detail_http_request_count", article.get("detail_fetch_attempt_count", 0)),
-            "detail_retry_cycle_count": article.get("detail_retry_cycle_count", article.get("detail_fetch_attempt_count", 0)),
-            "detail_fetch_attempt_count": article.get("detail_fetch_attempt_count", 0),
-            "transient_detail_error_count": article.get("transient_detail_error_count", 0),
-            "non_transient_detail_error_count": article.get("non_transient_detail_error_count", 0),
-            "retry_count": article.get("non_transient_detail_error_count", 0),
-            "last_retry_at_ms": article.get("last_retry_at_ms", 0),
-            "next_detail_retry_at_ms": article.get("next_detail_retry_at_ms", 0),
-            "first_deferred_at_ms": article.get("first_deferred_at_ms"),
-            "last_deferred_at_ms": article.get("last_deferred_at_ms"),
-            "last_deferred_manifest_at_ms": article.get("last_deferred_manifest_at_ms", 0),
-            "defer_count": article.get("defer_count", 0),
-            "source_published_at_ms_confidence": article.get("source_published_at_ms_confidence", "medium"),
-            "symbol_extraction_source": article.get("symbol_extraction_source", "none"),
-            "pending_reason": article.get("pending_reason", "title_symbol_missing"),
-            "candidate_symbols": article.get("candidate_symbols"),
-            "symbol_derivation_method": article.get("symbol_derivation_method"),
-            "symbol_validation_status": article.get("symbol_validation_status"),
-            "symbol_launch_times_ms": article.get("symbol_launch_times_ms", {}),
-            "symbol_onboard_times_ms": article.get("symbol_onboard_times_ms", {}),
-            "symbol_effective_launch_times_ms": article.get("symbol_effective_launch_times_ms", {}),
-            "last_detail_failure_class": article.get("last_detail_failure_class"),
-            "detail_retryable": article.get("detail_retryable"),
-            "last_bapi_detail_status": article.get("last_bapi_detail_status"),
-            "last_bapi_payload_hash": article.get("last_bapi_payload_hash"),
-            "last_bapi_parser_version": article.get("last_bapi_parser_version"),
-            "last_bapi_parser_status": article.get("last_bapi_parser_status"),
-            "last_bapi_parser_failure_reason": article.get("last_bapi_parser_failure_reason"),
-            "last_bapi_parse_attempt_at_ms": article.get("last_bapi_parse_attempt_at_ms"),
-            "last_support_detail_status": article.get("last_support_detail_status"),
-            "last_support_failure_class": article.get("last_support_failure_class"),
-            "parsed_candidate_symbols": article.get("parsed_candidate_symbols"),
-            "candidate_provenance": article.get("candidate_provenance"),
-            "launch_time_resolution_status": article.get("launch_time_resolution_status"),
-            "launch_anchor_policy": article.get("launch_anchor_policy"),
-            "required_launch_anchor_source": article.get("required_launch_anchor_source"),
-            "consumable_event_allowed": article.get("consumable_event_allowed"),
-            "symbol_launch_time_candidates_ms": article.get("symbol_launch_time_candidates_ms"),
-            "launch_time_conflict_ms": article.get("launch_time_conflict_ms"),
-            "inflight_cycle": article.get("inflight_cycle"),
-        }
+        art_row = dict(article)
+        art_row["raw"] = raw_art
+        detail_retry_state[code] = art_row
 
 
     detail_fetch_attempted_count = 0
@@ -2064,30 +2656,52 @@ def _main():
             {"diagnostic_type": "formal_launch_identity_index_rebuild", **diagnostic},
         )
 
-    # Recover any pre-crash inflight_cycle reservations
+    # Recover any pre-crash inflight_cycle reservations and formal emission cleanup
     inflight_recovered = False
+    crash_cleanup = preflight_res.get("crash_cleanup_row")
+    if crash_cleanup:
+        cleanup_id = str(crash_cleanup.get("source_article_id") or "")
+        if cleanup_id:
+            if cleanup_id in persisted_articles:
+                persisted_articles[cleanup_id]["terminal_state"] = True
+                persisted_articles[cleanup_id]["terminal_reason"] = "emitted_to_events"
+                persisted_articles[cleanup_id]["terminal_at_ms"] = startup_now_ms
+                persisted_articles[cleanup_id]["inflight_cycle"] = None
+                persisted_articles[cleanup_id]["status"] = "emitted_all_symbols"
+            detail_retry_state.pop(cleanup_id, None)
+            formal_completed_source_article_ids.add(cleanup_id)
+            diag = {
+                "diagnostic_type": "formal_emission_crash_recovered_row_purged",
+                "source_article_id": cleanup_id,
+                "recovered_at_ms": startup_now_ms,
+            }
+            append_jsonl(startup_stream_paths["detail_retry_scheduler_diagnostics"], diag, storage_guard=storage_guard)
+            inflight_recovered = True
+
     for code, article in list(persisted_articles.items()):
         inflight = article.get("inflight_cycle")
         if inflight:
             inflight_recovered = True
+            op = inflight.get("operation") or "unknown"
+            diag_type = "request_manifest_persistence_unknown" if op == "detail_request" else f"inflight_op_recovered_{op}"
             diag = {
-                "diagnostic_type": "request_manifest_persistence_unknown",
+                "diagnostic_type": diag_type,
                 "source_article_id": code,
                 "reserved_cycle": inflight.get("cycle"),
-                "reserved_at_ms": inflight.get("reserved_at_ms"),
+                "inflight_cycle": inflight,
                 "detected_at_ms": startup_now_ms,
             }
             append_jsonl(startup_stream_paths["detail_retry_scheduler_diagnostics"], diag, storage_guard=storage_guard)
-            article.pop("inflight_cycle", None)
+            article["inflight_cycle"] = None
             if code in detail_retry_state:
-                detail_retry_state[code].pop("inflight_cycle", None)
+                detail_retry_state[code]["inflight_cycle"] = None
 
     if inflight_recovered:
-        scheduler_state["articles"] = serialize_retry_articles(detail_retry_state)
+        scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
         write_detail_retry_scheduler_state(
             output_root,
             scheduler_state,
-            metadata_version=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 2),
+            metadata_version=3,
             storage_guard=storage_guard,
         )
 
@@ -2122,7 +2736,10 @@ def _main():
         "bapi_trusted_payload_rate": 1.0,
         "symbol_parse_success_rate": 1.0,
         "symbol_validation_success_rate": 1.0,
-        "scheduler_starved_expired_count": 0,
+        "scheduler_starved_expired_count": sum(
+            1 for row in persisted_articles.values()
+            if row.get("terminal_failure_type") == "detail_never_attempted_budget_starved"
+        ),
         **schedule_revision_producer_attestation,
     }
     write_stage1_5d_runtime_gate(
@@ -2353,81 +2970,157 @@ def _main():
 
             catalogs = payload.get("data", {}).get("catalogs", [])
             raw_articles = catalogs[0].get("articles", []) if catalogs else []
+            poll_ok = bool(cycle_res.get("heartbeat", {}).get("poll_success")) and isinstance(raw_articles, list)
+
+            # 1. First trusted poll bootstrap
+            if catalog_bootstrap_cutoff_ms is None:
+                if poll_ok:
+                    catalog_bootstrap_cutoff_ms = now_ms
+                    scheduler_state["catalog_bootstrap_cutoff_ms"] = catalog_bootstrap_cutoff_ms
+                    for raw_art in raw_articles:
+                        code = str(raw_art.get("code") or "")
+                        if not code:
+                            continue
+                        raw_date = (
+                            raw_art.get("releaseDate")
+                            if (
+                                isinstance(raw_art.get("releaseDate"), int)
+                                and not isinstance(raw_art.get("releaseDate"), bool)
+                                and raw_art.get("releaseDate") > 0
+                            )
+                            else None
+                        )
+                        tomb = build_stage1_5d_terminal_tombstone(
+                            existing=None,
+                            source_article_id=code,
+                            title=str(raw_art.get("title") or ""),
+                            source_detail_url_normalized=f"{source_parent_url.rstrip('/')}/{code}",
+                            source_parent_url=source_parent_url,
+                            detected_at_ms=now_ms,
+                            first_detected_at_ms=now_ms,
+                            reason="catalog_bootstrap_preexisting",
+                            now_ms=now_ms,
+                            source_published_at_ms=raw_date,
+                        )
+                        persisted_articles[code] = tomb
+                        diag = {
+                            "source_article_id": code,
+                            "terminal_reason": "catalog_bootstrap_preexisting",
+                            "terminal_at_ms": now_ms,
+                        }
+                        append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], diag, storage_guard=storage_guard)
+
+                    scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
+                    write_detail_retry_scheduler_state(
+                        output_root,
+                        scheduler_state,
+                        metadata_version=3,
+                        storage_guard=storage_guard,
+                    )
+                    cycle_res["events"] = []
+                    first_bar_queue.clear()
+                    raw_articles = []
+
             for ev in cycle_res["events"]:
+                code = ev["source_article_id"]
+                raw_art = next((art for art in raw_articles if art.get("code") == code), {})
+
+                admission = classify_stage1_5d_catalog_admission(
+                    raw_art,
+                    cutoff_ms=catalog_bootstrap_cutoff_ms,
+                    detected_at_ms=now_ms,
+                    formal_completed_ids=formal_completed_source_article_ids,
+                    persisted_row=persisted_articles.get(code),
+                )
+                if admission in ("formal_completed", "persisted_terminal"):
+                    continue
+                if admission in ("source_published_at_invalid", "historical_prebootstrap_catalog_article"):
+                    if code not in persisted_articles or not persisted_articles[code].get("terminal_state"):
+                        raw_date = (
+                            raw_art.get("releaseDate")
+                            if (
+                                admission != "source_published_at_invalid"
+                                and isinstance(raw_art.get("releaseDate"), int)
+                                and not isinstance(raw_art.get("releaseDate"), bool)
+                                and raw_art.get("releaseDate") > 0
+                            )
+                            else None
+                        )
+                        tomb = build_stage1_5d_terminal_tombstone(
+                            existing=persisted_articles.get(code),
+                            source_article_id=code,
+                            title=str(raw_art.get("title") or ""),
+                            source_detail_url_normalized=f"{source_parent_url.rstrip('/')}/{code}",
+                            source_parent_url=source_parent_url,
+                            detected_at_ms=now_ms,
+                            first_detected_at_ms=now_ms,
+                            reason=admission,
+                            now_ms=now_ms,
+                            source_published_at_ms=raw_date,
+                        )
+                        persisted_articles[code] = tomb
+                        scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
+                        write_detail_retry_scheduler_state(
+                            output_root,
+                            scheduler_state,
+                            metadata_version=3,
+                            storage_guard=storage_guard,
+                        )
+                        diag = {
+                            "source_article_id": code,
+                            "terminal_reason": admission,
+                            "terminal_at_ms": now_ms,
+                        }
+                        append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], diag, storage_guard=storage_guard)
+                    continue
+
                 raw_futures_launch_article_count += 1
                 if ev.get("symbols"):
                     title_symbol_extracted_count += 1
                     symbol_parsed_event_count += 1
 
-                code = ev["source_article_id"]
-                raw_art = next((art for art in raw_articles if art.get("code") == code), {})
-
-                if code not in seen_event_ids and code not in detail_retry_state:
+                if code not in seen_event_ids and code not in detail_retry_state and not persisted_articles.get(code, {}).get("terminal_state"):
                     persisted = persisted_articles.get(code, {})
                     title_candidate_res = extract_symbol_candidates_from_title(raw_art.get("title") or "", max_symbols)
                     if title_candidate_res["symbol_validation_status"] == "requires_exchange_info_validation":
-                        detail_retry_state[code] = {
-                            "raw": raw_art,
-                            "source_article_id": code,
-                            "title": raw_art.get("title") or persisted.get("title") or "",
-                            "source_detail_url_normalized": persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{code}",
-                            "source_parent_url": source_parent_url,
-                            "source_published_at_ms": raw_art.get("releaseDate") or persisted.get("source_published_at_ms"),
-                            "detected_at_ms": persisted.get("detected_at_ms", now_ms),
-                            "event_type": "futures_contract_launch",
-                            "first_detected_at_ms": persisted.get("first_detected_at_ms", now_ms),
-                            "detail_http_request_count": persisted.get("detail_http_request_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "detail_retry_cycle_count": persisted.get("detail_retry_cycle_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "detail_fetch_attempt_count": persisted.get("detail_fetch_attempt_count", 0),
-                            "transient_detail_error_count": persisted.get("transient_detail_error_count", 0),
-                            "non_transient_detail_error_count": persisted.get("non_transient_detail_error_count", 0),
-                            "retry_count": persisted.get("retry_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "last_retry_at_ms": persisted.get("last_retry_at_ms", 0),
-                            "next_detail_retry_at_ms": persisted.get("next_detail_retry_at_ms", 0),
-                            "first_deferred_at_ms": persisted.get("first_deferred_at_ms"),
-                            "last_deferred_at_ms": persisted.get("last_deferred_at_ms"),
-                            "last_deferred_manifest_at_ms": persisted.get("last_deferred_manifest_at_ms", 0),
-                            "defer_count": persisted.get("defer_count", 0),
-                            "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"],
-                            "candidate_symbols": title_candidate_res["symbols"],
-                            "symbol_extraction_source": title_candidate_res["symbol_extraction_source"],
-                            "symbol_derivation_method": title_candidate_res["symbol_derivation_method"],
-                            "quote_derivation_source": "exchange_info",
-                            "symbol_validation_status": "pending_exchangeinfo_missing",
-                            "symbol_launch_times_ms": title_candidate_res.get("symbol_launch_times_ms", {}),
-                            "symbol_onboard_times_ms": {},
-                            "detail_fetch_attempted": False,
-                            "detail_fetch_status": "not_needed",
-                        }
+                        detail_retry_state[code] = build_stage1_5d_v3_active_article(
+                            existing=persisted,
+                            source_article_id=code,
+                            title=raw_art.get("title") or persisted.get("title") or "",
+                            source_detail_url_normalized=persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{code}",
+                            source_parent_url=source_parent_url,
+                            source_published_at_ms=raw_art.get("releaseDate") or persisted.get("source_published_at_ms"),
+                            detected_at_ms=persisted.get("detected_at_ms", now_ms),
+                            first_detected_at_ms=persisted.get("first_detected_at_ms", now_ms),
+                            raw=raw_art,
+                            event_type="futures_contract_launch",
+                            candidate_symbols=title_candidate_res["symbols"],
+                            symbol_extraction_source=title_candidate_res["symbol_extraction_source"],
+                            symbol_derivation_method=title_candidate_res["symbol_derivation_method"],
+                            symbol_validation_status="pending_exchangeinfo_missing",
+                            quote_derivation_source="exchange_info",
+                            symbol_launch_times_ms=title_candidate_res.get("symbol_launch_times_ms", {}),
+                            symbol_onboard_times_ms={},
+                            source_published_at_ms_confidence=ev["source_published_at_ms_confidence"],
+                            detail_fetch_attempted=False,
+                            detail_fetch_status="not_needed",
+                        )
                     else:
-                        detail_retry_state[code] = {
-                            "raw": raw_art,
-                            "source_article_id": code,
-                            "title": raw_art.get("title") or persisted.get("title") or "",
-                            "source_detail_url_normalized": persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{code}",
-                            "source_parent_url": source_parent_url,
-                            "source_published_at_ms": raw_art.get("releaseDate") or persisted.get("source_published_at_ms"),
-                            "detected_at_ms": persisted.get("detected_at_ms", now_ms),
-                            "event_type": "futures_contract_launch",
-                            "first_detected_at_ms": persisted.get("first_detected_at_ms", now_ms),
-                            "detail_http_request_count": persisted.get("detail_http_request_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "detail_retry_cycle_count": persisted.get("detail_retry_cycle_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "detail_fetch_attempt_count": persisted.get("detail_fetch_attempt_count", 0),
-                            "transient_detail_error_count": persisted.get("transient_detail_error_count", 0),
-                            "non_transient_detail_error_count": persisted.get("non_transient_detail_error_count", 0),
-                            "retry_count": persisted.get("retry_count", persisted.get("detail_fetch_attempt_count", 0)),
-                            "last_retry_at_ms": persisted.get("last_retry_at_ms", 0),
-                            "next_detail_retry_at_ms": persisted.get("next_detail_retry_at_ms", 0),
-                            "first_deferred_at_ms": persisted.get("first_deferred_at_ms"),
-                            "last_deferred_at_ms": persisted.get("last_deferred_at_ms"),
-                            "last_deferred_manifest_at_ms": persisted.get("last_deferred_manifest_at_ms", 0),
-                            "defer_count": persisted.get("defer_count", 0),
-                            "source_published_at_ms_confidence": ev["source_published_at_ms_confidence"],
-                            "symbol_extraction_source": persisted.get("symbol_extraction_source", "none"),
-                            "pending_reason": persisted.get("pending_reason", "title_symbol_missing"),
-                            "last_detail_failure_class": persisted.get("last_detail_failure_class"),
-                            "detail_retryable": persisted.get("detail_retryable"),
-                        }
+                        detail_retry_state[code] = build_stage1_5d_v3_active_article(
+                            existing=persisted,
+                            source_article_id=code,
+                            title=raw_art.get("title") or persisted.get("title") or "",
+                            source_detail_url_normalized=persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{code}",
+                            source_parent_url=source_parent_url,
+                            source_published_at_ms=raw_art.get("releaseDate") or persisted.get("source_published_at_ms"),
+                            detected_at_ms=persisted.get("detected_at_ms", now_ms),
+                            first_detected_at_ms=persisted.get("first_detected_at_ms", now_ms),
+                            raw=raw_art,
+                            event_type="futures_contract_launch",
+                            source_published_at_ms_confidence=ev["source_published_at_ms_confidence"],
+                            symbol_extraction_source=persisted.get("symbol_extraction_source", "none"),
+                            pending_reason=persisted.get("pending_reason", "title_symbol_missing"),
+                        )
 
             # Revision titles are not launch events, but their trusted BAPI
             # detail may supersede a prior launch. Reuse the existing queue.
@@ -2438,33 +3131,25 @@ def _main():
                 ):
                     continue
                 persisted = persisted_articles.get(code, {})
-                detail_retry_state[code] = {
-                    "raw": raw_art,
-                    "source_article_id": code,
-                    "title": str(raw_art.get("title") or persisted.get("title") or ""),
-                    "source_detail_url_normalized": persisted.get(
+                detail_retry_state[code] = build_stage1_5d_v3_active_article(
+                    existing=persisted,
+                    source_article_id=code,
+                    title=str(raw_art.get("title") or persisted.get("title") or ""),
+                    source_detail_url_normalized=persisted.get(
                         "source_detail_url_normalized"
                     ) or f"{source_parent_url.rstrip('/')}/{code}",
-                    "source_parent_url": source_parent_url,
-                    "source_published_at_ms": raw_art.get("releaseDate"),
-                    "detected_at_ms": now_ms,
-                    "event_type": "futures_contract_launch",
-                    "detail_work_type": "launch_schedule_revision_detail",
-                    "first_detected_at_ms": now_ms,
-                    "detail_http_request_count": 0,
-                    "detail_retry_cycle_count": 0,
-                    "detail_fetch_attempt_count": 0,
-                    "transient_detail_error_count": 0,
-                    "non_transient_detail_error_count": 0,
-                    "retry_count": 0,
-                    "last_retry_at_ms": 0,
-                    "next_detail_retry_at_ms": 0,
-                    "defer_count": 0,
-                    "source_published_at_ms_confidence": "medium",
-                    "symbol_extraction_source": "none",
-                    "pending_reason": "revision_detail_required",
-                    "detail_fetch_status": "pending",
-                }
+                    source_parent_url=source_parent_url,
+                    source_published_at_ms=raw_art.get("releaseDate"),
+                    detected_at_ms=now_ms,
+                    first_detected_at_ms=now_ms,
+                    raw=raw_art,
+                    event_type="futures_contract_launch",
+                    detail_work_type="launch_schedule_revision_detail",
+                    source_published_at_ms_confidence="medium",
+                    symbol_extraction_source="none",
+                    pending_reason="revision_detail_required",
+                    detail_fetch_status="pending",
+                )
 
 
             # Clean up first_bar_queue to remove empty symbol events
@@ -2635,6 +3320,10 @@ def _main():
                             events_detected=events_detected,
                         )
 
+                    state["terminal_state"] = True
+                    state["terminal_reason"] = failed_reason
+                    state["terminal_at_ms"] = now_ms
+                    persisted_articles[code] = state
                     detail_retry_state.pop(code, None)
                     continue
 
@@ -2647,7 +3336,7 @@ def _main():
                 )
                 if (
                     (state["retry_count"] >= max_retries_limit or is_non_retryable)
-                    and "candidate_symbols" not in state
+                    and not state.get("candidate_symbols")
                     and state.get("transient_detail_error_count", 0) == 0
                 ):
                     symbol_empty_event_count += 1
@@ -2675,20 +3364,20 @@ def _main():
                     norm_event["symbol_resolved_at_ms"] = now_ms
                     norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
-                    event_id = norm_event["event_id"]
-                    if event_id not in seen_event_ids:
-                        record_formal_futures_launch_event(
-                            stream_paths=stream_paths,
-                            row=norm_event,
-                            seen_event_ids=seen_event_ids,
-                            events_detected=events_detected,
-                        )
+                    terminal_diag = dict(norm_event)
+                    terminal_diag["consumable_by_stage1_5f"] = False
+                    terminal_diag["diagnostic_stream"] = "detail_retry_terminal_diagnostics"
+                    append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], terminal_diag, storage_guard=storage_guard)
 
+                    state["terminal_state"] = True
+                    state["terminal_reason"] = "detail_retry_exhausted"
+                    state["terminal_at_ms"] = now_ms
+                    persisted_articles[code] = state
                     detail_retry_state.pop(code, None)
                     continue
 
                 # 2.5 Check if we already have candidates pending validation
-                if state.get("candidate_symbols") is not None and not title_candidate_needs_detail_launch_anchor(state):
+                if bool(state.get("candidate_symbols")) and not title_candidate_needs_detail_launch_anchor(state):
                     exchangeinfo_by_symbol, ex_ok = get_exchangeinfo_by_symbol()
                     if not ex_ok:
                         continue
@@ -2937,13 +3626,37 @@ def _main():
                         cycle = int(st.get("detail_retry_cycle_count") or 0) + 1
                         st["detail_retry_cycle_count"] = cycle
                         st["last_retry_at_ms"] = now_ms
-                        st["inflight_cycle"] = {"cycle": cycle, "reserved_at_ms": now_ms}
-                scheduler_state["articles"] = serialize_retry_articles(detail_retry_state)
+                        target = {
+                            "endpoint_kind": "bapi_article_detail_query",
+                            "source_article_id": code,
+                            "detail_fetch_variant": "bapi_article_detail_query",
+                            "requested_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={code}",
+                        }
+                        ident_payload = {
+                            "cycle": cycle,
+                            "operation": "detail_request",
+                            "request_ordinal": 1,
+                            "request_target": target,
+                            "source_article_id": code,
+                            "symbol": None,
+                        }
+                        req_ident = hashlib.sha256(_canonical_json_bytes(ident_payload)).hexdigest()
+                        st["inflight_cycle"] = {
+                            "operation": "detail_request",
+                            "cycle": cycle,
+                            "request_ordinal": 1,
+                            "reserved_at_ms": now_ms,
+                            "symbol": None,
+                            "request_target": target,
+                            "request_identity": req_ident,
+                        }
+                        persisted_articles[code] = st
+                scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
                 scheduler_state["endpoint_health"] = endpoint_health
                 write_detail_retry_scheduler_state(
                     output_root,
                     scheduler_state,
-                    metadata_version=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION", 2),
+                    metadata_version=3,
                     storage_guard=storage_guard,
                 )
 
@@ -2955,7 +3668,7 @@ def _main():
 
                 # 4. Attempt fetch
                 detail_budget_remaining -= 1
-                state.pop("inflight_cycle", None)
+                state["inflight_cycle"] = None
                 detail_fetch_attempted_count += 1
 
                 detail_url = f"{source_parent_url.rstrip('/')}/{code}"
@@ -3918,7 +4631,6 @@ def _main():
                     if is_transient_detail_fetch_error(chk_res):
                         state["transient_detail_error_count"] = state.get("transient_detail_error_count", 0) + 1
                         state["retry_count"] = int(state.get("retry_count") or 0) + 1
-                        state["detail_fetch_attempt_count"] = int(state.get("detail_fetch_attempt_count") or 0) + 1
                         state["detail_fetch_attempted"] = True
                         state["status"] = "pending_detail_retry"
                         state["pending_reason"] = err_reason
@@ -3934,9 +4646,10 @@ def _main():
                     else:
                         state["non_transient_detail_error_count"] = state.get("non_transient_detail_error_count", 0) + 1
                         state["retry_count"] = state["non_transient_detail_error_count"]
+                        state["last_retry_at_ms"] = now_ms
+                        state["next_detail_retry_at_ms"] = now_ms
                         state["last_detail_failure_class"] = f"http_{chk_res.get('http_status')}" if chk_res.get("http_status") else "non_transient_error"
                         state["detail_retryable"] = False
-
 
                         max_retries_limit = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_MAX_RETRIES", 3)
                         if state["retry_count"] >= max_retries_limit:
@@ -3965,25 +4678,27 @@ def _main():
                             norm_event["symbol_resolved_at_ms"] = now_ms
                             norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
-                            event_id = norm_event["event_id"]
-                            if event_id not in seen_event_ids:
-                                record_formal_futures_launch_event(
-                                    stream_paths=stream_paths,
-                                    row=norm_event,
-                                    seen_event_ids=seen_event_ids,
-                                    events_detected=events_detected,
-                                )
+                            terminal_diag = dict(norm_event)
+                            terminal_diag["consumable_by_stage1_5f"] = False
+                            terminal_diag["diagnostic_stream"] = "detail_retry_terminal_diagnostics"
+                            append_jsonl(stream_paths["detail_retry_terminal_diagnostics"], terminal_diag, storage_guard=storage_guard)
 
+                            state["terminal_state"] = True
+                            state["terminal_reason"] = err_reason
+                            state["terminal_at_ms"] = now_ms
+                            persisted_articles[code] = state
                             detail_retry_state.pop(code, None)
                         continue
 
             # Persist scheduler state
-            scheduler_state["articles"] = serialize_retry_articles(detail_retry_state)
+            for code, st in detail_retry_state.items():
+                persisted_articles[code] = st
+            scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
             scheduler_state["endpoint_health"] = endpoint_health
             write_detail_retry_scheduler_state(
                 output_root,
                 scheduler_state,
-                metadata_version=base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION,
+                metadata_version=3,
                 storage_guard=storage_guard,
             )
 
@@ -4124,7 +4839,10 @@ def _main():
             "bapi_trusted_payload_rate": 1.0 if bapi_detail_request_count == 0 else (bapi_detail_trusted_payload_count / float(bapi_detail_request_count)),
             "symbol_parse_success_rate": 1.0 if bapi_detail_trusted_payload_count == 0 else (bapi_symbol_parse_success_count / float(bapi_detail_trusted_payload_count)),
             "symbol_validation_success_rate": 1.0 if bapi_symbol_parse_success_count == 0 else (bapi_symbol_validation_success_count / float(bapi_symbol_parse_success_count)),
-            "scheduler_starved_expired_count": detail_budget_starved_count,
+            "scheduler_starved_expired_count": sum(
+                1 for row in persisted_articles.values()
+                if row.get("terminal_failure_type") == "detail_never_attempted_budget_starved"
+            ),
             **schedule_revision_producer_attestation,
         }
         write_stage1_5d_runtime_gate(

@@ -71,7 +71,98 @@ def test_stage1_5d_detail_endpoint_degraded_config_present():
     assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_MIN_SAMPLE == 5
     assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_ENDPOINT_DEGRADED_BACKOFF_SEC == 15 * 60
     assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_DEFERRED_MANIFEST_MIN_INTERVAL_SEC == 15 * 60
-    assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION == 2
+    assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION == 3
+
+
+def validate_stage1_5d_v3_config_delta_for_plan(before: str, after: str) -> bool:
+    import ast
+
+    try:
+        before_nodes = ast.parse(before).body
+        after_nodes = ast.parse(after).body
+    except Exception:
+        return False
+
+    if len(after_nodes) != len(before_nodes) + 1:
+        return False
+
+    metadata = "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION"
+    clock_skew = "EXTERNAL_SIGNAL_STAGE1_5D_CATALOG_RELEASEDATE_MAX_CLOCK_SKEW_MS"
+
+    target_idx = None
+    for idx, node in enumerate(before_nodes):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == metadata
+        ):
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        return False
+
+    for b_node, a_node in zip(before_nodes[:target_idx], after_nodes[:target_idx]):
+        if ast.dump(b_node, include_attributes=False) != ast.dump(a_node, include_attributes=False):
+            return False
+
+    b_meta = before_nodes[target_idx]
+    a_meta = after_nodes[target_idx]
+    if not (isinstance(b_meta, ast.Assign) and isinstance(a_meta, ast.Assign)):
+        return False
+    if len(b_meta.targets) != 1 or len(a_meta.targets) != 1:
+        return False
+    if not (isinstance(b_meta.targets[0], ast.Name) and isinstance(a_meta.targets[0], ast.Name)):
+        return False
+    if b_meta.targets[0].id != metadata or a_meta.targets[0].id != metadata:
+        return False
+    if not (isinstance(b_meta.value, ast.Constant) and b_meta.value.value == 2):
+        return False
+    if not (isinstance(a_meta.value, ast.Constant) and a_meta.value.value == 3):
+        return False
+
+    inserted = after_nodes[target_idx + 1]
+    if not (isinstance(inserted, ast.Assign) and len(inserted.targets) == 1):
+        return False
+    if not (isinstance(inserted.targets[0], ast.Name) and inserted.targets[0].id == clock_skew):
+        return False
+    expected_skew_ast = ast.parse("x = 30 * 1000").body[0].value
+    if ast.dump(inserted.value, include_attributes=False) != ast.dump(expected_skew_ast, include_attributes=False):
+        return False
+
+    for b_node, a_node in zip(before_nodes[target_idx + 1:], after_nodes[target_idx + 2:]):
+        if ast.dump(b_node, include_attributes=False) != ast.dump(a_node, include_attributes=False):
+            return False
+
+    return True
+
+
+def test_stage1_5d_v3_config_authorities_are_exact():
+    assert base.EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION == 3
+    assert base.EXTERNAL_SIGNAL_STAGE1_5D_CATALOG_RELEASEDATE_MAX_CLOCK_SKEW_MS == 30 * 1000
+
+
+def test_validate_stage1_5d_v3_config_delta_for_plan_allows_only_frozen_delta():
+    before = """\
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 2
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
+"""
+    after = """\
+EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_SCHEDULER_METADATA_VERSION = 3
+EXTERNAL_SIGNAL_STAGE1_5D_CATALOG_RELEASEDATE_MAX_CLOCK_SKEW_MS = 30 * 1000
+EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False
+"""
+    assert validate_stage1_5d_v3_config_delta_for_plan(before, after) is True
+    assert validate_stage1_5d_v3_config_delta_for_plan(
+        after, after.replace("30 * 1000", "30 * 1001")
+    ) is False
+    assert validate_stage1_5d_v3_config_delta_for_plan(
+        after, after + "EXTRA = 1\n"
+    ) is False
+    assert validate_stage1_5d_v3_config_delta_for_plan(
+        before, before
+    ) is False
 
 
 def test_stage1_5d_detail_degraded_recent_retry_config_present():
