@@ -31,8 +31,8 @@ ETF Flow、Prediction Market、Token Unlock、Exchange Flow 和 Security Inciden
 | 1.6B | 本地历史公告抓取、双 sweep、详情 raw bytes、terminal status 与 sealed export | `completed` | 冻结 export `e9ec315753ea...b2007734`；历史下载不证明 PIT |
 | 1.6C | 用独立 adapter 重新计算候选、语义、指标与 completion verdict | `completed` | G2 root `h2_g2_remediated_20260824T061701Z`；`source_audit_passed=true` |
 | 1.6D | VPS 持续观察官方公告首次发现与可信详情可得时间 | `deployed_observing` | Operator 于 2026-08-30 报告 tmux 会话 `stage1_6d_live_stage1_6d_live_20260828T075150Z` 正在运行；仍仅记录 public source observation，runbook health gate 是持续运行事实的唯一验证方式 |
-| 1.6E-A | 验证固定公开 REST market-data source profile 的单次有界能力与血统 | `design_draft` | 不读取 1.6D active root；不产生事件 PIT 或 coverage 结论 |
-| 1.6E-B | live semantic trigger 与事件级 market-data observer | `not_started` | 仅在 E-A 批准后另行设计；不得由 1.6D raw source evidence 直接触发 |
+| 1.6E-A | 验证固定公开 REST market-data source profile 的单次有界能力与血统 | `completed` | 2026-09-03 VPS 实机探测封签完成；Manifest `e918b344...74b3`，4 profile 全部 PASS；详见 completion audit |
+| 1.6E-B | live semantic trigger 与事件级 market-data observer | `not_started` | 待编写 1.6E-B Design；不得由 1.6D raw source evidence 直接触发 |
 | 1.6F | 以匹配控制组检验强制流/流动性机制，并另行设计 replay | `not_started` | 不得直接生成方向或收益结论 |
 | 1.6G | 对研究路线作 stop / diagnostic-only / separate-alpha-design 决定 | `not_started` | 仅在 1.6E--F 完成后讨论 |
 
@@ -70,11 +70,14 @@ execution_engine_allowed = false
 7. [1.6D VPS deployment authorization Design](../designs/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-deployment-authorization-design_CN.md)
 8. [1.6D current VPS live-source-observation runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)
 9. [1.6D historical preflight reference](../reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md) (`historical_preflight_reference`; not the current procedure)
+10. [1.6E-A capability audit Design](../designs/2026-08-30-external-signal-shadow-lab-stage1-6e-a-market-data-source-capability-audit-design_CN.md)
+11. [1.6E-A capability audit Plan](../plans/2026-08-31-external-signal-shadow-lab-stage1-6e-a-market-data-source-capability-audit-implementation-plan_CN.md)
+12. [1.6E-A capability audit Completion Audit](../reviews/2026-08-31-external-signal-shadow-lab-stage1-6e-a-market-data-source-capability-audit-completion-audit_CN.md)
 
 旧策略路线文档保留其候选选择与优先级分析价值；其 `1.6B`、`1.6C` 等候选编号不再作为当前工程实施编号 authority。
 
 ## 5. 下一项唯一工作
 
-下一项是 **Stage 1.6E-A market-data source capability audit Design**。1.6D 保持运行并按 current runbook 做只读 health gate；不得为开始 1.6E-A 而重启、复用、修改或重新密封任何 1.6D root。
+下一项是 **Stage 1.6E-B live semantic trigger 与事件级 market-data observer Design**。
 
-1.6E-A 仅冻结公开 REST profile、单次有界 capability probe、来源血统、存储边界和 fail-closed 条件。它不读取 1.6D active root，不产生事件 PIT 或 coverage 结论。实时 semantic trigger、checkpoint-consistent transport、revision lifecycle 和事件市场观察属于后续独立的 1.6E-B Design。两者都不是历史回填、1.6C 重跑、replay 或交易授权。
+1.6E-A 已完成 VPS 实机能力证明，证实生产节点能够合规访问币安公开行情端点并防篡改持久化。下一步 Stage 1.6E-B 将设计针对下架公告的实时语义触发与事件级市场深度观测器。1.6D 保持运行并按 current runbook 做只读 health gate；不得为开始 1.6E-B 而重启、复用、修改或重新密封任何 1.6D/1.6E-A root。
