@@ -376,9 +376,11 @@ source .venv/bin/activate
 date -u
 df -hT /
 tmux ls || true
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
+# Filter on the actual Python process. A tmux server retains the argv of the
+# session that created it, so grep on its command line is not writer evidence.
+ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/)' || true
 
-export ACTIVE_5F="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
+export ACTIVE_5F="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}' | tail -n 1)"
 echo "ACTIVE_5F=[$ACTIVE_5F]"
 if [ -n "$ACTIVE_5F" ] && [ -f "$ACTIVE_5F/live_depth_observer_summary.json" ]; then
   python3 - "$ACTIVE_5F/live_depth_observer_summary.json" <<'PY'
@@ -418,7 +420,7 @@ export OLD_5F_SESSION="stage1_5f_live_depth_7d_storage_lifecycle_resource_guard_
 tmux kill-session -t "$OLD_5F_SESSION"
 tmux kill-session -t "$OLD_5D_SESSION"
 
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
+ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/)' || true
 ```
 
 `ps` 仍显示旧 collector 或 observer 时，不得启动新进程。停止会话不执行任何数据删除。
@@ -429,8 +431,8 @@ ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-# 本次常规新 root 部署使用该 suffix；active-root recovery 不创建新 root。
-export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
+# 常规部署使用默认 suffix；7.12 V3 cutover 已设置时必须保留其值。
+export ROOT_SUFFIX="${ROOT_SUFFIX:-7d_detail_retry_cycle_active_root_recovery_hotfix}"
 export STAGE1_5D_SESSION="stage1_5d_continuous_${ROOT_SUFFIX}"
 export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${ROOT_SUFFIX}"
@@ -515,8 +517,8 @@ echo "D_GATE_READY=$D_GATE_READY"
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-# 本次常规新 root 部署使用该 suffix；active-root recovery 不创建新 root。
-export ROOT_SUFFIX="7d_detail_retry_cycle_active_root_recovery_hotfix"
+# 常规部署使用默认 suffix；7.12 V3 cutover 已设置时必须保留其值。
+export ROOT_SUFFIX="${ROOT_SUFFIX:-7d_detail_retry_cycle_active_root_recovery_hotfix}"
 export STAGE1_5F_SESSION="stage1_5f_live_depth_${ROOT_SUFFIX}"
 export STAGE1_5F_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${STAGE1_5F_RUN_ID}_${ROOT_SUFFIX}"
@@ -556,23 +558,15 @@ if [ ! -f "$STAGE1_5E_SUMMARY" ]; then
   F_START_READY=0
 fi
 
-if [ "$F_START_READY" = "1" ]; then
-  python3 - "$STAGE1_5D_EVENTS_OUT" <<'PY'
-import glob, sys
-hits = sorted(glob.glob(f"{sys.argv[1]}/events/*.jsonl"))
-print({"stage1_5d_events_glob_hit_count": len(hits), "tail": hits[-3:]})
-assert hits, "STOP: wait for Stage 1.5D to create events/*.jsonl"
-PY
-  if [ $? -ne 0 ]; then
-    F_START_READY=0
-  fi
-fi
+# A fresh D root may have no formal events yet, hence no events/*.jsonl.
+# F bootstrap accepts an empty glob and establishes the watermark before the
+# first post-bootstrap event; D gate admission above remains the authority.
 
 echo "STAGE1_5F_OUT=[$STAGE1_5F_OUT]"
 echo "F_START_READY=$F_START_READY"
 ```
 
-仅当 `F_START_READY=1` 且 Python 检查通过时，建立新 watermark。bootstrap 不会采集旧事件，也不会改写旧 root：
+仅当 `F_START_READY=1` 且 Python 检查通过时，建立新 watermark。新 D root 尚无 formal event 时，`events/*.jsonl` 为空是正常状态；F 会以空事件集完成 bootstrap，随后只接纳 watermark 后新出现的事件。bootstrap 不会采集旧事件，也不会改写旧 root：
 
 ```bash
 if [ "$F_START_READY" != "1" ]; then
@@ -666,7 +660,7 @@ assert int(summary.get("storage_root_bytes") or -1) >= 0
 assert int(summary.get("storage_root_max_bytes") or 0) > int(summary.get("storage_root_bytes") or 0)
 PY
 
-ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
+ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/' || true
 ```
 
 正常首检：1.5D 为 `READY` / `stage1_5d_runtime_gate_ready`；三个 `source_stage1_5d_*_root_id` 全部相同且绑定新 D root；1.5F runtime attestation 为 true、`block_new_event_admission=false`。若任一断言失败，停止新会话、保留所有新旧 root，定位后再重新部署。
@@ -1184,8 +1178,8 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 export ROOT_SUFFIX="7d_formal_v2_anchor_source_lineage_projection_hotfix"
-export STAGE1_5D_EVENTS_OUT="$(ps -efww | grep run_stage1_5d_live_event_source_smoke_collector | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
-export STAGE1_5F_OUT="$(ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep | sed -n 's/.*--output-root \([^ ]*\).*/\1/p' | tail -n 1)"
+export STAGE1_5D_EVENTS_OUT="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5d_live_event_source_smoke_collector.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}' | tail -n 1)"
+export STAGE1_5F_OUT="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}' | tail -n 1)"
 
 if [ -z "$STAGE1_5D_EVENTS_OUT" ]; then
   export STAGE1_5D_EVENTS_OUT="$(find data/external_signal_shadow/stage1_5d -maxdepth 1 -type d -name "live_event_source_continuous_*_${ROOT_SUFFIX}" | sort | tail -n 1)"
@@ -1262,7 +1256,7 @@ print({
 })
 PY
 
-ps -efww | grep run_stage1_5f_live_depth_observer | grep -v grep || true
+ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/' || true
 ```
 
 必须看到 `events_glob_hit_count > 0` 和 `root_binding_ok=true`。进程命令行中不得出现字面量 `events/\*.jsonl`。
@@ -1328,7 +1322,7 @@ export ROOT_SUFFIX="7d_formal_v2_anchor_source_lineage_projection_hotfix"
 tmux kill-session -t "stage1_5f_live_depth_${ROOT_SUFFIX}" 2>/dev/null || true
 tmux kill-session -t "stage1_5d_continuous_${ROOT_SUFFIX}" 2>/dev/null || true
 
-ps -efww | grep -E 'run_stage1_5d_live_event_source_smoke_collector|run_stage1_5f_live_depth_observer' | grep -v grep || true
+ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/)' || true
 ```
 
 停止前若 `active_observation_count > 0`，先保存第 8.2 节输出；之后需要新的代码部署时，重复第 7 章并创建新的 root，不删除本 root。
