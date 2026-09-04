@@ -69,8 +69,20 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
 
 对当前批次的每一个 Task，执行 Agent 严格遵循以下微循环：
 
+0. **跨边界契约真实性前置校验 (Pre-RED Contract Reality Check)**：
+   - 若当前 Task 涉及跨模块依赖（消费上游产物、调用上游存储、加载上游 Attestation 或写下游事件契约）：
+     - 严禁直接在测试或实现中凭借记忆或意图手写伪造 mock dict！
+     - 必须首先定位上游权威 SSOT：检查上游 models/dataclass、canonical serializer、真实 loader、或已提交的上游产物生成器。
+     - 确认待消费字段在上游真实输出中是否存在、数据类型是否严格一致、语义与空值行为是否匹配。
+     - 若发现真实上游与当前实现假设不一致（如缺少字段、类型不匹配等），**严禁在下游用 `.get(k, default)`、假 hash 或偷拷 bytes 等手段本地自圆其说**；必须收集证据并触发 **L1 Rule 12 三分类分流评估 (Three-way Architectural Drift Classification)**：
+       - 若属执行者自身理解偏差或忽略了既有公共 helper/API，判定为 `BLOCKED_IMPLEMENTATION_DEFECT`，在当前批准范围与计划内就地修正；
+       - 若需触碰或修改白名单以外的契约/文件，判定为 `BLOCKED_SCOPE_DRIFT`，中止并申请范围/计划增补；
+       - 仅当已批准的设计/计划与冻结的上游真实契约发生不可调和的结构性冲突时，判定为 `BLOCKED_SPEC_DRIFT`，携带标准 Evidence Packet 升级退回 Design/Plan 工作流。
+
 1. **测试先行 (RED)**：
    - 行为代码、Bug、契约/序列化语义或行为重构：先在 `Allowed verification paths` 中编写 failing test。
+   - **正向跨边界 Fixture 权威来源约束 (L1 Rule 11)**：所有正向测试的输入数据，必须直接通过上游 canonical 构造器/序列化器生成，或经由上游 strict loader 校验通过的真实产物字节，严禁使用跳过上游校验的伪造字典。
+   - **负向防御测试约束**：负向/fail-closed 测试应优先使用显式单点变异（Single-Point Mutation）以隔离验证因果关系；仅当已批准的状态机/生命周期不变量本身要求复合状态时（如失败恢复、多阶段写失败、部分回滚），允许声明并明确列举多点变异，且必须通过断言证明被系统安全拦截并终止。
    - 运行测试，确认因预期的原因失败。
    - 文档、Fixture metadata、生成物和部署命令：执行 Plan 声明的最小可执行验证，不制造无意义 TDD 测试。配置修改必须有 Plan 明确授权和相应行为验证。
 
@@ -82,7 +94,7 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
 3. **重构与精简 (REFACTOR)**：
    - 保持测试通过的同时精简代码。
 
-4. **Task 级 Scope 校验 (硬性拦截)**：
+4. **Task 级 Scope 校验与防投机扫描 (硬性拦截)**：
    - 每次 Task 完成后检查当前的实际变动路径：
      ```bash
      git diff --name-only "$BASE_SHA"
@@ -90,8 +102,15 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
      git status --short --untracked-files=all
      git ls-files --others --exclude-standard
      ```
-   - **硬门禁**：所有变动路径必须严格落在 `Allowed Change Scope` 白名单内！
-   - 若发现越界、全库格式化或无关文件被触碰（例如误跑 `ruff --fix .`），立即停止；保存当前 diff 和基线比对结果，不得自动 `git checkout`、`git reset` 或删除文件。由用户决定保留、拆分或回退。
+   - **硬门禁 1 (范围白名单)**：所有变动路径必须严格落在 `Allowed Change Scope` 白名单内！
+     若发现越界、全库格式化或无关文件被触碰（例如误跑 `ruff --fix .`），立即停止；保存当前 diff 和基线比对结果，不得自动 `git checkout`、`git reset` 或删除文件。由用户决定保留、拆分或回退。
+   - **硬门禁 2 (AST 差分防投机扫描)**：
+     运行 AST 静态防投机扫描器，自动覆盖从 `$BASE_SHA` 到当前工作态的全量变更（committed、staged、unstaged 与 untracked Python 文件）：
+     ```bash
+     python3 .agent/tools/anti_shortcut_scan.py --base-sha "$BASE_SHA"
+     ```
+     - **Fail-Closed 判定**：扫描器返回任何非 0 退出码（包括语法错误、文件读取失败、`RULE-AST-00-SCANNER-INTEGRITY` 或任何 `ERROR` 级别违规），Task 门禁立即失败，必须彻底修复，严禁进入下一 Task。
+     - **Warning 处置台账 (Disposition Ledger)**：扫描器若产生 `WARNING`（如普通字典 `.get()` 字面值回退、`.setdefault()`），严禁静默忽略；执行 Agent 必须在 Task Execution Report 中记录《Scanner Disposition Ledger》，逐条给出技术说明，证明其未侵蚀严格契约 Schema。
 
 5. **批次检查点**：
    - 汇报完成的 Task、精确验证命令和结果、实际变动路径及未解决问题。
@@ -126,9 +145,18 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
    - 调用 `verification-before-completion`，运行 Plan 要求的完整 targeted/integration/deployment/safety verification，并运行 `git diff --check "$BASE_SHA"` 与 `git diff --cached --check "$BASE_SHA"`。
    - 对重大代码修改调用 `requesting-code-review`；修复其必须问题后重新运行受影响验证。
    - 输出不落库的《Task Execution Report》：Plan hash、`BASE_SHA`、baseline 目录、每个 Task 的文件/符号、验证命令与结果、实际变动路径和未解决问题。
-2. **交接独立 Completion Audit（裁判员视角）**：
+2. **交接独立 Completion Audit（裁判员视角与盲审交接协议）**：
    - 由**独立 Subagent / 独立 Session / 用户**运行 [`.agent/skills/audit-plan-completion`](../skills/audit-plan-completion/SKILL.md)。
-   - 独立审计视角审查：白名单合规性、生产 Runner 是否真正接入新逻辑、部署 Glob 转义正确性。
+   - **盲审交接协议 (Blind-First Audit Handoff Protocol)**：
+     - 执行 Agent 交接给独立审计员时，仅移交客观权威输入元数据：
+       1. Approved Implementation Plan 路径与 SHA-256；
+       2. Approved Design 路径与 SHA-256；
+       3. Planning `BASE_SHA`；
+       4. Pre-execution Baseline 目录路径 (`EXECUTION_BASELINE_DIR`)；
+       5. `Allowed Change Scope` 白名单路径集合；
+       6. 执行过程中客观记录的未决已知缺陷或阻塞（若有）。
+     - **严禁向审计 Subagent 注入“所有任务均已完美完成/完全达标”等自我证明型自夸总结**，避免审计员产生证实偏误与锚定效应 (Anchoring Bias)。审计员必须基于权威文档和源码事实独立进行证据收集与判决。
+   - 独立审计视角审查：白名单合规性、生产 Runner 是否真正接入新逻辑、部署 Glob 转义正确性、不可变式生产接线映射、测试夹具权威来源。
    - 只有当 Completion Audit 给出 **`complete`** 结论时，整体开发才正式判定为完成。
 
 ---
