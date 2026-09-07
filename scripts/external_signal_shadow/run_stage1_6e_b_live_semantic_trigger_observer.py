@@ -34,7 +34,9 @@ from src.research.external_signal_shadow.stage1_6e_b_live_semantic_observer_stor
     validate_post_root_equality,
 )
 
-_SOURCE_RUN_ID_RE = re.compile(r"^stage1_6b_live_source_[0-9]{8}T[0-9]{6}Z_[0-9a-f]{32}$")
+_SOURCE_RUN_ID_RE = re.compile(
+    r"^stage1_6[bd]_live_(?:source_)?[0-9]{8}T[0-9]{6}Z(?:_[0-9a-f]{32})?$"
+)
 _GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
