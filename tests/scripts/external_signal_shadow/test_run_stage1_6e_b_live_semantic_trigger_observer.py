@@ -6,6 +6,8 @@ import argparse
 import hashlib
 import json
 import os
+import socket
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,6 +76,17 @@ from src.research.external_signal_shadow.stage1_6e_b_live_semantic_observer_mode
 )
 from src.research.external_signal_shadow.stage1_6e_b_live_semantic_observer_storage import (
     write_atomic_json,
+)
+
+CANONICAL_STAGE1_6D_RUN_ID = "stage1_6d_live_20260907T123941Z"
+REJECTED_SOURCE_RUN_IDS = (
+    "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+    "stage1_6b_live_20260904T120000Z",
+    "stage1_6b_live_20260904T120000Z_0123456789abcdef0123456789abcdef",
+    "stage1_6d_live_source_20260904T120000Z",
+    "stage1_6d_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+    "stage1_6d_live_20260904T120000Z_ABCDEF",
+    "stage1_6d_live_20260904T120000Z/../../x",
 )
 
 
@@ -404,7 +417,7 @@ def test_cli_arg_parsing_and_validations():
     required_args = [
         "--e-a-root", "/data/ea",
         "--source-root", "/data/source",
-        "--source-run-id", "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+        "--source-run-id", CANONICAL_STAGE1_6D_RUN_ID,
         "--e-b-supervisor-root", "/data/sup",
         "--e-b-events-root", "/data/events",
         "--deployment-git-commit", "a" * 40,
@@ -423,7 +436,7 @@ def test_cli_arg_parsing_and_validations():
             argparse.Namespace(
                 e_a_root="relative/path",
                 source_root="/data/source",
-                source_run_id="stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+                source_run_id=CANONICAL_STAGE1_6D_RUN_ID,
                 e_b_supervisor_root="/data/sup",
                 e_b_events_root="/data/events",
                 deployment_git_commit="a" * 40,
@@ -455,7 +468,7 @@ def test_cli_arg_parsing_and_validations():
             argparse.Namespace(
                 e_a_root="/data/ea",
                 source_root="/data/source",
-                source_run_id="stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+                source_run_id=CANONICAL_STAGE1_6D_RUN_ID,
                 e_b_supervisor_root="/data/sup",
                 e_b_events_root="/data/events",
                 deployment_git_commit="short_sha",
@@ -466,6 +479,52 @@ def test_cli_arg_parsing_and_validations():
         )
 
 
+def test_source_run_id_grammar_lexical_contract() -> None:
+    assert runner_module._SOURCE_RUN_ID_RE.fullmatch(CANONICAL_STAGE1_6D_RUN_ID)
+    assert all(
+        runner_module._SOURCE_RUN_ID_RE.fullmatch(run_id) is None
+        for run_id in REJECTED_SOURCE_RUN_IDS
+    )
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    REJECTED_SOURCE_RUN_IDS,
+)
+def test_invalid_source_run_id_fails_before_runtime_side_effects(
+    run_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def forbidden(name: str):
+        def _forbidden(*args, **kwargs):
+            calls.append(name)
+            raise AssertionError(f"forbidden runtime side effect: {name}")
+        return _forbidden
+
+    monkeypatch.setattr(runner_module, "get_vps_step_a_projection", forbidden("step_a"))
+    monkeypatch.setattr(runner_module, "validate_e_a_runtime_gate", forbidden("e_a_gate"))
+    monkeypatch.setattr(runner_module, "Stage16EBStorageGuard", forbidden("storage_guard"))
+    monkeypatch.setattr(runner_module, "Stage16EBSupervisor", forbidden("supervisor_or_root"))
+    monkeypatch.setattr(runner_module, "Stage16EBSourceConsumer", forbidden("source_consumer"))
+    monkeypatch.setattr(runner_module, "Stage16EBPublicClient", forbidden("public_client"))
+    monkeypatch.setattr(socket, "create_connection", forbidden("network_socket"))
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden("network_urlopen"))
+
+    args = _runner_args(
+        e_a_root=Path("/tmp/e_a"),
+        source_root=Path("/tmp/source"),
+        source_run_id=run_id,
+        supervisor_root=Path("/tmp/supervisor"),
+        events_root=Path("/tmp/events"),
+        shared_lock=Path("/tmp/shared.lock"),
+    )
+    with pytest.raises(ValueError) as exc_info:
+        run_observer(args)
+    assert str(exc_info.value) == f"invalid_source_run_id_format: {run_id}"
+    assert calls == []
+
+
 def test_financial_safety_invariants(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(base, "RISK_LIVE_TRADING_ENABLED", True)
     with pytest.raises(RuntimeError, match="RISK_LIVE_TRADING_ENABLED must be False"):
@@ -473,7 +532,7 @@ def test_financial_safety_invariants(monkeypatch: pytest.MonkeyPatch):
             argparse.Namespace(
                 e_a_root="/data/ea",
                 source_root="/data/source",
-                source_run_id="stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef",
+                source_run_id=CANONICAL_STAGE1_6D_RUN_ID,
                 e_b_supervisor_root="/data/sup",
                 e_b_events_root="/data/events",
                 deployment_git_commit="a" * 40,
@@ -488,7 +547,7 @@ def test_runner_bootstrap_does_not_construct_public_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
     supervisor_root = tmp_path / "supervisor_bootstrap"
     events_root = tmp_path / "events_bootstrap"
@@ -515,7 +574,7 @@ def test_runner_bootstrap_does_not_construct_public_client(
 
 def test_runner_e2e_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
 
     sup_root = tmp_path / "supervisor"
@@ -576,7 +635,7 @@ def test_runner_e2e_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_runner_c5_recovery_from_uncreated_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
 
     sup_root = tmp_path / "supervisor_c5_rec"
@@ -640,7 +699,7 @@ def test_runner_c5_recovery_from_uncreated_admission(tmp_path: Path, monkeypatch
 
 def test_runner_c6_recovery_from_existing_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
 
     sup_root = tmp_path / "supervisor_c6_rec"
@@ -718,7 +777,7 @@ def test_runner_startup_recovery_blocks_c8_c9_terminal_bypasses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
     sup_root = tmp_path / "supervisor_terminal_recovery"
     events_root = tmp_path / "events_terminal_recovery"
@@ -786,7 +845,7 @@ def test_runner_startup_recovery_blocks_c8_c9_terminal_bypasses(
 
 def test_runner_c5_pre_root_equality_rejection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ea_root = _setup_mock_ea(tmp_path)
-    run_id = "stage1_6b_live_source_20260904T120000Z_0123456789abcdef0123456789abcdef"
+    run_id = CANONICAL_STAGE1_6D_RUN_ID
     source_root = _setup_mock_source(tmp_path, run_id)
 
     sup_root = tmp_path / "supervisor_c5_pre_fail"
