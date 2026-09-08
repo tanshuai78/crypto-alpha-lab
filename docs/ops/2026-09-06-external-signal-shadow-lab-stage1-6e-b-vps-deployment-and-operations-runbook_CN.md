@@ -144,10 +144,12 @@ echo "1.6E-A Audit Root Status: PASS ($E_A_STATUS)"
 echo "=== 2.2 自动探测上游 1.6D 活跃公告源目录 ==="
 # 1.6D 运行在 stage1_6b namespace 下，寻找最新且未失败的 live_observation run_id
 LATEST_1_6D_ROOT=$(find /root/crypto-alpha-lab/data/external_signal_shadow/stage1_6b/live_observation/ \
-  -maxdepth 1 -mindepth 1 -type d -name "stage1_6b_live_source_*" | sort -r | head -n 1)
+  -maxdepth 1 -mindepth 1 -type d \( -name "stage1_6d_live_*" -o -name "stage1_6b_live_source_*" \) | sort -r | head -n 1)
 
 test -n "$LATEST_1_6D_ROOT" || { echo "STOP: No active 1.6D live source directory found!" >&2; exit 1; }
-test -f "$LATEST_1_6D_ROOT/live_checkpoint.json" || { echo "STOP: 1.6D live_checkpoint.json missing" >&2; exit 1; }
+test -f "$LATEST_1_6D_ROOT/observer_checkpoint.json" || { echo "STOP: 1.6D observer_checkpoint.json missing" >&2; exit 1; }
+test -f "$LATEST_1_6D_ROOT/capture_run_contract.json" || { echo "STOP: 1.6D capture_run_contract.json missing" >&2; exit 1; }
+test -f "$LATEST_1_6D_ROOT/source_profile_probe_attestation.json" || { echo "STOP: 1.6D source_profile_probe_attestation.json missing" >&2; exit 1; }
 
 SOURCE_RUN_ID=$(basename "$LATEST_1_6D_ROOT")
 echo "Detected 1.6D Source Root: $LATEST_1_6D_ROOT"
@@ -160,7 +162,7 @@ echo "export SOURCE_RUN_ID='$SOURCE_RUN_ID'" >> /tmp/stage1_6e_b_detected_source
 echo "=== 2.3 检查宿主机磁盘与文件系统 ==="
 FREE_GB=$(df -BG /root/crypto-alpha-lab | awk 'NR==2 {gsub("G",""); print $4}')
 echo "Available Disk Space: ${FREE_GB} GB"
-test "$FREE_GB" -ge 10 || { echo "STOP: Insufficient disk space (< 10GB)" >&2; exit 1; }
+test "$FREE_GB" -ge 8 || { echo "STOP: Insufficient disk space (< 8GB)" >&2; exit 1; }
 
 echo "=== 2.4 检查硬件指纹 (/etc/machine-id) ==="
 test -f /etc/machine-id || { echo "STOP: /etc/machine-id not found on VPS!" >&2; exit 1; }
@@ -291,9 +293,9 @@ BASH
   tail -f /root/crypto-alpha-lab/logs/stage1_6e_b/$(ls -t /root/crypto-alpha-lab/logs/stage1_6e_b/ | head -n 1)
   ```
 
-* **查看 Supervisor 检查点状态**：
+* **查看 Supervisor 消费检查点状态**：
   ```bash
-  python3 -m json.tool /root/crypto-alpha-lab/data/external_signal_shadow/stage1_6e_b/supervisor/supervisor_checkpoint.json
+  python3 -m json.tool /root/crypto-alpha-lab/data/external_signal_shadow/stage1_6e_b/supervisor/source_consumer_checkpoint.json
   ```
 
 * **查看是否有新捕获的下架事件目录**：
