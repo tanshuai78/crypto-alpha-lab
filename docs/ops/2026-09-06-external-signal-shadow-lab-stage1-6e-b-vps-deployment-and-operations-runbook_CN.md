@@ -5,7 +5,7 @@
 - **范围:** Stage 1.6E-B Binance USD-M 下架公告实时语义触发与事件级行情观察器的 VPS 实机部署、现场预检、试运行与常驻运维手册
 - **代码变更:** `false`（本手册为操作指导文档，不修改任何业务代码）
 - **硬安全开关:** `RISK_LIVE_TRADING_ENABLED = false`
-- **绑定的已审核部署 Commit:** `5b168caad9e2e6553e95bb1a7429196be0892ab3`
+- **绑定的已审核部署 Commit:** `854916fd531cbd61a166d81d46107e2cbfc2acb9`
 - **权限边界:**
   - `RISK_LIVE_TRADING_ENABLED = false`
   - `execution_feasibility_claim_allowed = false`
@@ -23,6 +23,7 @@
   - 核心设计: [docs/designs/2026-09-03-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-design_CN.md](../designs/2026-09-03-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-design_CN.md)
   - 修复设计: [docs/designs/2026-09-04-external-signal-shadow-lab-stage1-6e-b-completion-remediation-delta-design_CN.md](../designs/2026-09-04-external-signal-shadow-lab-stage1-6e-b-completion-remediation-delta-design_CN.md)
   - 实施计划: [docs/plans/2026-09-06-external-signal-shadow-lab-stage1-6e-b-profilecore-provenance-and-raw-cap-remediation-implementation-plan_CN.md](../plans/2026-09-06-external-signal-shadow-lab-stage1-6e-b-profilecore-provenance-and-raw-cap-remediation-implementation-plan_CN.md)
+  - 语法收紧计划: [docs/plans/2026-09-07-external-signal-shadow-lab-stage1-6e-b-source-run-id-grammar-remediation-implementation-plan_CN.md](../plans/2026-09-07-external-signal-shadow-lab-stage1-6e-b-source-run-id-grammar-remediation-implementation-plan_CN.md)
   - 独立审计: 审计裁决 `complete`（无 P0/P1/P2 发现）
 
 ---
@@ -49,7 +50,7 @@ cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
 # 1. 固化的部署 Commit SHA (不可篡改)
-export DEPLOY_COMMIT="5b168caad9e2e6553e95bb1a7429196be0892ab3"
+export DEPLOY_COMMIT="854916fd531cbd61a166d81d46107e2cbfc2acb9"
 
 # 2. 上游 1.6E-A 官方审计封签根目录 (已在 2026-09-03 实机验证封存)
 export E_A_ROOT="/root/crypto-alpha-lab/data/external_signal_shadow/stage1_6e/capability_audits/stage1_6e_a_capability_20260903T073227Z_c431d5be400aabe216f15c6bf6bee48f"
@@ -79,7 +80,7 @@ cd /Users/tanshuai/Desktop/AI-test/crypto-alpha-lab
 git status --short --untracked-files=all
 
 # 确认当前 HEAD SHA
-test "$(git rev-parse HEAD)" = "5b168caad9e2e6553e95bb1a7429196be0892ab3" && echo "Local Commit Verified: PASS"
+test "$(git rev-parse HEAD)" = "854916fd531cbd61a166d81d46107e2cbfc2acb9" && echo "Local Commit Verified: PASS"
 
 # 推送代码至远程仓库 (根据当前跟踪分支执行 push)
 git push
@@ -95,7 +96,7 @@ source .venv/bin/activate
 
 # 1. 拉取代码
 git fetch --all
-git checkout 5b168caad9e2e6553e95bb1a7429196be0892ab3
+git checkout 854916fd531cbd61a166d81d46107e2cbfc2acb9
 
 # 2. 检查工作树纯净性 (禁止任何 dirty 或 untracked 业务文件)
 test -z "$(git status --short --untracked-files=all)" || {
