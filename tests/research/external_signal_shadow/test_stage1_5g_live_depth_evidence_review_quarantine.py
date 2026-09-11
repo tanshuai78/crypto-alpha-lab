@@ -1,7 +1,11 @@
 import hashlib
 import json
 import os
+from pathlib import Path
 
+import pytest
+
+from src.research.external_signal_shadow.safety import canonical_json_dumps
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     compute_raw_snapshot_quarantine_metrics,
     verify_source_evidence_manifest,
@@ -614,42 +618,338 @@ def test_quarantine_v2_5_symbol_with_1_broken_symbol_fails_all_pass_gates():
     assert result.get("quarantined_depth_evidence_pass") is not True
 
 
-def test_quarantine_v2_closed_artifact_bundle_round_trip(tmp_path):
+EXPECTED_GATE_KEYS = {
+    "schema_version",
+    "source_runtime_attestation_gate_verified",
+    "stage1_5g_review_id",
+    "source_evidence_manifest_sha256",
+    "consumer_process_instance_id",
+    "consumer_root_id",
+    "consumer_process_started_at_ms",
+    "consumer_startup_commit_sha",
+    "consumer_root_contract_sha256",
+    "consumer_runtime_manifest_sha256",
+    "consumer_static_attestation_verified",
+    "consumer_runtime_attestation_verified",
+    "consumer_runtime_attestation_compromised",
+    "source_runtime_attestation_authority_sha256",
+}
+
+
+def _make_valid_task3_fixture_bundle(review_root: Path) -> tuple[dict, dict, dict, dict[str, Path]]:
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_stage1_5f_source_runtime_authority,
+        verify_source_evidence_manifest,
+    )
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
+        make_stage1_5f_fixture_root,
+    )
+
+    review_root.mkdir(parents=True, exist_ok=True)
+    src_root = make_stage1_5f_fixture_root(review_root.parent / "stage1_5f_source")
+    source_ok, src_manifest_sha, _ = verify_source_evidence_manifest(src_root)
+    assert source_ok is True
+    src_summary = json.loads((src_root / "live_depth_observer_summary.json").read_text(encoding="utf-8"))
+    source_authority, auth_blockers = validate_stage1_5f_source_runtime_authority(
+        stage1_5f_root=src_root,
+        summary=src_summary,
+        source_evidence_manifest_sha256=src_manifest_sha,
+    )
+    assert not auth_blockers and bool(source_authority)
+
+    summary_file = review_root / "stage1_5g_live_depth_evidence_review_summary.json"
+    quarantine_file = review_root / "stage1_5g_quarantine_summary.json"
+    invalid_rows_file = review_root / "quarantined_invalid_book_rows.jsonl"
+    valid_rows_file = review_root / "depth_quality_input_rows.jsonl"
+    gate_file = review_root / "stage1_5g_runtime_attestation_gate.json"
+
+    rev_id = "a" * 64
+
+    summary_data = {
+        "schema_version": 2,
+        "stage1_5g_review_id": rev_id,
+        "stage1_5f_output_root": str(src_root),
+        "source_evidence_manifest_sha256": src_manifest_sha,
+        "formal_completed_event_symbol_ids_sha256": "c" * 64,
+        "decision": "stage1_5g_depth_evidence_quarantined_pass",
+        "clean_depth_evidence_pass": False,
+        "quarantined_depth_evidence_pass": True,
+    }
+    quarantine_data = {
+        "stage1_5g_review_id": rev_id,
+        "source_evidence_manifest_sha256": src_manifest_sha,
+        "formal_completed_event_symbol_ids_sha256": "c" * 64,
+        "quarantined_depth_evidence_pass": True,
+    }
+
+    gate_payload_without_hash = {
+        "schema_version": 1,
+        "source_runtime_attestation_gate_verified": True,
+        "stage1_5g_review_id": rev_id,
+        "source_evidence_manifest_sha256": src_manifest_sha,
+        **source_authority,
+    }
+    auth_sha = hashlib.sha256(canonical_json_dumps(gate_payload_without_hash).encode("utf-8")).hexdigest()
+    gate_payload = {
+        **gate_payload_without_hash,
+        "source_runtime_attestation_authority_sha256": auth_sha,
+    }
+
+    summary_file.write_text(json.dumps(summary_data, indent=2), encoding="utf-8")
+    quarantine_file.write_text(json.dumps(quarantine_data, indent=2), encoding="utf-8")
+    invalid_rows_file.write_text(json.dumps({"depth_status": "invalid"}) + "\n", encoding="utf-8")
+    valid_rows_file.write_text(json.dumps({"best_bid": 100.0, "best_ask": 100.1}) + "\n", encoding="utf-8")
+    gate_file.write_text(json.dumps(gate_payload, indent=2), encoding="utf-8")
+
+    artifact_paths = {
+        "summary": summary_file,
+        "quarantine_summary": quarantine_file,
+        "quarantined_invalid_book_rows": invalid_rows_file,
+        "depth_quality_input_rows": valid_rows_file,
+        "runtime_attestation_gate": gate_file,
+    }
+    return summary_data, source_authority, gate_payload, artifact_paths
+
+
+def test_quarantine_v3_closed_artifact_bundle_round_trip(tmp_path):
     from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
         verify_stage1_5g_review_manifest,
         write_stage1_5g_review_manifest,
     )
 
     review_root = tmp_path / "closed_review_run"
-    review_root.mkdir(parents=True, exist_ok=True)
+    summary_data, _, _, artifact_paths = _make_valid_task3_fixture_bundle(review_root)
 
-    summary_file = review_root / "stage1_5g_live_depth_evidence_review_summary.json"
-    quarantine_file = review_root / "stage1_5g_quarantine_summary.json"
-    invalid_rows_file = review_root / "quarantined_invalid_book_rows.jsonl"
-    valid_rows_file = review_root / "depth_quality_input_rows.jsonl"
-
-    summary_data = {"schema_version": 2, "stage1_5g_review_id": "rev_123", "decision": "stage1_5g_depth_evidence_quarantined_pass"}
-    quarantine_data = {"stage1_5g_review_id": "rev_123", "quarantined_depth_evidence_pass": True}
-
-    summary_file.write_text(json.dumps(summary_data), encoding="utf-8")
-    quarantine_file.write_text(json.dumps(quarantine_data), encoding="utf-8")
-    invalid_rows_file.write_text(json.dumps({"depth_status": "invalid"}) + "\n", encoding="utf-8")
-    valid_rows_file.write_text(json.dumps({"best_bid": 100.0, "best_ask": 100.1}) + "\n", encoding="utf-8")
-
-    manifest_path = write_stage1_5g_review_manifest(review_root, summary_data, {
-        "summary": summary_file,
-        "quarantine_summary": quarantine_file,
-        "quarantined_invalid_book_rows": invalid_rows_file,
-        "depth_quality_input_rows": valid_rows_file,
-    })
-
+    manifest_path = write_stage1_5g_review_manifest(review_root, summary_data, artifact_paths)
     assert manifest_path.exists()
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_data["schema_version"] == 3
+    assert set(manifest_data["artifacts"].keys()) == {
+        "summary",
+        "quarantine_summary",
+        "quarantined_invalid_book_rows",
+        "depth_quality_input_rows",
+        "runtime_attestation_gate",
+    }
+
     ok, blockers = verify_stage1_5g_review_manifest(review_root)
     assert ok is True
     assert blockers == []
 
-    # Tamper with invalid rows file
-    invalid_rows_file.write_text(json.dumps({"tampered": True}) + "\n", encoding="utf-8")
-    ok_tampered, blockers_tampered = verify_stage1_5g_review_manifest(review_root)
-    assert ok_tampered is False
-    assert "stage1_5g_quarantine_v2_artifact_mismatch" in blockers_tampered
+
+def test_write_stage1_5g_runtime_attestation_gate_produces_exact_14_keys(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        write_stage1_5g_runtime_attestation_gate,
+    )
+
+    review_root = tmp_path / "gate_write_test"
+    review_root.mkdir(parents=True, exist_ok=True)
+    summary_data, source_authority, _, _ = _make_valid_task3_fixture_bundle(review_root)
+
+    gate_path = write_stage1_5g_runtime_attestation_gate(
+        review_root,
+        summary=summary_data,
+        source_authority=source_authority,
+    )
+    assert gate_path.is_file()
+    payload = json.loads(gate_path.read_text(encoding="utf-8"))
+    assert set(payload.keys()) == EXPECTED_GATE_KEYS
+    assert payload["schema_version"] == 1
+    assert payload["source_runtime_attestation_gate_verified"] is True
+    assert payload["consumer_static_attestation_verified"] is True
+    assert payload["consumer_runtime_attestation_verified"] is True
+    assert payload["consumer_runtime_attestation_compromised"] is False
+    assert payload["stage1_5g_review_id"] == summary_data["stage1_5g_review_id"]
+    assert payload["source_evidence_manifest_sha256"] == summary_data["source_evidence_manifest_sha256"]
+
+    # Verify authority self-hash
+    payload_without_hash = {k: v for k, v in payload.items() if k != "source_runtime_attestation_authority_sha256"}
+    expected_hash = hashlib.sha256(canonical_json_dumps(payload_without_hash).encode("utf-8")).hexdigest()
+    assert payload["source_runtime_attestation_authority_sha256"] == expected_hash
+
+
+def test_write_stage1_5g_runtime_attestation_gate_precondition_rejections(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        write_stage1_5g_runtime_attestation_gate,
+    )
+
+    review_root = tmp_path / "gate_precondition_test"
+    summary_data, source_authority, _, _ = _make_valid_task3_fixture_bundle(review_root)
+
+    # 1. Decision not quarantined pass
+    bad_summary = dict(summary_data, decision="stage1_5g_depth_evidence_clean_pass")
+    with pytest.raises(ValueError):
+        write_stage1_5g_runtime_attestation_gate(review_root, summary=bad_summary, source_authority=source_authority)
+
+    # 2. quarantined_depth_evidence_pass not True
+    bad_summary2 = dict(summary_data, quarantined_depth_evidence_pass=False)
+    with pytest.raises(ValueError):
+        write_stage1_5g_runtime_attestation_gate(review_root, summary=bad_summary2, source_authority=source_authority)
+
+    # 3. clean_depth_evidence_pass not False
+    bad_summary3 = dict(summary_data, clean_depth_evidence_pass=True)
+    with pytest.raises(ValueError):
+        write_stage1_5g_runtime_attestation_gate(review_root, summary=bad_summary3, source_authority=source_authority)
+
+    # 4. source_authority compromised
+    bad_auth = dict(source_authority, consumer_runtime_attestation_compromised=True)
+    with pytest.raises(ValueError):
+        write_stage1_5g_runtime_attestation_gate(review_root, summary=summary_data, source_authority=bad_auth)
+
+    # 5. source_authority missing required key
+    bad_auth2 = {k: v for k, v in source_authority.items() if k != "consumer_process_instance_id"}
+    with pytest.raises(ValueError):
+        write_stage1_5g_runtime_attestation_gate(review_root, summary=summary_data, source_authority=bad_auth2)
+
+
+def test_verify_manifest_rejects_v2_manifest(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        verify_stage1_5g_review_manifest,
+        write_stage1_5g_review_manifest,
+    )
+
+    review_root = tmp_path / "v2_manifest_test"
+    summary_data, _, _, artifact_paths = _make_valid_task3_fixture_bundle(review_root)
+    # Exclude gate proof so v2 is written
+    v2_artifact_paths = {k: v for k, v in artifact_paths.items() if k != "runtime_attestation_gate"}
+    write_stage1_5g_review_manifest(review_root, summary_data, v2_artifact_paths)
+
+    ok, blockers = verify_stage1_5g_review_manifest(review_root)
+    assert ok is False
+    assert blockers == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_verify_manifest_rejects_missing_or_corrupt_manifest(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        verify_stage1_5g_review_manifest,
+    )
+
+    review_root = tmp_path / "missing_manifest_test"
+    review_root.mkdir(parents=True, exist_ok=True)
+    ok, blockers = verify_stage1_5g_review_manifest(review_root)
+    assert ok is False
+    assert blockers == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    manifest_p = review_root / "stage1_5g_review_manifest.json"
+    manifest_p.write_text("{corrupt_json\n", encoding="utf-8")
+    ok2, blockers2 = verify_stage1_5g_review_manifest(review_root)
+    assert ok2 is False
+    assert blockers2 == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_verify_manifest_rejects_tampered_proof_self_hash(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        verify_stage1_5g_review_manifest,
+        write_stage1_5g_review_manifest,
+    )
+
+    review_root = tmp_path / "tampered_self_hash_test"
+    summary_data, _, _, artifact_paths = _make_valid_task3_fixture_bundle(review_root)
+
+    # Tamper with authority hash inside gate proof
+    gate_file = artifact_paths["runtime_attestation_gate"]
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data["source_runtime_attestation_authority_sha256"] = "0" * 64
+    gate_file.write_text(json.dumps(gate_data, indent=2), encoding="utf-8")
+
+    write_stage1_5g_review_manifest(review_root, summary_data, artifact_paths)
+    ok, blockers = verify_stage1_5g_review_manifest(review_root)
+    assert ok is False
+    assert blockers == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_verify_manifest_rejects_unexpected_or_missing_proof_keys(tmp_path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        verify_stage1_5g_review_manifest,
+        write_stage1_5g_review_manifest,
+    )
+
+    # Extra key
+    review_root1 = tmp_path / "extra_key_test"
+    summary_data1, _, _, artifact_paths1 = _make_valid_task3_fixture_bundle(review_root1)
+    gate_file1 = artifact_paths1["runtime_attestation_gate"]
+    gate_data1 = json.loads(gate_file1.read_text(encoding="utf-8"))
+    gate_data1["unexpected_extra_key"] = "forbidden"
+    gate_without_hash = {k: v for k, v in gate_data1.items() if k != "source_runtime_attestation_authority_sha256"}
+    gate_data1["source_runtime_attestation_authority_sha256"] = hashlib.sha256(canonical_json_dumps(gate_without_hash).encode("utf-8")).hexdigest()
+    gate_file1.write_text(json.dumps(gate_data1, indent=2), encoding="utf-8")
+    write_stage1_5g_review_manifest(review_root1, summary_data1, artifact_paths1)
+
+    ok1, blockers1 = verify_stage1_5g_review_manifest(review_root1)
+    assert ok1 is False
+    assert blockers1 == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    # Missing key
+    review_root2 = tmp_path / "missing_key_test"
+    summary_data2, _, _, artifact_paths2 = _make_valid_task3_fixture_bundle(review_root2)
+    gate_file2 = artifact_paths2["runtime_attestation_gate"]
+    gate_data2 = json.loads(gate_file2.read_text(encoding="utf-8"))
+    del gate_data2["consumer_process_instance_id"]
+    gate_without_hash2 = {k: v for k, v in gate_data2.items() if k != "source_runtime_attestation_authority_sha256"}
+    gate_data2["source_runtime_attestation_authority_sha256"] = hashlib.sha256(canonical_json_dumps(gate_without_hash2).encode("utf-8")).hexdigest()
+    gate_file2.write_text(json.dumps(gate_data2, indent=2), encoding="utf-8")
+    write_stage1_5g_review_manifest(review_root2, summary_data2, artifact_paths2)
+
+    ok2, blockers2 = verify_stage1_5g_review_manifest(review_root2)
+    assert ok2 is False
+    assert blockers2 == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+@pytest.mark.parametrize(
+    ("field", "mutated_value"),
+    [
+        ("consumer_process_instance_id", "99999999-9999-4999-8999-999999999999"),
+        ("consumer_root_id", "9" * 64),
+        ("consumer_process_started_at_ms", 1_799_999_999_000),
+        ("consumer_startup_commit_sha", "9" * 40),
+        ("consumer_root_contract_sha256", "9" * 64),
+        ("consumer_runtime_manifest_sha256", "9" * 64),
+        ("consumer_static_attestation_verified", False),
+        ("consumer_runtime_attestation_verified", False),
+        ("consumer_runtime_attestation_compromised", True),
+        ("stage1_5g_review_id", "9" * 64),
+        ("source_evidence_manifest_sha256", "9" * 64),
+        ("consumer_process_instance_id", "not-a-valid-uuid"),
+        ("consumer_root_id", "not-a-valid-hex-root-id"),
+        ("consumer_process_started_at_ms", 0),
+        ("consumer_startup_commit_sha", "short_sha"),
+        ("consumer_root_contract_sha256", "invalid_sha256"),
+        ("consumer_runtime_manifest_sha256", "invalid_manifest_sha"),
+    ],
+)
+def test_verify_manifest_semantic_linkage_mutations_rejected(tmp_path, field, mutated_value):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        verify_stage1_5g_review_manifest,
+        write_stage1_5g_review_manifest,
+    )
+
+    review_root = tmp_path / f"linkage_mut_{field}"
+    summary_data, _, _, artifact_paths = _make_valid_task3_fixture_bundle(review_root)
+
+    gate_file = artifact_paths["runtime_attestation_gate"]
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data[field] = mutated_value
+
+    # (1) Recompute and rewrite proof self-hash
+    payload_without_hash = {k: v for k, v in gate_data.items() if k != "source_runtime_attestation_authority_sha256"}
+    gate_data["source_runtime_attestation_authority_sha256"] = hashlib.sha256(
+        canonical_json_dumps(payload_without_hash).encode("utf-8")
+    ).hexdigest()
+    gate_file.write_text(json.dumps(gate_data, indent=2), encoding="utf-8")
+
+    # (2), (3), (4) write_stage1_5g_review_manifest computes exact outer sha256 and byte_count
+    manifest_path = write_stage1_5g_review_manifest(review_root, summary_data, artifact_paths)
+
+    # (5) Assert manifest is structurally/hash/size valid on disk
+    manifest_obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_obj["schema_version"] == 3
+    for art_meta in manifest_obj["artifacts"].values():
+        target = review_root / art_meta["relative_path"]
+        raw = target.read_bytes()
+        assert len(raw) == art_meta["byte_count"]
+        assert hashlib.sha256(raw).hexdigest() == art_meta["sha256"]
+
+    # Verify Stage 1.5H / manifest verifier rejects with exact blocker
+    ok, blockers = verify_stage1_5g_review_manifest(review_root)
+    assert ok is False
+    assert blockers == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]

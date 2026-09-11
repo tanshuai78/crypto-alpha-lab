@@ -206,11 +206,15 @@ def build_live_depth_observer_summary(
         else:
             blocker = "observer_invalid"
 
+    consumer_process_started_at_ms = int(runtime_gate_context.get("consumer_process_started_at_ms", 0))
+
     heartbeat_count = len(heartbeat_rows)
     last_hb_at = 0
     if heartbeat_rows:
         last_hb = heartbeat_rows[-1]
         last_hb_at = last_hb.get("poll_at_ms") if isinstance(last_hb, dict) else getattr(last_hb, "poll_at_ms", 0)
+    elif consumer_process_started_at_ms > 0:
+        last_hb_at = max(int(time.time() * 1000), consumer_process_started_at_ms)
 
     res_valid = (final_decision == "stage1_5f_observer_depth_evidence_collected" and any_valid)
 
@@ -294,6 +298,7 @@ def build_live_depth_observer_summary(
         blocker=blocker,
         summary_generated_at_ms=int(time.time() * 1000),
         consumer_process_instance_id=str(runtime_gate_context.get("consumer_process_instance_id", "")),
+        consumer_process_started_at_ms=consumer_process_started_at_ms,
         consumer_root_id=str(runtime_gate_context.get("consumer_root_id", "")),
         consumer_startup_commit_sha=str(runtime_gate_context.get("consumer_startup_commit_sha", "")),
         consumer_root_contract_sha256=str(runtime_gate_context.get("consumer_root_contract_sha256", "")),

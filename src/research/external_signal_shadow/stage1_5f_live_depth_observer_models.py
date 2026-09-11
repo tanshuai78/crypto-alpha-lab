@@ -374,6 +374,7 @@ class LiveDepthObserverSummary:
     blocker: str | None = None
     summary_generated_at_ms: int = 0
     consumer_process_instance_id: str = ""
+    consumer_process_started_at_ms: int = 0
     consumer_root_id: str = ""
     consumer_startup_commit_sha: str = ""
     consumer_root_contract_sha256: str = ""

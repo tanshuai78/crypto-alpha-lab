@@ -113,16 +113,177 @@ print("VPS_ENVIRONMENT_SECURITY_GATE: PASS")
 BASH
 ```
 
-### 3.3 拉取最新代码至目标 Commit
+### 3.3 Zero-Writer /proc 检查器定义
 
+在签出代码前，必须通过精确的 `/proc/<pid>/cwd` 与 `/proc/<pid>/cmdline` 分析，严格确认目标目录无遗留写入进程。
+
+<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_BEGIN -->
+```python
+from pathlib import Path
+import sys
+
+
+def inspect_writers(
+    proc_root: Path, target_root: Path
+) -> list[dict[str, object]]:
+  """Inspect proc_root (/proc/<pid>/cwd and /proc/<pid>/cmdline) for running writers in target_root.
+
+  A writer matches only when cwd resolves to target_root and argv contains either
+  exact resolved path:
+  scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py
+  scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py
+  """
+  target_resolved = target_root.resolve()
+  target_scripts = {
+      target_resolved
+      / "scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py",
+      target_resolved
+      / "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py",
+  }
+  matches: list[dict[str, object]] = []
+
+  if not proc_root.is_dir():
+    raise RuntimeError(f"proc root not found: {proc_root}")
+
+  for entry in sorted(proc_root.iterdir()):
+    if not entry.is_dir() or not entry.name.isdigit():
+      continue
+    pid = int(entry.name)
+    cwd_link = entry / "cwd"
+    cmdline_file = entry / "cmdline"
+
+    try:
+      cwd = cwd_link.resolve()
+      if not cwd_link.exists():
+        raise FileNotFoundError(f"cwd link missing or broken: {cwd_link}")
+    except Exception as exc:
+      raise RuntimeError(f"Failed to inspect /proc/{pid}/cwd: {exc}") from exc
+
+    try:
+      raw_cmdline = cmdline_file.read_bytes()
+    except Exception as exc:
+      raise RuntimeError(
+          f"Failed to inspect /proc/{pid}/cmdline: {exc}"
+      ) from exc
+
+    if not raw_cmdline:
+      continue
+    argv = [
+        arg.decode("utf-8", errors="replace")
+        for arg in raw_cmdline.split(b"\x00")
+        if arg
+    ]
+    if not argv or cwd != target_resolved:
+      continue
+
+    matched_script = None
+    for arg in argv:
+      if not arg:
+        continue
+      arg_path = Path(arg)
+      resolved_script = (
+          (cwd / arg_path).resolve()
+          if not arg_path.is_absolute()
+          else arg_path.resolve()
+      )
+      if resolved_script in target_scripts:
+        matched_script = str(resolved_script)
+        break
+
+    if matched_script is not None:
+      match_entry: dict[str, object] = {
+          "pid": pid,
+          "cwd": str(cwd),
+          "argv": argv,
+          "script": matched_script,
+      }
+      matches.append(match_entry)
+      print(
+          f"MATCHING_WRITER: pid={pid} cwd={cwd} script={matched_script}"
+          f" argv={argv}",
+          file=sys.stderr,
+      )
+
+  return matches
+
+
+if __name__ == "__main__":
+  target = (
+      Path(sys.argv[1]).resolve()
+      if len(sys.argv) > 1
+      else Path("/root/crypto-alpha-lab").resolve()
+  )
+  writers = inspect_writers(Path("/proc"), target)
+  if writers:
+    print(f"WRITERS_RUNNING={len(writers)}")
+    sys.exit(len(writers))
+  print("ZERO_WRITERS_RUNNING=0")
+  sys.exit(0)
+```
+<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_END -->
+
+### 3.4 优雅停止旧会话、Zero-Writer 门禁与代码签出 (原子部署块)
+
+本节将停止旧会话、30秒超时零写入者门禁核验与代码拉取签出合并为一个严格原子化的部署门禁脚本块：
+
+<!-- STAGE1_5D_1_5F_ZERO_WRITER_DEPLOYMENT_BEGIN -->
 ```bash
+set -euo pipefail
 cd /root/crypto-alpha-lab
+source .venv/bin/activate
+
+# 1. Request D/F tmux stop
+tmux kill-session -t "$STAGE1_5F_SESSION" 2>/dev/null || true
+tmux kill-session -t "$STAGE1_5D_SESSION" 2>/dev/null || true
+
+# 2. Inspect once per second for at most 30 seconds
+INSPECT_ATTEMPTS=0
+ZERO_WRITER_CONFIRMED=false
+
+while [ "$INSPECT_ATTEMPTS" -lt 30 ]; do
+  ACTIVE_COUNT=$(python3 - <<'PY_INSPECT'
+from pathlib import Path
+runbook = Path("docs/ops/2026-09-03-stage1-5d-1-5f-vps-deployment-and-operations-runbook_CN.md").read_text(encoding="utf-8")
+begin = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_BEGIN -->"
+end = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_END -->"
+code = runbook[runbook.index(begin) + len(begin):runbook.index(end)].replace("```python", "").replace("```", "")
+ns = {}
+exec(compile(code, "inspector", "exec"), ns)
+writers = ns["inspect_writers"](Path("/proc"), Path("/root/crypto-alpha-lab"))
+print(len(writers))
+PY_INSPECT
+  )
+  if [ "$ACTIVE_COUNT" -eq 0 ]; then
+    ZERO_WRITER_CONFIRMED=true
+    break
+  fi
+  INSPECT_ATTEMPTS=$((INSPECT_ATTEMPTS + 1))
+  sleep 1
+done
+
+# 3. Final exact count == 0 check
+if [ "$ZERO_WRITER_CONFIRMED" != "true" ]; then
+  echo "STOP=stage1_5d_1_5f_writer_still_running" >&2
+  exit 1
+fi
+
+echo "ZERO_WRITER_CONFIRMED: exact writer count == 0"
+
+# 4. Pull latest code & checkout target commit
 git fetch origin feature/external-signal-shadow-stage1
 git checkout "$DEPLOY_COMMIT"
 
-# 验证当前 HEAD 与期望 DEPLOY_COMMIT 完全一致
-test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" && echo "GIT_SYNC_OK"
+# 5. Assert HEAD == DEPLOY_COMMIT, clean protected worktree, new RUN_ID and fresh roots
+test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT"
+test -z "$(git status --short --untracked-files=all)"
+export RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export STAGE1_5D_EVENTS_OUT="data/external_signal_shadow/stage1_5d/live_event_source_continuous_${RUN_ID}_${ROOT_SUFFIX}"
+export STAGE1_5F_OUT="data/external_signal_shadow/stage1_5f/live_depth_observer_${RUN_ID}_${ROOT_SUFFIX}"
+test ! -e "$STAGE1_5D_EVENTS_OUT"
+test ! -e "$STAGE1_5F_OUT"
+echo "DEPLOYMENT_AND_ZERO_WRITER_GATE_PASSED: HEAD=$DEPLOY_COMMIT RUN_ID=$RUN_ID"
 ```
+<!-- STAGE1_5D_1_5F_ZERO_WRITER_DEPLOYMENT_END -->
 
 ---
 
@@ -130,23 +291,33 @@ test "$(git rev-parse HEAD)" = "$DEPLOY_COMMIT" && echo "GIT_SYNC_OK"
 
 全新 Root 部署适用于大版本发布、严重阻断性缺陷修复，或经批准的计划性重置。
 
-### 4.1 检查运行状态并优雅停止旧会话
+在日常 VPS 运维中，系统运行于 producer-disabled 影子模式。若未来经单独授权开启 `configured_enabled=true`，必须严格保留父级规范中的三阶段启动证明链（E0 -> E1 -> E2）：
+- **E0 (Bootstrap Waiting for Consumer)**: 1.5D 启动，校验静态证明与 Git Ancestry，因尚未配置 1.5F 报告 `BOOTSTRAP_WAITING_FOR_CONSUMER`；
+- **E1 (Consumer Proof Arming)**: 1.5F 在同 output root 和同 HEAD 提交下启动，发布 `observer_root_contract.json` 与 `live_depth_observer_summary.json`；
+- **E2 (Restart & Sticky Latch Protection)**: 1.5D 在同 output root 下重启并正式 arm producer，开启 sticky compromised 保护。
+严禁将上述流程简化为无验证的单向 D -> F 启动。
 
-在启动新进程前，必须确保没有遗留的 Python 采集器或观测器在后台运行：
+### 4.1 确认后台无旧写入者 (Zero-Writer 门禁核验)
+
+在 3.4 节原子部署块中，已通过 `/proc` 检查器与 30 秒超时门禁完成旧会话的优雅停止与零写入者核验。若执行非部署的普通服务重启，可执行以下命令快速核验当前零写入者状态：
 
 ```bash
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
-# 1. 查看当前运行中的采集与观测进程（使用精准进程过滤，排除 tmux 进程干扰）
-ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/)' || true
-
-# 2. 若存在正在运行的旧会话，优雅杀掉 tmux session
-tmux kill-session -t "$STAGE1_5F_SESSION" 2>/dev/null || true
-tmux kill-session -t "$STAGE1_5D_SESSION" 2>/dev/null || true
-
-# 3. 确认所有后台 Python 进程已彻底退出 (输出必须为空)
-test -z "$(ps -eo pid=,ppid=,comm=,args= | awk '$3 ~ /^python/ && (/run_stage1_5d_live_event_source_smoke_collector.py/ || /run_stage1_5f_live_depth_observer.py/)')" && echo "ZERO_WRITER_VERIFIED"
+# 确认所有后台 Python 写入进程已彻底退出 (输出必须为 0)
+python3 - <<'PY'
+from pathlib import Path
+runbook = Path("docs/ops/2026-09-03-stage1-5d-1-5f-vps-deployment-and-operations-runbook_CN.md").read_text(encoding="utf-8")
+b = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_BEGIN -->"
+e = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_END -->"
+code = runbook[runbook.index(b) + len(b):runbook.index(e)].replace("```python", "").replace("```", "")
+ns = {}
+exec(compile(code, "inspector", "exec"), ns)
+writers = ns["inspect_writers"](Path("/proc"), Path("/root/crypto-alpha-lab"))
+assert len(writers) == 0, f"STOP: {len(writers)} writer(s) still active!"
+print("ZERO_WRITER_VERIFIED")
+PY
 ```
 
 ### 4.2 启动 Stage 1.5D Collector

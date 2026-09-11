@@ -487,3 +487,28 @@ def test_summary_includes_terminal_hygiene_metrics():
     assert summary["historical_anchor_newly_ignored_this_poll"] == 1
     assert summary["bootstrap_watermark_missing_diagnostic_count"] == 2
     assert summary["malformed_terminal_diagnostic_count"] == 3
+
+
+def test_summary_serializes_process_start_from_runtime_context():
+    summary = build_live_depth_observer_summary(
+        decision="stage1_5f_observer_bootstrap_watermark_only",
+        bootstrap_watermark_allowed=True,
+        live_depth_observation_allowed=False,
+        stage1_5d_summary_path="dummy_d",
+        stage1_5e_summary_path=None,
+        stage1_5e_context_missing=True,
+        stage1_5e_context_suspicious=False,
+        watermark_present=True,
+        watermark_version=1,
+        max_seen_detected_at_ms=1000,
+        pre_watermark_events_ignored=5,
+        post_watermark_events_accepted=0,
+        active_states=[],
+        completed_states=[],
+        expired_states=[],
+        failed_states=[],
+        request_manifest_rows=[],
+        heartbeat_rows=[],
+        runtime_gate_context={"consumer_process_started_at_ms": 1_700_000_000_123},
+    )
+    assert summary.to_dict()["consumer_process_started_at_ms"] == 1_700_000_000_123

@@ -1,5 +1,15 @@
+import hashlib
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     build_stage1_5g_review_summary,
+    load_stage1_5g_inputs,
+    verify_source_evidence_manifest,
 )
 
 
@@ -902,3 +912,456 @@ def test_decision_aggregate_camouflage_invalid_rows_concentrated_in_one_symbol()
     # SYM0 has 2 midrun invalid rows exceeding limit 1 -> must fail
     assert result["decision"] == "stage1_5g_depth_evidence_invalid"
     assert "per_symbol_quarantine_gate_failed" in result["blockers"] or "midrun_invalid_book_count_exceeded" in result["blockers"]
+
+
+def seal_disposable_stage1_5f_source_root(root: Path) -> None:
+    baseline_dir = os.environ.get("STAGE1_5G_RUNTIME_ATTESTATION_GATE_BASELINE_DIR")
+    if not baseline_dir:
+        path_file = Path(".git/plan-execution/20260910T072434Z/path.txt")
+        if path_file.exists():
+            baseline_dir = path_file.read_text().strip()
+    command = Path(baseline_dir).joinpath(
+        "runbook_sha256sums_sealing_command.sh"
+    ).read_text(encoding="utf-8")
+    subprocess.run(
+        ["sh", "-c", command],
+        env={**os.environ, "LOCAL_EVIDENCE_ROOT": str(root)},
+        check=True,
+    )
+    ok, _, blockers = verify_source_evidence_manifest(root)
+    assert ok is True, f"manifest verification failed: {blockers}"
+
+
+def test_seal_disposable_stage1_5f_source_root_matches_runbook_command():
+    baseline_dir = os.environ.get("STAGE1_5G_RUNTIME_ATTESTATION_GATE_BASELINE_DIR", ".git/plan-execution/20260910T072434Z")
+    saved_sha = Path(baseline_dir, "runbook_sha256sums_sealing_command.sha256").read_text().strip()
+    runbook_text = Path("docs/ops/2026-09-03-stage1-5d-1-5f-vps-deployment-and-operations-runbook_CN.md").read_text(encoding="utf-8")
+    matches = [line for line in runbook_text.splitlines(keepends=True) if 'find "$LOCAL_EVIDENCE_ROOT" -type f -exec shasum -a 256' in line]
+    assert len(matches) == 1
+    assert hashlib.sha256(matches[0].encode("utf-8")).hexdigest() == saved_sha
+
+
+def make_canonical_stage1_5f_source_root(
+    root: Path,
+    *,
+    summary_overrides: dict | None = None,
+    contract_overrides: dict | None = None,
+    omit_contract: bool = False,
+    seal: bool = True,
+) -> Path:
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        write_live_depth_observer_summary_atomically,
+        write_observer_root_contract_atomically,
+    )
+    from src.research.external_signal_shadow.safety import canonical_json_dumps
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+
+    if not any(anc.name == "external_signal_shadow" and anc.parent.name == "data" for anc in [root] + list(root.parents)):
+        root = root / "data" / "external_signal_shadow" / "stage1_5f_source"
+    root.mkdir(parents=True, exist_ok=True)
+    guard = StorageGuard(output_root=root, stage="1.5F")
+
+    contract_sha = "0" * 64
+    if not omit_contract:
+        source_d_root_id = "0" * 64
+        root_facts = {
+            "consumer_process_instance_id": "11111111-2222-3333-4444-555555555555",
+            "consumer_root_id": "a" * 64,
+            "consumer_startup_commit_sha": "b" * 40,
+            "consumer_runtime_manifest_sha256": "c" * 64,
+            "consumer_static_attestation_verified": True,
+            "source_stage1_5d_output_root_id": source_d_root_id,
+            "source_stage1_5d_events_root_id": source_d_root_id,
+            "source_stage1_5d_runtime_gate_root_id": source_d_root_id,
+        }
+        if contract_overrides:
+            root_facts.update(contract_overrides)
+        contract = write_observer_root_contract_atomically(
+            str(root),
+            "v2_production",
+            reason="runtime_start",
+            storage_guard=guard,
+            source_binding_facts=root_facts,
+        )
+        contract_sha = hashlib.sha256(canonical_json_dumps(contract).encode("utf-8")).hexdigest()
+
+    summary_dict = {
+        "decision": "stage1_5f_observer_depth_evidence_collected",
+        "bootstrap_watermark_allowed": False,
+        "live_depth_observation_allowed": True,
+        "stage1_5d_summary_path": "stage1_5d.json",
+        "stage1_5e_summary_path": "stage1_5e.json",
+        "stage1_5e_context_missing": False,
+        "stage1_5e_context_suspicious": False,
+        "watermark_present": True,
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": 1000,
+        "pre_watermark_events_ignored": 0,
+        "post_watermark_events_accepted": 1,
+        "active_observation_count": 0,
+        "completed_observation_count": 1,
+        "expired_observation_count": 0,
+        "failed_observation_count": 0,
+        "observation_window_ms": 300_000,
+        "snapshot_interval_ms": 60_000,
+        "min_snapshot_count_required": 5,
+        "total_snapshots_collected": 5,
+        "request_success_rate": 1.0,
+        "total_requests_made": 5,
+        "failed_requests_count": 0,
+        "consecutive_network_errors": 0,
+        "max_consecutive_network_errors_seen": 0,
+        "last_heartbeat_at_ms": 2_000_000,
+        "heartbeat_count": 1,
+        "consumer_process_instance_id": "11111111-2222-3333-4444-555555555555",
+        "consumer_process_started_at_ms": 1_000_000,
+        "consumer_root_id": "a" * 64,
+        "consumer_startup_commit_sha": "b" * 40,
+        "consumer_root_contract_sha256": contract_sha,
+        "consumer_runtime_manifest_sha256": "c" * 64,
+        "consumer_static_attestation_verified": True,
+        "consumer_runtime_attestation_verified": True,
+        "consumer_runtime_attestation_compromised": False,
+    }
+    if summary_overrides:
+        summary_dict.update(summary_overrides)
+    write_live_depth_observer_summary_atomically(
+        root / "live_depth_observer_summary.json",
+        summary_dict,
+        storage_guard=guard,
+    )
+
+    (root / "watermark.json").write_text(json.dumps({
+        "watermark_version": 1,
+        "max_seen_detected_at_ms": 1000,
+        "seen_event_ids": ["ev1"],
+    }), encoding="utf-8")
+
+    (root / "observer_state.jsonl").write_text(json.dumps({
+        "event_symbol_id": "es1",
+        "symbol": "BTCUSDT",
+        "status": "completed",
+        "depth_snapshot_count": 5,
+    }) + "\n", encoding="utf-8")
+
+    (root / "events_accepted").mkdir(parents=True, exist_ok=True)
+    (root / "events_accepted" / "2026-09-08.jsonl").write_text(json.dumps({
+        "event_symbol_id": "es1",
+        "symbol": "BTCUSDT",
+        "event_id": "ev1",
+        "source_article_id": "art1",
+        "evidence_label": "announcement_and_launch_time",
+        "watermark_max_seen_detected_at_ms": 1000,
+        "watermark_version": 1,
+    }) + "\n", encoding="utf-8")
+
+    (root / "events_rejected").mkdir(parents=True, exist_ok=True)
+    (root / "events_rejected" / "empty.jsonl").write_text("", encoding="utf-8")
+
+    (root / "depth_snapshots" / "BTCUSDT").mkdir(parents=True, exist_ok=True)
+    (root / "depth_snapshots" / "BTCUSDT" / "snapshots.jsonl").write_text("\n".join(
+        json.dumps({
+            "event_symbol_id": "es1",
+            "symbol": "BTCUSDT",
+            "fetched_at_ms": 1_000_000 + i * 60_000,
+            "best_bid": 100.0,
+            "best_ask": 100.1,
+            "mid_price": 100.05,
+            "spread_bps": 10.0,
+            "buy_slippage_bps": 5.0,
+            "sell_slippage_bps": 5.0,
+            "top_bid_depth_usdt": 1000.0,
+            "top_ask_depth_usdt": 1000.0,
+        }) for i in range(5)
+    ) + "\n", encoding="utf-8")
+
+    (root / "request_manifest").mkdir(parents=True, exist_ok=True)
+    (root / "request_manifest" / "2026-09-08.jsonl").write_text("\n".join(
+        json.dumps({
+            "request_type": "depth_snapshot",
+            "event_symbol_id": "es1",
+            "symbol": "BTCUSDT",
+            "http_status": 200,
+        }) for _ in range(5)
+    ) + "\n", encoding="utf-8")
+
+    (root / "heartbeat").mkdir(parents=True, exist_ok=True)
+    (root / "heartbeat" / "2026-09-08.jsonl").write_text(json.dumps({
+        "poll_at_ms": 2_000_000,
+        "active_observation_count": 0,
+    }) + "\n", encoding="utf-8")
+
+    if seal:
+        seal_disposable_stage1_5f_source_root(root)
+    return root
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("consumer_runtime_attestation_verified", False, "source_runtime_attestation_unverified"),
+        ("consumer_runtime_attestation_verified", "false", "source_runtime_attestation_verified_field_invalid"),
+        ("consumer_runtime_attestation_compromised", True, "source_runtime_attestation_compromised"),
+        ("consumer_runtime_attestation_compromised", "false", "source_runtime_attestation_compromised_field_invalid"),
+    ],
+)
+def test_runtime_gate_boolean_precedence(tmp_path, field, value, expected):
+    root = make_canonical_stage1_5f_source_root(tmp_path / "root", summary_overrides={field: value})
+    bundle = load_stage1_5g_inputs(root)
+    result = build_stage1_5g_review_summary(
+        summary=bundle.summary,
+        watermark=bundle.watermark,
+        states=bundle.states,
+        accepted_events=bundle.accepted_events,
+        snapshots=bundle.snapshots,
+        request_manifest_rows=bundle.request_manifest_rows,
+        output_root=root,
+        loader_blockers=bundle.loader_blockers,
+    )
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert result["blockers"] == [expected]
+
+
+def test_runtime_gate_canonical_root_passes(tmp_path):
+    root = make_canonical_stage1_5f_source_root(tmp_path / "root")
+    bundle = load_stage1_5g_inputs(root)
+    result = build_stage1_5g_review_summary(
+        summary=bundle.summary,
+        watermark=bundle.watermark,
+        states=bundle.states,
+        accepted_events=bundle.accepted_events,
+        snapshots=bundle.snapshots,
+        request_manifest_rows=bundle.request_manifest_rows,
+        output_root=root,
+        loader_blockers=bundle.loader_blockers,
+    )
+    assert result["decision"] in ("stage1_5g_depth_evidence_quarantined_pass", "stage1_5g_depth_evidence_clean_pass")
+    assert result["blockers"] == []
+
+
+def test_runtime_gate_static_cases(tmp_path):
+    r1 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r1",
+        summary_overrides={"consumer_static_attestation_verified": False},
+        contract_overrides={"consumer_static_attestation_verified": False},
+    )
+    b1 = load_stage1_5g_inputs(r1)
+    res1 = build_stage1_5g_review_summary(
+        summary=b1.summary, watermark=b1.watermark, states=b1.states,
+        accepted_events=b1.accepted_events, snapshots=b1.snapshots,
+        request_manifest_rows=b1.request_manifest_rows, output_root=r1,
+        loader_blockers=b1.loader_blockers,
+    )
+    assert res1["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert res1["blockers"] == ["source_static_attestation_unverified"]
+
+    r2 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r2",
+        summary_overrides={"consumer_static_attestation_verified": False},
+        contract_overrides={"consumer_static_attestation_verified": True},
+    )
+    b2 = load_stage1_5g_inputs(r2)
+    res2 = build_stage1_5g_review_summary(
+        summary=b2.summary, watermark=b2.watermark, states=b2.states,
+        accepted_events=b2.accepted_events, snapshots=b2.snapshots,
+        request_manifest_rows=b2.request_manifest_rows, output_root=r2,
+        loader_blockers=b2.loader_blockers,
+    )
+    assert res2["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert res2["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r3 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r3",
+        summary_overrides={"consumer_static_attestation_verified": "true"},
+    )
+    b3 = load_stage1_5g_inputs(r3)
+    res3 = build_stage1_5g_review_summary(
+        summary=b3.summary, watermark=b3.watermark, states=b3.states,
+        accepted_events=b3.accepted_events, snapshots=b3.snapshots,
+        request_manifest_rows=b3.request_manifest_rows, output_root=r3,
+        loader_blockers=b3.loader_blockers,
+    )
+    assert res3["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert res3["blockers"] == ["source_static_attestation_field_invalid"]
+
+    r4 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r4",
+        contract_overrides={"consumer_static_attestation_verified": 1},
+    )
+    b4 = load_stage1_5g_inputs(r4)
+    res4 = build_stage1_5g_review_summary(
+        summary=b4.summary, watermark=b4.watermark, states=b4.states,
+        accepted_events=b4.accepted_events, snapshots=b4.snapshots,
+        request_manifest_rows=b4.request_manifest_rows, output_root=r4,
+        loader_blockers=b4.loader_blockers,
+    )
+    assert res4["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert res4["blockers"] == ["source_static_attestation_field_invalid"]
+
+
+def test_runtime_gate_binding_cases(tmp_path):
+    r1 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r1",
+        summary_overrides={"consumer_process_started_at_ms": None},
+    )
+    b1 = load_stage1_5g_inputs(r1)
+    res1 = build_stage1_5g_review_summary(
+        summary=b1.summary, watermark=b1.watermark, states=b1.states,
+        accepted_events=b1.accepted_events, snapshots=b1.snapshots,
+        request_manifest_rows=b1.request_manifest_rows, output_root=r1,
+        loader_blockers=b1.loader_blockers,
+    )
+    assert res1["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r2 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r2",
+        summary_overrides={"consumer_process_started_at_ms": 0},
+    )
+    b2 = load_stage1_5g_inputs(r2)
+    res2 = build_stage1_5g_review_summary(
+        summary=b2.summary, watermark=b2.watermark, states=b2.states,
+        accepted_events=b2.accepted_events, snapshots=b2.snapshots,
+        request_manifest_rows=b2.request_manifest_rows, output_root=r2,
+        loader_blockers=b2.loader_blockers,
+    )
+    assert res2["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r3 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r3",
+        summary_overrides={"consumer_process_started_at_ms": True},
+    )
+    b3 = load_stage1_5g_inputs(r3)
+    res3 = build_stage1_5g_review_summary(
+        summary=b3.summary, watermark=b3.watermark, states=b3.states,
+        accepted_events=b3.accepted_events, snapshots=b3.snapshots,
+        request_manifest_rows=b3.request_manifest_rows, output_root=r3,
+        loader_blockers=b3.loader_blockers,
+    )
+    assert res3["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r4 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r4",
+        summary_overrides={"consumer_process_started_at_ms": 3_000_000, "last_heartbeat_at_ms": 2_000_000},
+    )
+    b4 = load_stage1_5g_inputs(r4)
+    res4 = build_stage1_5g_review_summary(
+        summary=b4.summary, watermark=b4.watermark, states=b4.states,
+        accepted_events=b4.accepted_events, snapshots=b4.snapshots,
+        request_manifest_rows=b4.request_manifest_rows, output_root=r4,
+        loader_blockers=b4.loader_blockers,
+    )
+    assert res4["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r5 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r5",
+        summary_overrides={"consumer_process_instance_id": "NOT-A-UUID"},
+    )
+    b5 = load_stage1_5g_inputs(r5)
+    res5 = build_stage1_5g_review_summary(
+        summary=b5.summary, watermark=b5.watermark, states=b5.states,
+        accepted_events=b5.accepted_events, snapshots=b5.snapshots,
+        request_manifest_rows=b5.request_manifest_rows, output_root=r5,
+        loader_blockers=b5.loader_blockers,
+    )
+    assert res5["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r6 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r6",
+        summary_overrides={"consumer_root_contract_sha256": "0" * 64},
+    )
+    b6 = load_stage1_5g_inputs(r6)
+    res6 = build_stage1_5g_review_summary(
+        summary=b6.summary, watermark=b6.watermark, states=b6.states,
+        accepted_events=b6.accepted_events, snapshots=b6.snapshots,
+        request_manifest_rows=b6.request_manifest_rows, output_root=r6,
+        loader_blockers=b6.loader_blockers,
+    )
+    assert res6["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    r7 = make_canonical_stage1_5f_source_root(
+        tmp_path / "r7",
+        contract_overrides={"source_stage1_5d_output_root_id": "1" * 64},
+    )
+    b7 = load_stage1_5g_inputs(r7)
+    res7 = build_stage1_5g_review_summary(
+        summary=b7.summary, watermark=b7.watermark, states=b7.states,
+        accepted_events=b7.accepted_events, snapshots=b7.snapshots,
+        request_manifest_rows=b7.request_manifest_rows, output_root=r7,
+        loader_blockers=b7.loader_blockers,
+    )
+    assert res7["blockers"] == ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+
+def test_runtime_gate_root_contract_missing_or_corrupt(tmp_path):
+    r1 = make_canonical_stage1_5f_source_root(tmp_path / "r1", omit_contract=True)
+    b1 = load_stage1_5g_inputs(r1)
+    res1 = build_stage1_5g_review_summary(
+        summary=b1.summary, watermark=b1.watermark, states=b1.states,
+        accepted_events=b1.accepted_events, snapshots=b1.snapshots,
+        request_manifest_rows=b1.request_manifest_rows, output_root=r1,
+        loader_blockers=b1.loader_blockers,
+    )
+    assert res1["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "source_runtime_attestation_root_contract_missing_or_unreadable" in res1["blockers"]
+
+
+def test_runtime_gate_historical_compromised_root_fails():
+    root = Path("data/external_signal_shadow/local_evidence/20260902T105158Z_stage1_5f")
+    bundle = load_stage1_5g_inputs(root)
+    result = build_stage1_5g_review_summary(
+        summary=bundle.summary,
+        watermark=bundle.watermark,
+        states=bundle.states,
+        accepted_events=bundle.accepted_events,
+        snapshots=bundle.snapshots,
+        request_manifest_rows=bundle.request_manifest_rows,
+        output_root=root,
+        loader_blockers=bundle.loader_blockers,
+    )
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert "source_runtime_attestation_compromised" in result["blockers"]
+    assert "source_runtime_attestation_unverified" in result["blockers"]
+
+
+def test_runtime_gate_zero_reducer_calls_on_authority_failure(tmp_path, monkeypatch):
+    import src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review as g_module
+    call_counts = {"integrity": 0, "coverage": 0, "raw_integrity": 0, "raw_quarantine": 0}
+
+    def mock_integrity(*args, **kwargs):
+        call_counts["integrity"] += 1
+        raise AssertionError("integrity reducer should not be called")
+
+    def mock_coverage(*args, **kwargs):
+        call_counts["coverage"] += 1
+        raise AssertionError("coverage reducer should not be called")
+
+    def mock_raw_integrity(*args, **kwargs):
+        call_counts["raw_integrity"] += 1
+        raise AssertionError("raw integrity reducer should not be called")
+
+    def mock_raw_quarantine(*args, **kwargs):
+        call_counts["raw_quarantine"] += 1
+        raise AssertionError("raw quarantine reducer should not be called")
+
+    monkeypatch.setattr(g_module, "validate_evidence_integrity", mock_integrity)
+    monkeypatch.setattr(g_module, "compute_coverage_metrics", mock_coverage)
+    monkeypatch.setattr(g_module, "validate_raw_snapshot_integrity", mock_raw_integrity)
+    monkeypatch.setattr(g_module, "compute_raw_snapshot_quarantine_metrics", mock_raw_quarantine)
+
+    root = make_canonical_stage1_5f_source_root(
+        tmp_path / "root",
+        summary_overrides={"consumer_runtime_attestation_verified": False},
+    )
+    bundle = load_stage1_5g_inputs(root)
+    result = build_stage1_5g_review_summary(
+        summary=bundle.summary,
+        watermark=bundle.watermark,
+        states=bundle.states,
+        accepted_events=bundle.accepted_events,
+        snapshots=bundle.snapshots,
+        request_manifest_rows=bundle.request_manifest_rows,
+        output_root=root,
+        loader_blockers=bundle.loader_blockers,
+    )
+    assert result["decision"] == "stage1_5g_depth_evidence_invalid"
+    assert call_counts == {"integrity": 0, "coverage": 0, "raw_integrity": 0, "raw_quarantine": 0}

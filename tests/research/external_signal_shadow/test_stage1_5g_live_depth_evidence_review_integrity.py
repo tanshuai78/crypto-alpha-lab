@@ -29,18 +29,24 @@ def test_validator_accepts_announcement_and_launch_time_post_watermark():
 
 
 def test_state_loader_uses_physical_last_row(tmp_path):
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_decision import (
+        make_canonical_stage1_5f_source_root,
+        seal_disposable_stage1_5f_source_root,
+    )
+    root = make_canonical_stage1_5f_source_root(tmp_path / "root", seal=False)
     rows = [
         {"event_symbol_id": "es1", "status": "pending_launch_time_in_future", "updated_at_ms": 3_000},
         {"event_symbol_id": "es1", "status": "active", "updated_at_ms": 2_000},
         # Durable append order, not producer timestamps, defines the latest state.
-        {"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 3, "updated_at_ms": 1_000},
+        {"event_symbol_id": "es1", "status": "completed", "depth_snapshot_count": 5, "updated_at_ms": 1_000},
     ]
-    (tmp_path / "observer_state.jsonl").write_text(
+    (root / "observer_state.jsonl").write_text(
         "\n".join(json.dumps(row) for row in rows) + "\n",
         encoding="utf-8",
     )
+    seal_disposable_stage1_5f_source_root(root)
 
-    bundle = load_stage1_5g_inputs(tmp_path)
+    bundle = load_stage1_5g_inputs(root)
 
     assert len(bundle.states) == 1
     assert bundle.states[0]["event_symbol_id"] == "es1"

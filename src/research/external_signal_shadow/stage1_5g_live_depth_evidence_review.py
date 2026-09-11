@@ -3,11 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from src.research.external_signal_shadow.safety import canonical_json_dumps
+
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,9 @@ class Stage1_5GInputBundle:
     loader_warnings: list[str]
     parse_error_count: int
     total_jsonl_line_count: int
+    source_evidence_manifest_sha256: str = ""
+    source_authority: dict[str, Any] = field(default_factory=dict)
+    source_authority_blockers: list[str] = field(default_factory=list)
 
 
 def _load_json_file(path: Path) -> dict:
@@ -146,39 +154,306 @@ def _load_observer_states_reduced(
     return list(latest.values())
 
 
+def verify_source_evidence_manifest(stage1_5f_root: Path) -> tuple[bool, str, list[str]]:
+    stage1_5f_root = stage1_5f_root.resolve()
+    manifest_path = stage1_5f_root / "SHA256SUMS"
+    if not manifest_path.is_file():
+        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
+
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError:
+        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+
+    try:
+        content = manifest_bytes.decode("utf-8")
+    except Exception:
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    manifest_files: dict[Path, str] = {}
+    for line in content.splitlines():
+        if not line or line.lstrip().startswith("#"):
+            continue
+        expected_sha, separator, raw_path = line.partition("  ")
+        if (
+            not separator
+            or len(expected_sha) != 64
+            or any(char not in "0123456789abcdef" for char in expected_sha)
+        ):
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        file_path = Path(raw_path).resolve()
+        try:
+            file_path.relative_to(stage1_5f_root)
+        except ValueError:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if file_path in manifest_files:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        manifest_files[file_path] = expected_sha
+
+    if manifest_path not in manifest_files:
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    for file_path, expected_sha in manifest_files.items():
+        if file_path == manifest_path:
+            continue
+        if not file_path.is_file() or file_path.is_symlink():
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if hashlib.sha256(file_path.read_bytes()).hexdigest() != expected_sha:
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    actual_files = set()
+    for path in stage1_5f_root.rglob("*"):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+        if path.is_file():
+            actual_files.add(path.resolve())
+    if actual_files != set(manifest_files):
+        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+
+    return True, manifest_sha256, []
+
+
+def validate_stage1_5f_source_runtime_authority(
+    *,
+    stage1_5f_root: Path,
+    summary: dict[str, Any],
+    source_evidence_manifest_sha256: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Return only a validated summary projection and sorted fail-closed blockers."""
+    root = stage1_5f_root.resolve()
+    contract_path = root / "observer_root_contract.json"
+    if not contract_path.is_file():
+        return {}, ["source_runtime_attestation_root_contract_missing_or_unreadable"]
+
+    try:
+        contract_bytes = contract_path.read_bytes()
+        root_contract = json.loads(contract_bytes.decode("utf-8"))
+        if not isinstance(root_contract, dict):
+            return {}, ["source_runtime_attestation_root_contract_missing_or_unreadable"]
+    except Exception:
+        return {}, ["source_runtime_attestation_root_contract_missing_or_unreadable"]
+
+    if not isinstance(summary, dict):
+        return {}, ["source_runtime_attestation_contract_summary_binding_invalid"]
+
+    blockers: list[str] = []
+
+    # 1. Static attestation boolean checks
+    has_c_static = "consumer_static_attestation_verified" in root_contract
+    has_s_static = "consumer_static_attestation_verified" in summary
+    c_static_val = root_contract.get("consumer_static_attestation_verified")
+    s_static_val = summary.get("consumer_static_attestation_verified")
+    c_static_is_bool = type(c_static_val) is bool
+    s_static_is_bool = type(s_static_val) is bool
+
+    if not (has_c_static and has_s_static and c_static_is_bool and s_static_is_bool):
+        blockers.append("source_static_attestation_field_invalid")
+    else:
+        if c_static_val is False and s_static_val is False:
+            blockers.append("source_static_attestation_unverified")
+        elif c_static_val != s_static_val:
+            blockers.append("source_runtime_attestation_contract_summary_binding_invalid")
+
+    # 2. Runtime attestation verified check
+    has_r_verified = "consumer_runtime_attestation_verified" in summary
+    r_verified_val = summary.get("consumer_runtime_attestation_verified")
+    if not (has_r_verified and type(r_verified_val) is bool):
+        blockers.append("source_runtime_attestation_verified_field_invalid")
+    elif r_verified_val is False:
+        blockers.append("source_runtime_attestation_unverified")
+
+    # 3. Runtime attestation compromised check
+    has_r_compromised = "consumer_runtime_attestation_compromised" in summary
+    r_compromised_val = summary.get("consumer_runtime_attestation_compromised")
+    if not (has_r_compromised and type(r_compromised_val) is bool):
+        blockers.append("source_runtime_attestation_compromised_field_invalid")
+    elif r_compromised_val is True:
+        blockers.append("source_runtime_attestation_compromised")
+
+    # 4. Format, hash, and identity cross-checks (Section 5.2)
+    binding_ok = True
+
+    if (
+        "root_contract_schema_version" not in root_contract
+        or type(root_contract["root_contract_schema_version"]) is not int
+        or root_contract["root_contract_schema_version"] != 1
+        or "root_mode" not in root_contract
+        or root_contract["root_mode"] != "v2_production"
+    ):
+        binding_ok = False
+
+    expected_contract_sha = hashlib.sha256(
+        canonical_json_dumps(root_contract).encode("utf-8")
+    ).hexdigest()
+    if (
+        "consumer_root_contract_sha256" not in summary
+        or summary["consumer_root_contract_sha256"] != expected_contract_sha
+    ):
+        binding_ok = False
+
+    for field_name in (
+        "consumer_root_id",
+        "consumer_startup_commit_sha",
+        "consumer_runtime_manifest_sha256",
+    ):
+        if (
+            field_name not in summary
+            or field_name not in root_contract
+            or summary[field_name] != root_contract[field_name]
+        ):
+            binding_ok = False
+
+    if (
+        "consumer_process_instance_id" not in summary
+        or not isinstance(summary["consumer_process_instance_id"], str)
+        or not _UUID_RE.match(summary["consumer_process_instance_id"])
+    ):
+        binding_ok = False
+
+    if (
+        "consumer_root_id" not in summary
+        or not isinstance(summary["consumer_root_id"], str)
+        or not _HEX64_RE.match(summary["consumer_root_id"])
+    ):
+        binding_ok = False
+
+    if (
+        "consumer_runtime_manifest_sha256" not in summary
+        or not isinstance(summary["consumer_runtime_manifest_sha256"], str)
+        or not _HEX64_RE.match(summary["consumer_runtime_manifest_sha256"])
+    ):
+        binding_ok = False
+
+    if (
+        "consumer_startup_commit_sha" not in summary
+        or not isinstance(summary["consumer_startup_commit_sha"], str)
+        or not _HEX40_RE.match(summary["consumer_startup_commit_sha"])
+    ):
+        binding_ok = False
+
+    if not (
+        "source_stage1_5d_output_root_id" in root_contract
+        and "source_stage1_5d_events_root_id" in root_contract
+        and "source_stage1_5d_runtime_gate_root_id" in root_contract
+        and isinstance(root_contract["source_stage1_5d_output_root_id"], str)
+        and bool(_HEX64_RE.match(root_contract["source_stage1_5d_output_root_id"]))
+        and root_contract["source_stage1_5d_output_root_id"] == root_contract["source_stage1_5d_events_root_id"]
+        and root_contract["source_stage1_5d_output_root_id"] == root_contract["source_stage1_5d_runtime_gate_root_id"]
+    ):
+        binding_ok = False
+
+    if not (
+        "consumer_process_started_at_ms" in summary
+        and type(summary["consumer_process_started_at_ms"]) is int
+        and summary["consumer_process_started_at_ms"] > 0
+        and "last_heartbeat_at_ms" in summary
+        and type(summary["last_heartbeat_at_ms"]) is int
+        and summary["last_heartbeat_at_ms"] > 0
+        and summary["consumer_process_started_at_ms"] <= summary["last_heartbeat_at_ms"]
+    ):
+        binding_ok = False
+
+    if not binding_ok:
+        blockers.append("source_runtime_attestation_contract_summary_binding_invalid")
+
+    sorted_blockers = sorted(list(set(blockers)))
+    if sorted_blockers:
+        return {}, sorted_blockers
+
+    projection = {
+        "consumer_process_instance_id": summary["consumer_process_instance_id"],
+        "consumer_root_id": summary["consumer_root_id"],
+        "consumer_process_started_at_ms": summary["consumer_process_started_at_ms"],
+        "consumer_startup_commit_sha": summary["consumer_startup_commit_sha"],
+        "consumer_root_contract_sha256": summary["consumer_root_contract_sha256"],
+        "consumer_runtime_manifest_sha256": summary["consumer_runtime_manifest_sha256"],
+        "consumer_static_attestation_verified": summary["consumer_static_attestation_verified"],
+        "consumer_runtime_attestation_verified": summary["consumer_runtime_attestation_verified"],
+        "consumer_runtime_attestation_compromised": summary["consumer_runtime_attestation_compromised"],
+    }
+    return projection, []
+
+
 def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
-    root = Path(output_root)
+    root = Path(output_root).resolve()
     loader_blockers: list[str] = []
     loader_warnings: list[str] = []
-
-    # State tracking for errors across JSONL parsing
     state_errors = {"total": 0, "errors": 0}
 
-    # 1. Summary
+    # A. Manifest verification
+    manifest_ok, manifest_sha256, manifest_blockers = verify_source_evidence_manifest(root)
+    if not manifest_ok:
+        loader_blockers.extend(manifest_blockers)
+        return Stage1_5GInputBundle(
+            output_root=root,
+            summary={},
+            watermark={},
+            states=[],
+            accepted_events=[],
+            rejected_events=[],
+            snapshots=[],
+            request_manifest_rows=[],
+            heartbeat_rows=[],
+            loader_blockers=sorted(list(set(loader_blockers))),
+            loader_warnings=loader_warnings,
+            parse_error_count=0,
+            total_jsonl_line_count=0,
+            source_evidence_manifest_sha256=manifest_sha256,
+            source_authority={},
+            source_authority_blockers=sorted(list(set(loader_blockers))),
+        )
+
+    # B. Summary parse
     summary_path = root / "live_depth_observer_summary.json"
-    if not summary_path.exists():
+    if not summary_path.is_file():
         loader_blockers.append("missing_or_unreadable_summary")
         summary = {}
     else:
         summary = _load_json_file(summary_path)
-        if not summary:
+        if not summary or not isinstance(summary, dict):
             loader_blockers.append("missing_or_unreadable_summary")
+            summary = {}
 
-    # 2. Watermark
+    # C. Runtime authority validation
+    authority_projection, authority_blockers = validate_stage1_5f_source_runtime_authority(
+        stage1_5f_root=root,
+        summary=summary,
+        source_evidence_manifest_sha256=manifest_sha256,
+    )
+    if authority_blockers:
+        loader_blockers.extend(authority_blockers)
+        return Stage1_5GInputBundle(
+            output_root=root,
+            summary=summary,
+            watermark={},
+            states=[],
+            accepted_events=[],
+            rejected_events=[],
+            snapshots=[],
+            request_manifest_rows=[],
+            heartbeat_rows=[],
+            loader_blockers=sorted(list(set(loader_blockers))),
+            loader_warnings=loader_warnings,
+            parse_error_count=0,
+            total_jsonl_line_count=0,
+            source_evidence_manifest_sha256=manifest_sha256,
+            source_authority={},
+            source_authority_blockers=sorted(list(set(authority_blockers))),
+        )
+
+    # D. Reducer inputs loaded only when authority passes
     watermark_path = root / "watermark.json"
     if not watermark_path.exists():
         loader_blockers.append("missing_or_unreadable_watermark")
         watermark = {}
     else:
         watermark = _load_json_file(watermark_path)
-        if not watermark:
+        if not watermark or not isinstance(watermark, dict):
             loader_blockers.append("missing_or_unreadable_watermark")
+            watermark = {}
 
-    # 3. States (streaming physical-last reduction)
     states = _load_observer_states_reduced(root / "observer_state.jsonl", loader_blockers, state_errors)
-
-
-    # 4. Accepted/Rejected events
     accepted_events = _load_jsonl_glob(root, "events_accepted/*.jsonl", loader_blockers, state_errors)
     rejected_events = _load_jsonl_glob(root, "events_rejected/*.jsonl", loader_blockers, state_errors)
     duplicate_stable_identity_rows = detect_duplicate_stable_event_symbol_identity(
@@ -194,20 +469,15 @@ def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
             + str(len(duplicate_stable_identity_rows))
         )
 
-    # 5. Snapshots
     snapshots = _load_jsonl_glob(root, "depth_snapshots/**/*.jsonl", loader_blockers, state_errors)
-
-    # 6. Request manifest & heartbeat
     request_manifest_rows = _load_jsonl_glob(root, "request_manifest/*.jsonl", loader_blockers, state_errors)
     heartbeat_rows = _load_jsonl_glob(root, "heartbeat/*.jsonl", loader_blockers, state_errors)
 
-    # Cross-reference snapshots to update states when matching snapshots are missing
     seen_snapshot_event_symbol_ids = {s.get("event_symbol_id") for s in snapshots if s.get("event_symbol_id")}
     updated_states = []
     for st in states:
         es_id = st.get("event_symbol_id")
         if es_id not in seen_snapshot_event_symbol_ids:
-            # Overwrite snapshot count to 0 if the physical snapshot file is missing
             st = dict(st)
             st["depth_snapshot_count"] = 0
         updated_states.append(st)
@@ -222,10 +492,13 @@ def load_stage1_5g_inputs(output_root: str | Path) -> Stage1_5GInputBundle:
         snapshots=snapshots,
         request_manifest_rows=request_manifest_rows,
         heartbeat_rows=heartbeat_rows,
-        loader_blockers=loader_blockers,
+        loader_blockers=sorted(list(set(loader_blockers))),
         loader_warnings=loader_warnings,
         parse_error_count=state_errors["errors"],
         total_jsonl_line_count=state_errors["total"],
+        source_evidence_manifest_sha256=manifest_sha256,
+        source_authority=authority_projection,
+        source_authority_blockers=[],
     )
 
 
@@ -1534,6 +1807,7 @@ def _with_stage1_5g_audit_fields(
     accepted_events: list[dict],
     states: list[dict],
     formal_completed_event_symbol_ids: set[str] | list[str] | None = None,
+    source_evidence_manifest_sha256: str | None = None,
 ) -> dict:
     S = sorted(formal_completed_event_symbol_ids or set())
     reviewed_event_symbols = sorted(
@@ -1543,11 +1817,12 @@ def _with_stage1_5g_audit_fields(
             if event.get("event_symbol_id")
         }
     )
-    source_evidence_manifest_sha256 = ""
-    if output_root is not None:
-        source_manifest = Path(output_root) / "SHA256SUMS"
-        if source_manifest.is_file():
-            source_evidence_manifest_sha256 = hashlib.sha256(source_manifest.read_bytes()).hexdigest()
+    if source_evidence_manifest_sha256 is None:
+        source_evidence_manifest_sha256 = ""
+        if output_root is not None:
+            source_manifest = Path(output_root) / "SHA256SUMS"
+            if source_manifest.is_file():
+                source_evidence_manifest_sha256 = hashlib.sha256(source_manifest.read_bytes()).hexdigest()
 
     formal_completed_event_symbol_ids_sha256 = hashlib.sha256(
         canonical_json_dumps(S).encode("utf-8")
@@ -1649,64 +1924,104 @@ def write_stage1_5g_quarantine_artifacts(
     }
 
 
-def verify_source_evidence_manifest(stage1_5f_root: Path) -> tuple[bool, str, list[str]]:
-    stage1_5f_root = stage1_5f_root.resolve()
-    manifest_path = stage1_5f_root / "SHA256SUMS"
-    if not manifest_path.is_file():
-        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
 
-    try:
-        manifest_bytes = manifest_path.read_bytes()
-    except OSError:
-        return False, "", ["source_evidence_manifest_missing_or_unreadable"]
-    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+def write_stage1_5g_runtime_attestation_gate(
+    review_output_root: Path,
+    *,
+    summary: dict[str, Any],
+    source_authority: dict[str, Any],
+) -> Path:
+    if (
+        summary.get("decision") != "stage1_5g_depth_evidence_quarantined_pass"
+        or summary.get("quarantined_depth_evidence_pass") is not True
+        or summary.get("clean_depth_evidence_pass") is not False
+    ):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires quarantined pass decision")
 
-    try:
-        content = manifest_bytes.decode("utf-8")
-    except Exception:
-        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+    review_id = summary.get("stage1_5g_review_id")
+    source_manifest_sha = summary.get("source_evidence_manifest_sha256")
+    if not isinstance(review_id, str) or not _HEX64_RE.match(review_id):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid stage1_5g_review_id")
+    if not isinstance(source_manifest_sha, str) or not _HEX64_RE.match(source_manifest_sha):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid source_evidence_manifest_sha256")
 
-    manifest_files: dict[Path, str] = {}
-    for line in content.splitlines():
-        if not line or line.lstrip().startswith("#"):
-            continue
-        expected_sha, separator, raw_path = line.partition("  ")
-        if (
-            not separator
-            or len(expected_sha) != 64
-            or any(char not in "0123456789abcdef" for char in expected_sha)
-        ):
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
-        file_path = Path(raw_path).resolve()
-        try:
-            file_path.relative_to(stage1_5f_root)
-        except ValueError:
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
-        if file_path in manifest_files:
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
-        manifest_files[file_path] = expected_sha
+    required_auth_keys = {
+        "consumer_process_instance_id",
+        "consumer_root_id",
+        "consumer_process_started_at_ms",
+        "consumer_startup_commit_sha",
+        "consumer_root_contract_sha256",
+        "consumer_runtime_manifest_sha256",
+        "consumer_static_attestation_verified",
+        "consumer_runtime_attestation_verified",
+        "consumer_runtime_attestation_compromised",
+    }
+    if not required_auth_keys.issubset(source_authority.keys()):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires all source authority keys")
 
-    if manifest_path not in manifest_files:
-        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+    if (
+        type(source_authority["consumer_static_attestation_verified"]) is not bool
+        or source_authority["consumer_static_attestation_verified"] is not True
+        or type(source_authority["consumer_runtime_attestation_verified"]) is not bool
+        or source_authority["consumer_runtime_attestation_verified"] is not True
+        or type(source_authority["consumer_runtime_attestation_compromised"]) is not bool
+        or source_authority["consumer_runtime_attestation_compromised"] is not False
+    ):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid positive attestation triad")
 
-    for file_path, expected_sha in manifest_files.items():
-        if file_path == manifest_path:
-            continue
-        if not file_path.is_file() or file_path.is_symlink():
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
-        if hashlib.sha256(file_path.read_bytes()).hexdigest() != expected_sha:
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+    started_at = source_authority["consumer_process_started_at_ms"]
+    if type(started_at) is not int or started_at <= 0:
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires positive integer consumer_process_started_at_ms")
 
-    actual_files = set()
-    for path in stage1_5f_root.rglob("*"):
-        if path.is_symlink() or not (path.is_dir() or path.is_file()):
-            return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
-        if path.is_file():
-            actual_files.add(path.resolve())
-    if actual_files != set(manifest_files):
-        return False, manifest_sha256, ["source_evidence_manifest_missing_or_unreadable"]
+    proc_id = source_authority["consumer_process_instance_id"]
+    if not isinstance(proc_id, str) or not _UUID_RE.match(proc_id):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid UUID consumer_process_instance_id")
 
-    return True, manifest_sha256, []
+    root_id = source_authority["consumer_root_id"]
+    if not isinstance(root_id, str) or not _HEX64_RE.match(root_id):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid hex consumer_root_id")
+
+    commit_sha = source_authority["consumer_startup_commit_sha"]
+    if not isinstance(commit_sha, str) or not (_HEX40_RE.match(commit_sha) or _HEX64_RE.match(commit_sha)):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid hex consumer_startup_commit_sha")
+
+    contract_sha = source_authority["consumer_root_contract_sha256"]
+    if not isinstance(contract_sha, str) or not _HEX64_RE.match(contract_sha):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid hex consumer_root_contract_sha256")
+
+    runtime_manifest_sha = source_authority["consumer_runtime_manifest_sha256"]
+    if not isinstance(runtime_manifest_sha, str) or not _HEX64_RE.match(runtime_manifest_sha):
+        raise ValueError("write_stage1_5g_runtime_attestation_gate requires valid hex consumer_runtime_manifest_sha256")
+
+    gate_payload_without_hash = {
+        "schema_version": 1,
+        "source_runtime_attestation_gate_verified": True,
+        "stage1_5g_review_id": review_id,
+        "source_evidence_manifest_sha256": source_manifest_sha,
+        "consumer_process_instance_id": proc_id,
+        "consumer_root_id": root_id,
+        "consumer_process_started_at_ms": started_at,
+        "consumer_startup_commit_sha": commit_sha,
+        "consumer_root_contract_sha256": contract_sha,
+        "consumer_runtime_manifest_sha256": runtime_manifest_sha,
+        "consumer_static_attestation_verified": True,
+        "consumer_runtime_attestation_verified": True,
+        "consumer_runtime_attestation_compromised": False,
+    }
+    authority_sha256 = hashlib.sha256(
+        canonical_json_dumps(gate_payload_without_hash).encode("utf-8")
+    ).hexdigest()
+    gate_payload = {
+        **gate_payload_without_hash,
+        "source_runtime_attestation_authority_sha256": authority_sha256,
+    }
+
+    review_output_root.mkdir(parents=True, exist_ok=True)
+    gate_path = review_output_root / "stage1_5g_runtime_attestation_gate.json"
+    with gate_path.open("w", encoding="utf-8") as fh:
+        json.dump(gate_payload, fh, indent=2, ensure_ascii=False)
+
+    return gate_path
 
 
 def write_stage1_5g_review_manifest(
@@ -1726,8 +2041,10 @@ def write_stage1_5g_review_manifest(
             "byte_count": len(file_bytes),
         }
 
+    schema_version = 3 if "runtime_attestation_gate" in artifact_paths else 2
+
     manifest_payload = {
-        "schema_version": 2,
+        "schema_version": schema_version,
         "stage1_5g_review_id": summary.get("stage1_5g_review_id", ""),
         "source_evidence_manifest_sha256": summary.get("source_evidence_manifest_sha256", ""),
         "formal_completed_event_symbol_ids_sha256": summary.get("formal_completed_event_symbol_ids_sha256", ""),
@@ -1742,52 +2059,222 @@ def write_stage1_5g_review_manifest(
 
 def verify_stage1_5g_review_manifest(review_output_root: Path) -> tuple[bool, list[str]]:
     manifest_path = review_output_root / "stage1_5g_review_manifest.json"
-    if not manifest_path.is_file():
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
     try:
         with manifest_path.open("r", encoding="utf-8") as fh:
             manifest_data = json.load(fh)
     except Exception:
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
-    if manifest_data.get("schema_version") != 2:
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+    if not isinstance(manifest_data, dict):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    if manifest_data.get("schema_version") != 3:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
     review_id = manifest_data.get("stage1_5g_review_id")
-    artifacts = manifest_data.get("artifacts", {})
-    if not isinstance(artifacts, dict):
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+    if not isinstance(review_id, str) or not _HEX64_RE.match(review_id):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
-    required_artifacts = {"summary", "quarantine_summary", "quarantined_invalid_book_rows", "depth_quality_input_rows"}
-    if not required_artifacts.issubset(artifacts.keys()):
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+    source_manifest_sha256 = manifest_data.get("source_evidence_manifest_sha256")
+    if not isinstance(source_manifest_sha256, str) or not _HEX64_RE.match(source_manifest_sha256):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    artifacts = manifest_data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    required_artifacts = {
+        "summary",
+        "quarantine_summary",
+        "quarantined_invalid_book_rows",
+        "depth_quality_input_rows",
+        "runtime_attestation_gate",
+    }
+    if set(artifacts.keys()) != required_artifacts:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
     for key in required_artifacts:
         art = artifacts[key]
+        if not isinstance(art, dict):
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
         rel_p = art.get("relative_path")
         exp_sha = art.get("sha256")
-        if not rel_p or not exp_sha:
-            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        exp_bytes = art.get("byte_count")
+        if (
+            not isinstance(rel_p, str)
+            or not rel_p
+            or Path(rel_p).is_absolute()
+            or not isinstance(exp_sha, str)
+            or not _HEX64_RE.match(exp_sha)
+            or type(exp_bytes) is not int
+            or exp_bytes < 0
+        ):
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
         target_p = review_output_root / rel_p
-        if not target_p.is_file():
-            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
-        actual_sha = hashlib.sha256(target_p.read_bytes()).hexdigest()
-        if actual_sha != exp_sha:
-            return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        try:
+            target_p.resolve().relative_to(review_output_root.resolve())
+        except ValueError:
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+        if not target_p.is_file() or target_p.is_symlink():
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+        file_bytes = target_p.read_bytes()
+        if len(file_bytes) != exp_bytes:
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+        if hashlib.sha256(file_bytes).hexdigest() != exp_sha:
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
     summary_p = review_output_root / artifacts["summary"]["relative_path"]
     quarantine_p = review_output_root / artifacts["quarantine_summary"]["relative_path"]
     try:
-        with summary_p.open("r", encoding="utf-8") as fh:
-            summary_data = json.load(fh)
-        with quarantine_p.open("r", encoding="utf-8") as fh:
-            quarantine_data = json.load(fh)
+        summary_data = json.loads(summary_p.read_text(encoding="utf-8"))
+        quarantine_data = json.loads(quarantine_p.read_text(encoding="utf-8"))
     except Exception:
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
-    if summary_data.get("stage1_5g_review_id") != review_id or quarantine_data.get("stage1_5g_review_id") != review_id:
-        return False, ["stage1_5g_quarantine_v2_artifact_mismatch"]
+    if not isinstance(summary_data, dict) or not isinstance(quarantine_data, dict):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    if (
+        summary_data.get("stage1_5g_review_id") != review_id
+        or quarantine_data.get("stage1_5g_review_id") != review_id
+        or summary_data.get("source_evidence_manifest_sha256") != source_manifest_sha256
+        or quarantine_data.get("source_evidence_manifest_sha256") != source_manifest_sha256
+    ):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    gate_p = review_output_root / artifacts["runtime_attestation_gate"]["relative_path"]
+    try:
+        proof_data = json.loads(gate_p.read_text(encoding="utf-8"))
+    except Exception:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    if not isinstance(proof_data, dict):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    expected_gate_keys = {
+        "schema_version",
+        "source_runtime_attestation_gate_verified",
+        "stage1_5g_review_id",
+        "source_evidence_manifest_sha256",
+        "consumer_process_instance_id",
+        "consumer_root_id",
+        "consumer_process_started_at_ms",
+        "consumer_startup_commit_sha",
+        "consumer_root_contract_sha256",
+        "consumer_runtime_manifest_sha256",
+        "consumer_static_attestation_verified",
+        "consumer_runtime_attestation_verified",
+        "consumer_runtime_attestation_compromised",
+        "source_runtime_attestation_authority_sha256",
+    }
+    if set(proof_data.keys()) != expected_gate_keys:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    if (
+        proof_data.get("schema_version") != 1
+        or type(proof_data.get("source_runtime_attestation_gate_verified")) is not bool
+        or proof_data.get("source_runtime_attestation_gate_verified") is not True
+        or type(proof_data.get("consumer_static_attestation_verified")) is not bool
+        or proof_data.get("consumer_static_attestation_verified") is not True
+        or type(proof_data.get("consumer_runtime_attestation_verified")) is not bool
+        or proof_data.get("consumer_runtime_attestation_verified") is not True
+        or type(proof_data.get("consumer_runtime_attestation_compromised")) is not bool
+        or proof_data.get("consumer_runtime_attestation_compromised") is not False
+    ):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    if (
+        proof_data.get("stage1_5g_review_id") != review_id
+        or proof_data.get("source_evidence_manifest_sha256") != source_manifest_sha256
+        or proof_data.get("stage1_5g_review_id") != summary_data.get("stage1_5g_review_id")
+        or proof_data.get("source_evidence_manifest_sha256") != summary_data.get("source_evidence_manifest_sha256")
+    ):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    started_at = proof_data.get("consumer_process_started_at_ms")
+    if type(started_at) is not int or started_at <= 0:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    proc_id = proof_data.get("consumer_process_instance_id")
+    if not isinstance(proc_id, str) or not _UUID_RE.match(proc_id):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    root_id = proof_data.get("consumer_root_id")
+    if not isinstance(root_id, str) or not _HEX64_RE.match(root_id):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    commit_sha = proof_data.get("consumer_startup_commit_sha")
+    if not isinstance(commit_sha, str) or not (_HEX40_RE.match(commit_sha) or _HEX64_RE.match(commit_sha)):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    contract_sha = proof_data.get("consumer_root_contract_sha256")
+    if not isinstance(contract_sha, str) or not _HEX64_RE.match(contract_sha):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    runtime_manifest_sha = proof_data.get("consumer_runtime_manifest_sha256")
+    if not isinstance(runtime_manifest_sha, str) or not _HEX64_RE.match(runtime_manifest_sha):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    auth_sha = proof_data.get("source_runtime_attestation_authority_sha256")
+    if not isinstance(auth_sha, str) or not _HEX64_RE.match(auth_sha):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    proof_without_hash = {
+        k: v for k, v in proof_data.items()
+        if k != "source_runtime_attestation_authority_sha256"
+    }
+    expected_auth_sha = hashlib.sha256(
+        canonical_json_dumps(proof_without_hash).encode("utf-8")
+    ).hexdigest()
+    if auth_sha != expected_auth_sha:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    source_root_raw = summary_data.get("stage1_5f_output_root")
+    if not source_root_raw or not isinstance(source_root_raw, str):
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    source_root = Path(source_root_raw)
+    if not source_root.is_absolute():
+        if not source_root.is_dir():
+            source_root = (review_output_root / source_root).resolve()
+        else:
+            source_root = source_root.resolve()
+    else:
+        source_root = source_root.resolve()
+
+    if not source_root.is_dir():
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    source_ok, actual_src_manifest_sha, _ = verify_source_evidence_manifest(source_root)
+    if not source_ok or actual_src_manifest_sha != source_manifest_sha256:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    src_summary_p = source_root / "live_depth_observer_summary.json"
+    if not src_summary_p.is_file():
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    try:
+        src_summary = json.loads(src_summary_p.read_text(encoding="utf-8"))
+    except Exception:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    expected_projection, auth_blockers = validate_stage1_5f_source_runtime_authority(
+        stage1_5f_root=source_root,
+        summary=src_summary,
+        source_evidence_manifest_sha256=source_manifest_sha256,
+    )
+    if auth_blockers or not expected_projection:
+        return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+    for k, expected_v in expected_projection.items():
+        if proof_data.get(k) != expected_v or type(proof_data.get(k)) is not type(expected_v):
+            return False, ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
 
     return True, []
 
@@ -1802,6 +2289,7 @@ def build_stage1_5g_review_summary(
     request_manifest_rows: list[dict],
     output_root: str | Path | None = None,
     loader_blockers: list[str] | None = None,
+    source_evidence_manifest_sha256: str | None = None,
 ) -> dict:
     """
     Build Stage 1.5G review summary.
@@ -1816,12 +2304,15 @@ def build_stage1_5g_review_summary(
 
     if loader_blockers:
         all_blockers.extend(loader_blockers)
+    verified_manifest_sha = source_evidence_manifest_sha256 or ""
     if output_root is not None:
-        source_ok, _, source_blockers = verify_source_evidence_manifest(
+        source_ok, manifest_sha, source_blockers = verify_source_evidence_manifest(
             Path(output_root)
         )
         if not source_ok:
             all_blockers.extend(source_blockers)
+        elif not verified_manifest_sha:
+            verified_manifest_sha = manifest_sha
 
     def finish(result: dict, formal_completed_event_symbol_ids: set[str] | None = None) -> dict:
         finished = _with_stage1_5g_audit_fields(
@@ -1831,18 +2322,28 @@ def build_stage1_5g_review_summary(
             accepted_events=accepted_events,
             states=states,
             formal_completed_event_symbol_ids=formal_completed_event_symbol_ids,
+            source_evidence_manifest_sha256=verified_manifest_sha if verified_manifest_sha else None,
         )
         if quarantine_result and quarantine_result.invalid_book_row_count > 0:
             finished["_stage1_5g_quarantine_result"] = quarantine_result
         return finished
 
-    # 1. Loader Blockers Check
-    if any(b in all_blockers for b in [
+    # 1. Loader Blockers Check (including source authority & manifest blockers)
+    SOURCE_LOADER_BLOCKERS = {
         "jsonl_parse_error",
         "missing_or_unreadable_summary",
         "duplicate_stable_event_symbol_identity",
         "source_evidence_manifest_missing_or_unreadable",
-    ]):
+        "source_runtime_attestation_root_contract_missing_or_unreadable",
+        "source_runtime_attestation_contract_summary_binding_invalid",
+        "source_static_attestation_field_invalid",
+        "source_static_attestation_unverified",
+        "source_runtime_attestation_verified_field_invalid",
+        "source_runtime_attestation_unverified",
+        "source_runtime_attestation_compromised_field_invalid",
+        "source_runtime_attestation_compromised",
+    }
+    if any(b in all_blockers for b in SOURCE_LOADER_BLOCKERS):
         return finish({
             "schema_version": base.EXTERNAL_SIGNAL_STAGE1_5G_SCHEMA_VERSION,
             "decision": "stage1_5g_depth_evidence_invalid",

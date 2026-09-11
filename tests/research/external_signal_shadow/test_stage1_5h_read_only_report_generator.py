@@ -6,6 +6,7 @@ from pathlib import Path
 from src.research.external_signal_shadow.safety import canonical_json_dumps
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
     write_stage1_5g_review_manifest,
+    write_stage1_5g_runtime_attestation_gate,
 )
 from src.research.external_signal_shadow.stage1_5h_read_only_report_generator import (
     build_stage1_5h_report_summary,
@@ -129,11 +130,30 @@ def make_stage1_5h_fixture(tmp_path: Path):
 
 
 def make_stage1_5h_v2_fixture(tmp_path: Path):
+    from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+        validate_stage1_5f_source_runtime_authority,
+        verify_source_evidence_manifest,
+    )
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
+        make_stage1_5f_fixture_root,
+    )
+
     paths = list(make_stage1_5h_fixture(tmp_path))
     summary = json.loads(paths[0].read_text(encoding="utf-8"))
     legacy_quarantine = summary["quarantine"]
     ids = ["es1"]
-    source_hash = "a" * 64
+
+    src_root = make_stage1_5f_fixture_root(tmp_path / "stage1_5f_src")
+    source_ok, source_hash, _ = verify_source_evidence_manifest(src_root)
+    assert source_ok is True
+    src_summary = json.loads((src_root / "live_depth_observer_summary.json").read_text(encoding="utf-8"))
+    source_authority, auth_blockers = validate_stage1_5f_source_runtime_authority(
+        stage1_5f_root=src_root,
+        summary=src_summary,
+        source_evidence_manifest_sha256=source_hash,
+    )
+    assert not auth_blockers and bool(source_authority)
+
     formal_hash = hashlib.sha256(
         canonical_json_dumps(ids).encode("utf-8")
     ).hexdigest()
@@ -181,17 +201,24 @@ def make_stage1_5h_v2_fixture(tmp_path: Path):
     summary.update({
         "schema_version": 2,
         "stage1_5g_review_id": review_id,
+        "stage1_5f_output_root": str(src_root),
         "source_evidence_manifest_sha256": source_hash,
         "formal_completed_event_symbol_ids_sha256": formal_hash,
         "quarantine": quarantine,
     })
     paths[0].write_text(json.dumps(summary), encoding="utf-8")
     paths[1].write_text(json.dumps(quarantine), encoding="utf-8")
+    gate_path = write_stage1_5g_runtime_attestation_gate(
+        paths[0].parent,
+        summary=summary,
+        source_authority=source_authority,
+    )
     write_stage1_5g_review_manifest(paths[0].parent, summary, {
         "summary": paths[0],
         "quarantine_summary": paths[1],
         "depth_quality_input_rows": paths[2],
         "quarantined_invalid_book_rows": paths[3],
+        "runtime_attestation_gate": gate_path,
     })
     return paths
 
@@ -618,7 +645,7 @@ def test_stage1_5h_rejects_v2_bundle_without_manifest(tmp_path):
     ))
 
     assert result["decision"] == "stage1_5h_input_rejected"
-    assert "stage1_5g_quarantine_v2_artifact_mismatch" in result["blockers"]
+    assert "stage1_5h_runtime_attestation_gate_missing_or_invalid" in result["blockers"]
 
 
 def test_stage1_5h_rejects_v2_clean_bundle_without_a_new_consumer_path(tmp_path):
@@ -702,6 +729,7 @@ def test_stage1_5h_rejects_v2_bundle_with_failed_sole_symbol(tmp_path):
         "quarantine_summary": paths[1],
         "depth_quality_input_rows": paths[2],
         "quarantined_invalid_book_rows": paths[3],
+        "runtime_attestation_gate": paths[0].parent / "stage1_5g_runtime_attestation_gate.json",
     })
 
     result = build_stage1_5h_report_summary(load_stage1_5h_inputs(
@@ -769,7 +797,7 @@ def test_stage1_5h_fails_closed_when_v2_manifest_corrupted(tmp_path):
     result = build_stage1_5h_report_summary(bundle)
 
     assert result["decision"] == "stage1_5h_input_rejected"
-    assert "stage1_5g_quarantine_v2_artifact_mismatch" in result["blockers"]
+    assert "stage1_5h_runtime_attestation_gate_missing_or_invalid" in result["blockers"]
 
 
 def test_stage1_5h_v2_report_uses_only_sole_symbol_compatibility_view(tmp_path):
@@ -790,6 +818,7 @@ def test_stage1_5h_v2_report_uses_only_sole_symbol_compatibility_view(tmp_path):
         "quarantine_summary": paths[1],
         "depth_quality_input_rows": paths[2],
         "quarantined_invalid_book_rows": paths[3],
+        "runtime_attestation_gate": paths[0].parent / "stage1_5g_runtime_attestation_gate.json",
     })
 
     result = build_stage1_5h_report_summary(load_stage1_5h_inputs(

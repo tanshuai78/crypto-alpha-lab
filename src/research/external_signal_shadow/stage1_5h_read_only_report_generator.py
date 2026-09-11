@@ -203,30 +203,30 @@ def _validate_v2_closed_artifact_paths(
         bundle.stage1_5g_summary_path is None
         or any(path is None for path in required_paths.values())
     ):
-        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
         return None
 
     for p in required_paths.values():
         if p.is_symlink() or not p.is_file():
-            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
             return None
 
     root = bundle.stage1_5g_summary_path.resolve().parent
     manifest_path = root / "stage1_5g_review_manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
-        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
         return None
 
     manifest_ok, manifest_blockers = verify_stage1_5g_review_manifest(root)
     if not manifest_ok:
-        for b in manifest_blockers:
-            _append_once(blockers, b)
+        for _ in manifest_blockers:
+            _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
         return None
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+        _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
         return None
 
     artifacts = manifest.get("artifacts") or {}
@@ -234,16 +234,16 @@ def _validate_v2_closed_artifact_paths(
         meta = artifacts.get(key) or {}
         relative_path = meta.get("relative_path")
         if not isinstance(relative_path, str) or Path(relative_path).is_absolute():
-            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
             return None
         artifact_path = (root / relative_path).resolve()
         try:
             artifact_path.relative_to(root)
         except ValueError:
-            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
             return None
         if artifact_path != supplied_path.resolve():
-            _append_once(blockers, "stage1_5g_quarantine_v2_artifact_mismatch")
+            _append_once(blockers, "stage1_5h_runtime_attestation_gate_missing_or_invalid")
             return None
 
     return root, manifest
@@ -753,7 +753,6 @@ def build_stage1_5h_v2_event_bundle_reports(
 
     paths_res = _validate_v2_closed_artifact_paths(bundle, blockers)
     if paths_res is None or blockers:
-        _append_once(blockers, "stage1_5h_v2_event_bundle_input_rejected")
         return reject()
     root, manifest = paths_res
 

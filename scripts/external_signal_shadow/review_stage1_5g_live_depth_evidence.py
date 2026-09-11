@@ -11,6 +11,7 @@ from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review im
     load_stage1_5g_inputs,
     write_stage1_5g_quarantine_artifacts,
     write_stage1_5g_review_manifest,
+    write_stage1_5g_runtime_attestation_gate,
 )
 
 
@@ -125,14 +126,35 @@ def main() -> int:
     with open(review_path, "w", encoding="utf-8") as fh:
         fh.write(review_content + "\n")
 
-    # If quarantine artifacts exist, write review manifest
-    if quarantine_summary_path.is_file() and (out_root / "quarantined_invalid_book_rows.jsonl").is_file() and (out_root / "depth_quality_input_rows.jsonl").is_file():
+    # Positive runtime-gate proof (only for eligible quarantined pass)
+    gate_path: Path | None = None
+    if (
+        summary.get("decision") == "stage1_5g_depth_evidence_quarantined_pass"
+        and summary.get("quarantined_depth_evidence_pass") is True
+        and summary.get("clean_depth_evidence_pass") is False
+        and bool(bundle.source_authority)
+        and not bundle.source_authority_blockers
+    ):
+        gate_path = write_stage1_5g_runtime_attestation_gate(
+            out_root,
+            summary=summary,
+            source_authority=bundle.source_authority,
+        )
+
+    # If quarantine artifacts exist, write review manifest (manifest last)
+    if (
+        quarantine_summary_path.is_file()
+        and (out_root / "quarantined_invalid_book_rows.jsonl").is_file()
+        and (out_root / "depth_quality_input_rows.jsonl").is_file()
+    ):
         artifact_paths = {
             "summary": summary_path,
             "quarantine_summary": quarantine_summary_path,
             "quarantined_invalid_book_rows": out_root / "quarantined_invalid_book_rows.jsonl",
             "depth_quality_input_rows": out_root / "depth_quality_input_rows.jsonl",
         }
+        if gate_path is not None and gate_path.is_file():
+            artifact_paths["runtime_attestation_gate"] = gate_path
         write_stage1_5g_review_manifest(out_root, summary, artifact_paths)
 
     print(f"Stage 1.5G review summary written to: {summary_path}")

@@ -2834,14 +2834,17 @@ def test_task5_consumer_summary_models_and_atomic_writer(tmp_path):
     obj = LiveDepthObserverSummary.from_dict(old_dict)
     assert obj.consumer_process_instance_id == ""
     assert obj.consumer_static_attestation_verified is False
+    assert obj.consumer_process_started_at_ms == 0
 
     # Serializes new fields
     d = obj.to_dict()
     d["consumer_process_instance_id"] = "proc-123"
     d["consumer_static_attestation_verified"] = True
+    d["consumer_process_started_at_ms"] = 1_700_000_000_123
     new_obj = LiveDepthObserverSummary.from_dict(d)
     assert new_obj.consumer_process_instance_id == "proc-123"
     assert new_obj.consumer_static_attestation_verified is True
+    assert new_obj.consumer_process_started_at_ms == 1_700_000_000_123
 
     # Atomic summary writer
     sum_file = tmp_path / "summary.json"
@@ -3099,6 +3102,106 @@ def test_runtime_main_publishes_bound_consumer_proof_atomically(tmp_path, monkey
     assert summary["storage_terminal_write_set_peak_bytes"] > 0
     assert summary["storage_emergency_blocker_reserve_bytes"] > 0
     assert summary["consumer_runtime_manifest_sha256"] == contract["consumer_runtime_manifest_sha256"]
+
+
+def test_runtime_main_keeps_one_process_start_across_summary_writes(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import Watermark
+
+    d_root = tmp_path / "stage1_5d"
+    events_dir = d_root / "events"
+    events_dir.mkdir(parents=True)
+    (events_dir / "2026-08-10.jsonl").write_text("")
+    now_ms = int(__import__("time").time() * 1000)
+    gate_path = d_root / "live_safety_gate_summary.json"
+    gate_path.write_text(json.dumps({
+        "runtime_gate_schema_version": 1,
+        "decision": "stage1_5d_runtime_gate_ready",
+        "status": "READY",
+        "consumable_by_stage1_5f": True,
+        "fatal_blockers": [],
+        "source_root": str(d_root.resolve()),
+        "generated_at_ms": now_ms,
+        "live_trading_enabled": False,
+        "execution_feasibility_claim_allowed": False,
+        "trade_signal_allowed": False,
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+    }))
+    stage1_5e_summary = tmp_path / "stage1_5e.json"
+    stage1_5e_summary.write_text(json.dumps({
+        "decision": "stage1_5e_execution_feasibility_audit_ready_for_live_depth_observer",
+        "paper_trading_allowed": False,
+        "live_trading_allowed": False,
+        "execution_engine_allowed": False,
+        "alpha_interpretation_allowed": False,
+        "trade_signal_allowed": False,
+    }))
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": []}))
+    output_root = tmp_path / "stage1_5f"
+    output_root.mkdir()
+    (output_root / "watermark.json").write_text(json.dumps(Watermark(
+        watermark_version=1,
+        max_seen_detected_at_ms=now_ms - 1,
+        updated_at_ms=now_ms,
+    ).to_dict()))
+
+    writes = []
+    original_atomic_write = runner.write_live_depth_observer_summary_atomically
+
+    def capture_atomic_write(path, data, *, storage_guard):
+        if str(path).endswith("live_depth_observer_summary.json"):
+            writes.append(dict(data))
+        original_atomic_write(path, data, storage_guard=storage_guard)
+
+    monkeypatch.setattr(runner, "write_live_depth_observer_summary_atomically", capture_atomic_write)
+    monkeypatch.setattr(
+        runner,
+        "verify_consumer_static_proof",
+        lambda _repo_root: {
+            "valid": True,
+            "startup_head_sha": "a" * 40,
+            "manifest_sha256": runner.canonical_manifest_sha256("1.5F_v1", runner.CONSUMER_RUNTIME_MANIFEST),
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "verify_consumer_runtime_proof",
+        lambda *_args: {"valid": True},
+    )
+
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(events_dir / "*.jsonl"),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--stage1-5e-summary", str(stage1_5e_summary),
+            "--output-root", str(output_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "2",
+            "--live-public-readonly",
+        ]
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 0
+    finally:
+        sys.argv = old_argv
+
+    assert writes
+    starts = [row.get("consumer_process_started_at_ms") for row in writes]
+    assert all(type(value) is int and value > 0 for value in starts)
+    assert len(set(starts)) == 1
+    for summary in writes:
+        start = summary["consumer_process_started_at_ms"]
+        heartbeat = summary["last_heartbeat_at_ms"]
+        assert type(start) is int and start > 0
+        assert type(heartbeat) is int and heartbeat > 0
+        assert start <= heartbeat
 
 
 def test_pending_anchor_deadline_state_semantics_fixture_provenance():
@@ -4260,3 +4363,196 @@ def test_runner_malformed_versioned_fingerprint_blocks_without_mutation(tmp_path
     assert latest_st.status == "pending_launch_time_in_future"
     assert watermark_file.read_bytes() == watermark_bytes_before
     assert not accepted_file.exists() or accepted_file.read_text().strip() == ""
+
+
+def _extract_runbook_section(begin_marker: str, end_marker: str) -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    runbook_path = repo_root / "docs/ops/2026-09-03-stage1-5d-1-5f-vps-deployment-and-operations-runbook_CN.md"
+    content = runbook_path.read_text(encoding="utf-8")
+    assert begin_marker in content, f"missing marker: {begin_marker}"
+    assert end_marker in content, f"missing marker: {end_marker}"
+    start = content.index(begin_marker) + len(begin_marker)
+    end = content.index(end_marker, start)
+    return content[start:end]
+
+
+def _load_extracted_inspect_writers():
+    raw = _extract_runbook_section(
+        "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_BEGIN -->",
+        "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_END -->",
+    )
+    code = raw.replace("```python", "").replace("```", "")
+    ns: dict[str, object] = {}
+    exec(compile(code, "extracted_inspector", "exec"), ns)
+    assert "inspect_writers" in ns
+    return ns["inspect_writers"]
+
+
+def test_runbook_zero_writer_extracted_inspect_writers_matrix(tmp_path):
+    import io
+
+    inspect_writers = _load_extracted_inspect_writers()
+
+    target_root = tmp_path / "target_repo"
+    target_root.mkdir(parents=True, exist_ok=True)
+    wrong_root = tmp_path / "wrong_repo"
+    wrong_root.mkdir(parents=True, exist_ok=True)
+    proc = tmp_path / "proc"
+    proc.mkdir(parents=True, exist_ok=True)
+
+    # 1. Script D in target cwd (relative argv)
+    p1 = proc / "101"
+    p1.mkdir()
+    (p1 / "cwd").symlink_to(target_root)
+    (p1 / "cmdline").write_bytes(
+        b"python3\x00scripts/external_signal_shadow/run_stage1_5d_live_event_source_smoke_collector.py\x00"
+    )
+
+    # 2. Script F in target cwd (absolute argv)
+    p2 = proc / "102"
+    p2.mkdir()
+    (p2 / "cwd").symlink_to(target_root)
+    abs_f = str(target_root / "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py")
+    (p2 / "cmdline").write_bytes(f"python3\x00{abs_f}\x00".encode("utf-8"))
+
+    # 3. Script F in wrong cwd (must NOT match)
+    p3 = proc / "103"
+    p3.mkdir()
+    (p3 / "cwd").symlink_to(wrong_root)
+    (p3 / "cmdline").write_bytes(
+        b"python3\x00scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py\x00"
+    )
+
+    # 4. Irrelevant script in target cwd (must NOT match)
+    p4 = proc / "104"
+    p4.mkdir()
+    (p4 / "cwd").symlink_to(target_root)
+    (p4 / "cmdline").write_bytes(b"python3\x00scripts/other_unrelated_tool.py\x00")
+
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
+    try:
+        writers = inspect_writers(proc, target_root)
+        out = sys.stdout.getvalue()
+        err = sys.stderr.getvalue()
+    finally:
+        sys.stdout, sys.stderr = old_stdout, old_stderr
+
+    # stdout must receive 0 bytes so command substitution ACTIVE_COUNT=$(...) is pure integer
+    assert out == "", f"stdout must be empty to avoid shell capture pollution, got: {out}"
+    assert "MATCHING_WRITER: pid=101" in err
+    assert "MATCHING_WRITER: pid=102" in err
+
+    matched_pids = {w["pid"] for w in writers}
+    assert matched_pids == {101, 102}
+    assert len(writers) == 2
+
+
+def test_runbook_zero_writer_extracted_inspect_writers_inspection_failures(tmp_path):
+    inspect_writers = _load_extracted_inspect_writers()
+
+    target_root = tmp_path / "target_repo"
+    target_root.mkdir(parents=True, exist_ok=True)
+    proc = tmp_path / "proc_fail"
+    proc.mkdir(parents=True, exist_ok=True)
+
+    # 1. proc root does not exist
+    with pytest.raises(RuntimeError, match="proc root not found"):
+        inspect_writers(tmp_path / "missing_proc_dir", target_root)
+
+    # 2. Inaccessible / broken cwd symlink
+    p_broken = proc / "991"
+    p_broken.mkdir()
+    (p_broken / "cwd").symlink_to(tmp_path / "destination_does_not_exist")
+    (p_broken / "cmdline").write_bytes(b"python3\x00foo\x00")
+    with pytest.raises(RuntimeError, match=r"Failed to inspect /proc/991/cwd"):
+        inspect_writers(proc, target_root)
+
+    # Clean up broken pid before next sub-test
+    (p_broken / "cwd").unlink()
+    (p_broken / "cmdline").unlink()
+    p_broken.rmdir()
+
+    # 3. Unreadable cmdline (e.g. is directory)
+    p_badcmd = proc / "992"
+    p_badcmd.mkdir()
+    (p_badcmd / "cwd").symlink_to(target_root)
+    (p_badcmd / "cmdline").mkdir()
+    with pytest.raises(RuntimeError, match=r"Failed to inspect /proc/992/cmdline"):
+        inspect_writers(proc, target_root)
+
+
+def test_runbook_zero_writer_extracted_deployment_block_syntax_and_stop_guard(tmp_path):
+    import subprocess
+
+    raw_deployment = _extract_runbook_section(
+        "<!-- STAGE1_5D_1_5F_ZERO_WRITER_DEPLOYMENT_BEGIN -->",
+        "<!-- STAGE1_5D_1_5F_ZERO_WRITER_DEPLOYMENT_END -->",
+    )
+    sh_code = raw_deployment.replace("```bash", "").replace("```", "")
+
+    # Invariant: set -euo pipefail present
+    assert "set -euo pipefail" in sh_code
+
+    # Invariant: bash -n syntax check passes
+    syntax_check = subprocess.run(["bash", "-n", "-c", sh_code], capture_output=True, text=True)
+    assert syntax_check.returncode == 0, f"bash -n failed: {syntax_check.stderr}"
+
+    # Invariant: STOP branch lexically precedes git checkout
+    stop_idx = sh_code.index("STOP=stage1_5d_1_5f_writer_still_running")
+    checkout_idx = sh_code.index('git checkout "$DEPLOY_COMMIT"')
+    assert stop_idx < checkout_idx
+
+    # Invariant: simulated deployment with matching writer captures pure integer count
+    # and aborts via STOP branch without reaching checkout
+    target_root = tmp_path / "target_repo"
+    target_root.mkdir(parents=True, exist_ok=True)
+    proc = tmp_path / "proc_sim"
+    proc.mkdir(parents=True, exist_ok=True)
+    p_active = proc / "555"
+    p_active.mkdir()
+    (p_active / "cwd").symlink_to(target_root)
+    (p_active / "cmdline").write_bytes(
+        b"python3\x00scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py\x00"
+    )
+
+    repo_root = Path(__file__).resolve().parents[3]
+    runbook_path = repo_root / "docs/ops/2026-09-03-stage1-5d-1-5f-vps-deployment-and-operations-runbook_CN.md"
+
+    sim_script = f"""
+set -euo pipefail
+INSPECT_ATTEMPTS=0
+ZERO_WRITER_CONFIRMED=false
+
+while [ "$INSPECT_ATTEMPTS" -lt 1 ]; do
+  ACTIVE_COUNT=$(python3 - <<'PY_INSPECT'
+from pathlib import Path
+runbook = Path("{runbook_path}").read_text(encoding="utf-8")
+begin = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_BEGIN -->"
+end = "<!-- STAGE1_5D_1_5F_ZERO_WRITER_INSPECTOR_END -->"
+code = runbook[runbook.index(begin) + len(begin):runbook.index(end)].replace("```python", "").replace("```", "")
+ns = {{}}
+exec(compile(code, "inspector", "exec"), ns)
+writers = ns["inspect_writers"](Path("{proc}"), Path("{target_root}"))
+print(len(writers))
+PY_INSPECT
+  )
+  if [ "$ACTIVE_COUNT" -eq 0 ]; then
+    ZERO_WRITER_CONFIRMED=true
+    break
+  fi
+  INSPECT_ATTEMPTS=$((INSPECT_ATTEMPTS + 1))
+done
+
+if [ "$ZERO_WRITER_CONFIRMED" != "true" ]; then
+  echo "STOP=stage1_5d_1_5f_writer_still_running" >&2
+  exit 1
+fi
+echo "CHECKOUT_REACHED"
+"""
+    res = subprocess.run(["bash", "-c", sim_script], capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "STOP=stage1_5d_1_5f_writer_still_running" in res.stderr
+    assert "MATCHING_WRITER: pid=555" in res.stderr
+    assert "integer expression expected" not in res.stderr
+    assert "CHECKOUT_REACHED" not in res.stdout

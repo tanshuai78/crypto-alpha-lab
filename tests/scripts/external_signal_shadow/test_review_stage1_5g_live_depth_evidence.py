@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 from scripts.external_signal_shadow.review_stage1_5g_live_depth_evidence import main
 from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
@@ -96,17 +97,43 @@ def test_cli_does_not_write_quarantine_artifacts_for_clean_pass(tmp_path, monkey
     assert not (output_root / "stage1_5g_quarantine_summary.json").exists()
 
 
-def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypatch):
-    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
-        _write_source_manifest,
+EXPECTED_GATE_KEYS = {
+    "schema_version",
+    "source_runtime_attestation_gate_verified",
+    "stage1_5g_review_id",
+    "source_evidence_manifest_sha256",
+    "consumer_process_instance_id",
+    "consumer_root_id",
+    "consumer_process_started_at_ms",
+    "consumer_startup_commit_sha",
+    "consumer_root_contract_sha256",
+    "consumer_runtime_manifest_sha256",
+    "consumer_static_attestation_verified",
+    "consumer_runtime_attestation_verified",
+    "consumer_runtime_attestation_compromised",
+    "source_runtime_attestation_authority_sha256",
+}
+
+
+def _run_quarantined_pass_cli(tmp_path, monkeypatch) -> Path:
+    import shutil
+
+    from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_decision import (
+        seal_disposable_stage1_5f_source_root,
     )
 
-    root = make_stage1_5f_fixture_root(tmp_path)
+    root = make_stage1_5f_fixture_root(tmp_path / "stage1_5f_source")
+    shutil.rmtree(root / "depth_snapshots", ignore_errors=True)
+    shutil.rmtree(root / "events_accepted", ignore_errors=True)
+    shutil.rmtree(root / "request_manifest", ignore_errors=True)
+
     snap_dir = root / "depth_snapshots" / "20260706"
     snap_dir.mkdir(parents=True, exist_ok=True)
     snap_file = snap_dir / "es1.jsonl"
 
-    event_file = root / "events_accepted" / "20260706.jsonl"
+    event_dir = root / "events_accepted"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    event_file = event_dir / "20260706.jsonl"
     event = {
         "event_symbol_id": "es1",
         "symbol": "BTC/USDT",
@@ -129,7 +156,8 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
     state_file.write_text(json.dumps(state) + "\n", encoding="utf-8")
 
     summary_file = root / "live_depth_observer_summary.json"
-    summary = {
+    existing_summary = json.loads(summary_file.read_text(encoding="utf-8"))
+    existing_summary.update({
         "decision": "stage1_5f_observer_depth_evidence_collected",
         "completed_observation_count": 1,
         "observation_window_ms": 43200000,
@@ -141,10 +169,10 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
         "failed_requests_count": 0,
         "consecutive_network_errors": 0,
         "max_consecutive_network_errors_seen": 0,
-        "last_heartbeat_at_ms": 10000,
+        "last_heartbeat_at_ms": max(existing_summary.get("last_heartbeat_at_ms", 10000), existing_summary.get("consumer_process_started_at_ms", 0)),
         "heartbeat_count": 1,
-    }
-    summary_file.write_text(json.dumps(summary), encoding="utf-8")
+    })
+    summary_file.write_text(json.dumps(existing_summary), encoding="utf-8")
 
     snapshots = []
     launch_ms = 1000000
@@ -184,10 +212,12 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
 
     snap_file.write_text("\n".join(json.dumps(s) for s in snapshots) + "\n", encoding="utf-8")
 
-    manifest_file = root / "request_manifest" / "20260706.jsonl"
+    manifest_dir = root / "request_manifest"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_file = manifest_dir / "20260706.jsonl"
     manifest_rows = [{"event_symbol_id": "es1", "symbol": "BTC/USDT", "http_status": 200} for _ in range(718)]
     manifest_file.write_text("\n".join(json.dumps(r) for r in manifest_rows) + "\n", encoding="utf-8")
-    _write_source_manifest(root)
+    seal_disposable_stage1_5f_source_root(root)
 
     output_root = tmp_path / "review_out"
     monkeypatch.setattr(
@@ -201,8 +231,13 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
             str(output_root),
         ],
     )
-
     assert main() == 0
+    return output_root
+
+
+def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypatch):
+    output_root = _run_quarantined_pass_cli(tmp_path, monkeypatch)
+
     assert (output_root / "quarantined_invalid_book_rows.jsonl").exists()
     assert (output_root / "depth_quality_input_rows.jsonl").exists()
     assert (output_root / "stage1_5g_quarantine_summary.json").exists()
@@ -217,16 +252,36 @@ def test_cli_writes_quarantine_artifacts_for_quarantine_pass(tmp_path, monkeypat
     assert quarantine_summary["max_consecutive_invalid"] == 11
     assert quarantine_summary["max_consecutive_invalid_after_warmup"] == 1
 
+    # Stage 1.5G runtime attestation gate proof
+    gate_file = output_root / "stage1_5g_runtime_attestation_gate.json"
+    assert gate_file.exists()
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    assert set(gate_data.keys()) == EXPECTED_GATE_KEYS
+
     manifest_path = output_root / "stage1_5g_review_manifest.json"
     assert manifest_path.exists()
     manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest_data["schema_version"] == 2
+    assert manifest_data["schema_version"] == 3
     assert "stage1_5g_review_id" in manifest_data
     assert "artifacts" in manifest_data
-    for art_name in ("summary", "quarantine_summary", "quarantined_invalid_book_rows", "depth_quality_input_rows"):
+    for art_name in (
+        "summary",
+        "quarantine_summary",
+        "quarantined_invalid_book_rows",
+        "depth_quality_input_rows",
+        "runtime_attestation_gate",
+    ):
         assert art_name in manifest_data["artifacts"]
         art_path = output_root / manifest_data["artifacts"][art_name]["relative_path"]
         assert art_path.exists()
+
+
+def test_v3_manifest_is_final_after_positive_gate_proof(tmp_path, monkeypatch):
+    output_root = _run_quarantined_pass_cli(tmp_path, monkeypatch)
+    gate_file = output_root / "stage1_5g_runtime_attestation_gate.json"
+    manifest_file = output_root / "stage1_5g_review_manifest.json"
+    assert set(json.loads(gate_file.read_text(encoding="utf-8")).keys()) == EXPECTED_GATE_KEYS
+    assert json.loads(manifest_file.read_text(encoding="utf-8"))["schema_version"] == 3
 
 
 def test_cli_rejects_preexisting_output_root(tmp_path, monkeypatch):

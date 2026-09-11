@@ -21,6 +21,7 @@ from src.research.external_signal_shadow.stage1_5_storage_guard import (
 from src.risk.limits import RiskLimits
 
 CONSUMER_PROCESS_INSTANCE_ID = str(uuid.uuid4())
+CONSUMER_PROCESS_STARTED_AT_MS: int = 0
 
 CONSUMER_RUNTIME_MANIFEST = [
     "scripts/external_signal_shadow/run_stage1_5f_live_depth_observer.py",
@@ -95,7 +96,14 @@ def write_live_depth_observer_summary_atomically(
     require_storage_write(storage_guard, result)
 
 
-def _build_storage_failure_summary(storage_blocker: str, storage_guard_status: str) -> dict:
+def _build_storage_failure_summary(
+    storage_blocker: str,
+    storage_guard_status: str,
+    consumer_process_started_at_ms: int = 0,
+) -> dict:
+    now_ms = int(time.time() * 1000)
+    start_ms = consumer_process_started_at_ms or CONSUMER_PROCESS_STARTED_AT_MS or now_ms
+    heartbeat_ms = max(now_ms, start_ms)
     return {
         "decision": "stage1_5f_observer_failed",
         "blocker": str(storage_blocker)[:512],
@@ -106,6 +114,8 @@ def _build_storage_failure_summary(storage_blocker: str, storage_guard_status: s
         "live_trading_allowed": False,
         "execution_engine_allowed": False,
         "alpha_interpretation_allowed": False,
+        "consumer_process_started_at_ms": start_ms,
+        "last_heartbeat_at_ms": heartbeat_ms,
     }
 
 
@@ -888,9 +898,12 @@ def reconcile_terminal_hygiene_artifacts(output_root: str, state_file: str, stat
 def _main():
     args = parse_args()
     output_root = args.output_root
+    global CONSUMER_PROCESS_STARTED_AT_MS
+    consumer_process_started_at_ms = int(time.time() * 1000)
+    CONSUMER_PROCESS_STARTED_AT_MS = consumer_process_started_at_ms
 
     from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
-    startup_summary = _build_storage_failure_summary("x" * 512, "x" * 128)
+    startup_summary = _build_storage_failure_summary("x" * 512, "x" * 128, consumer_process_started_at_ms=consumer_process_started_at_ms)
     storage_guard = StorageGuard(
         output_root=output_root,
         stage="1.5F",
@@ -902,7 +915,7 @@ def _main():
     startup_res = storage_guard.validate_startup()
     if startup_res["status"] != "ready":
         storage_blocker = str(startup_res.get("storage_blocker") or startup_res["status"])
-        terminal_summary = _build_storage_failure_summary(storage_blocker, startup_res["status"])
+        terminal_summary = _build_storage_failure_summary(storage_blocker, startup_res["status"], consumer_process_started_at_ms=consumer_process_started_at_ms)
         try:
             write_live_depth_observer_summary_atomically(
                 os.path.join(output_root, "live_depth_observer_summary.json"),
@@ -983,6 +996,9 @@ def _main():
             failed_states=[],
             request_manifest_rows=[],
             heartbeat_rows=[],
+            runtime_gate_context={
+                "consumer_process_started_at_ms": consumer_process_started_at_ms,
+            },
         )
         write_live_depth_observer_summary_atomically(
             os.path.join(output_root, "live_depth_observer_summary.json"),
@@ -1034,6 +1050,9 @@ def _main():
             failed_states=[],
             request_manifest_rows=[],
             heartbeat_rows=[],
+            runtime_gate_context={
+                "consumer_process_started_at_ms": consumer_process_started_at_ms,
+            },
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5d_summary_invalid_or_unsafe"
@@ -1096,6 +1115,9 @@ def _main():
             failed_states=[],
             request_manifest_rows=[],
             heartbeat_rows=[],
+            runtime_gate_context={
+                "consumer_process_started_at_ms": consumer_process_started_at_ms,
+            },
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_context_missing_for_observation"
@@ -1130,6 +1152,9 @@ def _main():
             failed_states=[],
             request_manifest_rows=[],
             heartbeat_rows=[],
+            runtime_gate_context={
+                "consumer_process_started_at_ms": consumer_process_started_at_ms,
+            },
         )
         summary_dict = summary.to_dict()
         summary_dict["blocker"] = "stage1_5e_summary_invalid_or_unsafe"
@@ -1941,6 +1966,7 @@ def _main():
             malformed_terminal_diagnostic_count=malformed_terminal_diagnostic_count,
             runtime_gate_context={
                 **storage_guard.status_snapshot(),
+                "consumer_process_started_at_ms": consumer_process_started_at_ms,
                 "stage1_5d_gate_mode": stage1_5d_gate_mode,
                 "stage1_5d_runtime_gate_path": args.stage1_5d_runtime_gate,
                 "stage1_5d_runtime_gate_decision": gate_res.get("decision") or gate_res.get("status") or "",
@@ -1984,6 +2010,7 @@ def _write_runtime_storage_terminal_summary(error: StorageWriteBlocked) -> None:
     terminal_summary = _build_storage_failure_summary(
         error.storage_blocker,
         error.result.get("storage_guard_status") or error.result.get("status"),
+        consumer_process_started_at_ms=CONSUMER_PROCESS_STARTED_AT_MS,
     )
     try:
         write_live_depth_observer_summary_atomically(

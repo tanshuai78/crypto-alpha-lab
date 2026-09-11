@@ -9,11 +9,17 @@ import pytest
 
 from src.research.external_signal_shadow.safety import canonical_json_dumps
 from src.research.external_signal_shadow.stage1_5g_live_depth_evidence_review import (
+    validate_stage1_5f_source_runtime_authority,
+    verify_source_evidence_manifest,
     write_stage1_5g_review_manifest,
+    write_stage1_5g_runtime_attestation_gate,
 )
 from src.research.external_signal_shadow.stage1_5h_read_only_report_generator import (
     Stage1_5HInputBundle,
     load_stage1_5h_inputs,
+)
+from tests.research.external_signal_shadow.test_stage1_5g_live_depth_evidence_review_loader import (
+    make_stage1_5f_fixture_root,
 )
 
 # New interfaces to be tested
@@ -74,6 +80,17 @@ def make_v2_bundle_fixture(
     root = tmp_path / "stage1_5g_run"
     root.mkdir(parents=True, exist_ok=True)
 
+    src_root = make_stage1_5f_fixture_root(tmp_path / "stage1_5f_src")
+    source_ok, source_hash, _ = verify_source_evidence_manifest(src_root)
+    assert source_ok is True
+    src_summary = json.loads((src_root / "live_depth_observer_summary.json").read_text(encoding="utf-8"))
+    source_authority, auth_blockers = validate_stage1_5f_source_runtime_authority(
+        stage1_5f_root=src_root,
+        summary=src_summary,
+        source_evidence_manifest_sha256=source_hash,
+    )
+    assert not auth_blockers and bool(source_authority)
+
     id_a = event_symbol_id("event-a|AAAUSDT")
     id_b = event_symbol_id("event-a|BBBUSDT")
     ids = sorted([id_a, id_b])
@@ -88,7 +105,7 @@ def make_v2_bundle_fixture(
         ids = [id_a.upper(), id_b]
 
     formal_hash = hashlib.sha256(canonical_json_dumps(ids).encode("utf-8")).hexdigest()
-    source_sha = "46dacc457ed292b40d317ab340319447912d4de23967c2ed7cf638719d714918"
+    source_sha = source_hash
 
     review_payload = {
         "formal_completed_event_symbol_ids": ids,
@@ -218,7 +235,8 @@ def make_v2_bundle_fixture(
 
     summary = {
         "schema_version": 2,
-        "stage1_5g_review_id": review_id if mutation != "identity_mismatch" else "wrong_review_id",
+        "stage1_5g_review_id": review_id if mutation != "identity_mismatch" else "f" * 64,
+        "stage1_5f_output_root": str(src_root),
         "source_evidence_manifest_sha256": source_sha,
         "formal_completed_event_symbol_ids_sha256": formal_hash,
         "decision": "stage1_5g_depth_evidence_quarantined_pass" if mutation != "clean_v2_input" else "stage1_5g_depth_evidence_clean_pass",
@@ -264,12 +282,46 @@ def make_v2_bundle_fixture(
     valid_rows_path = write_jsonl(root / "depth_quality_input_rows.jsonl", valid_rows)
     invalid_rows_path = write_jsonl(root / "quarantined_invalid_book_rows.jsonl", invalid_rows)
 
-    write_stage1_5g_review_manifest(root, summary, {
-        "summary": summary_path,
-        "quarantine_summary": quarantine_path,
-        "depth_quality_input_rows": valid_rows_path,
-        "quarantined_invalid_book_rows": invalid_rows_path,
-    })
+    if mutation == "legacy_v2_manifest":
+        write_stage1_5g_review_manifest(root, summary, {
+            "summary": summary_path,
+            "quarantine_summary": quarantine_path,
+            "depth_quality_input_rows": valid_rows_path,
+            "quarantined_invalid_book_rows": invalid_rows_path,
+        })
+    elif mutation == "clean_v2_input":
+        gate_payload_without_hash = {
+            "schema_version": 1,
+            "source_runtime_attestation_gate_verified": True,
+            "stage1_5g_review_id": summary["stage1_5g_review_id"],
+            "source_evidence_manifest_sha256": summary["source_evidence_manifest_sha256"],
+            **source_authority,
+        }
+        canonical_bytes = canonical_json_dumps(gate_payload_without_hash).encode("utf-8")
+        self_hash = hashlib.sha256(canonical_bytes).hexdigest()
+        gate_payload = dict(gate_payload_without_hash)
+        gate_payload["source_runtime_attestation_authority_sha256"] = self_hash
+        gate_path = write_json(root / "stage1_5g_runtime_attestation_gate.json", gate_payload)
+        write_stage1_5g_review_manifest(root, summary, {
+            "summary": summary_path,
+            "quarantine_summary": quarantine_path,
+            "depth_quality_input_rows": valid_rows_path,
+            "quarantined_invalid_book_rows": invalid_rows_path,
+            "runtime_attestation_gate": gate_path,
+        })
+    else:
+        gate_path = write_stage1_5g_runtime_attestation_gate(
+            root,
+            summary=summary,
+            source_authority=source_authority,
+        )
+        write_stage1_5g_review_manifest(root, summary, {
+            "summary": summary_path,
+            "quarantine_summary": quarantine_path,
+            "depth_quality_input_rows": valid_rows_path,
+            "quarantined_invalid_book_rows": invalid_rows_path,
+            "runtime_attestation_gate": gate_path,
+        })
 
     bundle = load_stage1_5h_inputs(
         stage1_5g_summary_path=summary_path,
@@ -512,3 +564,163 @@ def test_v2_writer_never_resumes_or_overwrites_existing_root(tmp_path, monkeypat
     result = write_stage1_5h_v2_event_bundle_reports(bundle=bundle, output_root=out)
     assert result["decision"] == "stage1_5h_v2_event_bundle_output_rejected"
     assert tree_digest(out) == before
+
+
+def test_v2_loader_rejects_pre_hotfix_manifest_without_gate_proof(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path, mutation="legacy_v2_manifest")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["report_generation_allowed"] is False
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_accepts_only_canonical_v3_quarantined_bundle(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_reports_ready"
+
+
+def test_v2_loader_rejects_deleted_gate_proof(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_file.unlink()
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_rejects_tampered_gate_proof(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data["consumer_static_attestation_verified"] = False
+    gate_file.write_text(json.dumps(gate_data), encoding="utf-8")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_rejects_malformed_gate_proof(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_file.write_text("not-json-content", encoding="utf-8")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_rejects_unlinked_gate_proof(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data["stage1_5g_review_id"] = "e" * 64
+    gate_file.write_text(json.dumps(gate_data), encoding="utf-8")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_rejects_unexpected_gate_proof_key(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data["unexpected_key"] = "bad"
+    gate_file.write_text(json.dumps(gate_data), encoding="utf-8")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_v2_loader_rejects_gate_proof_hash_mismatch(tmp_path):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    gate_file = bundle.stage1_5g_summary_path.parent / "stage1_5g_runtime_attestation_gate.json"
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data["source_runtime_attestation_authority_sha256"] = "0" * 64
+    gate_file.write_text(json.dumps(gate_data), encoding="utf-8")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+@pytest.mark.parametrize("artifact_key", [
+    "summary",
+    "quarantine_summary",
+    "quarantined_invalid_book_rows",
+    "depth_quality_input_rows",
+    "runtime_attestation_gate",
+])
+def test_v2_loader_rejects_each_artifact_hash_mismatch(tmp_path, artifact_key):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    root = bundle.stage1_5g_summary_path.parent
+    manifest_file = root / "stage1_5g_review_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    rel_path = manifest["artifacts"][artifact_key]["relative_path"]
+    target_file = root / rel_path
+    target_file.write_bytes(target_file.read_bytes() + b"\n/* tampered */")
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
+
+
+def test_legacy_v1_never_claims_runtime_attested_status(tmp_path):
+    bundle, ids = make_v2_bundle_fixture(tmp_path)
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_reports_ready"
+    assert "stage1_5g_runtime_attestation_gate" not in result
+    for rep in result["reports"].values():
+        assert rep.get("runtime_attested") is not True
+
+
+@pytest.mark.parametrize(
+    ("field", "mutated_value"),
+    [
+        ("consumer_process_instance_id", "99999999-9999-4999-8999-999999999999"),
+        ("consumer_root_id", "9" * 64),
+        ("consumer_process_started_at_ms", 1_799_999_999_000),
+        ("consumer_startup_commit_sha", "9" * 40),
+        ("consumer_root_contract_sha256", "9" * 64),
+        ("consumer_runtime_manifest_sha256", "9" * 64),
+        ("consumer_static_attestation_verified", False),
+        ("consumer_runtime_attestation_verified", False),
+        ("consumer_runtime_attestation_compromised", True),
+        ("stage1_5g_review_id", "9" * 64),
+        ("source_evidence_manifest_sha256", "9" * 64),
+    ],
+)
+def test_v2_loader_rejects_gate_proof_semantic_linkage_attack(tmp_path, field, mutated_value):
+    bundle, _ = make_v2_bundle_fixture(tmp_path)
+    root = bundle.stage1_5g_summary_path.parent
+    gate_file = root / "stage1_5g_runtime_attestation_gate.json"
+    gate_data = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_data[field] = mutated_value
+
+    # Recompute gate proof self-hash
+    payload_without_hash = {k: v for k, v in gate_data.items() if k != "source_runtime_attestation_authority_sha256"}
+    gate_data["source_runtime_attestation_authority_sha256"] = hashlib.sha256(
+        canonical_json_dumps(payload_without_hash).encode("utf-8")
+    ).hexdigest()
+    gate_file.write_text(json.dumps(gate_data, indent=2), encoding="utf-8")
+
+    # Reseal outer review manifest so that manifest artifact hash and byte count are strictly valid
+    summary_data = json.loads(bundle.stage1_5g_summary_path.read_text(encoding="utf-8"))
+    artifact_paths = {
+        "summary": bundle.stage1_5g_summary_path,
+        "quarantine_summary": bundle.quarantine_summary_path,
+        "depth_quality_input_rows": bundle.depth_quality_input_rows_path,
+        "quarantined_invalid_book_rows": bundle.quarantined_invalid_book_rows_path,
+        "runtime_attestation_gate": gate_file,
+    }
+    manifest_path = write_stage1_5g_review_manifest(root, summary_data, artifact_paths)
+
+    # Assert outer manifest closure passes low-level hash and byte count checks
+    manifest_obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for art_meta in manifest_obj["artifacts"].values():
+        raw = (root / art_meta["relative_path"]).read_bytes()
+        assert len(raw) == art_meta["byte_count"]
+        assert hashlib.sha256(raw).hexdigest() == art_meta["sha256"]
+
+    # Assert 1.5H rejects the tampered gate proof with exact blocker
+    result = build_stage1_5h_v2_event_bundle_reports(bundle)
+    assert result["decision"] == "stage1_5h_v2_event_bundle_input_rejected"
+    assert result["report_generation_allowed"] is False
+    assert result["blockers"] == ["stage1_5h_runtime_attestation_gate_missing_or_invalid"]
