@@ -1,0 +1,87 @@
+{
+  "schema_version": "stage1_6f_data_semantics_contract_v1",
+  "generated_at_utc": "2026-09-13T09:46:08.452906+00:00",
+  "semantics_boundaries": {
+    "price_series_separation": {
+      "klines_1h": {
+        "source": "data.binance.vision / data/futures/um/daily/klines",
+        "semantics": "Perpetual contract traded price OHLCV",
+        "authority": "Direct matching engine trade execution prices",
+        "is_tradable": true
+      },
+      "index_price_1h": {
+        "source": "data.binance.vision / data/futures/um/daily/indexPriceKlines",
+        "semantics": "Spot multi-exchange volume-weighted benchmark price",
+        "authority": "Binance official Index Price series (1s sampling)",
+        "is_tradable": false
+      },
+      "mark_price_1h": {
+        "source": "data.binance.vision / data/futures/um/daily/markPriceKlines",
+        "semantics": "Risk management price used for liquidation and unrealized PnL",
+        "authority": "Binance official Mark Price series = Index Price + Moving Average Basis",
+        "is_tradable": false
+      },
+      "premium_index_1h": {
+        "source": "data.binance.vision / data/futures/um/daily/premiumIndexKlines",
+        "semantics": "Official dampened EMA rate series used for funding rate calculation",
+        "formula": "clamp(EMA(Impact Margin Basis), -0.05%, +0.05%) + interest rate dampener",
+        "authority": "Binance official Premium Index",
+        "is_direct_basis": false,
+        "prohibited_usage": "Strictly prohibited to use as direct basis (perp - index)/index"
+      }
+    },
+    "book_depth_semantics": {
+      "source": "data.binance.vision / data/futures/um/daily/bookDepth",
+      "schema": "timestamp,percentage,depth,notional",
+      "percentage_levels": [
+        -5,
+        -4,
+        -3,
+        -2,
+        -1,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "depth_notional_type": "cumulative_at_discrete_percentage_level",
+      "sampling_frequency": "discrete snapshots (~5s to 30s intervals, 28,800 rows/day)",
+      "operational_boundary": "Static visible depth ladder proxy only; strictly prohibited to claim microsecond L2 orderbook reconstruction or true execution slippage backtesting.",
+      "semantics_authority_status": "observed_schema_only_not_official_formula",
+      "authority_limitation_note": "BookDepth cumulative depth/notional at +-1% to +-5% is an observed structural schema from S3 sample data, not an officially published Binance mathematical formula. Strictly treated as a low-frequency discrete visible depth proxy, prohibited from claiming official matching slippage semantics."
+    },
+    "funding_rate_semantics": {
+      "source": "data.binance.vision / data/futures/um/monthly/fundingRate",
+      "schema": "calc_time,funding_interval_hours,last_funding_rate",
+      "billing_frequency": "Per-symbol specific interval (e.g. 4 hours for REEF during extreme event, standard 8 hours)",
+      "operational_boundary": "Only demonstrates historical discrete settlement rates; strictly prohibited to claim simulated net portfolio carry PnL without accounting for borrow cost, slippage, and basis loss."
+    }
+  },
+  "offline_authorities": [
+    {
+      "authority_file": "official_sources/binance_announcement_settlement_4bcabddf0e81423ebca242e185bf157d.html",
+      "authority_sha256": "2ba30d566e99928c4df332dbda6a62aaf1a4e9d39a0048f3c40d0266e5b6dd36",
+      "scope": "settlement_price_index_averaging",
+      "authority_title": "Updates on Binance Futures Settlement Price Calculation",
+      "published_at_utc": "2024-11-04T09:00:00Z",
+      "rule_change_effective_utc": "2024-11-11T08:00:00Z",
+      "semantics_authority_status": "verified_official_authority"
+    },
+    {
+      "authority_file": "official_sources/binance_faq_funding_rate_360033525031.html",
+      "authority_sha256": "9266dac6d2dd6c3bd873a0fd4da7bc0780026fe79dcfb241c2e0f0db9cd953ca",
+      "scope": "funding_rate_and_premium_index_estimation",
+      "authority_title": "Introduction to Binance Futures Funding Rates",
+      "semantics_authority_status": "verified_official_authority"
+    },
+    {
+      "authority_file": "official_sources/binance_faq_mark_price_360033525011.html",
+      "authority_sha256": "3604bf98774f37a7b67078c7c8b28454ad5e9bc1f9f3b1eac9f71d24c139a64a",
+      "scope": "mark_price_and_index_price",
+      "authority_title": "Support Center - Mark Price & Index Price Policy",
+      "semantics_authority_status": "observed_schema_and_general_policy",
+      "note": "Mark price is officially recognized as Index Price + Moving Average basis in exchange rules; exact EMA/clamping weights for specific historical delisted contracts are unproven from static HTML."
+    }
+  ]
+}
