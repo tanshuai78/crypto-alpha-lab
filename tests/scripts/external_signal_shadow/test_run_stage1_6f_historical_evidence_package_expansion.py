@@ -272,6 +272,21 @@ def test_fetch_terminal_outcomes_with_mock_double():
     assert res_429["fetch_status"] == "transport_inconclusive"
     assert call_counts["https://example.test/429.zip"] == 1
 
+    # 5. CSV invalid retains ZIP bytes and CSV path without premature unlinking
+    bad_csv = b"open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore\n1736294400000,INVALID,1,1,1,1,1736297999999,1,1,1,1,0\n"
+    res_bad_csv = collector.fetch_and_validate_physical_object(
+        "https://example.test/bad.zip",
+        "klines_1h",
+        "AAAUSDT",
+        fetch_callable=lambda u: (200, _make_zip("data.csv", bad_csv), "ok"),
+    )
+    assert res_bad_csv["fetch_status"] == "csv_invalid"
+    assert res_bad_csv["zip_bytes"] is not None
+    assert res_bad_csv["csv_bytes"] is not None
+    assert isinstance(res_bad_csv["csv_bytes"], Path)
+    assert res_bad_csv["csv_bytes"].is_file()
+    res_bad_csv["csv_bytes"].unlink(missing_ok=True)
+
 
 def test_zip_member_safety_contract():
     """Verify Section 5.3 strict ZIP member safety rules."""
@@ -442,10 +457,17 @@ def _make_auth_file(tmp_path: Path, run_id: str) -> Tuple[Path, str]:
     return auth_file, hashlib.sha256(auth_bytes).hexdigest()
 
 
+def _make_candidate_output_root(tmp_path: Path) -> Path:
+    """Helper to create isolated canonical candidate parent directory."""
+    p = tmp_path / "data" / "external_signal_shadow" / "stage1_6f" / "evidence_candidates"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def test_validator_and_writer_contract(tmp_path):
     """Verify Task 3 root writer, manifest-last persistence, and validator."""
     run_id = "test_run_20260916_root_001"
-    output_root = tmp_path / "candidates"
+    output_root = _make_candidate_output_root(tmp_path)
 
     auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
 
@@ -528,7 +550,7 @@ def test_validator_and_writer_contract(tmp_path):
 
 def test_durable_transition_failures_before_manifest_publication(tmp_path, monkeypatch):
     """Verify durable-transition failures before manifest publication leave no manifest."""
-    output_root = tmp_path / "candidates"
+    output_root = _make_candidate_output_root(tmp_path)
 
     reef_manifest = json.loads(Path(REEF_MANIFEST_PATH).read_text(encoding="utf-8"))
     reef_root = Path(REEF_MANIFEST_PATH).parent
@@ -619,7 +641,7 @@ def test_durable_transition_failures_before_manifest_publication(tmp_path, monke
 
 def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
     """Verify independent candidate validator detects tampered bytes or missing manifest."""
-    output_root = tmp_path / "candidates"
+    output_root = _make_candidate_output_root(tmp_path)
     run_id_valid = "test_run_valid_base"
     auth_file, auth_sha = _make_auth_file(tmp_path, run_id_valid)
 
@@ -652,8 +674,8 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
     manifest_bytes = (valid_root / "candidate_manifest.json").read_bytes()
 
     # 1. Missing manifest
-    empty_dir = tmp_path / "empty_dir"
-    empty_dir.mkdir()
+    empty_dir = _make_candidate_output_root(tmp_path / "empty") / "run_empty"
+    empty_dir.mkdir(parents=True)
     with pytest.raises(collector.CandidateCollectorError, match="missing_manifest"):
         collector.validate_completed_candidate_root(
             completed_root=empty_dir,
@@ -665,8 +687,8 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 2. Corrupted JSON manifest
-    bad_json_dir = tmp_path / "bad_json_dir"
-    bad_json_dir.mkdir()
+    bad_json_dir = _make_candidate_output_root(tmp_path / "bad_json") / "run_bad_json"
+    bad_json_dir.mkdir(parents=True)
     (bad_json_dir / "candidate_manifest.json").write_bytes(b"{not json}")
     with pytest.raises(collector.CandidateCollectorError, match="corrupted_manifest"):
         collector.validate_completed_candidate_root(
@@ -679,7 +701,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 3. Run ID mismatch
-    wrong_run_id_dir = tmp_path / "mutations" / "wrong_run_id"
+    wrong_run_id_dir = _make_candidate_output_root(tmp_path / "wrong_id") / "wrong_run_id"
     import shutil
     shutil.copytree(valid_root, wrong_run_id_dir)
     with pytest.raises(collector.CandidateCollectorError, match="run_id_mismatch"):
@@ -697,7 +719,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
     m_dict = json.loads(manifest_bytes.decode("utf-8"))
     bad_flags_dict = copy.deepcopy(m_dict)
     bad_flags_dict["authority_flags"]["trade_signal_allowed"] = True
-    bad_flags_dir = tmp_path / "mutations" / "bad_flags" / run_id_valid
+    bad_flags_dir = _make_candidate_output_root(tmp_path / "mutations" / "bad_flags") / run_id_valid
     shutil.copytree(valid_root, bad_flags_dir)
     (bad_flags_dir / "candidate_manifest.json").write_text(json.dumps(bad_flags_dict), encoding="utf-8")
     with pytest.raises(collector.CandidateCollectorError, match="authority_flag_not_false:trade_signal_allowed"):
@@ -711,7 +733,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 5. Tampered ZIP byte on disk
-    tampered_zip_dir = tmp_path / "mutations" / "tampered_zip" / run_id_valid
+    tampered_zip_dir = _make_candidate_output_root(tmp_path / "mutations" / "tampered_zip") / run_id_valid
     shutil.copytree(valid_root, tampered_zip_dir)
     zips = list((tampered_zip_dir / "zips").glob("*.zip"))
     assert len(zips) > 0
@@ -730,7 +752,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 6. Unexpected file on disk
-    unexpected_file_dir = tmp_path / "mutations" / "unexpected_file" / run_id_valid
+    unexpected_file_dir = _make_candidate_output_root(tmp_path / "mutations" / "unexpected_file") / run_id_valid
     shutil.copytree(valid_root, unexpected_file_dir)
     (unexpected_file_dir / "extra.txt").write_text("rogue", encoding="utf-8")
     with pytest.raises(collector.CandidateCollectorError, match="unexpected_file:extra.txt"):
@@ -744,7 +766,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 7. Stale .tmp file on disk
-    stale_tmp_dir = tmp_path / "mutations" / "stale_tmp" / run_id_valid
+    stale_tmp_dir = _make_candidate_output_root(tmp_path / "mutations" / "stale_tmp") / run_id_valid
     shutil.copytree(valid_root, stale_tmp_dir)
     (stale_tmp_dir / "stale.tmp").write_bytes(b"temp data")
     with pytest.raises(collector.CandidateCollectorError, match="stale_temp_file:stale.tmp"):
@@ -758,7 +780,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 8. Symlink detected
-    symlink_dir = tmp_path / "mutations" / "symlink" / run_id_valid
+    symlink_dir = _make_candidate_output_root(tmp_path / "mutations" / "symlink") / run_id_valid
     shutil.copytree(valid_root, symlink_dir)
     (symlink_dir / "symlink.csv").symlink_to(valid_root / "candidate_manifest.json")
     with pytest.raises(collector.CandidateCollectorError, match="symlink_detected"):
@@ -772,7 +794,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 9. Coverage entry tampered in manifest
-    tampered_cov_dir = tmp_path / "mutations" / "tampered_cov" / run_id_valid
+    tampered_cov_dir = _make_candidate_output_root(tmp_path / "mutations" / "tampered_cov") / run_id_valid
     shutil.copytree(valid_root, tampered_cov_dir)
     cov_manifest_p = tampered_cov_dir / "candidate_manifest.json"
     cov_data = json.loads(cov_manifest_p.read_text(encoding="utf-8"))
@@ -789,7 +811,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 10. Illegal physical fetch_status
-    illegal_phys_dir = tmp_path / "mutations" / "illegal_phys" / run_id_valid
+    illegal_phys_dir = _make_candidate_output_root(tmp_path / "mutations" / "illegal_phys") / run_id_valid
     shutil.copytree(valid_root, illegal_phys_dir)
     iphys_manifest_p = illegal_phys_dir / "candidate_manifest.json"
     iphys_data = json.loads(iphys_manifest_p.read_text(encoding="utf-8"))
@@ -806,7 +828,7 @@ def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
         )
 
     # 11. Logical record_state mismatch with physical
-    rec_mismatch_dir = tmp_path / "mutations" / "rec_mismatch" / run_id_valid
+    rec_mismatch_dir = _make_candidate_output_root(tmp_path / "mutations" / "rec_mismatch") / run_id_valid
     shutil.copytree(valid_root, rec_mismatch_dir)
     rm_manifest_p = rec_mismatch_dir / "candidate_manifest.json"
     rm_data = json.loads(rm_manifest_p.read_text(encoding="utf-8"))
@@ -911,7 +933,7 @@ def test_canonical_positive_integration_and_routing(tmp_path):
         return 404, b"", "HTTP 404 Not Found"
 
     run_id = "test_run_task4_integration_001"
-    output_root = tmp_path / "candidates"
+    output_root = _make_candidate_output_root(tmp_path)
     auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
 
     res = collector.execute_collection_run(
@@ -1138,7 +1160,7 @@ def test_main_cli_entrypoint(tmp_path, monkeypatch):
     """Verify CLI main entrypoint argument parsing and dispatch."""
     run_id = "test_run_main_001"
     auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
-    output_root = tmp_path / "cli_candidates"
+    output_root = _make_candidate_output_root(tmp_path)
 
     # Mock execute_collection_run and validate_completed_candidate_root to avoid real network
     called = {}
@@ -1282,7 +1304,7 @@ def test_audit_p0_2_validator_rejects_forged_url_and_undeclared_keys(tmp_path):
     import shutil
     run_id = "test_run_audit_p0_2"
     auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
-    output_root = tmp_path / "candidates"
+    output_root = _make_candidate_output_root(tmp_path)
 
     collector.execute_collection_run(
         project_root=Path(".").resolve(),
@@ -1313,7 +1335,7 @@ def test_audit_p0_2_validator_rejects_forged_url_and_undeclared_keys(tmp_path):
     )
 
     # 1. Forged exact_source_url in physical object
-    mut_url_root = tmp_path / "mut_url" / run_id
+    mut_url_root = _make_candidate_output_root(tmp_path / "mut_url") / run_id
     shutil.copytree(valid_root, mut_url_root)
     m_path = mut_url_root / "candidate_manifest.json"
     m_data = json.loads(m_path.read_text(encoding="utf-8"))
@@ -1331,7 +1353,7 @@ def test_audit_p0_2_validator_rejects_forged_url_and_undeclared_keys(tmp_path):
         )
 
     # 2. Undeclared key in physical object
-    mut_key_phys_root = tmp_path / "mut_key_phys" / run_id
+    mut_key_phys_root = _make_candidate_output_root(tmp_path / "mut_key_phys") / run_id
     shutil.copytree(valid_root, mut_key_phys_root)
     m_path = mut_key_phys_root / "candidate_manifest.json"
     m_data = json.loads(m_path.read_text(encoding="utf-8"))
@@ -1349,7 +1371,7 @@ def test_audit_p0_2_validator_rejects_forged_url_and_undeclared_keys(tmp_path):
         )
 
     # 3. Undeclared key in logical record
-    mut_key_log_root = tmp_path / "mut_key_log" / run_id
+    mut_key_log_root = _make_candidate_output_root(tmp_path / "mut_key_log") / run_id
     shutil.copytree(valid_root, mut_key_log_root)
     m_path = mut_key_log_root / "candidate_manifest.json"
     m_data = json.loads(m_path.read_text(encoding="utf-8"))
@@ -1435,3 +1457,76 @@ def test_audit_p1_1_bounded_chunk_zip_read_and_crc(monkeypatch):
     assert status == "archive_invalid"
     assert "member_size_exceeded" in reason
 
+
+def test_collector_rejects_non_canonical_output_root(tmp_path):
+    """Verify collector fail-closed rejection of non-canonical output_root."""
+    run_id = "test_run_non_canonical_001"
+    auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
+
+    # 1. Non-canonical directory outside project (missing 4-level canonical tail)
+    wrong_output_root = tmp_path / "some_random_dir"
+    with pytest.raises(collector.CandidateCollectorError, match="STOP=invalid_canonical_candidate_root_path"):
+        collector.execute_collection_run(
+            project_root=Path(".").resolve(),
+            source_export=Path(B_SOURCE_EXPORT),
+            completed_root=Path(C_COMPLETED_ROOT),
+            coverage_matrix=Path(FROZEN_MATRIX_PATH),
+            output_root=wrong_output_root,
+            run_id=run_id,
+            approved_design_path=Path(FROZEN_DESIGN_PATH),
+            approved_design_sha=FROZEN_DESIGN_SHA,
+            approved_plan_path=Path(FROZEN_PLAN_PATH),
+            approved_plan_sha=FROZEN_PLAN_SHA,
+            network_authorization_file=auth_file,
+            network_authorization_sha=auth_sha,
+        )
+
+    # 2. Non-canonical directory inside project (candidate_evidence_packages instead of evidence_candidates)
+    wrong_project_subroot = Path(".").resolve() / "data" / "external_signal_shadow" / "stage1_6f" / "candidate_evidence_packages"
+    with pytest.raises(collector.CandidateCollectorError, match="STOP=invalid_canonical_candidate_root_path"):
+        collector.execute_collection_run(
+            project_root=Path(".").resolve(),
+            source_export=Path(B_SOURCE_EXPORT),
+            completed_root=Path(C_COMPLETED_ROOT),
+            coverage_matrix=Path(FROZEN_MATRIX_PATH),
+            output_root=wrong_project_subroot,
+            run_id=run_id,
+            approved_design_path=Path(FROZEN_DESIGN_PATH),
+            approved_design_sha=FROZEN_DESIGN_SHA,
+            approved_plan_path=Path(FROZEN_PLAN_PATH),
+            approved_plan_sha=FROZEN_PLAN_SHA,
+            network_authorization_file=auth_file,
+            network_authorization_sha=auth_sha,
+        )
+
+
+def test_validator_rejects_non_canonical_completed_root_parent(tmp_path):
+    """Verify validator fail-closed rejection of non-canonical completed_root parent."""
+    wrong_parent_root = tmp_path / "wrong_candidates" / "run_001"
+    wrong_parent_root.mkdir(parents=True)
+    with pytest.raises(collector.CandidateCollectorError, match="candidate_root_invalid:non_canonical_parent_path"):
+        collector.validate_completed_candidate_root(
+            completed_root=wrong_parent_root,
+            approved_design_path=Path(FROZEN_DESIGN_PATH),
+            approved_design_sha=FROZEN_DESIGN_SHA,
+            approved_plan_path=Path(FROZEN_PLAN_PATH),
+            approved_plan_sha=FROZEN_PLAN_SHA,
+            network_authorization_sha="dummy",
+            project_root=Path(".").resolve(),
+        )
+
+
+def test_validator_rejects_legacy_candidate_evidence_packages_run_001():
+    """Verify validator strictly rejects previous run located in non-canonical candidate_evidence_packages."""
+    legacy_path = Path("data/external_signal_shadow/stage1_6f/candidate_evidence_packages/expansion_candidate_run_20260917_001").resolve()
+    if legacy_path.is_dir():
+        with pytest.raises(collector.CandidateCollectorError, match="candidate_root_invalid:non_canonical_parent_path"):
+            collector.validate_completed_candidate_root(
+                completed_root=legacy_path,
+                approved_design_path=Path(FROZEN_DESIGN_PATH),
+                approved_design_sha=FROZEN_DESIGN_SHA,
+                approved_plan_path=Path(FROZEN_PLAN_PATH),
+                approved_plan_sha=FROZEN_PLAN_SHA,
+                network_authorization_sha="dummy",
+                project_root=Path(".").resolve(),
+            )

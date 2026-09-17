@@ -237,6 +237,36 @@ TIMESTAMP_KEYS: Dict[str, str] = {
 
 BOOK_DEPTH_REQUIRED_PERCENTAGES: Set[int] = {-5, -4, -3, -2, -1, 1, 2, 3, 4, 5}
 
+CANONICAL_CANDIDATE_PARENT_REL = Path("data/external_signal_shadow/stage1_6f/evidence_candidates")
+CANONICAL_CANDIDATE_PARENT_PARTS = ("data", "external_signal_shadow", "stage1_6f", "evidence_candidates")
+
+
+def validate_canonical_parent_path(
+    parent_path: Path,
+    project_root: Optional[Path] = None,
+    is_collector: bool = True,
+) -> None:
+    """Strictly validate that candidate root parent path complies with Design line 295 / Plan line 349."""
+    resolved_parent = parent_path.resolve()
+    parts = resolved_parent.parts
+    if len(parts) < 4 or parts[-4:] != CANONICAL_CANDIDATE_PARENT_PARTS:
+        msg = f"parent_must_end_with_{'/'.join(CANONICAL_CANDIDATE_PARENT_PARTS)}:got={parent_path}"
+        if is_collector:
+            raise CandidateCollectorError(f"STOP=invalid_canonical_candidate_root_path:{msg}")
+        else:
+            raise CandidateCollectorError(f"candidate_root_invalid:non_canonical_parent_path:{msg}")
+
+    if project_root is not None:
+        resolved_proj = project_root.resolve()
+        if resolved_parent.is_relative_to(resolved_proj):
+            expected_canonical = (resolved_proj / CANONICAL_CANDIDATE_PARENT_REL).resolve()
+            if resolved_parent != expected_canonical:
+                msg = f"inside_project_must_equal_{CANONICAL_CANDIDATE_PARENT_REL}:got={resolved_parent.relative_to(resolved_proj)}"
+                if is_collector:
+                    raise CandidateCollectorError(f"STOP=invalid_canonical_candidate_root_path:{msg}")
+                else:
+                    raise CandidateCollectorError(f"candidate_root_invalid:non_canonical_parent_path:{msg}")
+
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Custom redirect handler that refuses redirects per INV-EP03."""
@@ -747,9 +777,10 @@ def parse_and_validate_csv(
                         return "csv_invalid", f"invalid_column_count:{len(parts)}", raw_header, 0, None, None, []
                     ts = _parse_timestamp_ms(parts[0])
                     pct_str = parts[1].strip()
-                    if not pct_str or not (pct_str.isdigit() or (pct_str.startswith("-") and pct_str[1:].isdigit())):
-                        raise ValueError(f"invalid_percentage_format:{pct_str}")
-                    pct = int(pct_str)
+                    pct_f = _parse_finite_float(pct_str, "percentage")
+                    if not pct_f.is_integer():
+                        raise ValueError(f"non_integer_percentage:{pct_str}")
+                    pct = int(pct_f)
                     if pct not in BOOK_DEPTH_REQUIRED_PERCENTAGES:
                         return "csv_invalid", f"unapproved_percentage:{pct}", raw_header, 0, None, None, []
                     depth_val = _parse_finite_float(parts[2], "depth")
@@ -1017,11 +1048,6 @@ def fetch_and_validate_physical_object(
         family, csv_bytes, canonical_symbol
     )
     if c_status != "fetched_verified":
-        if isinstance(csv_bytes, Path):
-            try:
-                csv_bytes.unlink(missing_ok=True)
-            except Exception:
-                pass
         res["fetch_status"] = c_status
         res["reason"] = c_reason
         return res
@@ -1145,7 +1171,7 @@ def execute_collection_run(
     source_export: Path,
     completed_root: Path,
     coverage_matrix: Path,
-    output_root: Path,
+    output_root: Optional[Path],
     run_id: str,
     approved_design_path: Path,
     approved_design_sha: str,
@@ -1156,6 +1182,10 @@ def execute_collection_run(
     fetch_callable: Optional[Callable[[str], Tuple[int, bytes, str]]] = None,
 ) -> Dict[str, Any]:
     """Execute complete collection run with manifest-last atomic persistence and independent validation."""
+    if output_root is None:
+        output_root = project_root / CANONICAL_CANDIDATE_PARENT_REL
+    validate_canonical_parent_path(output_root, project_root=project_root, is_collector=True)
+
     gate_result = validate_prefetch_authority(
         project_root=project_root,
         source_export=source_export,
@@ -1469,6 +1499,7 @@ def validate_completed_candidate_root(
     project_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Strict independent reader validating completed candidate root."""
+    validate_canonical_parent_path(completed_root.parent, project_root=project_root, is_collector=False)
     manifest_path = completed_root / "candidate_manifest.json"
     if not manifest_path.is_file():
         raise CandidateCollectorError("candidate_root_invalid:missing_manifest")
@@ -1879,7 +1910,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--source-export", type=Path, required=True)
     parser.add_argument("--completed-root", type=Path, required=True)
     parser.add_argument("--coverage-matrix", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Parent directory for candidate root. Defaults to data/external_signal_shadow/stage1_6f/evidence_candidates",
+    )
     parser.add_argument("--run-id", type=str, required=True)
     parser.add_argument("--approved-design-path", type=Path, required=True)
     parser.add_argument("--approved-design-sha256", type=str, required=True)
@@ -1893,12 +1929,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     args = parse_args(argv)
+    output_root = args.output_root
+    if output_root is None:
+        output_root = args.project_root / CANONICAL_CANDIDATE_PARENT_REL
+    validate_canonical_parent_path(output_root, project_root=args.project_root, is_collector=True)
+
     execute_collection_run(
         project_root=args.project_root,
         source_export=args.source_export,
         completed_root=args.completed_root,
         coverage_matrix=args.coverage_matrix,
-        output_root=args.output_root,
+        output_root=output_root,
         run_id=args.run_id,
         approved_design_path=args.approved_design_path,
         approved_design_sha=args.approved_design_sha256,
@@ -1909,7 +1950,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         fetch_callable=None,
     )
     validated = validate_completed_candidate_root(
-        completed_root=args.output_root / args.run_id,
+        completed_root=output_root / args.run_id,
         approved_design_path=args.approved_design_path,
         approved_design_sha=args.approved_design_sha256,
         approved_plan_path=args.approved_plan_path,
