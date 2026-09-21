@@ -14,6 +14,11 @@ from typing import Dict, Tuple
 import pytest
 
 import scripts.external_signal_shadow.run_stage1_6f_historical_evidence_package_expansion as collector
+from src.research.external_signal_shadow.stage1_6f_candidate_evidence_source import (
+    CANONICAL_CANDIDATE_RUN_ID,
+    FROZEN_NETWORK_AUTH_RELATIVE_PATH,
+    FROZEN_NETWORK_AUTH_SHA256,
+)
 from src.research.external_signal_shadow.stage1_6f_historical_diagnostic import (
     ALL_PERMISSION_FLAGS_FALSE,
     reconstruct_denominator,
@@ -491,8 +496,9 @@ def test_validator_and_writer_contract(tmp_path):
         )
 
     # 2. Successful collection run with mock fetch double using canonical REEF fixtures
-    run_id_success = "test_run_20260916_success_001"
-    auth_file_s, auth_sha_s = _make_auth_file(tmp_path, run_id_success)
+    run_id_success = CANONICAL_CANDIDATE_RUN_ID
+    auth_file_s = Path(".").resolve() / FROZEN_NETWORK_AUTH_RELATIVE_PATH
+    auth_sha_s = FROZEN_NETWORK_AUTH_SHA256
 
     reef_manifest = json.loads(Path(REEF_MANIFEST_PATH).read_text(encoding="utf-8"))
     reef_root = Path(REEF_MANIFEST_PATH).parent
@@ -642,8 +648,9 @@ def test_durable_transition_failures_before_manifest_publication(tmp_path, monke
 def test_validator_rejects_corrupted_manifest_and_tampered_bytes(tmp_path):
     """Verify independent candidate validator detects tampered bytes or missing manifest."""
     output_root = _make_candidate_output_root(tmp_path)
-    run_id_valid = "test_run_valid_base"
-    auth_file, auth_sha = _make_auth_file(tmp_path, run_id_valid)
+    run_id_valid = CANONICAL_CANDIDATE_RUN_ID
+    auth_file = Path(".").resolve() / FROZEN_NETWORK_AUTH_RELATIVE_PATH
+    auth_sha = FROZEN_NETWORK_AUTH_SHA256
 
     reef_manifest = json.loads(Path(REEF_MANIFEST_PATH).read_text(encoding="utf-8"))
     reef_root = Path(REEF_MANIFEST_PATH).parent
@@ -932,9 +939,10 @@ def test_canonical_positive_integration_and_routing(tmp_path):
             return 200, valid_klines_zip, "ok"
         return 404, b"", "HTTP 404 Not Found"
 
-    run_id = "test_run_task4_integration_001"
+    run_id = CANONICAL_CANDIDATE_RUN_ID
     output_root = _make_candidate_output_root(tmp_path)
-    auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
+    auth_file = Path(".").resolve() / FROZEN_NETWORK_AUTH_RELATIVE_PATH
+    auth_sha = FROZEN_NETWORK_AUTH_SHA256
 
     res = collector.execute_collection_run(
         project_root=Path(".").resolve(),
@@ -1302,8 +1310,9 @@ def test_audit_p0_1_strict_csv_validation_no_coercion():
 def test_audit_p0_2_validator_rejects_forged_url_and_undeclared_keys(tmp_path):
     """Verify P0-2: Validator rejects forged exact_source_url and undeclared keys in physical/logical records."""
     import shutil
-    run_id = "test_run_audit_p0_2"
-    auth_file, auth_sha = _make_auth_file(tmp_path, run_id)
+    run_id = CANONICAL_CANDIDATE_RUN_ID
+    auth_file = Path(".").resolve() / FROZEN_NETWORK_AUTH_RELATIVE_PATH
+    auth_sha = FROZEN_NETWORK_AUTH_SHA256
     output_root = _make_candidate_output_root(tmp_path)
 
     collector.execute_collection_run(
@@ -1530,3 +1539,94 @@ def test_validator_rejects_legacy_candidate_evidence_packages_run_001():
                 network_authorization_sha="dummy",
                 project_root=Path(".").resolve(),
             )
+
+
+def test_collector_adapter_delegates_to_shared_source_core():
+    """Verify that collector.validate_completed_candidate_root adapts shared source core."""
+    with pytest.raises(collector.CandidateCollectorError, match="missing_manifest|candidate_root_invalid"):
+        collector.validate_completed_candidate_root(
+            completed_root=Path("/nonexistent/root"),
+            approved_design_path=Path(FROZEN_DESIGN_PATH),
+            approved_design_sha=FROZEN_DESIGN_SHA,
+            approved_plan_path=Path(FROZEN_PLAN_PATH),
+            approved_plan_sha=FROZEN_PLAN_SHA,
+            network_authorization_sha="dummy",
+            project_root=Path(".").resolve(),
+        )
+
+
+def test_collector_adapter_rejects_non_002_alias_network_auth(tmp_path):
+    """Verify that collector adapter does not search or select alias network auth for non-002 roots."""
+    non_002_run_id = "test_run_non_002_probe_001"
+    output_root = _make_candidate_output_root(tmp_path)
+    completed_root = output_root / non_002_run_id
+    completed_root.mkdir(parents=True)
+
+    # Place alias file in evidence_candidates (parent of completed_root)
+    alias_parent_auth = output_root / f"network_auth_{non_002_run_id}.json"
+    auth_data = {
+        "run_id": non_002_run_id,
+        "approved_design_sha256": FROZEN_DESIGN_SHA,
+        "approved_plan_sha256": FROZEN_PLAN_SHA,
+    }
+    auth_bytes = json.dumps(auth_data).encode("utf-8")
+    alias_parent_auth.write_bytes(auth_bytes)
+    auth_sha = hashlib.sha256(auth_bytes).hexdigest()
+
+    auth_pkt = {
+        key: {
+            "path": rel_p,
+            "sha256": collector.EXACT_AUTHORITY_FILES[key],
+        }
+        for rel_p, key in collector.FIXED_AUTHORITY_KEY_MAP.items()
+    }
+    auth_pkt["approved_historical_evidence_expansion_design"] = {
+        "path": FROZEN_DESIGN_PATH,
+        "sha256": FROZEN_DESIGN_SHA,
+    }
+    auth_pkt["approved_expansion_implementation_plan"] = {
+        "path": FROZEN_PLAN_PATH,
+        "sha256": FROZEN_PLAN_SHA,
+    }
+    auth_pkt["network_collection_authorization"] = {
+        "run_id": non_002_run_id,
+        "approved_design_sha256": FROZEN_DESIGN_SHA,
+        "approved_plan_sha256": FROZEN_PLAN_SHA,
+        "authorization_record_sha256": auth_sha,
+    }
+
+    # Place manifest in completed_root with all 13 false flags, valid keys
+    manifest_data = {
+        "schema_version": collector.SCHEMA_VERSION,
+        "run_id": non_002_run_id,
+        "authority_packet": auth_pkt,
+        "cohort": EXPECTED_COHORT,
+        "physical_source_objects": [],
+        "logical_archive_records": [],
+        "metric_window_coverages": [],
+        "candidate_root_state": "collection_terminal_with_gaps_or_unproven_data",
+        "capture_mode": "historical_ex_post_candidate",
+        "point_in_time_source_validated": False,
+        "authority_flags": collector.EXACT_EXPECTED_13_FALSE_MAPPING,
+    }
+    (completed_root / "candidate_manifest.json").write_bytes(
+        json.dumps(manifest_data).encode("utf-8")
+    )
+
+    # Call validate_completed_candidate_root
+    # It must NOT select alias_parent_auth. It must fail closed because configs/authorizations/ does not have this mapping.
+    with pytest.raises(collector.CandidateCollectorError) as exc_info:
+        collector.validate_completed_candidate_root(
+            completed_root=completed_root,
+            approved_design_path=Path(FROZEN_DESIGN_PATH),
+            approved_design_sha=FROZEN_DESIGN_SHA,
+            approved_plan_path=Path(FROZEN_PLAN_PATH),
+            approved_plan_sha=FROZEN_PLAN_SHA,
+            network_authorization_sha=auth_sha,
+            project_root=Path(".").resolve(),
+        )
+
+    err_msg = str(exc_info.value)
+    assert "missing_workspace_authority" in err_msg
+    assert f"network_auth_{non_002_run_id}.json" in err_msg
+    assert str(alias_parent_auth) not in err_msg
