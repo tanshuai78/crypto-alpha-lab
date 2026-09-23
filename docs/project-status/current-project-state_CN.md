@@ -91,7 +91,7 @@ crypto-alpha-lab/
 | **Stage 1.5D** | Binance 公告实时采集 + BAPI 详情 + 202 重试调度 | `implemented_locally`, `committed`, `deployed`, `running`, `evidence_collected` | `Yes` | `True` (PID 88580) | `runtime_evidence/.../stage1_5d/detail_retry_scheduler_state.json` | BAPI 详情页解析与 202 重试调度器持续稳定运行，消除饥饿 | 维持 7 天连续运行 |
 | **Stage 1.5E** | 执行可行性静态审计 | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Completed | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` | 静态深度审计通过 500 USDT 深度承载力测试 | 推进 1.5F 实时盘口观察 |
 | **Stage 1.5F** | L2 深度实时观察器 + 上线时间闸门 + 水印 v2 + 终端 Ignore | `implemented_locally`, `committed`, `deployed`, `running`, `evidence_collected` | `Yes` | `True` (PID 88770) | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json` | 进程持续运行(2643 heartbeats)，76个 pre-bootstrap 历史锚点终端 Ignore，0 报错 | 捕获新合约上线 L2 盘口证据 |
-| **Stage 1.5G** | L2 深度证据离线审查器 (Clean/Quarantine/Invalid) | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json` | SPCXUSD1 审查通过 Clean；SKHYUSDT 审查通过 Quarantine；POPMARTUSDT 为 invalid / quarantine candidate | 继续积累新 root 下的 Clean 样本并推进 1.5H/1.6A |
+| **Stage 1.5G** | L2 深度证据离线审查器 (Clean/Quarantine/Invalid) | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` | SPCXUSD1 与 MOONSHOTUSDT 审查通过 Clean (MOONSHOTUSDT 采样 716 点，覆盖率 99.44%，P50点差 5.85 bps，P50滑点 7.14/8.01 bps)；SKHYUSDT 审查通过 Quarantine；POPMARTUSDT 为 invalid / quarantine candidate | 样本量已扩充至 2 个 Clean 样本，继续积累并推进 1.5H/1.6A |
 | **Stage 1.5H** | 静态执行代理报告生成器 (Read-Only Report Generator) | `implemented_locally`, `committed`, `reviewed` | `Yes` | Offline Tool | `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md` | 报告生成器治理审查通过；当前本地 `data/stage1_5h` artifact 未同步进工作区 | 维持纯只读报告工具定位 |
 | **Stage 1.6A - 1.6R** | 期货下架 (1.6A) 与安全事故 Risk-Veto (1.6R) | `planned_only` | `No` | `False` | `docs/strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md` | 1.6A 与 1.6R 已通过 Master Assessment，为下一阶段最高优先设计文档 | 撰写 1.6A 设计文档 |
 | **Stage 1.6F** | 候选证据准入与 W1 描述性诊断 | `implemented_locally`, `evidence_collected`, `reviewed` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_6f/candidate_w1_diagnostics/candidate_w1_run_20260920_001/` | 41 标的 W1 诊断生成完成 (704 descriptive, 75 incomplete)；审查通过 (COMPLETE，双重 Effective Authority 绑定闭环，P0-3 规范冲突已解决) | 推进 Stage 1.6A 生产端期货下架事件源设计 |
@@ -161,11 +161,11 @@ crypto-alpha-lab/
 
 | 分类口径 | 数量 / 标的 | 事实与审查证据路径 | 说明 |
 |---|---|---|---|
-| **Clean Evidence (无瑕疵证据)** | **1** (`SPCXUSD1`) | `data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true`) | 已存在 1 个 Clean 级 L2 深度证据；`formal_announcement_and_launch_count = 1`，`book_availability_ratio = 99.86%` |
+| **Clean Evidence (无瑕疵证据)** | **2** (`SPCXUSD1`, `MOONSHOTUSDT`) | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true`) | 已存在 2 个 Clean 级 L2 深度证据。新增 `MOONSHOTUSDT`（716 采样点，覆盖率 99.44%，P50点差 5.85 bps，P50滑点 7.14/8.01 bps，0 无效订单簿行）；历史样本 `SPCXUSD1` (`book_availability_ratio = 99.86%`) |
 | **Quarantined Evidence (隔离级证据)** | **1** (`SKHYUSDT`) | `quarantine_summary.json:L7` (`quarantined_depth_evidence_pass = true`) | 前 11 分钟存在 12 个空盘口快照，隔离后有效快照 706 个，`book_availability_ratio = 98.06%` |
 | **Invalid Evidence (本地可复核)** | **0** | `quarantine_summary.json:L11` | 当前本地 runtime evidence 包未包含 POPMARTUSDT 的 2026-07-23 服务器 review JSON，不能在本地独立复核该 invalid 结论 |
 
-> **注**：`SPCXUSD1` clean pass 是当前本地已同步的服务器正式 review 证据。`POPMARTUSDT` 事件也于 2026-07-23 在服务器完成审查，但对应 `20260723T152909Z_popmartusdt` review JSON/Markdown 当前未出现在本地工作区；在同步前，只能作为会话历史结论引用，不能作为本地 source_upload 包内可独立复核证据。
+> **注**：`SPCXUSD1` 与 `MOONSHOTUSDT` clean pass 是当前本地已同步的服务器正式 review 证据。`POPMARTUSDT` 事件也于 2026-07-23 在服务器完成审查，但对应 `20260723T152909Z_popmartusdt` review JSON/Markdown 当前未出现在本地工作区；在同步前，只能作为会话历史结论引用，不能作为本地 source_upload 包内可独立复核证据。
 
 ### 7.2 Stage 1.5H 静态执行代理报告定位
 
