@@ -473,6 +473,7 @@ PY
 cd /root/crypto-alpha-lab
 source .venv/bin/activate
 
+export ROOT_SUFFIX="${ROOT_SUFFIX:-7d_historical_catalog_re_admission_hotfix_v3}"
 export STAGE1_5D_EVENTS_OUT="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5d_live_event_source_smoke_collector.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}' | tail -n 1)"
 export STAGE1_5F_OUT="$(ps -eo comm=,args= | awk '$1 ~ /^python/ && /run_stage1_5f_live_depth_observer.py/ {for (i = 1; i <= NF; i++) if ($i == "--output-root") print $(i + 1)}' | tail -n 1)"
 
