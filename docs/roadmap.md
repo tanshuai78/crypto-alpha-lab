@@ -18,6 +18,19 @@
 * **Zero Trade Signals / Zero Execution Feasibility Claims**: All observation modules enforce `trade_signal_allowed = False`, `paper_trading_allowed = False`, `live_trading_allowed = False`, `execution_engine_allowed = False`, and `execution_feasibility_claim_allowed = False`.
 * **Execution Layer Preservation**: The 355-line atomic dual-leg execution engine ([src/execution/order_executor.py](../src/execution/order_executor.py)) is migrated verbatim and frozen. It handles 7 distinct failure recovery paths (maker timeout, net edge check, hedge exception, dust fill rollback, abort on partial fill, duplicate intent rejection, force deleveraging lock).
 
+### Alpha Research Methodology v1
+
+Project-wide alpha research follows `.agent/rules/L2_Alpha_Research_Methodology.md`. The methodological change does **not** relax L0 safety or evidence quality. It changes the research question from “does every event win?” to “does a preregistered rule show positive cost-adjusted expectancy across independent opportunities with survivable tail risk?”
+
+Core implications:
+
+* Win rate alone is not an Alpha pass/fail criterion; payoff distribution, MAE/MFE, tail loss, costs and capacity matter.
+* Calendar duration is not sample size; strategy conclusions must use the declared independent event/episode unit and clustered splits where needed.
+* Losing observations are allowed; unbounded ruin paths, negative cost-adjusted expectancy, hindsight tuning, invalid PIT evidence, or economically negligible capacity are not.
+* `phenomenon_supported`, `alpha_candidate`, `alpha_validated`, `evidence_insufficient`, and `falsified` are distinct research states.
+* Historical `falsified/stopped/superseded` tracks are not automatically reopened. Reconsideration requires a separate methodology audit showing the old kill materially depended on an invalid/incomplete criterion; routes killed by non-positive cost-adjusted edge or invalid evidence remain closed absent genuinely new evidence.
+
+
 ---
 
 ## 2. Current Position
@@ -92,7 +105,7 @@ Preserving historical research value and negative findings:
 
 1. **Route C1 Price-Only Proxy 7-Day Live Smoke Test**:
    - Document: `docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md` (2026-07-05).
-   - Finding: `falsified`. 7-day live smoke test showed high sample overlap, insufficient win rate, and net edge after fees $\le 0$. Route C1 price-only proxy branch terminated.
+   - Finding: `falsified`. 7-day live smoke test showed high sample overlap and net edge after fees $\le 0$; insufficient win rate was descriptive, not the standalone kill reason. Route C1 price-only proxy branch remains terminated under L2 because the cost-adjusted edge gate failed.
 2. **Stage 1.4B-Lite Crowding-Only Replay**:
    - Document: `docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md` (2026-06-18).
    - Finding: `falsified`. 500 trials of crowding-only metrics showed zero statistically significant independent alpha. Decision made in Stage 1.4C to pivot to external catalyst announcements.
@@ -151,6 +164,7 @@ Organized by category:
 * **2026-07-24**: Implemented and verified Stage 1.5F historical-anchor rejection hygiene hotfix (watermark schema v2, terminal ignored pre-bootstrap state tracking).
 * **2026-07-26**: Verified server 1.5D and 1.5F 7-day continuous run state; finalized unified project state (`current-project-state_CN.md`) and document index (`current-document-index_CN.md`).
 * **2026-08-10**: Approved Stage 1.5D/1.5F Git Ancestry Attestation design and completed implementation plan. Producer emits version 2 formal schedule revision events; consumer accepts `[1, 2]`; producer configuration remains default disabled (`EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False`).
+* **2026-09-24**: Adopted project-level L2 Alpha Research Methodology: Alpha is evaluated by preregistered cost-adjusted expectancy across independent opportunities plus robustness, capacity and survivable tail risk; win rate/per-trade certainty is no longer a universal pass/fail criterion. Historical falsifications remain closed unless separately re-audited.
 
 
 ---

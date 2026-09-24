@@ -12,9 +12,10 @@ When multiple instructions exist, apply them in this order:
 
 1. Safety and capital preservation
 2. Engineering process discipline
-3. Project workflows
-4. Domain role and communication style
-5. Soft preferences
+3. Alpha research methodology (when the task concerns alpha/strategy research)
+4. Project workflows
+5. Domain role and communication style
+6. Soft preferences
 
 If two rules conflict, follow the higher-priority rule and state the conflict explicitly.
 
@@ -126,6 +127,14 @@ These govern how work is executed.
     - `BLOCKED_IMPLEMENTATION_DEFECT`: Local executor misunderstanding of approved design or existing API; fix locally within approved scope and plan without changing design.
     - `BLOCKED_SCOPE_DRIFT`: Implementation requires touching files or contracts outside the approved whitelist; halt and request plan/whitelist revision.
     - `BLOCKED_SPEC_DRIFT`: Approved design/plan has structural contradiction with frozen upstream reality; halt and escalate with a formal Evidence Packet (Failed Invariant, Upstream SSOT reference, Contradiction proof, Proposed architectural delta) back to the Design/Plan workflow.
+
+## L2 Alpha Research Methodology
+
+For any task involving alpha discovery, strategy hypothesis, event study, factor research, replay/backtest, strategy evaluation, promotion/falsification, expectancy, PnL, or economic-edge claims, read and follow `.agent/rules/L2_Alpha_Research_Methodology.md`.
+
+L2 governs probabilistic research methodology only. It never overrides L0 Financial Safety or L1 Engineering Process, and it never grants paper/live/execution authority. Safety claims remain deterministic; alpha claims may be probabilistic but must state uncertainty and use the declared independent sampling unit.
+
+The existing Core Trading Design Rules remain mandatory. L2 explains how fees, slippage, liquidity, holding risk, margin, net exposure, and exchange-specific failure modes enter alpha evaluation; it does not remove those requirements from this file or redefine L0/L1 invariants.
 
 ## Workflow Mapping
 

@@ -12,6 +12,7 @@ description: 实施计划与白名单规范流程 (Implementation Plan Workflow)
 
 1. **Preflight 与影响清单**：
    - 重新读取已批准 Design、`docs/roadmap.md`、`configs/base.py`、当前源码、测试、Fixture、近期提交及 `git status --short --untracked-files=all`。
+   - 若已批准 Design 属于 alpha/strategy research 且声明受 `.agent/rules/L2_Alpha_Research_Methodology.md` 约束，Plan 必须同时读取该规则，并把 Design 已批准的研究语义视为不可在实施阶段自行改写的 contract。
    - 将每个 `INV-*` 映射到预期 production entry point、持久化/序列化路径、消费者和验证证据。
    - 对计划修改的共享 SSOT、Helper、契约、Schema、CLI 或 transport boundary 运行精准 Graphify 查询，并以源码和 `rg` 验证。
    - 将影响分为：需要修改、兼容但不修改、仅 advisory、兼容性尚未证明。最后一类在证明兼容或纳入任务前属于 P0。
@@ -22,6 +23,7 @@ description: 实施计划与白名单规范流程 (Implementation Plan Workflow)
    - 未经用户明确要求，Plan 不得生成或执行逐 Task `git commit` 步骤。
    - 在 Review verdict 为 `Approve` 且用户明确批准前，不得提供或启动 `writing-plans` 的执行选项。
    - 每个 Task 必须写明：对应 Design Invariant、精确文件、接口、验证命令、预期结果与不在本 Task 范围内的内容。
+   - 对 Alpha Research Plan，禁止自行发明或优化 Design 未批准的 entry/exit/stop-loss、holding horizon、subgroup filter、cost assumption、benchmark、promotion/kill threshold；若实现需要改变这些语义，必须 `STOP=BLOCKED_SPEC_DRIFT` 并返回 Design 流程。
    - 行为代码和 bugfix 使用 RED-GREEN TDD；文档、Fixture metadata 和部署命令使用最小可执行验证，不得制造无意义测试。
 
 3. **嵌入 `Allowed Change Scope` 强制白名单**：

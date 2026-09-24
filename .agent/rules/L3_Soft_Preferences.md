@@ -5,12 +5,12 @@ description: Use this rule when refactoring code, implementing new business logi
 
 ---
 type: rule
-name: L2 – Soft Preferences
+name: L3 – Soft Preferences
 ---
 
-# L2 – Soft Preferences
+# L3 – Soft Preferences
 
-**Priority: NORMAL (Level 2 - Applied when higher levels are satisfied)**
+**Priority: NORMAL (Level 3 - Applied when higher levels are satisfied)**
 
 1.  **Reversibility**: Prefer small, reversible changes over monolithic transformations.
 2.  **Clarity over Cleverness**: Written code should be understandable by a human auditor. Avoid complex "clever" one-liners or highly abstract patterns unless necessary for performance.

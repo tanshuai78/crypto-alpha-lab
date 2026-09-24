@@ -13,6 +13,7 @@ description: 设计契约与架构选型流程 (Design Contract Workflow)
 1. **同步事实与需求澄清 (Superpowers)**：
    - 在任何项目检查或提问前，先调用 `.agent/skills/using-superpowers`，再调用 `.agent/skills/brainstorming`。
    - 在 `brainstorming` 的项目探索步骤中读取 `docs/roadmap.md`、`configs/base.py`、相关源码、测试、Fixture、近期提交和当前 `git status --short --untracked-files=all`，再澄清用户真实意图、边界、不变量和成功标准。
+   - 若任务涉及 alpha discovery、策略假设、事件研究、factor、replay/backtest、策略晋级/证伪、expectancy、PnL 或 economic-edge claim，必须同时读取 `.agent/rules/L2_Alpha_Research_Methodology.md`；L2 仅约束研究方法，不能覆盖 L0/L1 或开启任何交易权限。
    - 本项目覆盖 `brainstorming` 的默认文档位置与提交行为：Design 写入 `docs/designs/`；未经用户明确要求不得自动 commit。
    - 本项目覆盖 `brainstorming` 的默认终态：Design Review 和用户批准前不得直接调用 `writing-plans`。
 
@@ -55,6 +56,18 @@ description: 设计契约与架构选型流程 (Design Contract Workflow)
    - 验证策略（happy path、failure path、boundary、restart、production wiring）
    - Rollout / rollback（仅运行时或部署行为变化时适用）
    - 未解决问题 (Open Questions)，注明是否阻断、owner 和延后理由
+   - **Alpha Research 附加章节（仅适用于 L2 路由任务）**：必须按 `.agent/rules/L2_Alpha_Research_Methodology.md` 定义或以 `N/A + 理由` 明确说明：
+     - Alpha / economic mechanism hypothesis 与本阶段允许的 claim level；
+     - independent sampling unit / cluster rules；
+     - point-in-time / anti-hindsight boundary；
+     - preregistered observation/strategy rule；
+     - outcome distribution metrics（不得以 win rate 单独代表 Alpha）；
+     - cost/friction、liquidity/capacity 的本阶段证据边界；
+     - loss / MAE / tail-risk、outlier/concentration dependency；
+     - conditional-alpha 规则（如适用）；
+     - promotion / kill / evidence-gap semantics；
+     - 明确延后到后续 Gate 的 execution、PnL、shadow 或 live claim。
+   - Alpha Research Design 不得为了填模板而凭空制造 entry/exit/stop/threshold；描述性阶段可以明确保持 `phenomenon_supported / evidence_insufficient` 语义并延后策略参数。
 
 5. **Design Review Gate**：
    - 完成 `brainstorming` 的 placeholder、矛盾、范围和歧义自审。

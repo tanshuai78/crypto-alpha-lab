@@ -25,6 +25,7 @@
 |---|---|---|---|---|---|---|
 | **项目全局状态** | N/A | N/A | N/A | N/A | N/A | [current-project-state_CN.md](current-project-state_CN.md) |
 | **项目 Roadmap** | [roadmap.md](../roadmap.md) | N/A | N/A | N/A | N/A | [docs/roadmap.md](../roadmap.md) |
+| **Alpha 研究方法论** | [.agent/rules/L2_Alpha_Research_Methodology.md](../../.agent/rules/L2_Alpha_Research_Methodology.md) | N/A | N/A | N/A | N/A | 项目级研究方法 SSOT；L0/L1 优先级更高 |
 | **Stage 1.5D** (公告采集+BAPI详情) | [1.5D Design](../designs/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-design_CN.md) | [1.5D BAPI Plan](../plans/2026-07-22-external-signal-shadow-lab-stage1-5d-bapi-article-detail-source-hotfix-implementation-plan_CN.md) | [1.5D Review](../reviews/2026-06-24-external-signal-shadow-lab-stage1-5d-live-event-source-smoke-collector-review_CN.md) | `implemented` | `deployed` (PID 88580) | `server_runtime_snapshot...txt:L24` |
 | **Stage 1.5F** (L2盘口观察+上线时间闸门) | [1.5F Design](../designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md) | [1.5F Terminal Hygiene Plan](../plans/2026-07-24-external-signal-shadow-lab-stage1-5f-historical-anchor-terminal-ignore-rejection-hygiene-hotfix-plan_CN.md) | [1.5F Review](../reviews/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-review_CN.md) | `implemented` | `deployed` (PID 88770) | `server_runtime_snapshot...txt:L26` |
 | **Stage 1.5G** (盘口质量离线审查) | [1.5G Design](../designs/2026-07-06-external-signal-shadow-lab-stage1-5g-live-depth-evidence-review-design_CN.md) | [1.5G Quarantine Plan](../plans/2026-07-11-external-signal-shadow-lab-stage1-5g-raw-snapshot-quarantine-implementation-plan_CN.md) | [1.5G Clean Summary](../../data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json) | `implemented` | `implemented` (Offline) | SPCXUSD1 clean pass；SKHYUSDT quarantine pass；POPMARTUSDT invalid/quarantine candidate |
@@ -182,3 +183,6 @@
    - 严禁阅读被标记为 `superseded`、`falsified` 或 `historical_reference` 的文档并将其作为新代码实现的依据。
 3. **严格区分文档类型与状态**：
    - 严禁将 `Design` 当作 `Implementation Plan`，严禁将 `Plan` 当作已完成代码，严禁将本地代码误写为服务器已部署。
+4. **Alpha / 策略研究条件路由**：
+   - 若任务涉及 alpha discovery、策略假设、event study、factor、replay/backtest、策略评估、promotion/falsification、expectancy、PnL 或 economic-edge claim，必须额外读取 `.agent/rules/L2_Alpha_Research_Methodology.md`。
+   - L2 只规范研究方法，不覆盖 L0/L1，也不允许把 `phenomenon_supported`、`alpha_candidate` 或统计正期望升级为 paper/live/execution authority。
