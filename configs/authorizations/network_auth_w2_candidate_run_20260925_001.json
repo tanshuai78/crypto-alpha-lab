@@ -1,0 +1,26 @@
+{
+  "all_urls_sha256": "3b9ab69a8c1236cab59f161636ae9e4136465ca599d735ef65e37fd2cc574a46",
+  "design_sha256": "11f5e9a253e2b721301e1c12aedd35bc6a01aaa7d6a05b5d6616c6e876eec303",
+  "fetch_urls_sha256": "6eac006f8854a17a2d78b4306c03da6f28528aba58ffcfafd6b5f078d4ed7058",
+  "max_requests": 171,
+  "permission_flags": {
+    "RISK_LIVE_TRADING_ENABLED": false,
+    "alpha_interpretation_allowed": false,
+    "authenticated_api_allowed": false,
+    "execution_engine_allowed": false,
+    "execution_feasibility_claim_allowed": false,
+    "live_trading_allowed": false,
+    "net_cost_or_profit_claim_allowed": false,
+    "order_api_allowed": false,
+    "paper_trading_allowed": false,
+    "point_in_time_directional_replay_allowed": false,
+    "private_api_allowed": false,
+    "replay_allowed": false,
+    "trade_signal_allowed": false
+  },
+  "plan_sha256": "183689a6b786ccd3dce9f74f5d1fc2e9ccc1741d80f243f5724dd3b7de149229",
+  "public_archive_get_allowed": true,
+  "reuse_urls_sha256": "9773f11e316ce480651b0debf6258fefbd39a1ee9bdc2d6bdd838484704ed405",
+  "run_id": "w2_candidate_run_20260925_001",
+  "schema_version": "stage1_6f_w2_network_authorization_v1"
+}
