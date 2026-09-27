@@ -1,7 +1,7 @@
 # Crypto Alpha Lab Research Roadmap & Decision Log
 
 **Created:** 2026-05-23
-**Latest State Audit:** 2026-07-26 (Evidence Date: 2026-07-26T02:11:01Z)
+**Latest State Audit:** 2026-09-26 (Evidence Date: 2026-09-26T08:50:00Z)
 **Primary State File:** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **Document Index:** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -35,7 +35,7 @@ Core implications:
 
 ## 2. Current Position
 
-*(Extracted from verified runtime snapshot `_project_context/server_runtime_snapshot_20260726T021054Z.txt` and `docs/project-status/current-project-state_CN.md` as of 2026-07-26)*
+*(Updated as of 2026-09-26 based on Stage 1.6F historical research completion and Stage 1.5 live server observation)*
 
 * **Active Server Processes**:
   * **Stage 1.5D Live Collector**: PID 88580 running `run_stage1_5d_live_event_source_smoke_collector.py` under root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
@@ -43,9 +43,9 @@ Core implications:
 * **Active Verification State**:
   * Stage 1.5D: BAPI detail parser + 202 retry scheduler running continuously; zero detail retry starvation.
   * Stage 1.5F: Watermark Schema V2 active; 2643 heartbeats recorded; 76 pre-bootstrap historical anchors terminal ignored.
-* **Current Blockers**:
-  * **P1 Blocker**: Stage 1.5G has 2 clean pass events (`SPCXUSD1`, `MOONSHOTUSDT`), event-family evidence accumulating. Requires continued continuous observation until at least 3 unique symbols under current evidence gates.
-
+* **Stage 1.6F Historical Research State**:
+  * **Stage 1.6F-W2 Evidence Expansion**: `w2_candidate_run_20260925_001`; 180 physical source objects; 41 contracts / 27 parents; 31 contracts / 21 parents window-defined.
+  * **Stage 1.6F-W2-0 Terminal Basis Diagnostic**: `w2_0_exploratory_20260926T071500Z`; 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive.
 ---
 
 ## 3. Research Track Matrix
@@ -68,13 +68,16 @@ Core implications:
 | **Stage 1.5F (Live Depth Observer)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json` (2026-07-26) | Server PID 88770 running continuously. Launch gate active; 76 pre-bootstrap anchors terminal ignored. | Capture clean L2 orderbook evidence. | Network error rate > 5% or 0 heartbeats. |
 | **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` (2026-09-23) | Offline reviewer active. SPCXUSD1 and MOONSHOTUSDT passed Clean (MOONSHOTUSDT 99.44% coverage, P50 spread 5.85 bps); SKHYUSDT passed Quarantine; POPMARTUSDT invalid/quarantine candidate. Event-family evidence accumulating (2 Clean, 1 Quarantine). | Accumulate at least 3 unique symbols and 2 source articles under current evidence gates (currently 2 Clean symbols across 2 articles). | No additional clean/quarantine-valid samples after 30d continuous run. |
 | **Stage 1.5H (Static Read-Only Report)** | `completed` | `data/external_signal_shadow/stage1_5h/reports/20260712T043755Z/stage1_5h_static_execution_proxy_report_summary.json` (2026-07-12) | Static read-only report generator implemented and verified. Hard safety flags enforced. | Maintain read-only tool role. | Any trade signal or execution feasibility claim. |
-| **Stage 1.6 Roadmap (Futures Delisting 1.6A & Risk-Veto 1.6R)** | `planned` | `docs/strategy_specs/2026-07-19-event_source_master_assessment.md` (2026-07-19) | Master Assessment approved Stage 1.6A (Futures Delisting) and Stage 1.6R (Security Risk-Veto) as top priority design docs. | Write Stage 1.6A design doc. | Lack of auditable point-in-time timestamps. |
-
+| **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | Verified Binance futures delisting notice source, BAPI H2 versioned grammar, and 3 timestamp anchors. | Stage 1.6B delisting catalog. | Ambiguous delivery/settlement semantics or missing anchors. |
+| **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | Canonical delisting catalog, burst queue failure recovery, and checkpoint contracts verified. | Stage 1.6E capability audit. | Unrecoverable queue drop under burst load. |
+| **Stage 1.6E (Market Data Observer & Capability Audit)** | `completed` | `docs/reviews/2026-09-04-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-completion-audit_CN.md` (2026-09-04) | Live semantic trigger observer and historical 1s kline / mark / index capability audit completed. | Stage 1.6F matched control. | Kline/mark/index coverage < 80%. |
+| **Stage 1.6F (Historical Matched Control & Evidence Expansion)** | `completed` | `w2_candidate_run_20260925_001` | 180 physical source objects; 41 contracts / 27 parents; 31 contracts / 21 parents window-defined. | conclusion closure only | checksum mismatch. |
+| **Stage 1.6F-W2-0 (Exploratory Terminal Basis Diagnostic)** | `completed` | `data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json` | 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive. | `none_from_current_evidence` | no further gate from current evidence. |
 ---
 
 ## 4. Current Active Chain
 
-The active development and operational chain for the current observation phase is:
+### 4.1 Stage 1.5 Live Catalyst Observation Chain
 
 ```text
 Stage 1.5D Live Announcement Collector (PID 88580)
@@ -97,6 +100,18 @@ Stage 1.5H Static Execution Proxy Report Generator (Offline Tool)
   └── Strictly Read-Only Report Generation (trade_signal_allowed = False)
 ```
 
+### 4.2 Stage 1.6 Delisting Research & Diagnostic Chain
+
+```text
+Stage 1.6F W1/W2 evidence
+  -> 180 physical source objects
+  -> 41 contracts / 27 parents; 31 contracts / 21 parents window-defined
+Stage 1.6F-W2-0 exploratory diagnostic
+  -> 29 contracts / 19 parents exploratory_described
+  -> outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]
+  -> 3/19 negative; 16/19 positive
+  -> conclusion closure only
+```
 ---
 
 ## 5. Completed and Falsified Work
@@ -119,35 +134,21 @@ Preserving historical research value and negative findings:
 
 Organized by category:
 
-* **Data / Verification Blocker (P1)**:
-  * **Issue**: Stage 1.5G has 1 clean pass event, but event-family sample size is still insufficient.
-  * **Evidence**: `data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true`).
-  * **Risk**: A single clean event supports continued read-only Stage 1.5H design work, but cannot justify a family-level conclusion about catalyst launch depth quality.
-  * **Required Action**: Maintain server 1.5D + 1.5F continuous run and continue reviewing new contract launch observations until current event-family thresholds are met.
-* **Engineering / Design Blocker (P2)**:
-  * **Issue**: Stage 1.6A (Futures Delisting Notice) design specification document not yet drafted.
-  * **Evidence**: Roadmap Total Spec `docs/strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md:L305`.
-  * **Risk**: Delay in expanding into next-generation forced-flow event discovery.
-  * **Required Action**: Draft `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`.
+* **Data / Verification Blocker (P3 - Stage 1.5G Live Depth)**:
+  * **Issue**: Stage 1.5G 虽有 2 个 Clean 通过事件（`SPCXUSD1`, `MOONSHOTUSDT`），但新合约上线事件族样本量仍需持续累积至 $\ge 3$ 个独立标的。
+  * **Evidence**: Stage 1.5G 历史评审记录及连续运行心跳。
+  * **Required Action**: 保持 VPS 端 1.5D + 1.5F 进程持续运行并监控新上线合约。
 
 ---
 
 ## 7. Next Gates
 
-### Gate 1: Stage 1.5G Event-Family Evidence Sufficiency
-* **Prerequisite**: Stage 1.5D and 1.5F continuous server observation running cleanly.
-* **Required Evidence**: `stage1_5g_live_depth_evidence_review_summary.json` generated for each new contract launch event.
-* **Current Evidence**: `SPCXUSD1` has already passed Clean (`clean_depth_evidence_pass = true`, `book_availability_ratio = 99.86%`).
-* **Pass Criteria**: Event-family threshold is met with at least 3 unique symbols and 2 source articles, without any trade signal or execution feasibility permission being enabled.
-* **Fail/Stop Criteria**: `invalid_book_ratio > 0.05` or missing snapshots $> 10\%$.
-* **Safety Boundary**: Observation mode only (`trade_signal_allowed = False`).
-
-### Gate 2: Stage 1.6A Futures Delisting Design Review
-* **Prerequisite**: Stage 1.6 Unified Roadmap & Master Assessment approved.
-* **Required Evidence**: Drafted `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`.
-* **Pass Criteria**: Design review approved with clear definition of Binance futures delisting source, scope isolation, and 3 timestamp anchors (`available_at_ms`, `non_reduce_only_start_time_ms`, `settlement_time_ms`).
-* **Fail/Stop Criteria**: Missing timestamp anchors or inability to separate futures delisting from spot/margin delisting.
-* **Safety Boundary**: Read-only source audit design (`implementation_plan_allowed = False` until design approved).
+### Gate 3: Stage 1.5G Event-Family Evidence Sufficiency
+* **Prerequisite**: Stage 1.5D 和 1.5F 持续稳定运行。
+* **Required Evidence**: 累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`。
+* **Pass Criteria**: 达到事件族样本量门槛且无致命污染。
+* **Fail/Stop Criteria**: 连续 30 天无有效新样本或数据丢失率 $> 10\%$。
+* **Safety Boundary**: 观察模式 (`trade_signal_allowed = False`)。
 
 ---
 
@@ -165,6 +166,8 @@ Organized by category:
 * **2026-07-26**: Verified server 1.5D and 1.5F 7-day continuous run state; finalized unified project state (`current-project-state_CN.md`) and document index (`current-document-index_CN.md`).
 * **2026-08-10**: Approved Stage 1.5D/1.5F Git Ancestry Attestation design and completed implementation plan. Producer emits version 2 formal schedule revision events; consumer accepts `[1, 2]`; producer configuration remains default disabled (`EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = False`).
 * **2026-09-24**: Adopted project-level L2 Alpha Research Methodology: Alpha is evaluated by preregistered cost-adjusted expectancy across independent opportunities plus robustness, capacity and survivable tail risk; win rate/per-trade certainty is no longer a universal pass/fail criterion. Historical falsifications remain closed unless separately re-audited.
+* **2026-09-25**: Stage 1.6F-W2 evidence expansion completed for `w2_candidate_run_20260925_001`: 180 physical source objects; 41 contracts / 27 parents; 31 contracts / 21 parents window-defined.
+* **2026-09-26**: Stage 1.6F-W2-0 exploratory diagnostic completed for `w2_0_exploratory_20260926T071500Z`: 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive.
 
 
 ---
