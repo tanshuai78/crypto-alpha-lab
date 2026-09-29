@@ -2,6 +2,8 @@
 
 > **文档生成时间：** 2026-08-25（Stage 1.6D deployment authorization/runbook governance 更新；其它历史索引条目保留原采集时间）
 > **使用说明：** 本文档为仓库中所有研究、设计、计划、审查与状态文档的**统一事实索引入口**。未来的 AI Agent 在开展任何工作前，必须遵循《10. AI 使用规则》，严禁直接以历史被替代 (superseded) 或已证伪 (falsified) 的文档指导新开发。
+> **局部治理纠偏 Design 日期：** 2026-09-28；仅修正 C1、B-Lite 与 Factor Lab 的历史决策措辞，未执行全仓库重新扫描。
+> **纠偏 Design SHA-256：** `37ff23045de7519b426ff1da71e04ec8d61ce371ccafe3fae96711802201583f`。
 
 ---
 
@@ -43,7 +45,7 @@
 | **Stage 1.2** | Review | [docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md](../reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md) | `historical_reference` | Passed | Yes | Completed | None | None | 只读采集关卡通过 |
 | **Stage 1.3** | Review | [docs/reviews/2026-06-13-external-signal-shadow-lab-stage1-3-candidate-signal-discovery-review_CN.md](../reviews/2026-06-13-external-signal-shadow-lab-stage1-3-candidate-signal-discovery-review_CN.md) | `historical_reference` | Passed | Yes | Completed | None | None | 候选信号发现完成 |
 | **Stage 1.4A** | Review | [docs/reviews/2026-06-14-external-signal-shadow-lab-stage1-4-derivatives-stress-data-feasibility-review_CN.md](../reviews/2026-06-14-external-signal-shadow-lab-stage1-4-derivatives-stress-data-feasibility-review_CN.md) | `superseded` | Feasibility Degraded | Yes | Completed | None | Stage 1.4E | 衍生品压力数据受限于交易所限频 |
-| **Stage 1.4B** | Review | [docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md](../reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md) | `historical_reference` | No Alpha | Yes | Completed | None | Stage 1.4C | 500 次试验确认单纯拥挤度反转无独立 Alpha |
+| **Stage 1.4B** | Review | [docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md](../reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md) | `historical_reference` | `stopped_crowding_only` | Yes | Completed | None | Stage 1.4C | 21 events / 6 days; 500 baseline resampling trials are not independent opportunities; evidence sparse/concentrated, not a full derivatives-stress or no-Alpha conclusion |
 | **Stage 1.4C** | Review | [docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4c-joint-decision-review_CN.md](../reviews/2026-06-18-external-signal-shadow-lab-stage1-4c-joint-decision-review_CN.md) | `historical_reference` | Shift to Catalyst | Yes | Completed | Stage 1.4B | Stage 1.5A | 决定从衍生品拥挤度转向催化剂公告 |
 | **Stage 1.4E** | Review | [docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md](../reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md) | `superseded` | Degraded | Yes | Completed | Stage 1.4A | Stage 1.5A | 去杠杆代理敏感性分析通过，但确定转向公告 |
 | **Stage 1.5A** | Plan | [docs/plans/2026-06-23-external-signal-shadow-lab-stage1-5a-binance-reviewed-high-confidence-source-audit-implementation-plan_CN.md](../plans/2026-06-23-external-signal-shadow-lab-stage1-5a-binance-reviewed-high-confidence-source-audit-implementation-plan_CN.md) | `implemented` | Approved | Yes | Completed | None | None | Binance 离线源审计实施计划 |
@@ -87,20 +89,20 @@
 - **结论**：5 年历史数据验证 >100% 年化阈值下 DOGE/XRP 胜率 >64%，年化 >30% + 贴水吸收检查契约成立。
 
 ### 4.3 Trend Regime / Liquidation Cascade (Priority 2 Strategy & Route A/B/C/C1)
-- **状态**：`implemented` (核心策略在 `configs/base.py`) / `falsified` (Route C1 7d 试验)
+- **状态**：`implemented` (核心策略在 `configs/base.py`) / `stopped_no_promotion` (Route C1 price-only proxy)
 - **核心文档**：
   - [docs/plans/2026-05-26-trend-liquidation-phase1a-implementation-plan.md](../plans/2026-05-26-trend-liquidation-phase1a-implementation-plan.md) (`implemented`)
   - [docs/plans/2026-06-02-route-c1-price-only-implementation-plan_CN.md](../plans/2026-06-02-route-c1-price-only-implementation-plan_CN.md) (`implemented`)
-  - [docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md](../reviews/2026-07-05-route-c1-live-smoke-7d-review.md) (`falsified`: Route C1 7 天烟雾测试样本重叠度与胜率不达标，分支终止)
-- **结论**：Route A/B 受到 API 限频与数据完整性拦截，Route C1 纯价格代理已证伪；现仅保留 1h 波动率突破 (2.5x) + OI 动量方向性框架。
+  - [docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md](../reviews/2026-07-05-route-c1-live-smoke-7d-review.md) (`stopped_no_promotion`: 904 / 1536 baseline/control matches; 58.85416667% < 70%; economic edge not established)
+- **结论**：Route A/B 受到 API 限频与数据完整性拦截，Route C1 纯价格代理因 baseline/control matching failed 而停止推广，不构成成本后 EV 或胜率证伪；现仅保留 1h 波动率突破 (2.5x) + OI 动量方向性框架。
 
 ### 4.4 Cross-Sectional Factor Lab (截面因子实验室)
-- **状态**：`historical_reference` / `falsified`
+- **状态**：`historical_reference` / `retain_closed_for_tested_price_only_specification`
 - **核心文档**：
   - [docs/strategy_specs/cross_sectional_factor_lab_implementation_guide_CN_v3.md](../strategy_specs/cross_sectional_factor_lab_implementation_guide_CN_v3.md) (`historical_reference`)
   - [docs/reviews/2026-06-09-cross-sectional-factor-lab-stageA1-closure-review_CN.md](../reviews/2026-06-09-cross-sectional-factor-lab-stageA1-closure-review_CN.md) (`review_approved`)
-  - [docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md](../reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md) (`falsified`: CMOM 截面动量因子超额收益不足以覆盖现金替代)
-- **结论**：截面动量因子在扣除交易成本后未呈现超越 Cash Fallback 的稳定 Alpha，项目闭环结题。
+  - [docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md](../reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md) (`retain_closed_for_tested_price_only_specification`: tested 30d/14d pure-price momentum had negative 30 bps cost-scenario portfolio performance and large drawdowns)
+- **结论**：已测试 pure-price 截面动量规格保持关闭；该结果不评估、也不证伪所有 cross-sectional factors。任何非价格因子研究必须另起 L2 Design。
 
 ### 4.5 Stage 1.6 Event-Source Candidate Registry (研究候选登记)
 - **状态**：`strategic_reference_only`

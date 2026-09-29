@@ -59,7 +59,7 @@
 | **Trend / Liquidation Scanner** | `observation_only` | [configs/base.py:L124](../configs/base.py#L124) | 波动率突破 (2.5x 30d 基准) + OI 踩踏方向性候选。硬止损 1.5%，最大持仓 12h。 | 1.5 环境下的影子模拟回放。 | 20 个信号单次净边际扣除 20 bps 成本后 $\le 0$。 |
 | **Tactical Carry** | `stopped` | `docs/roadmap.md` (2026-05-23) | 在平坦期限结构下无法获利，被 Extreme Funding 和 Basis Desk 替代。 | 无 | 期限结构斜率持续为负或零。 |
 | **Long-Horizon Basis Desk** | `observation_only` | [configs/base.py:L145](../configs/base.py#L145) | 多日 Carry (10-25% 费率，持仓 3-7 天)。每 8h 必须通过基差回撤 > 50% 累计资金收益的熔断校验。 | 基差 DB 与 8h Funding Flip 检测器。 | 累计基差亏损 > 50% 费率收益，或挂单成交率 < 70%。 |
-| **Cross-Sectional Factor Lab** | `falsified` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | Stage A2 CMOM 截面动量因子超额收益在扣除交易摩擦成本后未能跑赢 Cash Fallback 现金基线。 | 结题 / 历史参考。 | 因子相比现金基准的夏普提升 $\le 0$。 |
+| **Cross-Sectional Factor Lab** | `stopped` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | 已测试的 30d/14d 纯价格动量在成本情景下组合表现为负且出现大幅回撤；此 Stage A2 证据不评估亦不证伪非价格因子。 | 保持已测试的纯价格规格关闭；任何非价格因子需另起 L2 Design。 | 不适用于未经测试的因子。 |
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | 基础设施与公共只读采集器验证通过。 | Stage 1.3 信号发现。 | 网络读取失败率 > 5%。 |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | 本地强平快照受交易所频控降级。转向 Stage 1.5 催化剂公告。 | 被 Stage 1.5 替代。 | 强平数据流被交易所限频。 |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | 催化剂公告在历史重放中被证实产生显著的价格响应。 | Stage 1.5D 实时采集器。 | 价格覆盖率 < 80%。 |
@@ -116,19 +116,19 @@ Stage 1.6F-W2-0 探索性诊断
 
 ---
 
-## 5. 已结题与已证伪工作 (Completed and Falsified Work)
+## 5. 历史已结题与已停止研究 (Historical Completed and Stopped Research)
 
-为保证项目认知框架不受幸存者偏差干扰，在此保留已证伪分支的负结论证据：
+为保留历史研究价值与负结论证据：
 
 1. **Route C1 现货价格代理 7 天实盘烟雾测试 (Route C1 Price-Only Proxy 7-Day Live Smoke Test)**：
    - 证明文件：`docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md` (2026-07-05)。
-   - 结论：`falsified`。7 天实盘烟雾测试显示样本重叠率高，扣除费用后净边际 $\le 0$；胜率不足仅为描述性现象，并非独立关停原因。Route C1 纯价格代理分支在 L2 框架下维持终止，因为成本后期望门禁未通过。
+   - 结论：`stopped_no_promotion`。904 / 1536 个事件达到基线/对照匹配（58.85416667% < 70%）；经济优势未建立。这既不是成本调整后 EV 证伪，也不是胜率证伪。
 2. **Stage 1.4B-Lite 衍生品拥挤度反转重放 (Stage 1.4B-Lite Crowding-Only Replay)**：
    - 证明文件：`docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md` (2026-06-18)。
-   - 结论：`falsified`。500 次重抽样试验表明单纯衍生品拥挤度指标无统计显著的独立 Alpha。在 Stage 1.4C 中决定转向外生催化剂公告。
+   - 结论：`stopped_crowding_only`。跨 6 天的 21 个事件候选计数为 13 / 0 / 8；500 次基线重抽样试验并非 500 个独立机会，前 5 大正向事件贡献了 89.28914131% 的毛利润。这并不评估亦未证伪完整的衍生品压力复合因子。
 3. **Cross-Sectional Factor Lab 阶段 A2 (CMOM 动量因子) (Cross-Sectional Factor Lab Stage A2 (CMOM Factor))**：
    - 证明文件：`docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10)。
-   - 结论：`falsified`。截面动量 (CMOM) 因子超额收益在扣除交易成本后未能战胜 Cash Fallback 现金基准。因子实验室闭环结题。
+   - 结论：`retain_closed_for_tested_price_only_specification`。在 30 bps 成本情景下经过 77 次周度调仓，所测试的 30d 和 14d 纯价格动量组合表现为负且出现大幅回撤。这并不证伪所有截面因子。
 
 ---
 
@@ -157,11 +157,11 @@ Stage 1.6F-W2-0 探索性诊断
 ## 8. 决策日志记录 (Decision Log)
 
 * **2026-05-23**：旧 carry/MR 期限趋平且频繁超时，决策封存，转向 `crypto-alpha-lab` 新架构。建立 5k-50k USDT 资金规模假设，原子化执行层原样迁移并冻结。
-* **2026-06-10**：截面动量 (CMOM) 因子测试判定无法战胜 Cash Fallback，截面因子实验室结题闭环。
-* **2026-06-18**：500 次 Monte Carlo 重放证明衍生品拥挤度反转无显著净收益。在 Stage 1.4C 决策转向 Stage 1.5 外生催化剂公告。
+* **2026-06-10**：77 次周度调仓在 30 bps 成本情景下显示负表现与大幅回撤后，保持已测试的 30d/14d 纯价格动量规格关闭；非价格因子不在本次结题范围内且未重新开放。
+* **2026-06-18**：停止 Stage 1.4B-Lite 仅拥挤度 (crowding-only) 分支：跨 6 天 21 个事件，候选计数为 13 / 0 / 8，且 500 次试验为基线重抽样而非独立机会。证据稀疏且集中；无完整衍生品压力结论或 Alpha 声明。
 * **2026-06-24**：批准 Stage 1.5D 实时公告采集器设计，完成 Stage 1.5C 价格覆盖扩展审计。
 * **2026-06-26**：批准 Stage 1.5F 实时盘口观察器设计，服务器上部署实时 L2 深度快照采集。
-* **2026-07-05**：Route C1 7 天实盘烟雾测试评估未达标，现货价格代理策略被证伪结题。
+* **2026-07-05**：在 904 / 1536 个基线/对照匹配事件（58.85416667% < 70%）后停止 Route C1 纯价格代理推广；其经济优势未建立。这并非净 EV 或胜率证伪。
 * **2026-07-12**：批准 Stage 1.5H 静态代理只读报告生成器，确立严格只读治理契约。
 * **2026-07-19**：发布 Master Assessment (`2026-07-19-event_source_master_assessment.md`)。批准 Stage 1.6A (期货下架) 作为最高优先级发现路线，Stage 1.6R (安全事故) 作为 Risk-Veto 辅助路线。
 * **2026-07-24**：实施并验证 Stage 1.5F 历史锚点 Rejection Hygiene 热装补丁（水印 Schema v2、终端 Ignore 分流以防污染 `events_rejected`）。

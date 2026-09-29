@@ -59,7 +59,7 @@ Core implications:
 | **Trend / Liquidation Scanner** | `observation_only` | [configs/base.py:L124](../configs/base.py#L124) | Vol breakout (2.5x 30d baseline) + OI cascade directional candidate. Hard stop 1.5%, max 12h hold. | Shadow simulation in 1.5 env. | Net edge $\le$ 20 bps round-trip cost over 20 signals. |
 | **Tactical Carry** | `stopped` | `docs/roadmap.md` (2026-05-23) | Replaced by Extreme Funding Scanner and Basis Desk due to flat term structure. | None | Flat term structure persistence. |
 | **Long-Horizon Basis Desk** | `observation_only` | [configs/base.py:L145](../configs/base.py#L145) | Multi-day carry (10-25% funding, 3-7d hold). Basis drawdown halt >50% cumulative funding income required every 8h. | Basis DB & 8h Funding Flip detector. | Cumulative basis loss > 50% funding income or maker fill rate < 70%. |
-| **Cross-Sectional Factor Lab** | `falsified` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | Stage A2 CMOM factor excess return failed to outperform Cash Fallback after transaction costs. | Closed / Historical Reference. | Factor Sharpe uplift over cash fallback $\le 0$. |
+| **Cross-Sectional Factor Lab** | `stopped` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | Tested 30d/14d pure-price momentum had negative cost-scenario portfolio performance and large drawdowns; this Stage A2 evidence does not evaluate or falsify non-price factors. | Retain tested price-only specification closed; any non-price factor requires a new L2 Design. | Not applicable to untested factors. |
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | Infrastructure and public read-only collectors verified. | Stage 1.3 signal discovery. | Network read failure rate > 5%. |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | Local forceorder snapshots degraded by exchange rate-limiting. Pivot to Stage 1.5 catalyst announcements. | Superseded by Stage 1.5. | Exchange rate-limiting on forceorder stream. |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | Catalyst announcements verified to generate significant historical price response. | Stage 1.5D live collector. | Price coverage < 80%. |
@@ -114,19 +114,19 @@ Stage 1.6F-W2-0 exploratory diagnostic
 ```
 ---
 
-## 5. Completed and Falsified Work
+## 5. Historical Completed and Stopped Research
 
 Preserving historical research value and negative findings:
 
 1. **Route C1 Price-Only Proxy 7-Day Live Smoke Test**:
    - Document: `docs/reviews/2026-07-05-route-c1-live-smoke-7d-review.md` (2026-07-05).
-   - Finding: `falsified`. 7-day live smoke test showed high sample overlap and net edge after fees $\le 0$; insufficient win rate was descriptive, not the standalone kill reason. Route C1 price-only proxy branch remains terminated under L2 because the cost-adjusted edge gate failed.
+   - Finding: `stopped_no_promotion`. 904 / 1536 events achieved baseline/control matching (58.85416667% < 70%); the economic edge is not established. This is neither a cost-adjusted EV nor a win-rate falsification.
 2. **Stage 1.4B-Lite Crowding-Only Replay**:
    - Document: `docs/reviews/2026-06-18-external-signal-shadow-lab-stage1-4b-lite-funding-oi-price-crowding-replay-500trials-real-review_CN.md` (2026-06-18).
-   - Finding: `falsified`. 500 trials of crowding-only metrics showed zero statistically significant independent alpha. Decision made in Stage 1.4C to pivot to external catalyst announcements.
+   - Finding: `stopped_crowding_only`. The 21 events across 6 days had candidate counts 13 / 0 / 8; 500 baseline resampling trials are not 500 independent opportunities, and the top five positive events contributed 89.28914131% of gross positive profit. This does not evaluate or falsify a full derivatives-stress composite.
 3. **Cross-Sectional Factor Lab Stage A2 (CMOM Factor)**:
    - Document: `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10).
-   - Finding: `falsified`. Cross-sectional momentum (CMOM) factor excess returns failed to clear transaction costs over Cash Fallback. Factor Lab closed.
+   - Finding: `retain_closed_for_tested_price_only_specification`. Across 77 weekly rebalances under the 30 bps cost scenario, tested 30d and 14d pure-price momentum had negative portfolio performance and large drawdowns. This does not falsify every cross-sectional factor.
 
 ---
 
@@ -155,11 +155,11 @@ Organized by category:
 ## 8. Decision Log
 
 * **2026-05-23**: Pivoted from `my-bitcoin-project` (flat term structure, OKX timeouts) to `crypto-alpha-lab`. Established 5k-50k USDT capital scale assumption and verbatim migration of execution layer.
-* **2026-06-10**: Closed Cross-Sectional Factor Lab after Stage A2 CMOM factor failed to clear cash fallback.
-* **2026-06-18**: Terminated Stage 1.4B derivatives stress crowding replay after 500 trials proved zero net edge. Pivoted in Stage 1.4C to Stage 1.5 External Catalyst Announcements.
+* **2026-06-10**: Retained the tested 30d/14d pure-price momentum specifications closed after 77 weekly rebalances showed negative 30 bps cost-scenario portfolio performance and large drawdowns; non-price factors are outside this closure's scope and were not reopened.
+* **2026-06-18**: Stopped the Stage 1.4B-Lite crowding-only branch: 21 events over 6 days, candidate counts 13 / 0 / 8, and 500 baseline resampling trials rather than independent opportunities. The evidence was sparse and concentrated; no full derivatives-stress conclusion or Alpha claim follows.
 * **2026-06-24**: Approved Stage 1.5D Live Announcement Collector design and completed Stage 1.5C price coverage expansion audit.
 * **2026-06-26**: Approved Stage 1.5F Live Depth Observer design and deployed real-time L2 orderbook snapshot collection on server.
-* **2026-07-05**: Terminated Route C1 price-only proxy after 7-day live smoke test failed win rate and net edge criteria.
+* **2026-07-05**: Stopped promotion of the Route C1 price-only proxy after 904 / 1536 baseline/control matches (58.85416667% < 70%); its economic edge is not established. This is not a net-EV or win-rate falsification.
 * **2026-07-12**: Approved Stage 1.5H Static Execution Proxy Report Generator with strict read-only governance flags.
 * **2026-07-19**: Finalized Master Assessment (`2026-07-19-event_source_master_assessment.md`). Approved Stage 1.6A (Futures Delisting) as top priority discovery route and Stage 1.6R (Security Incident) as Risk-Veto side route.
 * **2026-07-24**: Implemented and verified Stage 1.5F historical-anchor rejection hygiene hotfix (watermark schema v2, terminal ignored pre-bootstrap state tracking).
