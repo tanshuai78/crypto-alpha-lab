@@ -1,7 +1,7 @@
 # Crypto Alpha Lab Research Roadmap & Decision Log
 
 **Created:** 2026-05-23
-**Latest State Audit:** 2026-09-26 (Evidence Date: 2026-09-26T08:50:00Z)
+**Latest State Audit:** 2026-09-30 (Evidence Date: 2026-09-30T09:51:16Z)
 **Primary State File:** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **Document Index:** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -35,8 +35,13 @@ Core implications:
 
 ## 2. Current Position
 
-*(Updated as of 2026-09-26 based on Stage 1.6F historical research completion and Stage 1.5 live server observation)*
+*(Updated as of 2026-09-30 based on Stage 1.3 R10 readmission preflight completion, Stage 1.6F historical research completion, and Stage 1.5 live server observation)*
 
+* **Stage 1.3 R10 Historical Signal Readmission Preflight State**:
+  * Implemented offline preflight reader (`src/research/external_signal_shadow/stage1_3_r10_readmission.py`) and CLI entrypoint (`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`).
+  * Enforces pure read-only structural validation, AST import boundary (forbidden execution/replay imports), Git-anchored manifest admission, point-in-time event causality, and atomic collision exclusion via `fcntl.flock`.
+  * Passed 69 automated tests and Completion Audit with `COMPLETE` (0 open findings).
+  * Consumer fail-closed gate active (`STOP=stage1_3_r10_readmission_future_consumer_binding_missing`); zero live/paper/execution permission.
 * **Active Server Processes**:
   * **Stage 1.5D Live Collector**: PID 88580 running `run_stage1_5d_live_event_source_smoke_collector.py` under root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
   * **Stage 1.5F Live Depth Observer**: PID 88770 running `run_stage1_5f_live_depth_observer.py` under root `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
@@ -62,6 +67,7 @@ Core implications:
 | **Cross-Sectional Factor Lab** | `stopped` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | Tested 30d/14d pure-price momentum had negative cost-scenario portfolio performance and large drawdowns; this Stage A2 evidence does not evaluate or falsify non-price factors. | Retain tested price-only specification closed; any non-price factor requires a new L2 Design. | Not applicable to untested factors. |
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | Infrastructure and public read-only collectors verified. | Stage 1.3 signal discovery. | Network read failure rate > 5%. |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | Local forceorder snapshots degraded by exchange rate-limiting. Pivot to Stage 1.5 catalyst announcements. | Superseded by Stage 1.5. | Exchange rate-limiting on forceorder stream. |
+| **Stage 1.3 R10 (Readmission Preflight)** | `completed` | Commit `8c6f3a0` / `docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md` (2026-09-30) | Implemented offline readmission preflight gate enforcing structural bars integrity, Git ancestry, and PIT event causality without outcome leakage; downstream consumption hard-blocked fail-closed. | Await candidate historical manifest/bars dataset run. | Receipt tampering, collision overwrite, or missing PIT integrity. |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | Catalyst announcements verified to generate significant historical price response. | Stage 1.5D live collector. | Price coverage < 80%. |
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | Server PID 88580 running continuously. BAPI detail parser + 202 retry scheduler active. | Maintain 7d continuous run. | Detail retry starvation > 1800s. |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | Static orderbook audit verified 500 USDT position depth capacity. | Stage 1.5F live observer. | Depth capacity < 500 USDT. |
@@ -111,6 +117,26 @@ Stage 1.6F-W2-0 exploratory diagnostic
   -> outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]
   -> 3/19 negative; 16/19 positive
   -> conclusion closure only
+```
+
+### 4.3 Stage 1.3 R10 Historical Signal Readmission Preflight Gate
+
+```text
+Offline Historical Artifacts & Git Commit
+  ├── AST Import Boundary Guard (verify_source_code_integrity: no replay/execution/network)
+  ├── Structural Bars Snapshot (read_structural_bars: 180d span, >=98% coverage, zero price leakage)
+  ├── Git-Anchored Historical Manifest (read_historical_manifest_from_git: 40-hex OID, b122 ancestor)
+  └── Event Ledger & PIT Causality (parse_event_ledger: exact candidate scope, bar index matching)
+        │
+        ▼ (reduce_r10_readmission)
+Deterministic Evaluation
+  ├── eligible_for_exploratory_expectancy_design (when all PIT criteria satisfied)
+  └── evidence_gap (when inputs/evidence absent, fail-closed without data fabrication)
+        │
+        ▼ (publish_r10_receipt)
+Atomic Flocked Publication & Fail-Closed Guard
+  ├── fcntl.flock concurrency exclusion + pre-rename existence check
+  └── load_local_published_r10_receipt (future_consumer_allowed -> hard STOP)
 ```
 ---
 
@@ -168,6 +194,8 @@ Organized by category:
 * **2026-09-24**: Adopted project-level L2 Alpha Research Methodology: Alpha is evaluated by preregistered cost-adjusted expectancy across independent opportunities plus robustness, capacity and survivable tail risk; win rate/per-trade certainty is no longer a universal pass/fail criterion. Historical falsifications remain closed unless separately re-audited.
 * **2026-09-25**: Stage 1.6F-W2 evidence expansion completed for `w2_candidate_run_20260925_001`: 180 physical source objects; 41 contracts / 27 parents; 31 contracts / 21 parents window-defined.
 * **2026-09-26**: Stage 1.6F-W2-0 exploratory diagnostic completed for `w2_0_exploratory_20260926T071500Z`: 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive.
+* **2026-09-29**: Approved Stage 1.3 R10 Historical Signal Readmission Preflight Design (`docs/designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md`, SHA-256 `1b5088316f4f7dd28424ae37702f7b78d6c5e5b4fb3f873e73282f6137619446`) and Implementation Plan (`docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md`, SHA-256 `7e79731b03fd7db76ae1cc2e75c7de4c1f461d9e057ef8532f6c5f38bf3f5e72`).
+* **2026-09-30**: Implemented Stage 1.3 R10 Readmission Preflight module (`src/research/external_signal_shadow/stage1_3_r10_readmission.py`), CLI entry point (`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`), and 69 unit/integration/mutation tests. Completed 2 audit remediation cycles resolving 6 findings (nested schemas, CWD independence, fsync ordering, flock collision exclusion, symlink order, canonical fixtures). Independent Completion Audit passed with `COMPLETE` (0 OPEN findings). Committed as `8c6f3a0`.
 
 
 ---

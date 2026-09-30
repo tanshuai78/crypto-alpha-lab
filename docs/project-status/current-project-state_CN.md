@@ -67,12 +67,15 @@ crypto-alpha-lab/
 │   │   └── base.py                    # SignalCandidate 强类型契约
 │   ├── risk/                          # 风险控制模块
 │   │   └── limits.py                  # RiskLimits 风险硬边界
-│   └── research/external_signal_shadow/ # 外部催化剂影子观察管线 (Stage 1.5)
+│   └── research/external_signal_shadow/ # 外部催化剂影子观察管线 (Stage 1.3 - 1.5)
+│       ├── stage1_3_r10_readmission.py  # 1.3 R10 历史信号只读准入前置校验门禁 (AST防泄漏 + Git锚定 + flock原子发布)
 │       ├── stage1_5d_live_event_source_* # 1.5D 公告采集 + BAPI 详情解析 + 202 Retry 调度器
 │       ├── stage1_5f_live_depth_*       # 1.5F L2 盘口观察器 + 上线时间闸门 + 水印 v2 + 终端 Ignore Hygiene
 │       ├── stage1_5g_live_depth_*       # 1.5G 离线盘口质量审查器 (Clean / Quarantine / Invalid)
 │       └── stage1_5h_static_execution_* # 1.5H 静态执行代理报告生成器 (Strict Read-Only)
-└── scripts/external_signal_shadow/     # 影子观察与审查脚本集 (Stage 1.3 - 1.5H)
+├── scripts/
+│   ├── review_external_signal_shadow_stage1_3_r10_readmission.py # 1.3 R10 离线准入复核 CLI 脚本
+│   └── external_signal_shadow/          # 影子观察与审查脚本集 (Stage 1.3 - 1.5H)
 ```
 
 ---
@@ -87,6 +90,7 @@ crypto-alpha-lab/
 | **Trend / Liquidation Scanner** | 波动率突破(2.5x)与清算级瀑布动量 | `implemented_locally`, `committed`, `planned_only` | `Yes` | `False` | [configs/base.py:L124](../../configs/base.py#L124) | 方向性 Alpha 候选，需硬止损(1.5%)与 12h 最大持仓 | 影子模式模拟 |
 | **Long-Horizon Basis Desk** | 3-7天稳定 Carry (10-25% 资金费率) | `implemented_locally`, `committed`, `planned_only` | `Yes` | `False` | [configs/base.py:L145](../../configs/base.py#L145) | 每 8h 必须进行 Basis 亏损>50% 资金收益的熔断检查 | Basis 历史 DB 建立与 8h Funding Flip 检测器 |
 | **Stage 1.3 - 1.4E** | Vision OI、爆仓快照与 Crowd Replay | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Historical | `docs/reviews/2026-06-26-external-signal-shadow-lab-stage1-4e-review_CN.md` | 爆仓快照受到交易所限频影响，被 Stage 1.5 催化剂公告路线替代 | `superseded` |
+| **Stage 1.3 R10** | 历史信号只读结构化准入前置校验 (无收益泄露/无未来函数) | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Offline Tool | Commit `8c6f3a0` | 69项测试通过，独立 Completion Audit 结论为 COMPLETE（0 OPEN finding）；下游消费者强制 Fail-Closed 阻断 | 等待候选 Manifest/Bars 离线运行 |
 | **Stage 1.5A - 1.5C1** | 催化剂历史事件审计、最小表与重放 | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Completed | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` | 证实公告后存在显著价格响应，通过可行性前置门槛 | 推进 1.5D 实时采集 |
 | **Stage 1.5D** | Binance 公告实时采集 + BAPI 详情 + 202 重试调度 | `implemented_locally`, `committed`, `deployed`, `running`, `evidence_collected` | `Yes` | `True` (PID 88580) | `runtime_evidence/.../stage1_5d/detail_retry_scheduler_state.json` | BAPI 详情页解析与 202 重试调度器持续稳定运行，消除饥饿 | 维持 7 天连续运行 |
 | **Stage 1.5E** | 执行可行性静态审计 | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Completed | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` | 静态深度审计通过 500 USDT 深度承载力测试 | 推进 1.5F 实时盘口观察 |

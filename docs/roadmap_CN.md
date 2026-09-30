@@ -1,7 +1,7 @@
 # Crypto Alpha Lab 研究路线图与决策记录
 
 **创建时间：** 2026-05-23
-**最新状态审计点：** 2026-09-26（证据时间戳：2026-09-26T08:50:00Z）
+**最新状态审计点：** 2026-09-30（证据时间戳：2026-09-30T09:51:16Z）
 **主状态快照文件：** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **有效文档索引入口：** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -34,8 +34,13 @@
 
 ## 2. 当前位置与运行状态 (Current Position)
 
-*(本节更新至 2026-09-26，基于 Stage 1.6F 历史研究结题与 Stage 1.5 服务器实时观察)*
+*(本节更新至 2026-09-30，基于 Stage 1.3 R10 历史信号准入前置校验完成、Stage 1.6F 历史研究结题与 Stage 1.5 服务器实时观察)*
 
+* **Stage 1.3 R10 历史信号准入前置校验状态**：
+  * 完成离线前置读取模块（[`src/research/external_signal_shadow/stage1_3_r10_readmission.py`](../src/research/external_signal_shadow/stage1_3_r10_readmission.py)）与 CLI 入口（[`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`](../scripts/review_external_signal_shadow_stage1_3_r10_readmission.py)）。
+  * 强制执行纯只读结构化校验、AST 模块导入边界（阻断回测/执行/网络库导入）、Git 锚定 Manifest 准入、PIT 事件因果验证，以及基于 `fcntl.flock` 的原子目录发布碰撞互斥。
+  * 69 项自动化测试全通，独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。
+  * 下游消费者 Fail-Closed 硬阻断生效（`STOP=stage1_3_r10_readmission_future_consumer_binding_missing`）；零实盘/模拟/执行权限。
 * **服务器活跃进程**：
   * **Stage 1.5D 实时公告采集器**：运行进程 PID 88580（tmux `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
   * **Stage 1.5F 实时盘口观察器**：运行进程 PID 88770（tmux `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
@@ -62,6 +67,7 @@
 | **Cross-Sectional Factor Lab** | `stopped` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | 已测试的 30d/14d 纯价格动量在成本情景下组合表现为负且出现大幅回撤；此 Stage A2 证据不评估亦不证伪非价格因子。 | 保持已测试的纯价格规格关闭；任何非价格因子需另起 L2 Design。 | 不适用于未经测试的因子。 |
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | 基础设施与公共只读采集器验证通过。 | Stage 1.3 信号发现。 | 网络读取失败率 > 5%。 |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | 本地强平快照受交易所频控降级。转向 Stage 1.5 催化剂公告。 | 被 Stage 1.5 替代。 | 强平数据流被交易所限频。 |
+| **Stage 1.3 R10 (Readmission Preflight)** | `completed` | Commit `8c6f3a0` / `docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md` (2026-09-30) | 实现离线准入前置校验门禁，在零未来函数、零收益泄漏前提下严密核验 Bars 结构与 PIT 因果；下游消费强制 Fail-Closed 硬阻断。 | 等待候选 Manifest/Bars 离线数据集执行。 | 收据篡改、目录覆盖或缺少 PIT 因果完整性。 |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | 催化剂公告在历史重放中被证实产生显著的价格响应。 | Stage 1.5D 实时采集器。 | 价格覆盖率 < 80%。 |
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | 服务器 PID 88580 持续运行。BAPI 详情页解析器 + 202 重试调度器保持活跃。 | 保持 7 天连续稳定运行。 | 详情页重试饥饿 > 1800 秒。 |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | 静态订单簿审计证实可承载 500 USDT 仓位深度。 | Stage 1.5F 实时观察器。 | 深度承载力 < 500 USDT。 |
@@ -112,6 +118,26 @@ Stage 1.6F-W2-0 探索性诊断
   -> outcome_seen/exploratory_only 19-parent 子集在 [-24h, 0h] 未显示常规自然终局收敛
   -> 3/19 负向；16/19 正向
   -> 仅限结论收敛闭环 (conclusion closure only)
+```
+
+### 4.3 Stage 1.3 R10 历史信号准入前置校验链 (Stage 1.3 R10 Readmission Preflight Gate)
+
+```text
+离线历史 Artifacts 与 Git Commit
+  ├── AST 模块导入安全边界 (verify_source_code_integrity: 阻断回测/执行/网络)
+  ├── 结构化 Bars 快照 (read_structural_bars: 180天跨度, >=98% 覆盖率, 严禁泄漏价格收益)
+  ├── Git 锚定历史 Manifest (read_historical_manifest_from_git: 40位 OID, b122 祖先校验)
+  └── 事件账本与 PIT 因果检验 (parse_event_ledger: 候选范围白名单, Bar 索引匹配)
+        │
+        ▼ (reduce_r10_readmission)
+确定性准入归约
+  ├── eligible_for_exploratory_expectancy_design (当满足全部结构与因果门槛)
+  └── evidence_gap (当输入/证据缺失时, fail-closed 记录证据断层, 绝不捏造数据)
+        │
+        ▼ (publish_r10_receipt)
+原子加锁发布与下游防线
+  ├── fcntl.flock 并发排他 + 重命名前碰撞检查 + 目录双重 fsync
+  └── load_local_published_r10_receipt (future_consumer_allowed -> 抛出硬 STOP 阻断)
 ```
 
 ---
@@ -170,6 +196,8 @@ Stage 1.6F-W2-0 探索性诊断
 * **2026-09-24**：全实验室采纳 L2 Alpha 研究方法论：Alpha 评估依据独立机会下经过预注册的成本后数学期望、稳健性、资金容量与可生存尾部风险进行；胜率/单笔确定性不再作为通用通过/失败门禁。历史证伪路线除非经过单独重新审计，否则维持关闭。
 * **2026-09-25**：完成 Stage 1.6F-W2 证据扩展 (`w2_candidate_run_20260925_001`)：180 个物理数据对象；41 个标的 / 27 个父事件；31 个标的 / 21 个父事件窗口完整。
 * **2026-09-26**：完成 Stage 1.6F-W2-0 终局基差探索性诊断 (`w2_0_exploratory_20260926T071500Z`)：29 个标的 / 19 个父事件完成探索性描述；`outcome_seen/exploratory_only` 19-parent 子集在 [-24h, 0h] 未显示常规自然终局收敛；3/19 负向；16/19 正向。
+* **2026-09-29**：批准 Stage 1.3 R10 历史信号准入前置校验设计（`docs/designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md`，SHA-256 `1b5088316f4f7dd28424ae37702f7b78d6c5e5b4fb3f873e73282f6137619446`）与实施计划（`docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md`，SHA-256 `7e79731b03fd7db76ae1cc2e75c7de4c1f461d9e057ef8532f6c5f38bf3f5e72`）。
+* **2026-09-30**：完成 Stage 1.3 R10 离线准入校验模块（`src/research/external_signal_shadow/stage1_3_r10_readmission.py`）、CLI 入口（`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`）及 69 项单元/集成/变异测试。完成 2 轮审计闭环整改并解决 6 项发现（嵌套模式严格校验、CWD 路径独立性、fsync 顺序、flock 碰撞互斥、软链接顺序、规范测试夹具）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。代码及文档已固化提交为 `8c6f3a0`。
 
 ---
 
