@@ -1,7 +1,7 @@
 # Crypto Alpha Lab Research Roadmap & Decision Log
 
 **Created:** 2026-05-23
-**Latest State Audit:** 2026-09-30 (Evidence Date: 2026-09-30T09:51:16Z)
+**Latest State Audit:** 2026-09-30 (Evidence Date: 2026-09-30T10:48:59Z)
 **Primary State File:** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **Document Index:** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -42,6 +42,12 @@ Core implications:
   * Enforces pure read-only structural validation, AST import boundary (forbidden execution/replay imports), Git-anchored manifest admission, point-in-time event causality, and atomic collision exclusion via `fcntl.flock`.
   * Passed 69 automated tests and Completion Audit with `COMPLETE` (0 open findings).
   * Consumer fail-closed gate active (`STOP=stage1_3_r10_readmission_future_consumer_binding_missing`); zero live/paper/execution permission.
+* **Stage 1.5G Cross-Root Event-Family Admission State**:
+  * Implemented cross-root event-family admission module (`src/research/external_signal_shadow/stage1_5g_cross_root_event_family_admission.py`) and CLI entrypoint (`scripts/external_signal_shadow/run_stage1_5g_cross_root_event_family_admission.py`).
+  * Enforces pure read-only structural validation, AST import boundary, Git HEAD/base SHA authority verification, parent-aware clustering (2 distinct parent articles, 2 parent events, 8 formal child symbols), atomic flocked directory publication, and 13 false governance flags.
+  * Passed 102 automated tests and independent Completion Audit with `COMPLETE` (0 open findings).
+  * First production admission receipt generated: `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/` (`receipt_published`, 2 parents, 8 symbols).
+  * Downstream consumer gate active (`STOP=stage1_5g_cross_root_future_consumer_not_authorized`); zero live/paper/execution permission.
 * **Active Server Processes**:
   * **Stage 1.5D Live Collector**: PID 88580 running `run_stage1_5d_live_event_source_smoke_collector.py` under root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
   * **Stage 1.5F Live Depth Observer**: PID 88770 running `run_stage1_5f_live_depth_observer.py` under root `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
@@ -72,7 +78,7 @@ Core implications:
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | Server PID 88580 running continuously. BAPI detail parser + 202 retry scheduler active. | Maintain 7d continuous run. | Detail retry starvation > 1800s. |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | Static orderbook audit verified 500 USDT position depth capacity. | Stage 1.5F live observer. | Depth capacity < 500 USDT. |
 | **Stage 1.5F (Live Depth Observer)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json` (2026-07-26) | Server PID 88770 running continuously. Launch gate active; 76 pre-bootstrap anchors terminal ignored. | Capture clean L2 orderbook evidence. | Network error rate > 5% or 0 heartbeats. |
-| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` (2026-09-23) | Offline reviewer active. SPCXUSD1 and MOONSHOTUSDT passed Clean (MOONSHOTUSDT 99.44% coverage, P50 spread 5.85 bps); SKHYUSDT passed Quarantine; POPMARTUSDT invalid/quarantine candidate. Event-family evidence accumulating (2 Clean, 1 Quarantine). | Accumulate at least 3 unique symbols and 2 source articles under current evidence gates (currently 2 Clean symbols across 2 articles). | No additional clean/quarantine-valid samples after 30d continuous run. |
+| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_receipt.json` (2026-09-30) | Offline reviewer and cross-root admission gate active. Cross-root event-family admission passed Gate 3 evidence count threshold (2 parent articles, 2 parent events, 8 formal child symbols: `MOONSHOTUSDT` + 7 `batch7` symbols). `stage1_5g_gate3_complete = false` (continuous collector run stability remains bounded to VPS). Downstream consumers strictly blocked fail-closed (`STOP=stage1_5g_cross_root_future_consumer_not_authorized`). | Await Stage 1.5H execution proxy / simulator design or further live sample collection. | No additional clean/quarantine-valid samples after 30d continuous run. |
 | **Stage 1.5H (Static Read-Only Report)** | `completed` | `data/external_signal_shadow/stage1_5h/reports/20260712T043755Z/stage1_5h_static_execution_proxy_report_summary.json` (2026-07-12) | Static read-only report generator implemented and verified. Hard safety flags enforced. | Maintain read-only tool role. | Any trade signal or execution feasibility claim. |
 | **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | Verified Binance futures delisting notice source, BAPI H2 versioned grammar, and 3 timestamp anchors. | Stage 1.6B delisting catalog. | Ambiguous delivery/settlement semantics or missing anchors. |
 | **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | Canonical delisting catalog, burst queue failure recovery, and checkpoint contracts verified. | Stage 1.6E capability audit. | Unrecoverable queue drop under burst load. |
@@ -99,7 +105,8 @@ Stage 1.5F Live Depth Observer (PID 88770)
         ▼ (Outputs L2 depth snapshots & observer_state.jsonl)
 Stage 1.5G Live Depth Evidence Reviewer (Offline Tool)
   ├── Audit L2 snapshot completeness, polarity, and initial warmup gaps
-  └── Classify events: Clean Evidence Pass vs. Quarantine Pass vs. Invalid Failure
+  ├── Classify events: Clean Evidence Pass vs. Quarantine Pass vs. Invalid Failure
+  └── Cross-Root Event-Family Admission Gate (2 parents, 8 symbols admitted)
         │
         ▼
 Stage 1.5H Static Execution Proxy Report Generator (Offline Tool)
@@ -161,9 +168,9 @@ Preserving historical research value and negative findings:
 Organized by category:
 
 * **Data / Verification Blocker (P3 - Stage 1.5G Live Depth)**:
-  * **Issue**: Stage 1.5G 虽有 2 个 Clean 通过事件（`SPCXUSD1`, `MOONSHOTUSDT`），但新合约上线事件族样本量仍需持续累积至 $\ge 3$ 个独立标的。
-  * **Evidence**: Stage 1.5G 历史评审记录及连续运行心跳。
-  * **Required Action**: 保持 VPS 端 1.5D + 1.5F 进程持续运行并监控新上线合约。
+  * **Issue**: Stage 1.5G 虽已通过跨 Root 准入满足 Gate 3 事件族样本数量门槛（2 篇独立公告、2 个父事件、8 个子标的），但 1.5D+1.5F 实时观测仍需维持运行以持续捕获更多独立事件。
+  * **Evidence**: Stage 1.5G 生产准入回执 `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/` 及 VPS 连续运行心跳。
+  * **Required Action**: 保持 VPS 端 1.5D + 1.5F 进程持续运行，并推进 Stage 1.5H 执行代理仿真器设计。
 
 ---
 
@@ -171,7 +178,8 @@ Organized by category:
 
 ### Gate 3: Stage 1.5G Event-Family Evidence Sufficiency
 * **Prerequisite**: Stage 1.5D 和 1.5F 持续稳定运行。
-* **Required Evidence**: 累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`。
+* **Required Evidence**: 累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`，并通过跨 Root 准入生成 `stage1_5g_cross_root_admission_receipt.json`。
+* **Status**: 证据数量门槛已达成（2 篇独立公告、2 个父事件、8 个子标的已通过生产准入回执 `stage1_5g_cross_root_admission_20260930T104859Z` 验证）；运行稳定性持续观测中。
 * **Pass Criteria**: 达到事件族样本量门槛且无致命污染。
 * **Fail/Stop Criteria**: 连续 30 天无有效新样本或数据丢失率 $> 10\%$。
 * **Safety Boundary**: 观察模式 (`trade_signal_allowed = False`)。
@@ -196,6 +204,8 @@ Organized by category:
 * **2026-09-26**: Stage 1.6F-W2-0 exploratory diagnostic completed for `w2_0_exploratory_20260926T071500Z`: 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive.
 * **2026-09-29**: Approved Stage 1.3 R10 Historical Signal Readmission Preflight Design (`docs/designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md`, SHA-256 `1b5088316f4f7dd28424ae37702f7b78d6c5e5b4fb3f873e73282f6137619446`) and Implementation Plan (`docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md`, SHA-256 `7e79731b03fd7db76ae1cc2e75c7de4c1f461d9e057ef8532f6c5f38bf3f5e72`).
 * **2026-09-30**: Implemented Stage 1.3 R10 Readmission Preflight module (`src/research/external_signal_shadow/stage1_3_r10_readmission.py`), CLI entry point (`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`), and 69 unit/integration/mutation tests. Completed 2 audit remediation cycles resolving 6 findings (nested schemas, CWD independence, fsync ordering, flock collision exclusion, symlink order, canonical fixtures). Independent Completion Audit passed with `COMPLETE` (0 OPEN findings). Committed as `8c6f3a0`.
+* **2026-09-30**: Approved Stage 1.5G Cross-Root Event-Family Admission Design (`docs/designs/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-design_CN.md`, SHA-256 `51a25377537dade47c7a234f93802aa445db75348f7e10b4e9c354888d4cefc7`) and Implementation Plan (`docs/plans/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-implementation-plan_CN.md`, SHA-256 `8bb2a6ff906d54e209d8bca6c0885211c101664b87af65e2bee0b17483369c73`).
+* **2026-09-30**: Implemented Stage 1.5G Cross-Root Event-Family Admission module (`src/research/external_signal_shadow/stage1_5g_cross_root_event_family_admission.py`), CLI entry point (`scripts/external_signal_shadow/run_stage1_5g_cross_root_event_family_admission.py`), and 102 automated tests. Completed Completion Audit remediation cycles resolving P0-1 (authority packet enforcement) and P0-2 (independent frozen re-admission and child identity projection validation). Independent Completion Audit passed with `COMPLETE` (0 open findings). Generated first production admission receipt `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/` admitting 2 parent articles, 2 parent events, and 8 formal child symbols with 13 false governance flags; downstream consumer gate active fail-closed (`STOP=stage1_5g_cross_root_future_consumer_not_authorized`).
 
 
 ---
