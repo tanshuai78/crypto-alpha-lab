@@ -78,7 +78,7 @@
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | 服务器 PID 88580 持续运行。BAPI 详情页解析器 + 202 重试调度器保持活跃。 | 保持 7 天连续稳定运行。 | 详情页重试饥饿 > 1800 秒。 |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | 静态订单簿审计证实可承载 500 USDT 仓位深度。 | Stage 1.5F 实时观察器。 | 深度承载力 < 500 USDT。 |
 | **Stage 1.5F (Live Depth Observer)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json` (2026-07-26) | 服务器 PID 88770 持续运行。上线时间闸门正常；76 个 pre-bootstrap 历史锚点终端 Ignore。 | 捕获 Clean 级 L2 订单簿盘口证据。 | 网络错误率 > 5% 或 0 心跳。 |
-| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_receipt.json` (2026-09-30) | 离线审查器与跨 Root 准入门禁活跃。跨 Root 事件族准入已通过 Gate 3 证据数量门槛（2 篇独立公告、2 个父事件、8 个正式子标的：`MOONSHOTUSDT` + 7 个 `batch7` 标的）。`stage1_5g_gate3_complete = false`（采集器连续运行稳定性边界仍在 VPS）。下游消费者严格 Fail-Closed 硬阻断（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。 | 等待 Stage 1.5H 执行代理仿真器设计或进一步实盘样本累积。 | 连续运行 30 天无新增 clean/quarantine-valid 样本。 |
+| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_summary.json` (2026-09-30) | 离线审查器与跨 Root 准入门禁活跃。跨 Root 事件族准入已通过 Gate 3 证据数量门槛（2 篇独立公告、2 个父事件、8 个正式子标的：`MOONSHOTUSDT` + 7 个 `batch7` 标的）。`stage1_5g_gate3_complete = false`（采集器连续运行稳定性边界仍在 VPS）。下游消费者严格 Fail-Closed 硬阻断（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。 | 等待 Stage 1.5H 执行代理仿真器设计或进一步实盘样本累积。 | 连续运行 30 天无新增 clean/quarantine-valid 样本。 |
 | **Stage 1.5H (Static Read-Only Report)** | `completed` | `data/external_signal_shadow/stage1_5h/reports/20260712T043755Z/stage1_5h_static_execution_proxy_report_summary.json` (2026-07-12) | 静态只读报告生成器实现并验证完成。严格执行硬安全标识约束。 | 维持只读工具定位。 | 出现任何交易信号或执行可行性声明。 |
 | **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | 验证币安期货下架公告源、BAPI H2 版本化语法及 3 个时间戳锚点。 | Stage 1.6B 下架目录。 | 交割/结算语义不明确或缺失时间戳锚点。 |
 | **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | 规范下架目录、突发队列故障恢复及 Checkpoint 契约已完成验证。 | Stage 1.6E 标的能力审计。 | 突发负载下出现不可恢复的队列丢包。 |
@@ -180,7 +180,7 @@ Stage 1.6F-W2-0 探索性诊断
 
 ### 关卡 3：Stage 1.5G 事件族证据充分性校验
 * **前置依赖**：Stage 1.5D 和 1.5F 持续稳定运行。
-* **所需证据**：累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`，并通过跨 Root 准入生成 `stage1_5g_cross_root_admission_receipt.json`。
+* **所需证据**：累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`，并通过跨 Root 准入生成 `stage1_5g_cross_root_admission_summary.json`。
 * **当前状态**：证据数量门槛已达成（2 篇独立公告、2 个父事件、8 个子标的已通过生产准入回执 `stage1_5g_cross_root_admission_20260930T104859Z` 验证）；运行稳定性持续观测中。
 * **通过标准**：达到事件族样本量门槛且无致命污染。
 * **拒绝/停止条件**：连续 30 天无有效新样本或数据丢失率 $> 10\%$。
