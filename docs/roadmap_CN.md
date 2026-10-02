@@ -34,7 +34,7 @@
 
 ## 2. 当前位置与运行状态 (Current Position)
 
-*(本节更新至 2026-09-30，基于 Stage 1.3 R10 历史信号准入前置校验完成、Stage 1.6F 历史研究结题与 Stage 1.5 服务器实时观察)*
+*(本节更新至 2026-10-01，基于 Stage 1.5H V3 跨 Root 流动性摩擦诊断完成、Stage 1.5G 跨 Root 准入、Stage 1.3 R10 历史信号准入前置校验完成与 Stage 1.5 服务器实时观察)*
 
 * **Stage 1.3 R10 历史信号准入前置校验状态**：
   * 完成离线前置读取模块（[`src/research/external_signal_shadow/stage1_3_r10_readmission.py`](../src/research/external_signal_shadow/stage1_3_r10_readmission.py)）与 CLI 入口（[`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`](../scripts/review_external_signal_shadow_stage1_3_r10_readmission.py)）。
@@ -47,6 +47,12 @@
   * 102 项自动化测试全通，独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。
   * 成功生成首份生产准入回执：`data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/`（状态 `receipt_published`，2 个父事件、8 个子标的）。
   * 下游消费者门禁生效（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）；零实盘/模拟/执行权限。
+* **Stage 1.5H V3 跨 Root 流动性摩擦诊断状态**：
+  * 完成跨 Root 流动性摩擦诊断模块（[`src/research/external_signal_shadow/stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`](../src/research/external_signal_shadow/stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py)）与 CLI 入口（[`scripts/external_signal_shadow/run_stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`](../scripts/external_signal_shadow/run_stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py)）。
+  * 强制校验不可变用户授权文本、阻断项目内阴影模块预加载、严格校验 Manifest byte_count 与元数据、全线防御向上至文件系统根路径的祖先目录符号链接穿透，实施 `fcntl.flock` 目录发布碰撞互斥与 14 项 false 治理否定授权标志。
+  * 26 项自动化测试全通，完成 3 轮审计闭环整改，独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。
+  * 成功生成生产诊断回执：`data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/`（状态 `receipt_published`，评估 2 个父事件、8 个子标的 P95 滑点摩擦）。
+  * 研究结论严格判定为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`；下游消费门禁生效 Fail-Closed；零实盘/模拟/执行/Alpha 权限。
 * **服务器活跃进程**：
   * **Stage 1.5D 实时公告采集器**：运行进程 PID 88580（tmux `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
   * **Stage 1.5F 实时盘口观察器**：运行进程 PID 88770（tmux `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
@@ -78,8 +84,8 @@
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | 服务器 PID 88580 持续运行。BAPI 详情页解析器 + 202 重试调度器保持活跃。 | 保持 7 天连续稳定运行。 | 详情页重试饥饿 > 1800 秒。 |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | 静态订单簿审计证实可承载 500 USDT 仓位深度。 | Stage 1.5F 实时观察器。 | 深度承载力 < 500 USDT。 |
 | **Stage 1.5F (Live Depth Observer)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json` (2026-07-26) | 服务器 PID 88770 持续运行。上线时间闸门正常；76 个 pre-bootstrap 历史锚点终端 Ignore。 | 捕获 Clean 级 L2 订单簿盘口证据。 | 网络错误率 > 5% 或 0 心跳。 |
-| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_summary.json` (2026-09-30) | 离线审查器与跨 Root 准入门禁活跃。跨 Root 事件族准入已通过 Gate 3 证据数量门槛（2 篇独立公告、2 个父事件、8 个正式子标的：`MOONSHOTUSDT` + 7 个 `batch7` 标的）。`stage1_5g_gate3_complete = false`（采集器连续运行稳定性边界仍在 VPS）。下游消费者严格 Fail-Closed 硬阻断（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。 | 等待 Stage 1.5H 执行代理仿真器设计或进一步实盘样本累积。 | 连续运行 30 天无新增 clean/quarantine-valid 样本。 |
-| **Stage 1.5H (Static Read-Only Report)** | `completed` | `data/external_signal_shadow/stage1_5h/reports/20260712T043755Z/stage1_5h_static_execution_proxy_report_summary.json` (2026-07-12) | 静态只读报告生成器实现并验证完成。严格执行硬安全标识约束。 | 维持只读工具定位。 | 出现任何交易信号或执行可行性声明。 |
+| **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_summary.json` (2026-09-30) | 离线审查器与跨 Root 准入门禁活跃。跨 Root 事件族准入已通过 Gate 3 证据数量门槛（2 篇独立公告、2 个父事件、8 个正式子标的：`MOONSHOTUSDT` + 7 个 `batch7` 标的）。`stage1_5g_gate3_complete = false`（采集器连续运行稳定性边界仍在 VPS）。下游消费者严格 Fail-Closed 硬阻断（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。 | 已被 Stage 1.5H V3 跨 Root 流动性摩擦诊断安全消费；保持 VPS 实时采集。 | 连续运行 30 天无新增 clean/quarantine-valid 样本。 |
+| **Stage 1.5H (Cross-Root Liquidity Friction Diagnostic)** | `completed` | `data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/stage1_5h_v3_cross_root_friction_summary.json` (2026-10-01) | 只读诊断模块完成 2 个父事件 / 8 个子标的 P95 滑点摩擦诊断。结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`。强制 14 项 false 否定授权标志；下游消费 Fail-Closed。 | 等待 VPS 持续采集累积更多独立上线事件样本，或规划后续多交易所微观结构只读研究。 | 出现任何交易信号、执行可行性声明或授权外泄。 |
 | **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | 验证币安期货下架公告源、BAPI H2 版本化语法及 3 个时间戳锚点。 | Stage 1.6B 下架目录。 | 交割/结算语义不明确或缺失时间戳锚点。 |
 | **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | 规范下架目录、突发队列故障恢复及 Checkpoint 契约已完成验证。 | Stage 1.6E 标的能力审计。 | 突发负载下出现不可恢复的队列丢包。 |
 | **Stage 1.6E (Market Data Observer & Capability Audit)** | `completed` | `docs/reviews/2026-09-04-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-completion-audit_CN.md` (2026-09-04) | 实时语义触发观察器与历史 1s kline / mark / index 标的能力审计完成。 | Stage 1.6F 匹配对照。 | Kline/mark/index 覆盖率 < 80%。 |
@@ -110,8 +116,8 @@ Stage 1.5G 盘口质量离线审查 (Offline reviewer)
   └── 跨 Root 事件族准入门禁 (准入 2 个父事件、8 个正式子标的)
         │
         ▼
-Stage 1.5H 静态只读报告生成 (Offline reporter)
-  └── 依据 1.5G 结果输出只读报告，严格断言禁止一切方向性交易信号 (trade_signal_allowed = False)
+Stage 1.5H V3 跨 Root 流动性摩擦诊断 (Offline Tool)
+  └── 严格只读流动性摩擦诊断 (14 项 false 否定授权标志，trade_signal_allowed = False)
 ```
 
 ### 4.2 Stage 1.6 下架研究与诊断链 (Stage 1.6 Delisting Research & Diagnostic Chain)
@@ -172,7 +178,7 @@ Stage 1.6F-W2-0 探索性诊断
 * **数据与验证阻塞 (P3 - Stage 1.5G 实时盘口深度)**：
   * **问题描述**：Stage 1.5G 虽已通过跨 Root 准入满足 Gate 3 事件族样本数量门槛（2 篇独立公告、2 个父事件、8 个子标的），但 1.5D+1.5F 实时观测仍需维持运行以持续捕获更多独立事件。
   * **事实证据**：Stage 1.5G 生产准入回执 `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/` 及 VPS 连续运行心跳。
-  * **解封动作**：保持 VPS 端 1.5D + 1.5F 进程持续运行，并推进 Stage 1.5H 执行代理仿真器设计。
+  * **解封动作**：保持 VPS 端 1.5D + 1.5F 进程持续运行以累积更多独立上线事件样本，或规划后续多交易所微观结构只读研究。
 
 ---
 
@@ -208,6 +214,7 @@ Stage 1.6F-W2-0 探索性诊断
 * **2026-09-30**：完成 Stage 1.3 R10 离线准入校验模块（`src/research/external_signal_shadow/stage1_3_r10_readmission.py`）、CLI 入口（`scripts/review_external_signal_shadow_stage1_3_r10_readmission.py`）及 69 项单元/集成/变异测试。完成 2 轮审计闭环整改并解决 6 项发现（嵌套模式严格校验、CWD 路径独立性、fsync 顺序、flock 碰撞互斥、软链接顺序、规范测试夹具）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。代码及文档已固化提交为 `8c6f3a0`。
 * **2026-09-30**：批准 Stage 1.5G 跨 Root 事件族准入设计（`docs/designs/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-design_CN.md`，SHA-256 `51a25377537dade47c7a234f93802aa445db75348f7e10b4e9c354888d4cefc7`）与实施计划（`docs/plans/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-implementation-plan_CN.md`，SHA-256 `8bb2a6ff906d54e209d8bca6c0885211c101664b87af65e2bee0b17483369c73`）。
 * **2026-09-30**：完成 Stage 1.5G 跨 Root 事件族准入模块（`src/research/external_signal_shadow/stage1_5g_cross_root_event_family_admission.py`）、CLI 入口（`scripts/external_signal_shadow/run_stage1_5g_cross_root_event_family_admission.py`）及 102 项自动化测试。完成审计闭环整改并解决 P0-1（授权数据包严格校验）与 P0-2（独立重新准入与子标的投影身份校验）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。成功生成首份生产准入回执 `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/`，准入 2 篇独立公告、2 个父事件、8 个正式子标的及 13 项 false 治理安全标志；下游消费门禁生效 Fail-Closed（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。
+* **2026-10-01**：批准 Stage 1.5H V3 跨 Root 流动性摩擦诊断设计（`docs/designs/2026-09-30-external-signal-shadow-lab-stage1-5h-v3-cross-root-liquidity-friction-diagnostic-design_CN.md`，SHA-256 `416b394bf809e1dcc159f9d39ecd175b57962022434d09478f5e0d97fa5a9276`）与实施计划（`docs/plans/2026-09-30-external-signal-shadow-lab-stage1-5h-v3-cross-root-liquidity-friction-diagnostic-implementation-plan_CN.md`，SHA-256 `7a1e8a5a2b0f803677bb9342d5167b8a2ec8d9458dc3c7cf8abf543c4ec53ceb`）。完成核心模块（`src/research/external_signal_shadow/stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`）、CLI 入口（`scripts/external_signal_shadow/run_stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`）及 26 项自动化测试。完成 3 轮审计闭环整改并解决全部 4 项 P0 发现（不可变授权文本、阴影模块预加载防御、Manifest byte_count 校验、全线祖先目录软链接穿透防御）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。成功生成生产诊断回执 `data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/`；研究结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`；下游消费门禁生效 Fail-Closed；零实盘/模拟/执行/Alpha 权限。
 
 ---
 
