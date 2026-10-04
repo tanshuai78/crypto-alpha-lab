@@ -2,8 +2,7 @@
 
 > **文档生成时间：** 2026-10-03（Stage 1.5G N=3 产品机制分层准入与 Stage 1.5H N=3 流动性摩擦诊断收敛治理更新；其它历史索引条目保留原采集时间）
 > **使用说明：** 本文档为仓库中所有研究、设计、计划、审查与状态文档的**统一事实索引入口**。未来的 AI Agent 在开展任何工作前，必须遵循《10. AI 使用规则》，严禁直接以历史被替代 (superseded) 或已证伪 (falsified) 的文档指导新开发。
-> **局部治理纠偏 Design 日期：** 2026-09-28；仅修正 C1、B-Lite 与 Factor Lab 的历史决策措辞，未执行全仓库重新扫描。
-> **纠偏 Design SHA-256：** `37ff23045de7519b426ff1da71e04ec8d61ce371ccafe3fae96711802201583f`。
+> **历史治理纠偏注记：** 2026-09-28 曾执行局部历史决策记录修正（纠偏 Design SHA-256: `37ff23045de7519b426ff1da71e04ec8d61ce371ccafe3fae96711802201583f`，仅规范 C1、B-Lite 与 Factor Lab 历史措辞，未重新全仓扫描）。
 
 ---
 
@@ -11,11 +10,11 @@
 
 | 属性 | 统计值 / 事实 | 凭据与说明 |
 |---|---|---|
-| **generated_at** | `2026-10-03` | Stage 1.5G N=3 准入与 Stage 1.5H N=3 流动性摩擦诊断更新；非全仓重新扫描 |
-| **local_commit** | `4a15c1f8ab5f1893dc409270a88e5c3b153cf682` | 本次治理开始时的 `git rev-parse HEAD` |
-| **server_git_commit** | `unknown` | 当前服务器快照未成功采集 Git commit；仅能证明三份关键部署文件 SHA256 与本地匹配 |
-| **selected_deployed_file_hash_match** | `true` | `configs/base.py`、1.5D runner、1.5F runner 与服务器文件 SHA256 匹配 |
-| **scanned_document_count** | `180` | 全仓库扫描的 Markdown 研究与架构文档总数 |
+| **generated_at** | `2026-10-03` | Stage 1.5G N=3 准入与 Stage 1.5H N=3 流动性摩擦诊断收敛治理更新 |
+| **local_commit** | `ea754ae7d0da57d22105e424ab9cee012f765b82` | 本次治理更新时的 `git rev-parse HEAD` |
+| **server_git_commit** | `unknown` | 2026-07-26 服务器快照未成功采集 Git commit；仅能证明三份关键部署文件 SHA256 与本地匹配 |
+| **selected_deployed_file_hash_match** | `true` | `configs/base.py`、1.5D runner、1.5F runner 与 2026-07-26 服务器快照文件 SHA256 匹配 |
+| **scanned_document_count** | `291+` (历史基线 `180`) | 历史全仓静态扫描基线 180 篇 (2026-08)；当前 `docs/` 下 Markdown 文档扩展至 291 篇 |
 | **unknown_status_count** | `2` | 包含 `docs/reviews/2026-06-03-route-c1-phases-and-practical-usage-explanation_CN.md` 与 `docs/production_artifacts/Crypto_Trading_101.md` |
 | **conflict_count** | `1` | 1.5D 详情页重试调度重叠计划冲突 (见 8. 文档冲突) |
 
@@ -33,7 +32,7 @@
 | **Stage 1.5G** (N=3产品机制分层准入) | [1.5G N=3准入 Design](../designs/2026-10-02-external-signal-shadow-lab-stage1-5g-n3-regime-stratified-admission-design_CN.md) | [1.5G N=3准入 Plan](../plans/2026-10-02-external-signal-shadow-lab-stage1-5g-n3-regime-stratified-admission-implementation-plan_CN.md) | [1.5G N=3 生产准入回执](../../data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json) | `implemented` | `implemented` (Offline) | 52 项自动化测试全通；独立审计评定 COMPLETE (Commit `9484dd3`)；达成 Gate 3 样本数量门槛（3 篇独立公告、3 个父事件、9 个正式子标的按 3 类产品机制分层 clean pass）；下游消费强制 Fail-Closed 硬阻断 |
 | **Stage 1.5H** (N=3产品机制分层流动性摩擦诊断) | [1.5H N=3分层诊断 Design](../designs/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-design_CN.md) | [1.5H N=3分层诊断 Plan](../plans/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-implementation-plan_CN.md) | [1.5H N=3 生产诊断回执](../../data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json) | `implemented` | `implemented` (Offline) | 39 项自动化测试通过；独立审计评定 COMPLETE (Commit `ab5043d`)；基于 1.5G N=3 的 3 个父事件与 9 个子标的完成机制分层 P95 滑点摩擦诊断；证实三种产品机制摩擦显著分化（标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps），严禁跨机制池化或统一定价；结论保持 `evidence_insufficient`，`stage1_5g_gate3_complete=false`；下游消费强制 Fail-Closed 硬阻断，无任何交易或执行权限 |
 | **Stage 1.3 R10** (历史信号准入前置校验) | [1.3 R10 Design](../designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md) | [1.3 R10 Plan](../plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md) | Task 6 Independent Review Receipt (`7671bd...`) & Completion Audit (Commit `8c6f3a0`) | `implemented` | `implemented` (Offline) | 69 项自动化测试通过；独立审计评定 COMPLETE；下游消费者硬阻断；严禁任何收益泄漏或实盘权限 |
-| **Stage 1.6 Futures Delisting** | [1.6D Deployment Authorization Design](../designs/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-deployment-authorization-design_CN.md) | [1.6D Runbook Governance Plan](../plans/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook-governance-implementation-plan_CN.md) | [1.6C H2 Completion Audit](../reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md) | `implemented_through_1_6C` | `1_6D_not_deployed` | [Current 1.6D Runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)；下一步是 target preflight transcript，随后仍需 explicit user deployment authorization |
+| **Stage 1.6 Futures Delisting & Terminal Basis** | [1.6F Conclusion Closure Design](../designs/2026-09-26-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-delta-design_CN.md) | [1.6F Conclusion Closure Plan](../plans/2026-09-27-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-implementation-plan_CN.md) | [1.6F W2-0 Diagnostic Manifest](../../data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json) | `implemented` | `diagnostic_completed` (Offline) | 1.6A-C 已实现并通过完成审计；1.6F-W2-0 探索性诊断完成（180 物理源对象，41 标的 / 27 父事件，19 个 window-defined 父事件子集证实终局基差发散/非自然收敛，严格保持 exploratory/outcome_seen，无后续交易权限，结项 closure only）；1.6D 远端实盘观察保持未授权部署 ([Current 1.6D Runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)) |
 
 ---
 
@@ -119,13 +118,14 @@
   - [docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md](../reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md) (`retain_closed_for_tested_price_only_specification`: tested 30d/14d pure-price momentum had negative 30 bps cost-scenario portfolio performance and large drawdowns)
 - **结论**：已测试 pure-price 截面动量规格保持关闭；该结果不评估、也不证伪所有 cross-sectional factors。任何非价格因子研究必须另起 L2 Design。
 
-### 4.5 Stage 1.6 Event-Source Candidate Registry (研究候选登记)
-- **状态**：`strategic_reference_only`
+### 4.5 Stage 1.6 Futures Delisting & Terminal Basis (研究候选登记与终局基差结项)
+- **状态**：`implemented_offline` / `conclusion_closure_only`
 - **核心文档**：
-  - [2026-07-13 统一研究路线总纲](../strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md) (`strategic_reference_only`)
-  - [2026-07-19 Master Assessment 评估](../strategy_specs/2026-07-19-event_source_master_assessment.md) (`strategic_reference_only`)
-- **当前实施编号 authority**：[2026-08-24 Stage 1.6 Futures Delisting 路线地图](2026-08-24-stage1-6-futures-delisting-route-map_CN.md)。旧文档中 ETF Flow 等的 `1.6B`、`1.6C` 候选编号不再用于当前工程实施编号。
-- **结论**：Futures Delisting 是当前唯一已立项的 Stage 1.6 研究事件；ETF Flow、Prediction Market 和 Security Incident 保留为未立项候选。
+  - [2026-08-24 Stage 1.6 Futures Delisting 路线地图](2026-08-24-stage1-6-futures-delisting-route-map_CN.md) (`current_authority`)
+  - [Stage 1.6F 终局基差结项 Design](../designs/2026-09-26-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-delta-design_CN.md) (`current_authority`)
+  - [Stage 1.6F 终局基差结项 Plan](../plans/2026-09-27-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-implementation-plan_CN.md) (`current_authority`)
+  - [Stage 1.6F-W2-0 诊断回执 Manifest](../../data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json) (`current_authority`)
+- **结论**：Futures Delisting 历史证据链（1.6A-C）已完成并通过审计；1.6F-W2-0 探索性诊断（2026-09-26）覆盖 180 个物理源对象、41 标的 / 27 父事件，19 个 window-defined 父事件子集证实终局基差发散（仅 3/19 负值，16/19 正值），不支持自然收敛假设，保持结项 closure only；1.6D 远端实盘观察保持未授权部署。
 
 ---
 
@@ -141,8 +141,8 @@
    `单 Root 审查: Design (2026-07-06) -> Plan (2026-07-11) -> Summary (Clean/Quarantine)` -> `N=3 机制分层准入: Design (2026-10-02) -> Plan (2026-10-02) -> Code (stage1_5g_n3_regime_stratified_admission.py) -> Test (52 passed) -> Production Receipt (stage1_5g_n3_regime_stratified_admission_20261002T110403Z)`
 4. **Stage 1.5H N=3 产品机制分层流动性摩擦诊断链**：
    `Design (2026-10-03 N=3 Design)` -> `Plan (2026-10-03 Plan)` -> `Code (stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py)` -> `Test (39 passed)` -> `Production Receipt (stage1_5h_n3_regime_stratified_friction_20261003T070500Z)` -> `Markdown Review (stage1_5h_n3_regime_stratified_friction_review_CN.md)`
-5. **Stage 1.6 Futures Delisting 历史证据与审计链**：
-   `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Deployment Authorization Design` -> `1.6D current runbook` -> `target preflight transcript` -> `explicit user deployment authorization` -> `1.6D Live Observation (not deployed)`。
+5. **Stage 1.6 Futures Delisting 历史证据、审计与终局基差诊断链**：
+   `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Deployment Authorization Design & Runbook` -> `1.6D Live Observation (not deployed)`；`1.6F 历史对照与终局基差探索性诊断: W1/W2 扩展 -> W2-0 诊断 (w2_0_exploratory_20260926T071500Z) -> 终局基差发散探索性结项 (conclusion closure only)`。
 
 ---
 
@@ -183,8 +183,8 @@
 
 ## 9. 缺失文档 (Missing Documents)
 
-1. **Stage 1.6A--C 文件缺失项已关闭**：
-   - **现状**：实际基线文件为 `docs/designs/2026-08-18-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`；后续 1.6B producer、1.6C adapter 和 H2 completion evidence 见 [Stage 1.6 路线地图](2026-08-24-stage1-6-futures-delisting-route-map_CN.md)。
+1. **Stage 1.6 历史证据与探索性诊断链路已闭环**：
+   - **现状**：1.6A-C 历史源契约、密封导出与适配器完成审计；1.6F-W2-0 终局基差探索性诊断已结项（`w2_0_exploratory_20260926T071500Z`）；1.6D 远端实盘源观察保持未授权部署（需 target preflight transcript 与显式用户部署授权）。
 2. **Stage 1.6R Security Incident Risk-Veto 设计文档尚未立项**：
    - **现状**：Roadmap 已确定 1.6R 为风控旁路线，但 `docs/designs/` 下尚无相关设计与 SOP 文档。
 3. **缺失 Stage 1.5G Clean Markdown 正式审查报告索引**：

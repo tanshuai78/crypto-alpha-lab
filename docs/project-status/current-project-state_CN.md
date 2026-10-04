@@ -1,11 +1,10 @@
 # Crypto Alpha Lab 当前项目状态 (Current Project State)
 
-> **文档生成时间：** 2026-07-26T11:12:57+08:00 (Server UTC: 2026-07-26T02:11:01Z)  
-> **事实数据源：** 
-> - 服务器运行快照：`../../_project_context/server_runtime_snapshot_20260726T021054Z.txt`
-> - 本地工作区快照：`../../_project_context/workspace_snapshot_20260726T020922Z.txt`
-> - 运行证据目录：`../../_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest`
-> - 服务器归档 Artifacts：`../../_project_context/server_runtime_artifacts/20260726T024623Z`
+> **文档生成时间：** 2026-10-03T23:50:00+08:00 (Local Evidence UTC: 2026-10-03T15:50:00Z)
+> **双态事实数据源：**
+> - **本地代码库与治理基线：** Git HEAD `ea754ae7d0da57d22105e424ab9cee012f765b82`（2026-10-03，包含 Stage 1.3 R10、Stage 1.5G N=3、Stage 1.5H N=3 与 Stage 1.6F W2-0 探索性诊断结项）
+> - **服务器运行时快照基线：** `../../_project_context/server_runtime_snapshot_20260726T021054Z.txt`（2026-07-26 采集，PID 88580 与 PID 88770 稳定运行，直至下次 VPS 同步）
+> - **生产回执与运行证据目录：** `data/external_signal_shadow/`（含 1.5G N=3、1.5H N=3、1.6F W2-0 回执）与 `../../_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest`
 
 ---
 
@@ -13,15 +12,15 @@
 
 | 属性 | 当前真实状态 | 证据来源 |
 |---|---|---|
-| **文档更新时间** | 2026-07-26T11:12:57+08:00 (UTC 2026-07-26 02:11:01) | `_project_context/server_runtime_snapshot_20260726T021054Z.txt:L2` |
-| **本地 Branch** | `feature/external-signal-shadow-stage1` | `workspace_snapshot_20260726T020922Z.txt:L12` |
-| **本地 Commit** | `2502e1220ec0144c5d6f4915f89d3ba9804661f3` | `workspace_snapshot_20260726T020922Z.txt:L15` |
-| **服务器 Git Commit** | `unknown` | 当前服务器快照未成功采集 `git rev-parse HEAD` |
-| **关键部署文件 Hash Match** | `MATCH` (仅限下表三份部署关键文件) | SHA256 比对（见下表）；不能外推为服务器 Git commit 匹配 |
-| **本地工作区状态** | `Clean` (仅存在未跟踪目录 `_project_context/`) | `workspace_snapshot_20260726T020922Z.txt:L22` |
-| **服务器工作区状态** | `unknown` | 当前服务器快照未成功采集 `git status --short` |
+| **文档更新时间** | 2026-10-03T23:50:00+08:00 (UTC 2026-10-03 15:50:00) | 本次 Stage 1.5G N=3 / 1.5H N=3 收敛治理更新 |
+| **本地 Branch** | `feature/external-signal-shadow-stage1` | `git branch --show-current` |
+| **本地 Commit** | `ea754ae7d0da57d22105e424ab9cee012f765b82` | `git rev-parse HEAD` |
+| **服务器 Git Commit** | `unknown` | 2026-07-26 服务器快照未成功采集 `git rev-parse HEAD` |
+| **关键部署文件 Hash Match** | `MATCH` (仅限 2026-07-26 快照比对) | 历史 SHA256 比对（见下表）；不能外推为当前服务器 Git commit 匹配 |
+| **本地工作区状态** | `Clean` (跟踪文件无越界修改) | `git status --short` |
+| **服务器工作区状态** | `unknown` | 2026-07-26 服务器快照未成功采集 `git status --short` |
 
-### 核心部署文件 SHA256 校验比对表
+### 历史部署文件 SHA256 校验比对表 (2026-07-26 快照)
 
 | 核心文件 | 本地 Hash | 服务器部署 Hash | 匹配状态 | 证据路径 |
 |---|---|---|---|---|
@@ -33,8 +32,9 @@
 
 ## 2. 项目当前使命与安全边界 (Mission & Safety Invariants)
 
-### 2.1 项目定位
+#### 2.1 项目定位
 本项目**不是套利系统**，**不是自动化收益机器**，而是**个人 Alpha 验证实验室与安全执行基座**（针对 5,000 – 50,000 USDT 资金规模，当前阶段仅进行纯只读观察与影子验证，严禁任何实盘交易）。
+全项目研究方法论遵循 [.agent/rules/L2_Alpha_Research_Methodology.md](../../.agent/rules/L2_Alpha_Research_Methodology.md)，但 L2 从属于 L0/L1，绝不授予任何实盘、模拟盘或执行权限。
 
 ### 2.2 安全开关与硬边界表
 
@@ -42,13 +42,14 @@
 |---|---|---|---|
 | `RISK_LIVE_TRADING_ENABLED` | `False` | 拒绝任何实盘下单逻辑 | [configs/base.py:L86](../../configs/base.py#L86) |
 | `RiskLimits.live_trading_enabled` | `False` | 风险引擎默认处于 Observation 模式 | [src/risk/limits.py:L39](../../src/risk/limits.py#L39) |
-| `trade_signal_allowed` | `False` | 禁止策略输出可交易 SignalCandidate | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L50` |
-| `paper_trading_allowed` | `False` | 禁止模拟盘下单或虚拟撮合 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L51` |
-| `live_trading_allowed` | `False` | 禁止实盘交易 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L52` |
-| `execution_engine_allowed` | `False` | 禁止连接执行引擎 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L53` |
-| `alpha_interpretation_allowed` | `False` | 禁止将观察数据解构为独立 Alpha 结论 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L54` |
-| `execution_feasibility_claim_allowed` | `False` | 禁止宣称流动性/深度具备可执行性 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L49` |
-| `research_result_valid` | `False` | 当前阶段研究结论尚未通过 Stage 1.5G 完全验证 | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json:L55` |
+| `trade_signal_allowed` | `False` | 禁止策略输出可交易 SignalCandidate | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `paper_trading_allowed` | `False` | 禁止模拟盘下单或虚拟撮合 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `live_trading_allowed` | `False` | 禁止实盘交易 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `execution_engine_allowed` | `False` | 禁止连接执行引擎 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `alpha_interpretation_allowed` | `False` | 禁止将观察数据解构为独立 Alpha 结论 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `execution_feasibility_claim_allowed` | `False` | 禁止宣称流动性/深度具备可执行性 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `stage1_5g_gate3_complete` | `False` | Stage 1.5H N=3 诊断结论为证据不充分，Gate 3 未开放通过 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
+| `consumer_admission_allowed` | `False` | 下游消费者强制 Fail-Closed 硬阻断 (`STOP=...`) | Stage 1.3 R10 / 1.5G N=3 / 1.5H N=3 核心模块 |
 
 ---
 
@@ -59,7 +60,7 @@
 ```text
 crypto-alpha-lab/
 ├── configs/
-│   └── base.py                        # 全局配置单一事实来源 (Single Source of Truth)
+│   └── base.py                        # 全局配置单一事实来源 (Single Source of Truth, RISK_LIVE_TRADING_ENABLED=False)
 ├── src/
 │   ├── execution/                     # 冻结的底层执行层 (Verbatim migrated, 355 lines)
 │   │   └── order_executor.py          # 7 种异常恢复机制 (Maker timeout, rollback, unknown remote state)
@@ -67,15 +68,18 @@ crypto-alpha-lab/
 │   │   └── base.py                    # SignalCandidate 强类型契约
 │   ├── risk/                          # 风险控制模块
 │   │   └── limits.py                  # RiskLimits 风险硬边界
-│   └── research/external_signal_shadow/ # 外部催化剂影子观察管线 (Stage 1.3 - 1.5)
-│       ├── stage1_3_r10_readmission.py  # 1.3 R10 历史信号只读准入前置校验门禁 (AST防泄漏 + Git锚定 + flock原子发布)
+│   └── research/external_signal_shadow/ # 外部催化剂影子观察管线 (Stage 1.3 - 1.6)
+│       ├── stage1_3_r10_readmission.py # 1.3 R10 历史信号准入前置校验门禁 (AST防泄漏 + Git锚定 + flock原子发布)
 │       ├── stage1_5d_live_event_source_* # 1.5D 公告采集 + BAPI 详情解析 + 202 Retry 调度器
-│       ├── stage1_5f_live_depth_*       # 1.5F L2 盘口观察器 + 上线时间闸门 + 水印 v2 + 终端 Ignore Hygiene
-│       ├── stage1_5g_live_depth_*       # 1.5G 离线盘口质量审查器 (Clean / Quarantine / Invalid)
-│       └── stage1_5h_static_execution_* # 1.5H 静态执行代理报告生成器 (Strict Read-Only)
+│       ├── stage1_5f_live_depth_*     # 1.5F L2 盘口观察器 + 上线时间闸门 + 水印 v2 + 终端 Ignore Hygiene
+│       ├── stage1_5g_live_depth_*     # 1.5G 离线盘口质量审查器 (Clean / Quarantine / Invalid)
+│       ├── stage1_5g_n3_regime_stratified_admission.py # 1.5G N=3 产品机制分层事件族准入模块
+│       ├── stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py # 1.5H N=3 产品机制分层流动性摩擦诊断模块
+│       ├── stage1_5h_static_execution_* # 1.5H 历史静态执行代理报告生成器 (Strict Read-Only)
+│       └── stage1_6*                  # 1.6 Futures Delisting 历史源契约、密封适配器、H2 语法回放与终局基差诊断模块
 ├── scripts/
 │   ├── review_external_signal_shadow_stage1_3_r10_readmission.py # 1.3 R10 离线准入复核 CLI 脚本
-│   └── external_signal_shadow/          # 影子观察与审查脚本集 (Stage 1.3 - 1.5H)
+│   └── external_signal_shadow/        # 影子观察、准入与审查脚本集 (含 1.5G N=3、1.5H N=3 runner)
 ```
 
 ---
@@ -95,9 +99,13 @@ crypto-alpha-lab/
 | **Stage 1.5D** | Binance 公告实时采集 + BAPI 详情 + 202 重试调度 | `implemented_locally`, `committed`, `deployed`, `running`, `evidence_collected` | `Yes` | `True` (PID 88580) | `runtime_evidence/.../stage1_5d/detail_retry_scheduler_state.json` | BAPI 详情页解析与 202 重试调度器持续稳定运行，消除饥饿 | 维持 7 天连续运行 |
 | **Stage 1.5E** | 执行可行性静态审计 | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Completed | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` | 静态深度审计通过 500 USDT 深度承载力测试 | 推进 1.5F 实时盘口观察 |
 | **Stage 1.5F** | L2 深度实时观察器 + 上线时间闸门 + 水印 v2 + 终端 Ignore | `implemented_locally`, `committed`, `deployed`, `running`, `evidence_collected` | `Yes` | `True` (PID 88770) | `runtime_evidence/.../stage1_5f/live_depth_observer_summary.json` | 进程持续运行(2643 heartbeats)，76个 pre-bootstrap 历史锚点终端 Ignore，0 报错 | 捕获新合约上线 L2 盘口证据 |
-| **Stage 1.5G** | L2 深度证据离线审查器 (Clean/Quarantine/Invalid) | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` | SPCXUSD1 与 MOONSHOTUSDT 审查通过 Clean (MOONSHOTUSDT 采样 716 点，覆盖率 99.44%，P50点差 5.85 bps，P50滑点 7.14/8.01 bps)；SKHYUSDT 审查通过 Quarantine；POPMARTUSDT 为 invalid / quarantine candidate | 样本量已扩充至 2 个 Clean 样本，继续积累并推进 1.5H/1.6A |
-| **Stage 1.5H** | 静态执行代理报告生成器 (Read-Only Report Generator) | `implemented_locally`, `committed`, `reviewed` | `Yes` | Offline Tool | `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md` | 报告生成器治理审查通过；当前本地 `data/stage1_5h` artifact 未同步进工作区 | 维持纯只读报告工具定位 |
-| **Stage 1.6F** | W1/W2/W2-0 descriptive conclusion closure | `implemented_locally`, `evidence_collected`, `reviewed` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json` | `w2_0_exploratory_20260926T071500Z`; 180 physical source objects; 41 contracts / 27 parents; 31 contracts / 21 parents window-defined; 29 contracts / 19 parents exploratory_described; outcome_seen/exploratory_only 19-parent subset does not support usual natural terminal convergence in [-24h, 0h]; 3/19 negative; 16/19 positive. | `none_from_current_evidence` |
+| **Stage 1.5G (历史单Root)** | L2 深度证据离线审查器 (Clean/Quarantine/Invalid) | `implemented_locally`, `committed`, `reviewed`, `evidence_collected` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` | SPCXUSD1 与 MOONSHOTUSDT 审查通过 Clean (MOONSHOTUSDT 采样 716 点，覆盖率 99.44%，P50点差 5.85 bps，P50滑点 7.14/8.01 bps)；SKHYUSDT 审查通过 Quarantine；POPMARTUSDT 为 invalid / quarantine candidate | 样本量已扩充至 2 个 Clean 样本，被 N=3 分层准入覆盖 |
+| **Stage 1.5G N=3** | N=3 产品机制分层事件族准入 | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json` | 52 项测试全通，独立审计评定 COMPLETE (Commit `9484dd3`)；准入 3 篇独立公告、3 个父事件、9 个正式子标的（CTUSDT、MOONSHOTUSDT、7 个 batch7 标的）按 3 类产品机制分层 clean pass；**达成 Gate 3 样本数量门槛（$\ge 3$ 个独立事件且 $\ge 3$ 篇公告）**；下游消费强制 Fail-Closed 硬阻断 | 推进 Stage 1.5H N=3 机制分层流动性摩擦诊断 |
+| **Stage 1.5H (历史静态报告)** | 静态执行代理报告生成器 (Read-Only Report Generator) | `implemented_locally`, `committed`, `reviewed` | `Yes` | Offline Tool | `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md` | 报告生成器治理审查通过；当前本地 `data/stage1_5h` artifact 未同步进工作区 | 维持纯只读报告工具定位，已被 N=3 诊断替代 |
+| **Stage 1.5H N=3** | N=3 产品机制分层流动性摩擦诊断 | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` | 39 项测试通过；独立审计评定 COMPLETE (Commit `ab5043d`)；基于 1.5G N=3 的 3 个父事件与 9 个子标的完成机制分层 P95 滑点摩擦诊断；证实三种产品机制摩擦显著分化（标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps），严禁跨机制池化或统一定价；结论保持 `evidence_insufficient`，`stage1_5g_gate3_complete=false`；下游消费强制 Fail-Closed 硬阻断，无任何交易或执行权限 | 下游只读微观结构研究；维持零交易/执行权限 |
+| **Stage 1.6A-C** | Futures Delisting 历史源契约、密封导出与适配器 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Completed | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` | 1.6A-C 历史源契约、密封导出与 H2 语法适配器完成独立审计 (`source_audit_passed=true`) | 1.6D 远端部署授权评估 |
+| **Stage 1.6D** | Futures Delisting VPS 实时源观察 | `implemented_locally`, `committed`, `planned_only` | `Yes` | `False` (1_6D_not_deployed) | `docs/ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md` | 部署设计与 Runbook 就绪；需 target preflight transcript 与显式用户部署授权 | 待用户显式授权 |
+| **Stage 1.6F & W2-0** | 历史对照机制与终局基差探索性诊断结项 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json` | 180 物理源对象；41 标的 / 27 父事件；19 个 window-defined 父事件子集证实终局基差发散/非自然收敛（仅 3/19 负值，16/19 正值）；严格保持 outcome_seen/exploratory_only，无后续交易权限，结项 closure only | `none_from_current_evidence` |
 
 ---
 
@@ -160,23 +168,30 @@ crypto-alpha-lab/
 
 ## 7. 当前 Stage 1.5G / 1.5H 状态 (Stage 1.5G & 1.5H Current Status)
 
-### 7.1 Stage 1.5G 离线盘口审查分类统计
+### 7.1 Stage 1.5G 离线盘口审查与 N=3 产品机制分层准入
 
 | 分类口径 | 数量 / 标的 | 事实与审查证据路径 | 说明 |
 |---|---|---|---|
-| **Clean Evidence (无瑕疵证据)** | **2** (`SPCXUSD1`, `MOONSHOTUSDT`) | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true`) | 已存在 2 个 Clean 级 L2 深度证据。新增 `MOONSHOTUSDT`（716 采样点，覆盖率 99.44%，P50点差 5.85 bps，P50滑点 7.14/8.01 bps，0 无效订单簿行）；历史样本 `SPCXUSD1` (`book_availability_ratio = 99.86%`) |
-| **Quarantined Evidence (隔离级证据)** | **1** (`SKHYUSDT`) | `quarantine_summary.json:L7` (`quarantined_depth_evidence_pass = true`) | 前 11 分钟存在 12 个空盘口快照，隔离后有效快照 706 个，`book_availability_ratio = 98.06%` |
-| **Invalid Evidence (本地可复核)** | **0** | `quarantine_summary.json:L11` | 当前本地 runtime evidence 包未包含 POPMARTUSDT 的 2026-07-23 服务器 review JSON，不能在本地独立复核该 invalid 结论 |
+| **Clean Evidence (单Root历史)** | **2** (`SPCXUSD1`, `MOONSHOTUSDT`) | `data/external_signal_shadow/stage1_5g/reviews/20260923T025100Z_moonshot_review/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`) | SPCXUSD1 与 MOONSHOTUSDT 通过单 Root 深度审查 Clean；已纳入历史基线 |
+| **Quarantined Evidence (单Root历史)** | **1** (`SKHYUSDT`) | `quarantine_summary.json:L7` (`quarantined_depth_evidence_pass = true`) | 前 11 分钟存在 12 个空盘口快照，隔离后有效快照 706 个 |
+| **Stage 1.5G N=3 分层准入 (生产回执)** | **3 个独立事件 / 9 个子标的** | `data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json` | 准入 3 篇独立公告、3 个父事件、9 个正式子标的（CTUSDT、MOONSHOTUSDT、7 个 batch7 标的）按 3 类产品机制分层 clean pass；**Gate 3 样本数量门槛已解封**（Commit `9484dd3`） |
 
-> **注**：`SPCXUSD1` 与 `MOONSHOTUSDT` clean pass 是当前本地已同步的服务器正式 review 证据。`POPMARTUSDT` 事件也于 2026-07-23 在服务器完成审查，但对应 `20260723T152909Z_popmartusdt` review JSON/Markdown 当前未出现在本地工作区；在同步前，只能作为会话历史结论引用，不能作为本地 source_upload 包内可独立复核证据。
+> **机制分层说明**：
+> - `crypto_standard_perpetual` (CTUSDT): 标准加密货币资产永续合约；
+> - `pre_ipo_equity_perpetual` (MOONSHOTUSDT): Pre-IPO 股权类永续合约；
+> - `tradfi_equity_or_etf_perpetual_batch` (7 个标的): 传统股票/ETF 挂钩类永续合约批次。
 
-### 7.2 Stage 1.5H 静态执行代理报告定位
+### 7.2 Stage 1.5H N=3 产品机制分层流动性摩擦诊断
 
-- **静态/只读代理报告 (Static/Read-Only Proxy Report)**：生成脚本 `scripts/external_signal_shadow/review_stage1_5h_static_execution_proxy_report.py`。
-- **绝对禁令硬断言**：
-  - `execution_feasibility_claim_allowed = False`
-  - `trade_signal_allowed = False`
-- **定位声明**：Stage 1.5H **仅为静态只读报告生成器**，绝非回测模拟器，绝非交易执行引擎，严禁做出任何可执行性声明（Execution Feasibility Claim）。当前本地可用治理证据为 `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md`；原始 `data/external_signal_shadow/stage1_5h/reports/...` artifact 当前未同步进本地工作区。
+- **生产诊断模块与入口**：`src/research/external_signal_shadow/stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py` 及 CLI `scripts/external_signal_shadow/run_stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py`。
+- **生产回执与结论**：
+  - 回执路径：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json`
+  - 诊断结论：`research_classification = "evidence_insufficient"`，`stage1_5g_gate3_complete = False`。
+- **经验发现（流动性摩擦显著分化）**：
+  - `crypto_standard_perpetual` (CTUSDT): 边际 P95 滑点和为 **17.99 bps**；
+  - `pre_ipo_equity_perpetual` (MOONSHOTUSDT): 边际 P95 滑点和为 **31.58 bps**；
+  - `tradfi_equity_or_etf_perpetual_batch` (7 个标的): 边际 P95 滑点和中位数为 **80.02 bps**（最高达 87.43 bps）。
+- **硬治理约束**：严禁跨机制池化、统一定价或外推任何 Alpha 假设；下游消费强制 Fail-Closed 硬阻断 (`STOP=stage1_5h_n3_future_consumer_not_authorized`)；零实盘/零模拟盘/零执行引擎权限。
 
 ---
 
@@ -185,27 +200,28 @@ crypto-alpha-lab/
 所有结论均绑定真实文件路径：
 
 1. **本地 Git 分支与 Commit**：
-   - 路径：`_project_context/workspace_snapshot_20260726T020922Z.txt:L12-L19`
-   - 结论：Branch `feature/external-signal-shadow-stage1`, Commit `2502e1220ec0144c5d6f4915f89d3ba9804661f3`
-2. **服务器运行进程与 Output Root**：
+   - 路径：`git rev-parse HEAD`
+   - 结论：Branch `feature/external-signal-shadow-stage1`, Commit `ea754ae7d0da57d22105e424ab9cee012f765b82`
+2. **服务器运行进程与 Output Root (2026-07-26 采集快照)**：
    - 路径：`_project_context/server_runtime_snapshot_20260726T021054Z.txt:L20-L26`
    - 结论：
      - PID 88580 运行 1.5D，Root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`
      - PID 88770 运行 1.5F，Root `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`
-3. **代码部署一致性 (File Hash Match)**：
-   - 路径：`_project_context/server_runtime_snapshot_20260726T021054Z.txt:L150-L154` 与本地 `shasum -a 256`
-   - 结论：`configs/base.py`、`run_stage1_5d...py`、`run_stage1_5f...py` 三文件 SHA256 哈希与服务器 100% 完全匹配；服务器 Git commit 与 worktree status 仍为 `unknown`。
-4. **安全硬开关状态**：
-   - 路径：[configs/base.py:L86](../../configs/base.py#L86) 与 `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json:L49-L55`
+3. **安全硬开关状态**：
+   - 路径：[configs/base.py:L86](../../configs/base.py#L86) 与各生产回执中的 governance vector
    - 结论：`RISK_LIVE_TRADING_ENABLED = False`，所有实盘/信号/模拟/引擎开关全为 `false`。
-5. **Stage 1.5F 水印 v2 与 Pre-Bootstrap 终端 Ignore 证据**：
-   - 路径：`_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/watermark.json:L80-L84` 与 `live_depth_observer_summary.json:L36`
-   - 结论：Watermark Schema Version 2，已统计 76 个历史 pre-bootstrap 锚点终端 Ignore。
-6. **Stage 1.5G Clean 与隔离级证据**：
-   - Clean 路径：`data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json`
-   - Clean 结论：`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true` (`SPCXUSD1`).
-   - Quarantine 路径：`_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5g/stage1_5g_quarantine_summary.json`
-   - Quarantine 结论：`quarantined_depth_evidence_pass = true` (`SKHYUSDT`).
+4. **Stage 1.5G N=3 生产准入回执证据**：
+   - 路径：`data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json`
+   - 结论：`receipt_published`，3 篇独立公告、3 个父事件、9 个正式子标的通过准入，Gate 3 样本数量门槛解封（Commit `9484dd3`）。
+5. **Stage 1.5H N=3 生产诊断回执证据**：
+   - 路径：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json`
+   - 结论：`receipt_published`，9 标的分层 P95 滑点摩擦诊断完成，结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete=false`（Commit `ab5043d`）。
+6. **Stage 1.3 R10 历史信号准入前置校验闭环证据**：
+   - 路径：`src/research/external_signal_shadow/stage1_3_r10_readmission.py` 与 Task 6 审计收据
+   - 结论：69 项测试通过，独立 Completion Audit COMPLETE，下游消费者强制阻断（Commit `8c6f3a0`）。
+7. **Stage 1.6F W2-0 终局基差探索性诊断结项证据**：
+   - 路径：`data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json`
+   - 结论：180 物理源对象，19 个 window-defined 父事件子集证实终局基差发散，结项 closure only。
 
 ---
 
@@ -214,21 +230,21 @@ crypto-alpha-lab/
 按优先级 P0 / P1 / P2 排序：
 
 ### P0 阻塞项
-- **无**（服务器 1.5D 与 1.5F 进程运行正常，无未捕获异常或主循环崩溃）。
+- **无**（服务器 1.5D 与 1.5F 进程持续稳定运行；本地各离线研究管线测试全通，0 崩溃）。
 
 ### P1 阻塞项
-- **Blocker**：Stage 1.5 已有 1 个 Clean 级 L2 深度证据，但事件族样本量仍不足以支持最终 family-level conclusion。
-- **Evidence**：`data/external_signal_shadow/stage1_5g/reviews/20260722T023908Z/stage1_5g_live_depth_evidence_review_summary.json` (`decision = stage1_5g_depth_evidence_clean_pass`, `clean_depth_evidence_pass = true`)
-- **Risk**：单一 Clean 样本只能支持继续推进 1.5H 只读报告/影子设计，不能代表 Binance 新合约上线事件族已经完成充分统计验证。
-- **Required Next Action**：维持服务器 1.5D 与 1.5F 的连续影子观察进程，优先捕获新 hotfix root 下的新合约上线事件，并继续运行 Stage 1.5G 离线审查。
-- **Stop Condition**：满足事件族审查门槛（至少 3 个 unique symbol 且至少 2 个 source article，按当前配置口径），并保持所有交易/信号/执行权限为 `False`。
+- **Blocker**：Stage 1.5H N=3 机制分层诊断显示三种产品机制的流动性摩擦显著分化（17.99 bps vs 31.58 bps vs 80.02 bps），当前证据不足以支撑无差别成本模型或交易可行性。
+- **Evidence**：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` (`research_classification = "evidence_insufficient"`, `stage1_5g_gate3_complete = false`)
+- **Risk**：若跨机制池化或采用单一统一定价模型，将导致传统股票/ETF 永续的高额摩擦被低估，引入严重交易亏损风险。
+- **Required Next Action**：维持机制分层隔离；继续保持服务器 1.5D 与 1.5F 连续影子观察以累积长期自然样本；仅在机制分层约束下推进下游只读微观结构研究。
+- **Stop Condition**：严禁授予任何交易或执行权限；下游消费保持 Fail-Closed。
 
 ### P2 阻塞项
-- **Blocker**：Stage 1.6A (Futures Delisting Notice) 设计文档尚未撰写。
-- **Evidence**：`docs/strategy_specs/2026-07-13-整理的后续事件源研究路线图-external-catalyst-event-sources-unified-research-roadmap_CN.md:L305`
-- **Risk**：无法开启下一代强流事件源（下架公告）的源审计与设计评审。
-- **Required Next Action**：撰写 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`。
-- **Stop Condition**：设计文档通过审查。
+- **Blocker**：Stage 1.6D (Futures Delisting VPS 实时源观察) 尚未获得生产部署授权。
+- **Evidence**：`docs/ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md` (`deployment_status: 1_6D_not_deployed`)
+- **Risk**：无法在服务器实时采集下架事件与盘口响应。
+- **Required Next Action**：如需推进 1.6D 部署，须先完成目标环境 preflight transcript 验证并获得用户显式部署授权。
+- **Stop Condition**：用户显式授权或维持未部署状态。
 
 ---
 
@@ -236,10 +252,10 @@ crypto-alpha-lab/
 
 仅列出当前可以执行的 4 项计划内任务：
 
-1. **维持 1.5D 与 1.5F 7 天影子观察进程**：监控 PID 88580 与 PID 88770 稳定运行，积累新合约上线事件的数据。
-2. **撰写 Stage 1.6A (Futures Delisting Notice) 设计文档**：按照已批准的路线图，制定 `docs/designs/2026-07-26-external-signal-shadow-lab-stage1-6a-futures-delisting-source-schema-effective-time-design_CN.md`，定义合约下架源解析、隔离规则与三大时间锚点（`available_at_ms`, `non_reduce_only_start_time_ms`, `settlement_time_ms`）契约。
-3. **撰写 Daily Capital & Supply Flow Regime Diagnostic 整合设计文档**：合并原 `1.6B` (ETF Daily Net Flow) 与 `1.6F` (BTC Exchange Net Position)，设计日频资金流/供给状态诊断过滤器。
-4. **对新抓取的 L2 盘口数据运行 Stage 1.5G 离线审查**：当 1.5F 捕获新的合约上线事件后，执行 `review_stage1_5g_live_depth_evidence.py`，继续补充 Clean / Quarantine / Invalid 样本，并避免把单个 Clean 样本误读为事件族结论。
+1. **维持 1.5D 与 1.5F 连续影子观察进程**：监控 PID 88580 与 PID 88770 稳定运行，持续积累新合约上线事件的原始 L2 盘口数据。
+2. **推进 Stage 1.5 机制分层下游只读微观结构研究**：在保持 `crypto_standard_perpetual`、`pre_ipo_equity_perpetual`、`tradfi_equity_or_etf_perpetual_batch` 三类机制严格隔离的前提下，开展只读挂单簿与深度衰减分析，严禁跨机制池化。
+3. **Stage 1.6D 部署前置条件评估**：若需开启期货下架实时源观察，按照 1.6D Runbook 收集目标环境前置证据并请求用户显式部署授权。
+4. **维持 L0/L1 安全与权限阻断**：严格保持 `RISK_LIVE_TRADING_ENABLED = False`，维持下游消费者 fail-closed 硬门禁，零交易/执行权限。
 
 ---
 
