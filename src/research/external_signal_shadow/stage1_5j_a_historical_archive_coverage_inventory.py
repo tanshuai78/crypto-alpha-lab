@@ -1328,6 +1328,24 @@ def load_verified_stage1_5j_a_historical_archive_coverage_root(
                 elif not all_children_complete and pstate != "coverage_evidence_gap_archive":
                     raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_record_mismatch:{pid}")
 
+    expected_analysis_state = (
+        "coverage_inventory_complete" if calc_parent_gap == 0 and calc_target_parent_count > 0
+        else "coverage_inventory_evidence_gap"
+    )
+    expected_decision = (
+        "stage1_5j_a_historical_archive_coverage_inventory_published" if calc_parent_gap == 0 and calc_target_parent_count > 0
+        else "stage1_5j_a_historical_archive_coverage_evidence_gap_published"
+    )
+
+    if summary_data.get("analysis_state") != expected_analysis_state:
+        raise Stage1_5JADiagnosticError(
+            f"STOP=stage1_5j_a_reduction_mismatch:analysis_state_mismatch:{summary_data.get('analysis_state')}"
+        )
+    if summary_data.get("decision") != expected_decision:
+        raise Stage1_5JADiagnosticError(
+            f"STOP=stage1_5j_a_reduction_mismatch:decision_mismatch:{summary_data.get('decision')}"
+        )
+
     return summary_data
 
 

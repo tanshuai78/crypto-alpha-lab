@@ -17,6 +17,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -645,11 +646,14 @@ def test_verify_network_authorization_rejects_cap_mismatches(tmp_path: Path, cap
         _verify_network_authorization_for_test(run_id=run_id, bundle_dir=bundle)
 
 
-def test_public_verify_network_authorization_fails_closed_when_absent_on_disk() -> None:
-    """Public verify_network_authorization(run_id) takes strictly only run_id and fails closed on disk."""
-    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261006T000000Z"
-    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_network_authorization_absent"):
-        verify_network_authorization(run_id=run_id)
+def test_public_verify_network_authorization_fails_closed_on_unauthorized_run_id() -> None:
+    """Public verify_network_authorization(run_id) takes strictly only run_id and fails closed before network access."""
+    unauthorized_run_id = "stage1_5j_a_historical_archive_coverage_inventory_99999999T999999Z"
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_network_authorization_(absent|mismatch:run_id_mismatch)",
+    ):
+        verify_network_authorization(run_id=unauthorized_run_id)
 
 
 def test_public_verify_network_authorization_rejects_path_arguments(tmp_path: Path) -> None:
@@ -1316,30 +1320,43 @@ def test_verify_execution_authority_rejects_tampered_plan_file_on_disk(valid_aut
 
 
 def test_task5_proof_a_public_authority_request_boundary(tmp_path: Path) -> None:
-    """Proof A: Public entrypoint fails closed on absent network authorization without bypass seams.
+    """Proof A: Public entrypoint fails closed on absent or unauthorized network authorization without bypass seams.
 
     Verifies:
-    1. run_inventory(run_id) strictly fails closed when network_authorization.txt is absent on disk.
+    1. run_inventory(run_id) strictly fails closed on unauthorized run_id or absent network authorization before transport.
     2. Setting arbitrary module globals does not bypass the disk network authority check.
-    3. Component-level RequestManager URL admission works correctly in isolated tmp_path.
-    4. Production data namespace is never created, modified, or cleaned in teardown.
+    3. Absent network authorization fails closed via isolated test bundle helper.
+    4. Component-level RequestManager URL admission works correctly in isolated tmp_path.
+    5. Production data namespace is never created, modified, or cleaned in teardown.
     """
     import src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory as core_mod
 
-    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261006T000000Z"
+    unauthorized_run_id = "stage1_5j_a_historical_archive_coverage_inventory_99999999T999999Z"
 
-    # 1. Public entrypoint directly fails closed with STOP=stage1_5j_a_network_authorization_absent
-    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_network_authorization_absent"):
-        run_inventory(run_id)
+    # 1. Public entrypoint directly fails closed with STOP=stage1_5j_a_network_authorization_(absent|mismatch:run_id_mismatch)
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_network_authorization_(absent|mismatch:run_id_mismatch)",
+    ):
+        run_inventory(unauthorized_run_id)
 
     # 2. Attempting to set arbitrary module-level globals does not bypass the disk check
     setattr(core_mod, "_EPHEMERAL_NETWORK_AUTH_PAYLOAD", "fake_payload")
     try:
-        with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_network_authorization_absent"):
-            run_inventory(run_id)
+        with pytest.raises(
+            Stage1_5JADiagnosticError,
+            match=r"STOP=stage1_5j_a_network_authorization_(absent|mismatch:run_id_mismatch)",
+        ):
+            run_inventory(unauthorized_run_id)
     finally:
         if hasattr(core_mod, "_EPHEMERAL_NETWORK_AUTH_PAYLOAD"):
             delattr(core_mod, "_EPHEMERAL_NETWORK_AUTH_PAYLOAD")
+
+    # 3. Isolated test of absent network authorization fails closed with exact absent code
+    empty_bundle = tmp_path / "empty_bundle"
+    empty_bundle.mkdir()
+    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_network_authorization_absent"):
+        core_mod._verify_network_authorization_for_test(run_id=unauthorized_run_id, bundle_dir=empty_bundle)
 
     # 3. Component-level URL admission in isolated tmp_path
     staging_dir = tmp_path / "staging_proof_a"
@@ -1357,10 +1374,9 @@ def test_task5_proof_a_public_authority_request_boundary(tmp_path: Path) -> None
     with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_request_admission_failure:catalog_url"):
         req_mgr.validate_url("catalog", "https://malicious.example.com/query")
 
-    # 4. Production receipt directory must not exist (and test never executes rmtree on data/)
-    pub_dir = Path("data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory") / run_id
-    assert not pub_dir.exists(), "Final receipt directory must not exist"
-    assert not Path("data/external_signal_shadow/stage1_5j_a").exists(), "Production root must remain absent"
+    # 4. Production receipt directory for unauthorized run_id must not exist (and test never executes rmtree on data/)
+    pub_dir = Path("data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory") / unauthorized_run_id
+    assert not pub_dir.exists(), "Unauthorized receipt directory must not exist"
 
 
 def test_task5_proof_b_canonical_data_pipeline() -> None:
@@ -1539,3 +1555,78 @@ def test_open_spy_no_sockets_opened_during_negative_probes() -> None:
         assert res is not None
 
     assert len(opened_sockets) == 0, f"Sockets opened during authority check: {opened_sockets}"
+
+
+def test_post_network_closure_probes_state_and_decision_mutations(tmp_path: Path) -> None:
+    """Post-network closure probes: assert strict loader rejects mutated analysis_state and decision."""
+    prod_root = Path(
+        "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T025000Z"
+    )
+    if not prod_root.is_dir():
+        pytest.skip("Production receipt not present on disk")
+
+    test_root = tmp_path / OUTPUT_PARENT_REL / prod_root.name
+    shutil.copytree(prod_root, test_root, copy_function=os.link)
+
+    summary_path = test_root / "summary.json"
+    summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    # Probe 1: analysis_state mutated to coverage_inventory_complete
+    mutated_sum_1 = dict(summary_data)
+    mutated_sum_1["analysis_state"] = "coverage_inventory_complete"
+    summary_path.unlink()
+    new_sum_bytes_1 = (canonical_json_dumps(mutated_sum_1) + "\n").encode("utf-8")
+    summary_path.write_bytes(new_sum_bytes_1)
+
+    review_path = test_root / "review_CN.md"
+    review_path.unlink()
+    new_rev_text_1 = render_stage1_5j_a_review(mutated_sum_1)
+    review_path.write_text(new_rev_text_1, encoding="utf-8")
+    new_rev_bytes_1 = new_rev_text_1.encode("utf-8")
+
+    manifest_path = test_root / "manifest.json"
+    manifest_data_1 = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for art in manifest_data_1["artifacts"]:
+        if art["relative_path"] == "summary.json":
+            art["byte_count"] = len(new_sum_bytes_1)
+            art["sha256"] = _sha256(new_sum_bytes_1)
+        elif art["relative_path"] == "review_CN.md":
+            art["byte_count"] = len(new_rev_bytes_1)
+            art["sha256"] = _sha256(new_rev_bytes_1)
+    manifest_path.unlink()
+    manifest_path.write_bytes((canonical_json_dumps(manifest_data_1) + "\n").encode("utf-8"))
+
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_reduction_mismatch:analysis_state_mismatch:coverage_inventory_complete",
+    ):
+        load_verified_stage1_5j_a_historical_archive_coverage_root(test_root, project_root=tmp_path)
+
+    # Probe 2: decision mutated to stage1_5j_a_historical_archive_coverage_inventory_published
+    mutated_sum_2 = dict(summary_data)
+    mutated_sum_2["decision"] = "stage1_5j_a_historical_archive_coverage_inventory_published"
+    summary_path.unlink()
+    new_sum_bytes_2 = (canonical_json_dumps(mutated_sum_2) + "\n").encode("utf-8")
+    summary_path.write_bytes(new_sum_bytes_2)
+
+    review_path.unlink()
+    new_rev_text_2 = render_stage1_5j_a_review(mutated_sum_2)
+    review_path.write_text(new_rev_text_2, encoding="utf-8")
+    new_rev_bytes_2 = new_rev_text_2.encode("utf-8")
+
+    manifest_data_2 = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for art in manifest_data_2["artifacts"]:
+        if art["relative_path"] == "summary.json":
+            art["byte_count"] = len(new_sum_bytes_2)
+            art["sha256"] = _sha256(new_sum_bytes_2)
+        elif art["relative_path"] == "review_CN.md":
+            art["byte_count"] = len(new_rev_bytes_2)
+            art["sha256"] = _sha256(new_rev_bytes_2)
+    manifest_path.unlink()
+    manifest_path.write_bytes((canonical_json_dumps(manifest_data_2) + "\n").encode("utf-8"))
+
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_reduction_mismatch:decision_mismatch:stage1_5j_a_historical_archive_coverage_inventory_published",
+    ):
+        load_verified_stage1_5j_a_historical_archive_coverage_root(test_root, project_root=tmp_path)
