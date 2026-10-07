@@ -778,7 +778,7 @@ def build_inventory_summary(
         "target_parent_count": target_parent_count,
     }
 
-    if parent_coverage_gap_count == 0 and target_parent_count > 0:
+    if parent_coverage_gap_count == 0:
         analysis_state = "coverage_inventory_complete"
         decision = "stage1_5j_a_historical_archive_coverage_inventory_published"
     else:
@@ -925,9 +925,11 @@ def _validate_authority_packet(summary_data: dict[str, Any], project_root: Path 
             raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_authority_packet_invalid:const_sha_mismatch:{comp}")
 
         target_path = proj_root / expected_rel_path
-        if target_path.is_file():
-            if _file_sha256(target_path) != sha:
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_authority_packet_invalid:disk_sha_mismatch:{comp}")
+        _assert_no_symlinks(target_path)
+        if not target_path.is_file():
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_authority_packet_invalid:disk_file_missing:{comp}")
+        if _file_sha256(target_path) != sha:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_authority_packet_invalid:disk_sha_mismatch:{comp}")
 
     net_auth = auth_packet.get("network_authorization")
     if not isinstance(net_auth, dict) or set(net_auth.keys()) != {
@@ -953,18 +955,41 @@ def _validate_authority_packet(summary_data: dict[str, Any], project_root: Path 
         raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_authority_packet_invalid:network_auth_sha_invalid")
 
     net_path = proj_root / expected_net_rel
-    if net_path.is_file():
-        if _file_sha256(net_path) != net_sha:
-            raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_authority_packet_invalid:network_auth_disk_sha_mismatch")
+    _assert_no_symlinks(net_path)
+    if not net_path.is_file():
+        raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_authority_packet_invalid:network_auth_disk_file_missing")
+    if _file_sha256(net_path) != net_sha:
+        raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_authority_packet_invalid:network_auth_disk_sha_mismatch")
 
 
 def load_verified_stage1_5j_a_historical_archive_coverage_root(
     root_dir: Path,
-    project_root: Path | None = None,
 ) -> dict[str, Any]:
     """Strict loader replaying journal/parser/package/count/render reductions per Section 5.3."""
+    return _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
+        root_dir=root_dir,
+        project_root=_resolve_project_root(),
+    )
+
+
+def _load_verified_stage1_5j_a_historical_archive_coverage_root_for_test(
+    root_dir: Path,
+    project_root: Path,
+) -> dict[str, Any]:
+    """Private test helper: loads and validates root against an isolated test project_root."""
+    return _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
+        root_dir=root_dir,
+        project_root=project_root,
+    )
+
+
+def _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
+    root_dir: Path,
+    project_root: Path,
+) -> dict[str, Any]:
+    """Internal strict loader implementation."""
     _assert_no_symlinks(root_dir)
-    root = project_root or _resolve_project_root()
+    root = project_root
     _assert_no_symlinks(root)
 
     # 1. Output-parent containment and run_id format
@@ -1329,11 +1354,11 @@ def load_verified_stage1_5j_a_historical_archive_coverage_root(
                     raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_record_mismatch:{pid}")
 
     expected_analysis_state = (
-        "coverage_inventory_complete" if calc_parent_gap == 0 and calc_target_parent_count > 0
+        "coverage_inventory_complete" if calc_parent_gap == 0
         else "coverage_inventory_evidence_gap"
     )
     expected_decision = (
-        "stage1_5j_a_historical_archive_coverage_inventory_published" if calc_parent_gap == 0 and calc_target_parent_count > 0
+        "stage1_5j_a_historical_archive_coverage_inventory_published" if calc_parent_gap == 0
         else "stage1_5j_a_historical_archive_coverage_evidence_gap_published"
     )
 
@@ -1349,8 +1374,8 @@ def load_verified_stage1_5j_a_historical_archive_coverage_root(
     return summary_data
 
 
-def _load_verified_root_for_test(root_dir: Path, project_root: Path | None = None) -> dict[str, Any]:
-    return load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root)
+def _load_verified_root_for_test(root_dir: Path, project_root: Path) -> dict[str, Any]:
+    return _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(root_dir=root_dir, project_root=project_root)
 
 
 

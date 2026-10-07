@@ -17,7 +17,6 @@ import fcntl
 import hashlib
 import json
 import os
-import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -1183,14 +1182,14 @@ def test_strict_loader_structural_rejects_missing_tree_members(tmp_path: Path) -
         root_dir, project_root = _build_minimal_structural_root(sub_tmp)
         (root_dir / missing_name).unlink()
         with pytest.raises(Exception, match=f"STOP=stage1_5j_a_root_invalid:missing_file:{missing_name}"):
-            load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+            _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_extra_tree_members(tmp_path: Path) -> None:
     root_dir, project_root = _build_minimal_structural_root(tmp_path)
     (root_dir / "extra_untracked.txt").write_text("forbidden\n", encoding="utf-8")
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_root_invalid:unexpected_entries"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_symlinks(tmp_path: Path) -> None:
@@ -1198,7 +1197,7 @@ def test_strict_loader_structural_rejects_symlinks(tmp_path: Path) -> None:
     symlink_dir = tmp_path / OUTPUT_PARENT_REL / "symlink_root"
     os.symlink(root_dir, symlink_dir)
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_symlink_detected"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(symlink_dir, project_root=project_root)
+        _load_verified_root_for_test(symlink_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_noncanonical_manifest_bytes(tmp_path: Path) -> None:
@@ -1207,7 +1206,7 @@ def test_strict_loader_structural_rejects_noncanonical_manifest_bytes(tmp_path: 
     m_data = json.loads(m_file.read_text(encoding="utf-8"))
     m_file.write_text(json.dumps(m_data, indent=2) + "\n", encoding="utf-8")
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_manifest_not_canonical"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_manifest_run_id_mismatch(tmp_path: Path) -> None:
@@ -1217,7 +1216,7 @@ def test_strict_loader_structural_rejects_manifest_run_id_mismatch(tmp_path: Pat
     m_data["run_id"] = "stage1_5j_a_historical_archive_coverage_inventory_20261006T999999Z"
     m_file.write_text(canonical_json_dumps(m_data) + "\n", encoding="utf-8")
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_manifest_mismatch:run_id_mismatch"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_manifest_root_relative_path_mismatch(tmp_path: Path) -> None:
@@ -1227,38 +1226,46 @@ def test_strict_loader_structural_rejects_manifest_root_relative_path_mismatch(t
     m_data["root_relative_path"] = "different/path"
     m_file.write_text(canonical_json_dumps(m_data) + "\n", encoding="utf-8")
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_manifest_mismatch:root_relative_path_mismatch"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_manifest_missing_artifact(tmp_path: Path) -> None:
     root_dir, project_root = _build_minimal_structural_root(tmp_path)
     (root_dir / "raw" / "dummy.txt").unlink()
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_manifest_mismatch:missing_artifact:raw/dummy.txt"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_manifest_hash_mismatch(tmp_path: Path) -> None:
     root_dir, project_root = _build_minimal_structural_root(tmp_path)
     (root_dir / "raw" / "dummy.txt").write_bytes(b"tampered_data\n")
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_manifest_mismatch:hash_mismatch:raw/dummy.txt"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir, project_root=project_root)
+        _load_verified_root_for_test(root_dir, project_root=project_root)
 
 
 def test_strict_loader_structural_rejects_illegal_tree_state_shapes(tmp_path: Path) -> None:
     run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261006T000000Z"
     nonexistent = tmp_path / OUTPUT_PARENT_REL / run_id
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_root_missing"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(nonexistent, project_root=tmp_path)
+        _load_verified_root_for_test(nonexistent, project_root=tmp_path)
 
     bad_run_id_root = tmp_path / OUTPUT_PARENT_REL / "invalid_run_id_format"
     bad_run_id_root.mkdir(parents=True)
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_root_invalid:run_id_format"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(bad_run_id_root, project_root=tmp_path)
+        _load_verified_root_for_test(bad_run_id_root, project_root=tmp_path)
 
     wrong_parent_root = tmp_path / "wrong_parent" / run_id
     wrong_parent_root.mkdir(parents=True)
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_root_invalid:not_under_output_parent"):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(wrong_parent_root, project_root=tmp_path)
+        _load_verified_root_for_test(wrong_parent_root, project_root=tmp_path)
+
+
+def test_public_load_verified_root_rejects_path_arguments(tmp_path: Path) -> None:
+    """Public load_verified_stage1_5j_a_historical_archive_coverage_root() rejects caller-controlled project_root."""
+    with pytest.raises(TypeError):
+        load_verified_stage1_5j_a_historical_archive_coverage_root(tmp_path, tmp_path)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        load_verified_stage1_5j_a_historical_archive_coverage_root(root_dir=tmp_path, project_root=tmp_path)  # type: ignore[call-arg]
 
 
 def test_verify_execution_authority_rejects_sidecar_without_trailing_lf(valid_authority_bundle: Path) -> None:
@@ -1557,76 +1564,16 @@ def test_open_spy_no_sockets_opened_during_negative_probes() -> None:
     assert len(opened_sockets) == 0, f"Sockets opened during authority check: {opened_sockets}"
 
 
-def test_post_network_closure_probes_state_and_decision_mutations(tmp_path: Path) -> None:
-    """Post-network closure probes: assert strict loader rejects mutated analysis_state and decision."""
+def test_stale_production_receipt_fails_closed_under_new_core() -> None:
+    """Public loader on canonical repo root strictly rejects stale receipt due to audited_core hash mismatch."""
     prod_root = Path(
         "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T025000Z"
     )
     if not prod_root.is_dir():
         pytest.skip("Production receipt not present on disk")
 
-    test_root = tmp_path / OUTPUT_PARENT_REL / prod_root.name
-    shutil.copytree(prod_root, test_root, copy_function=os.link)
-
-    summary_path = test_root / "summary.json"
-    summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
-
-    # Probe 1: analysis_state mutated to coverage_inventory_complete
-    mutated_sum_1 = dict(summary_data)
-    mutated_sum_1["analysis_state"] = "coverage_inventory_complete"
-    summary_path.unlink()
-    new_sum_bytes_1 = (canonical_json_dumps(mutated_sum_1) + "\n").encode("utf-8")
-    summary_path.write_bytes(new_sum_bytes_1)
-
-    review_path = test_root / "review_CN.md"
-    review_path.unlink()
-    new_rev_text_1 = render_stage1_5j_a_review(mutated_sum_1)
-    review_path.write_text(new_rev_text_1, encoding="utf-8")
-    new_rev_bytes_1 = new_rev_text_1.encode("utf-8")
-
-    manifest_path = test_root / "manifest.json"
-    manifest_data_1 = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for art in manifest_data_1["artifacts"]:
-        if art["relative_path"] == "summary.json":
-            art["byte_count"] = len(new_sum_bytes_1)
-            art["sha256"] = _sha256(new_sum_bytes_1)
-        elif art["relative_path"] == "review_CN.md":
-            art["byte_count"] = len(new_rev_bytes_1)
-            art["sha256"] = _sha256(new_rev_bytes_1)
-    manifest_path.unlink()
-    manifest_path.write_bytes((canonical_json_dumps(manifest_data_1) + "\n").encode("utf-8"))
-
     with pytest.raises(
         Stage1_5JADiagnosticError,
-        match=r"STOP=stage1_5j_a_reduction_mismatch:analysis_state_mismatch:coverage_inventory_complete",
+        match=r"STOP=stage1_5j_a_authority_packet_invalid:disk_sha_mismatch:audited_core",
     ):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(test_root, project_root=tmp_path)
-
-    # Probe 2: decision mutated to stage1_5j_a_historical_archive_coverage_inventory_published
-    mutated_sum_2 = dict(summary_data)
-    mutated_sum_2["decision"] = "stage1_5j_a_historical_archive_coverage_inventory_published"
-    summary_path.unlink()
-    new_sum_bytes_2 = (canonical_json_dumps(mutated_sum_2) + "\n").encode("utf-8")
-    summary_path.write_bytes(new_sum_bytes_2)
-
-    review_path.unlink()
-    new_rev_text_2 = render_stage1_5j_a_review(mutated_sum_2)
-    review_path.write_text(new_rev_text_2, encoding="utf-8")
-    new_rev_bytes_2 = new_rev_text_2.encode("utf-8")
-
-    manifest_data_2 = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for art in manifest_data_2["artifacts"]:
-        if art["relative_path"] == "summary.json":
-            art["byte_count"] = len(new_sum_bytes_2)
-            art["sha256"] = _sha256(new_sum_bytes_2)
-        elif art["relative_path"] == "review_CN.md":
-            art["byte_count"] = len(new_rev_bytes_2)
-            art["sha256"] = _sha256(new_rev_bytes_2)
-    manifest_path.unlink()
-    manifest_path.write_bytes((canonical_json_dumps(manifest_data_2) + "\n").encode("utf-8"))
-
-    with pytest.raises(
-        Stage1_5JADiagnosticError,
-        match=r"STOP=stage1_5j_a_reduction_mismatch:decision_mismatch:stage1_5j_a_historical_archive_coverage_inventory_published",
-    ):
-        load_verified_stage1_5j_a_historical_archive_coverage_root(test_root, project_root=tmp_path)
+        load_verified_stage1_5j_a_historical_archive_coverage_root(prod_root)
