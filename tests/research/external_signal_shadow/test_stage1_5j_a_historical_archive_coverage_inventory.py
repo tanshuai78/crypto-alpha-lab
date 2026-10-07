@@ -210,6 +210,44 @@ def test_verify_execution_authority_rejects_extra_file_in_bundle(valid_authority
         _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
 
 
+def test_verify_execution_authority_permits_paired_network_authorization_files(valid_authority_bundle: Path) -> None:
+    (valid_authority_bundle / "network_authorization.txt").write_text("dummy net auth\n", encoding="utf-8")
+    (valid_authority_bundle / "network_authorization.sha256").write_text("dummy sha\n", encoding="utf-8")
+    res = _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
+    assert res["base_sha"] == PLANNING_BASE_SHA
+
+
+def test_verify_execution_authority_rejects_incomplete_network_authorization(valid_authority_bundle: Path) -> None:
+    (valid_authority_bundle / "network_authorization.txt").write_text("dummy net auth\n", encoding="utf-8")
+    with pytest.raises(
+        Exception, match=r"STOP=stage1_5j_a_execution_authority_packet_invalid:network_authorization_incomplete"
+    ):
+        _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
+
+    (valid_authority_bundle / "network_authorization.txt").unlink()
+    (valid_authority_bundle / "network_authorization.sha256").write_text("dummy sha\n", encoding="utf-8")
+    with pytest.raises(
+        Exception, match=r"STOP=stage1_5j_a_execution_authority_packet_invalid:network_authorization_incomplete"
+    ):
+        _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
+
+
+def test_verify_execution_authority_rejects_symlink_or_dir_network_authorization(
+    valid_authority_bundle: Path, tmp_path: Path
+) -> None:
+    target = tmp_path / "real_file.txt"
+    target.write_text("target\n", encoding="utf-8")
+    os.symlink(target, valid_authority_bundle / "network_authorization.txt")
+    (valid_authority_bundle / "network_authorization.sha256").write_text("dummy sha\n", encoding="utf-8")
+    with pytest.raises(Exception, match=r"STOP=stage1_5j_a_execution_authority_symlink_detected"):
+        _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
+
+    (valid_authority_bundle / "network_authorization.txt").unlink()
+    (valid_authority_bundle / "network_authorization.txt").mkdir()
+    with pytest.raises(Exception, match=r"STOP=stage1_5j_a_execution_authority_not_regular_file"):
+        _verify_execution_authority_for_test(authority_bundle_dir=valid_authority_bundle)
+
+
 def test_verify_execution_authority_rejects_missing_file_in_bundle(valid_authority_bundle: Path) -> None:
     (valid_authority_bundle / "base_sha").unlink()
     with pytest.raises(Exception, match=r"STOP=stage1_5j_a_execution_authority_packet_invalid:missing_entries"):

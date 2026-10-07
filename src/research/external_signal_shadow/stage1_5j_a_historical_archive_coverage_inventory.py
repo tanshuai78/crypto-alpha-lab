@@ -230,7 +230,15 @@ def _verify_execution_authority_for_test(
         raise Stage1_5JADiagnosticError(
             f"STOP=stage1_5j_a_execution_authority_packet_invalid:missing_entries:{sorted(missing)}"
         )
-    extra = set(entries) - set(expected_entries)
+
+    optional_network_entries = {"network_authorization.txt", "network_authorization.sha256"}
+    net_present = optional_network_entries.intersection(entries)
+    if len(net_present) == 1:
+        raise Stage1_5JADiagnosticError(
+            f"STOP=stage1_5j_a_execution_authority_packet_invalid:network_authorization_incomplete:{sorted(net_present)}"
+        )
+
+    extra = set(entries) - set(expected_entries) - optional_network_entries
     if extra:
         raise Stage1_5JADiagnosticError(
             f"STOP=stage1_5j_a_execution_authority_packet_invalid:unexpected_entries:{sorted(extra)}"
@@ -242,6 +250,14 @@ def _verify_execution_authority_for_test(
             raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_execution_authority_symlink_detected: {p}")
         if not p.is_file():
             raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_execution_authority_not_regular_file: {p}")
+
+    if len(net_present) == 2:
+        for name in sorted(optional_network_entries):
+            p = bundle_dir / name
+            if p.is_symlink():
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_execution_authority_symlink_detected: {p}")
+            if not p.is_file():
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_execution_authority_not_regular_file: {p}")
 
     # Validate implementation_authorization.txt
     auth_file = bundle_dir / "implementation_authorization.txt"
