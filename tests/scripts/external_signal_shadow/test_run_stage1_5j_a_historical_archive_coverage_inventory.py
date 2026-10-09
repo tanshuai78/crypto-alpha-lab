@@ -12,10 +12,10 @@ from unittest.mock import patch
 
 import pytest
 
-APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md"
-APPROVED_DESIGN_SHA256 = "b74c306e92b2bd72935b6791ac5ee38889d27887c90be31c55457a223e4fc15a"
-APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md"
-APPROVED_PLAN_SHA256 = "fa7d2ac23a605163a3ceb476efe4c5823b94e16ef9944ced173a2cff9d07279f"
+APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
+APPROVED_DESIGN_SHA256 = "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-implementation-plan_CN.md"
+APPROVED_PLAN_SHA256 = "6af426ca5d8c628449820fbd433190f4923971aa2515b16f4bbd398f18fcec7a"
 VALID_RUN_ID = "stage1_5j_a_historical_archive_coverage_inventory_20261006T000000Z"
 
 # Graceful import stubbing for TDD RED phase

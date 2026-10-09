@@ -25,11 +25,11 @@ from unittest.mock import patch
 import pytest
 
 # Constants from approved Design and Plan
-APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md"
-APPROVED_DESIGN_SHA256 = "b74c306e92b2bd72935b6791ac5ee38889d27887c90be31c55457a223e4fc15a"
-APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md"
-APPROVED_PLAN_SHA256 = "fa7d2ac23a605163a3ceb476efe4c5823b94e16ef9944ced173a2cff9d07279f"
-PLANNING_BASE_SHA = "d91574c292ff54a7b489a203dd1c166bb6bfba75"
+APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
+APPROVED_DESIGN_SHA256 = "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-implementation-plan_CN.md"
+APPROVED_PLAN_SHA256 = "6af426ca5d8c628449820fbd433190f4923971aa2515b16f4bbd398f18fcec7a"
+PLANNING_BASE_SHA = "23708b840384b56d11b17b8d63c131e9ce72f2d3"
 FROZEN_PARSER_SHA256 = "7e0e696647acf158facbdd8d3d39351bbc68c33b039871f26f4a38bc75ad56e5"
 FROZEN_PARSER_REL_PATH = "src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py"
 
@@ -129,6 +129,22 @@ except ImportError as _import_err:
     EXTERNAL_SIGNAL_STAGE1_5J_A_MAX_CHECKSUM_RESPONSE_BYTES = 16384
     EXTERNAL_SIGNAL_STAGE1_5J_A_MAX_ARCHIVE_CSV_UNCOMPRESSED_BYTES = 536870912
     EXTERNAL_SIGNAL_STAGE1_5J_A_MAX_ARCHIVE_COMPRESSION_RATIO = 64
+
+try:
+    from src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory import (
+        _compute_required_archive_utc_dates,
+    )
+except ImportError:
+    def _compute_required_archive_utc_dates(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("STOP=stage1_5j_a_compute_required_archive_utc_dates_not_implemented")
+
+try:
+    from src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory import (
+        _validate_request_journal_lines,
+    )
+except ImportError:
+    def _validate_request_journal_lines(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("STOP=stage1_5j_a_validate_request_journal_lines_not_implemented")
 
 
 def _sha256(data: bytes | str) -> str:
@@ -1565,7 +1581,7 @@ def test_open_spy_no_sockets_opened_during_negative_probes() -> None:
 
 
 def test_stale_production_receipt_fails_closed_under_new_core() -> None:
-    """Public loader on canonical repo root strictly rejects stale receipt due to audited_core hash mismatch."""
+    """Public loader on canonical repo root strictly rejects stale receipt due to authority packet mismatch."""
     prod_root = Path(
         "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T025000Z"
     )
@@ -1574,6 +1590,332 @@ def test_stale_production_receipt_fails_closed_under_new_core() -> None:
 
     with pytest.raises(
         Stage1_5JADiagnosticError,
-        match=r"STOP=stage1_5j_a_authority_packet_invalid:disk_sha_mismatch:audited_core",
+        match=r"STOP=stage1_5j_a_authority_packet_invalid:(rel_path_mismatch:approved_design|disk_sha_mismatch:audited_core)",
     ):
         load_verified_stage1_5j_a_historical_archive_coverage_root(prod_root)
+
+
+# =========================================================================
+# Group I: Task 1 Conformance Remediation RED Contract Tests
+# =========================================================================
+
+
+def test_request_journal_exact_grammar_and_http_not_found(tmp_path: Path) -> None:
+    from src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory import (
+        RequestManager,
+    )
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    mgr = RequestManager(staging_dir=staging_dir)
+
+    class FakeResponse200:
+        status = 200
+
+        def read(self, n: int = -1) -> bytes:
+            return b'{"data": []}'
+
+    class FakeConn200:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def request(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def getresponse(self) -> Any:
+            return FakeResponse200()
+
+        def close(self) -> None:
+            pass
+
+    url = f"https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize={EXTERNAL_SIGNAL_STAGE1_5J_A_CATALOG_PAGE_SIZE}"
+    with patch("http.client.HTTPSConnection", FakeConn200):
+        mgr.request(kind="catalog", url=url, rel_path="raw/catalog_scan_a/1.json")
+
+    journal_lines = [json.loads(line) for line in mgr.journal_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(journal_lines) == 2, f"Expected 2 journal entries, got {len(journal_lines)}"
+    intent = journal_lines[0]
+    term = journal_lines[1]
+
+    # Delta §3.1: Intent exact keys: event, parent_article_id, request_id, request_kind, request_state, symbol, url, utc_date
+    expected_intent_keys = {
+        "event", "parent_article_id", "request_id", "request_kind",
+        "request_state", "symbol", "url", "utc_date"
+    }
+    assert set(intent.keys()) == expected_intent_keys, f"Intent keys mismatch: {set(intent.keys())} vs {expected_intent_keys}"
+    assert intent["event"] == "request_intent"
+    assert intent["request_state"] == "admitted_pending"
+    assert "created_at_utc" not in intent
+
+    # Delta §3.1: Terminal exact keys: event, http_status, request_id, request_state, response_bytes, response_relative_path, response_sha256, transport_error
+    expected_terminal_keys = {
+        "event", "http_status", "request_id", "request_state",
+        "response_bytes", "response_relative_path", "response_sha256", "transport_error"
+    }
+    assert set(term.keys()) == expected_terminal_keys, f"Terminal keys mismatch: {set(term.keys())} vs {expected_terminal_keys}"
+    assert term["event"] == "request_terminal"
+    assert term["request_state"] == "response_persisted"
+    assert term["http_status"] == 200
+    assert term["transport_error"] is None
+    assert "completed_at_utc" not in term
+    assert "http_status_or_transport_error" not in term
+
+    class FakeResponse404:
+        status = 404
+
+        def read(self, n: int = -1) -> bytes:
+            return b"Not Found"
+
+    class FakeConn404:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def request(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def getresponse(self) -> Any:
+            return FakeResponse404()
+
+        def close(self) -> None:
+            pass
+
+    detail_article_id = "a" * 32
+    detail_url = "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=" + detail_article_id
+    with patch("http.client.HTTPSConnection", FakeConn404):
+        mgr.request(
+            kind="detail",
+            url=detail_url,
+            rel_path="raw/detail/detail_a.json",
+            parent_article_id=detail_article_id,
+        )
+
+    lines_after_404 = [json.loads(line) for line in mgr.journal_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines_after_404) == 4
+    term404 = lines_after_404[3]
+    assert set(term404.keys()) == expected_terminal_keys
+    # Delta §3.1: 404 MUST be http_not_found, never http_non_200
+    assert term404["request_state"] == "http_not_found"
+    assert term404["http_status"] == 404
+    assert term404["transport_error"] is None
+    assert term404["response_bytes"] is None
+
+    # Fail-closed probes for component validator _validate_request_journal_lines
+    raw_lines = mgr.journal_file.read_text(encoding="utf-8").splitlines()
+    mutated_intent_no_state = json.loads(raw_lines[0])
+    del mutated_intent_no_state["request_state"]
+    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_journal_invalid:intent_keys_mismatch"):
+        _validate_request_journal_lines([json.dumps(mutated_intent_no_state)] + raw_lines[1:])
+
+    mutated_intent_created_at = json.loads(raw_lines[0])
+    mutated_intent_created_at["created_at_utc"] = "2026-10-08T00:00:00Z"
+    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_journal_invalid:intent_keys_mismatch"):
+        _validate_request_journal_lines([json.dumps(mutated_intent_created_at)] + raw_lines[1:])
+
+    mutated_term_non_200 = json.loads(raw_lines[3])
+    mutated_term_non_200["request_state"] = "http_non_200"
+    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_journal_invalid:terminal_state_invalid"):
+        _validate_request_journal_lines(raw_lines[:3] + [json.dumps(mutated_term_non_200)])
+
+    mutated_term_404_bytes = json.loads(raw_lines[3])
+    mutated_term_404_bytes["response_bytes"] = 123
+    with pytest.raises(Stage1_5JADiagnosticError, match=r"STOP=stage1_5j_a_journal_invalid:terminal_combination_invalid"):
+        _validate_request_journal_lines(raw_lines[:3] + [json.dumps(mutated_term_404_bytes)])
+
+
+def test_required_utc_dates_and_logical_records() -> None:
+    # Non-crossing interval: 2026-07-31 02:00:00 UTC -> 06:00:00 UTC
+    dates1 = _compute_required_archive_utc_dates(1785463200000)
+    assert dates1 == ["2026-07-31"]
+
+    # Crossing UTC midnight: 2026-07-31 22:00:00 UTC -> 2026-08-01 02:00:00 UTC
+    dates2 = _compute_required_archive_utc_dates(1785535200000)
+    assert dates2 == ["2026-07-31", "2026-08-01"]
+
+    # Closed interval touching UTC midnight: 2026-07-31 20:00:00 UTC -> 2026-08-01 00:00:00 UTC
+    dates3 = _compute_required_archive_utc_dates(1785528000000)
+    assert dates3 == ["2026-07-31", "2026-08-01"]
+
+
+def test_archive_package_finite_decimal_validation(canonical_fixture_dir: Path, tmp_path: Path) -> None:
+    zip_path = canonical_fixture_dir / "GRVTUSDT-aggTrades-2026-07-31.zip"
+    chk_path = canonical_fixture_dir / "GRVTUSDT-aggTrades-2026-07-31.zip.CHECKSUM"
+    launch_time_ms = 1785463200000
+
+    # Canonical GRVT package passes unchanged
+    res = validate_archive_package(
+        zip_path=zip_path,
+        checksum_path=chk_path,
+        symbol="GRVTUSDT",
+        utc_date="2026-07-31",
+        launch_time_ms=launch_time_ms,
+    )
+    assert res["child_state"] == "archive_verified_with_post_launch_rows"
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        csv_bytes = zf.read("GRVTUSDT-aggTrades-2026-07-31.csv")
+
+    lines = csv_bytes.decode("utf-8").splitlines()
+    header = lines[0]
+    data_rows = [r.split(",") for r in lines[1:]]
+
+    # Probes: NaN, sNaN, Infinity, -Infinity, 0, negative
+    bad_tokens = ["NaN", "sNaN", "Infinity", "-Infinity", "0", "-1.5"]
+    for bad_token in bad_tokens:
+        probe_dir = tmp_path / f"probe_{bad_token}"
+        probe_dir.mkdir(parents=True)
+        probe_zip = probe_dir / "GRVTUSDT-aggTrades-2026-07-31.zip"
+        probe_chk = probe_dir / "GRVTUSDT-aggTrades-2026-07-31.zip.CHECKSUM"
+
+        mutated_rows = [list(r) for r in data_rows]
+        mutated_rows[0][1] = bad_token  # price
+        mutated_csv_text = header + "\n" + "\n".join(",".join(r) for r in mutated_rows) + "\n"
+
+        with zipfile.ZipFile(probe_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf_out:
+            zf_out.writestr("GRVTUSDT-aggTrades-2026-07-31.csv", mutated_csv_text)
+
+        zip_hash = _file_sha256(probe_zip)
+        probe_chk.write_text(f"{zip_hash}  GRVTUSDT-aggTrades-2026-07-31.zip\n", encoding="utf-8")
+
+        with pytest.raises(
+            Stage1_5JADiagnosticError,
+            match=r"STOP=stage1_5j_a_archive_package_invalid:csv_(value_range_error|type_error|numeric_invalid)",
+        ) as exc_info:
+            validate_archive_package(
+                zip_path=probe_zip,
+                checksum_path=probe_chk,
+                symbol="GRVTUSDT",
+                utc_date="2026-07-31",
+                launch_time_ms=launch_time_ms,
+            )
+        err_msg = str(exc_info.value)
+        assert "checksum" not in err_msg
+        assert "zip" not in err_msg
+
+
+def test_public_loader_rejects_legacy_root() -> None:
+    legacy_root = Path(
+        "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z"
+    )
+    if not legacy_root.is_dir():
+        pytest.skip("Legacy production root not found on disk")
+    with pytest.raises(Stage1_5JADiagnosticError) as exc_info:
+        load_verified_stage1_5j_a_historical_archive_coverage_root(legacy_root)
+    assert "STOP=" in str(exc_info.value)
+
+
+def test_intent_context_applicability(tmp_path: Path) -> None:
+    """Verifies that intent context fields (parent_article_id, symbol, utc_date) are strictly validated per request_kind."""
+    from src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory import (
+        RequestManager,
+        _validate_request_journal_lines,
+    )
+
+    # 1. Component probe on _validate_request_journal_lines
+    valid_terminal_404 = canonical_json_dumps({
+        "event": "request_terminal",
+        "http_status": 404,
+        "request_id": 1,
+        "request_state": "http_not_found",
+        "response_bytes": None,
+        "response_relative_path": None,
+        "response_sha256": None,
+        "transport_error": None,
+    })
+
+    # Archive with missing context fields must fail closed
+    archive_invalid_intent = canonical_json_dumps({
+        "event": "request_intent",
+        "parent_article_id": None,
+        "request_id": 1,
+        "request_kind": "archive",
+        "request_state": "admitted_pending",
+        "symbol": None,
+        "url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-05-01.zip",
+        "utc_date": None,
+    })
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:archive",
+    ):
+        _validate_request_journal_lines([archive_invalid_intent, valid_terminal_404])
+
+    # Checksum with missing symbol must fail closed
+    checksum_invalid_intent = canonical_json_dumps({
+        "event": "request_intent",
+        "parent_article_id": "test_parent",
+        "request_id": 1,
+        "request_kind": "checksum",
+        "request_state": "admitted_pending",
+        "symbol": None,
+        "url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-05-01.zip.CHECKSUM",
+        "utc_date": "2026-05-01",
+    })
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:checksum",
+    ):
+        _validate_request_journal_lines([checksum_invalid_intent, valid_terminal_404])
+
+    # Catalog with illegal context fields must fail closed
+    catalog_invalid_intent = canonical_json_dumps({
+        "event": "request_intent",
+        "parent_article_id": "illegal_parent",
+        "request_id": 1,
+        "request_kind": "catalog",
+        "request_state": "admitted_pending",
+        "symbol": None,
+        "url": "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=50",
+        "utc_date": None,
+    })
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:catalog",
+    ):
+        _validate_request_journal_lines([catalog_invalid_intent, valid_terminal_404])
+
+    # Detail with missing parent_article_id must fail closed
+    detail_invalid_intent = canonical_json_dumps({
+        "event": "request_intent",
+        "parent_article_id": None,
+        "request_id": 1,
+        "request_kind": "detail",
+        "request_state": "admitted_pending",
+        "symbol": None,
+        "url": "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=12345678901234567890123456789012",
+        "utc_date": None,
+    })
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:detail",
+    ):
+        _validate_request_journal_lines([detail_invalid_intent, valid_terminal_404])
+
+    # 2. Producer enforcement in RequestManager.request()
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    mgr = RequestManager(staging_dir=staging_dir)
+
+    # Calling archive request without context must raise before writing intent
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:archive",
+    ):
+        mgr.request(
+            kind="archive",
+            url="https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-05-01.zip",
+            rel_path="test.zip",
+            parent_article_id=None,
+            symbol=None,
+            utc_date=None,
+        )
+
+    # Calling catalog request with context must raise before writing intent
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:catalog",
+    ):
+        mgr.request(
+            kind="catalog",
+            url="https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=50",
+            rel_path="test.json",
+            parent_article_id="bad_context",
+        )

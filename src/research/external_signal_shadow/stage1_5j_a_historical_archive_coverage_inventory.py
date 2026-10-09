@@ -26,6 +26,7 @@ import sys
 import urllib.parse
 import zipfile
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -54,11 +55,11 @@ __all__ = [
 ]
 
 # Immutable Design & Plan Bindings
-APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md"
-APPROVED_DESIGN_SHA256 = "b74c306e92b2bd72935b6791ac5ee38889d27887c90be31c55457a223e4fc15a"
-APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md"
-APPROVED_PLAN_SHA256 = "fa7d2ac23a605163a3ceb476efe4c5823b94e16ef9944ced173a2cff9d07279f"
-PLANNING_BASE_SHA = "d91574c292ff54a7b489a203dd1c166bb6bfba75"
+APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
+APPROVED_DESIGN_SHA256 = "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-implementation-plan_CN.md"
+APPROVED_PLAN_SHA256 = "6af426ca5d8c628449820fbd433190f4923971aa2515b16f4bbd398f18fcec7a"
+PLANNING_BASE_SHA = "23708b840384b56d11b17b8d63c131e9ce72f2d3"
 FROZEN_PARSER_REL_PATH = "src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py"
 FROZEN_PARSER_SHA256 = "7e0e696647acf158facbdd8d3d39351bbc68c33b039871f26f4a38bc75ad56e5"
 
@@ -122,6 +123,35 @@ SUMMARY_EXACT_KEYS = {
     "universe_window",
 }
 
+INTENT_EXACT_KEYS = frozenset({
+    "event",
+    "parent_article_id",
+    "request_id",
+    "request_kind",
+    "request_state",
+    "symbol",
+    "url",
+    "utc_date",
+})
+
+TERMINAL_EXACT_KEYS = frozenset({
+    "event",
+    "http_status",
+    "request_id",
+    "request_state",
+    "response_bytes",
+    "response_relative_path",
+    "response_sha256",
+    "transport_error",
+})
+
+VALID_TERMINAL_STATES = frozenset({
+    "response_persisted",
+    "http_not_found",
+    "transport_inconclusive",
+    "response_rejected",
+})
+
 RUN_ID_REGEX = re.compile(r"^stage1_5j_a_historical_archive_coverage_inventory_\d{8}T\d{6}Z$")
 
 
@@ -133,6 +163,182 @@ class Stage1_5JADiagnosticError(Exception):
 class Stage1_5JAPostRenameDurabilityFailure(Stage1_5JADiagnosticError):
     """Raised when fsync fails after atomic rename, indicating durability failure."""
     pass
+
+
+def _compute_required_archive_utc_dates(launch_time_ms: int) -> list[str]:
+    """Computes sorted deduplicated UTC calendar dates intersecting [launch_time_ms, launch_time_ms + PRESENCE_WINDOW_MS]."""
+    if not isinstance(launch_time_ms, int) or isinstance(launch_time_ms, bool):
+        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_invalid_launch_time: {launch_time_ms}")
+    end_time_ms = launch_time_ms + PRESENCE_WINDOW_MS
+    start_day = launch_time_ms // 86_400_000
+    end_day = end_time_ms // 86_400_000
+    dates = []
+    for d in range(start_day, end_day + 1):
+        dt = datetime.fromtimestamp(d * 86400, tz=timezone.utc)
+        dates.append(dt.strftime("%Y-%m-%d"))
+    return sorted(set(dates))
+
+
+def _validate_intent_context_applicability(
+    kind: str,
+    parent_article_id: Any,
+    symbol: Any,
+    utc_date: Any,
+) -> None:
+    """Validates intent context fields per approved Delta Section 3.1:
+
+    parent_article_id, symbol, and utc_date are null only when not applicable to that request kind.
+    - catalog: parent_article_id, symbol, and utc_date must all be null.
+    - detail: parent_article_id must be a non-empty string; symbol and utc_date must be null.
+    - archive, checksum: parent_article_id, symbol, and utc_date must all be non-empty strings.
+    """
+    if kind == "catalog":
+        if parent_article_id is not None or symbol is not None or utc_date is not None:
+            raise Stage1_5JADiagnosticError(
+                "STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:catalog"
+            )
+    elif kind == "detail":
+        if (
+            not isinstance(parent_article_id, str)
+            or not parent_article_id
+            or symbol is not None
+            or utc_date is not None
+        ):
+            raise Stage1_5JADiagnosticError(
+                "STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:detail"
+            )
+    elif kind in ("archive", "checksum"):
+        if (
+            not isinstance(parent_article_id, str)
+            or not parent_article_id
+            or not isinstance(symbol, str)
+            or not symbol
+            or not isinstance(utc_date, str)
+            or not utc_date
+        ):
+            raise Stage1_5JADiagnosticError(
+                f"STOP=stage1_5j_a_journal_invalid:intent_context_inapplicable:{kind}"
+            )
+    else:
+        raise Stage1_5JADiagnosticError(
+            f"STOP=stage1_5j_a_journal_invalid:intent_kind_invalid:{kind}"
+        )
+
+
+def _validate_request_journal_lines(
+    journal_lines: list[str],
+) -> tuple[dict[int, dict[str, Any]], dict[int, dict[str, Any]], list[dict[str, Any]]]:
+    """Validates raw request journal lines per approved Delta Section 3.1 and returns intents, terminals, replayed_records."""
+    seen_intent_rids: set[int] = set()
+    seen_terminal_rids: set[int] = set()
+    intents: dict[int, dict[str, Any]] = {}
+    terminals: dict[int, dict[str, Any]] = {}
+
+    for line in journal_lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+        try:
+            entry = json.loads(line_str)
+        except Exception as e:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid: {e}") from e
+
+        ev = entry.get("event")
+        rid = entry.get("request_id")
+        if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:invalid_request_id:{rid}")
+
+        if ev == "request_intent":
+            if set(entry.keys()) != INTENT_EXACT_KEYS:
+                raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:intent_keys_mismatch")
+            if entry.get("request_state") != "admitted_pending":
+                raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:intent_state_invalid")
+            kind = entry.get("request_kind")
+            if kind not in ("catalog", "detail", "archive", "checksum"):
+                raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:intent_kind_invalid")
+            _validate_intent_context_applicability(
+                kind=kind,
+                parent_article_id=entry.get("parent_article_id"),
+                symbol=entry.get("symbol"),
+                utc_date=entry.get("utc_date"),
+            )
+            if rid in seen_intent_rids:
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:duplicate_intent:{rid}")
+            seen_intent_rids.add(rid)
+            intents[rid] = entry
+
+        elif ev == "request_terminal":
+            if set(entry.keys()) != TERMINAL_EXACT_KEYS:
+                raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_keys_mismatch")
+            if rid in seen_terminal_rids:
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:duplicate_terminal:{rid}")
+            if rid not in seen_intent_rids:
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:terminal_without_intent:{rid}")
+
+            req_state = entry.get("request_state")
+            if req_state not in VALID_TERMINAL_STATES:
+                raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_state_invalid")
+
+            status = entry.get("http_status")
+            err = entry.get("transport_error")
+            resp_bytes = entry.get("response_bytes")
+            resp_rel = entry.get("response_relative_path")
+            resp_sha = entry.get("response_sha256")
+
+            # Check state combinations per Delta Section 3.1
+            if req_state == "response_persisted":
+                if (
+                    status != 200
+                    or err is not None
+                    or not isinstance(resp_rel, str)
+                    or not resp_rel
+                    or not isinstance(resp_sha, str)
+                    or len(resp_sha) != 64
+                    or not isinstance(resp_bytes, int)
+                    or isinstance(resp_bytes, bool)
+                    or resp_bytes <= 0
+                ):
+                    raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_combination_invalid")
+            elif req_state == "http_not_found":
+                if status != 404 or err is not None or resp_rel is not None or resp_sha is not None or resp_bytes is not None:
+                    raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_combination_invalid")
+            elif req_state == "transport_inconclusive":
+                if status is not None or not isinstance(err, str) or not err or resp_rel is not None or resp_sha is not None or resp_bytes is not None:
+                    raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_combination_invalid")
+            elif req_state == "response_rejected":
+                if not isinstance(status, int) or isinstance(status, bool) or status in (200, 404) or err is not None or resp_rel is not None or resp_sha is not None or resp_bytes is not None:
+                    raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:terminal_combination_invalid")
+
+            seen_terminal_rids.add(rid)
+            terminals[rid] = entry
+        else:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:unknown_event:{ev}")
+
+    if seen_intent_rids != seen_terminal_rids:
+        missing_terminals = seen_intent_rids - seen_terminal_rids
+        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:intent_terminal_mismatch:{missing_terminals}")
+
+    all_rids = sorted(terminals.keys())
+    if all_rids != list(range(1, len(all_rids) + 1)):
+        raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:non_contiguous_request_ids")
+
+    replayed_records = []
+    for rid in all_rids:
+        intent = intents[rid]
+        term = terminals[rid]
+        http_or_err = term["http_status"] if term["http_status"] is not None else term["transport_error"]
+        replayed_records.append({
+            "http_status_or_transport_error": http_or_err,
+            "request_id": rid,
+            "request_kind": intent["request_kind"],
+            "request_state": term["request_state"],
+            "response_bytes": term["response_bytes"],
+            "response_relative_path": term["response_relative_path"],
+            "response_sha256": term["response_sha256"],
+            "url": intent["url"],
+        })
+
+    return intents, terminals, replayed_records
 
 
 def _sha256(data: bytes | str) -> str:
@@ -682,16 +888,25 @@ def validate_archive_package(
 
                 try:
                     trade_id = int(row[0])
-                    price = float(row[1])
-                    qty = float(row[2])
+                    price = Decimal(row[1])
+                    qty = Decimal(row[2])
                     first_id = int(row[3])
                     last_id = int(row[4])
                     transact_time = int(row[5])
                     maker = row[6].strip().lower()
-                except ValueError as e:
+                except (ValueError, InvalidOperation) as e:
                     raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_archive_package_invalid:csv_type_error: {e}") from e
 
-                if trade_id < 0 or first_id < 0 or last_id < 0 or transact_time <= 0 or price <= 0 or qty <= 0:
+                if (
+                    trade_id < 0
+                    or first_id < 0
+                    or last_id < 0
+                    or transact_time <= 0
+                    or not price.is_finite()
+                    or price <= 0
+                    or not qty.is_finite()
+                    or qty <= 0
+                ):
                     raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_archive_package_invalid:csv_value_range_error")
                 if maker not in ("true", "false"):
                     raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_archive_package_invalid:csv_maker_invalid")
@@ -1081,63 +1296,7 @@ def _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
     if not journal_lines:
         raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_root_invalid:empty_journal")
 
-    seen_intent_rids: set[int] = set()
-    seen_terminal_rids: set[int] = set()
-    intents: dict[int, dict[str, Any]] = {}
-    terminals: dict[int, dict[str, Any]] = {}
-    for line in journal_lines:
-        try:
-            entry = json.loads(line)
-        except Exception as e:
-            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid: {e}") from e
-        ev = entry.get("event")
-        rid = entry.get("request_id")
-        if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0:
-            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:invalid_request_id:{rid}")
-        if ev == "request_intent":
-            if rid in seen_intent_rids:
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:duplicate_intent:{rid}")
-            seen_intent_rids.add(rid)
-            intents[rid] = entry
-        elif ev == "request_terminal":
-            if rid in seen_terminal_rids:
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:duplicate_terminal:{rid}")
-            if rid not in seen_intent_rids:
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:terminal_without_intent:{rid}")
-            seen_terminal_rids.add(rid)
-            terminals[rid] = entry
-            # Consistency check
-            intent_entry = intents[rid]
-            if entry.get("request_kind") != intent_entry.get("request_kind"):
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:kind_mismatch:{rid}")
-            if entry.get("url") != intent_entry.get("url"):
-                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:url_mismatch:{rid}")
-        else:
-            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:unknown_event:{ev}")
-
-    if seen_intent_rids != seen_terminal_rids:
-        missing_terminals = seen_intent_rids - seen_terminal_rids
-        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_journal_invalid:intent_terminal_mismatch:{missing_terminals}")
-
-    # Verify contiguous request IDs
-    all_rids = sorted(terminals.keys())
-    if all_rids != list(range(1, len(all_rids) + 1)):
-        raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_journal_invalid:non_contiguous_request_ids")
-
-    # Replay request_records against terminals
-    replayed_request_records = []
-    for rid in all_rids:
-        term = terminals[rid]
-        replayed_request_records.append({
-            "http_status_or_transport_error": term["http_status_or_transport_error"],
-            "request_id": term["request_id"],
-            "request_kind": term["request_kind"],
-            "request_state": term["request_state"],
-            "response_bytes": term["response_bytes"],
-            "response_relative_path": term["response_relative_path"],
-            "response_sha256": term["response_sha256"],
-            "url": term["url"],
-        })
+    intents, terminals, replayed_request_records = _validate_request_journal_lines(journal_lines)
 
     if summary_data.get("request_records") != replayed_request_records:
         raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_reduction_mismatch:request_records_mismatch")
@@ -1252,11 +1411,44 @@ def _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
     # Replay archive packages
     archive_dir = root_dir / "raw" / "archive"
     packages = summary_data.get("archive_package_records", [])
+
+    # Replay required date sets per child
+    expected_package_keys: set[tuple[str, str, str]] = set()
+    for p in parents:
+        pid = p["source_article_id"]
+        if p.get("detail_status") == "validated_target_detail":
+            for c in p.get("children", []):
+                if c.get("child_scope") == "in_scope_usdt":
+                    sym = c["symbol"]
+                    launch_time = c.get("symbol_launch_time_ms")
+                    if launch_time is not None:
+                        for d in _compute_required_archive_utc_dates(launch_time):
+                            expected_package_keys.add((pid, sym, d))
+
+    actual_package_keys = {
+        (ap["parent_article_id"], ap["symbol"], ap["utc_date"])
+        for ap in packages
+        if ap.get("utc_date") != "unknown"
+    }
+    if actual_package_keys != expected_package_keys:
+        raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_reduction_mismatch:archive_package_date_set_mismatch")
+
     for ap in packages:
         sym = ap["symbol"]
         utc_date = ap["utc_date"]
         pid = ap["parent_article_id"]
         state = ap["child_state"]
+
+        exp_logical_id = {
+            "market": "futures_um",
+            "metric": "aggTrades",
+            "parent_article_id": pid,
+            "symbol": sym,
+            "utc_date": utc_date,
+        }
+        if ap.get("logical_archive_identity") != exp_logical_id:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:logical_archive_identity_mismatch:{sym}:{utc_date}")
+
         zip_path = archive_dir / sym / f"{sym}-aggTrades-{utc_date}.zip" if archive_dir.is_dir() else None
         chk_path = archive_dir / sym / f"{sym}-aggTrades-{utc_date}.zip.CHECKSUM" if archive_dir.is_dir() else None
         if zip_path and zip_path.is_file() and chk_path and chk_path.is_file():
@@ -1421,20 +1613,32 @@ class RequestManager:
         else:
             raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_request_admission_failure:unknown_kind:{kind}")
 
-    def request(self, kind: str, url: str, rel_path: str) -> bytes | None:
+    def request(
+        self,
+        kind: str,
+        url: str,
+        rel_path: str,
+        parent_article_id: str | None = None,
+        symbol: str | None = None,
+        utc_date: str | None = None,
+    ) -> bytes | None:
+        # 1. Validate admission and intent context applicability
+        self.validate_url(kind, url)
+        _validate_intent_context_applicability(kind, parent_article_id, symbol, utc_date)
+
         self.request_id += 1
         req_id = self.request_id
 
-        # 1. Validate admission
-        self.validate_url(kind, url)
-
         # 2. Append-only write intent
         intent = {
-            "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "event": "request_intent",
+            "parent_article_id": parent_article_id,
             "request_id": req_id,
             "request_kind": kind,
+            "request_state": "admitted_pending",
+            "symbol": symbol,
             "url": url,
+            "utc_date": utc_date,
         }
         with open(self.journal_file, "a", encoding="utf-8") as jf:
             jf.write(canonical_json_dumps(intent) + "\n")
@@ -1467,6 +1671,7 @@ class RequestManager:
             http_status = resp.status
             if http_status in (301, 302, 303, 307, 308):
                 transport_err = f"redirect_prohibited:{http_status}"
+                http_status = None
                 body_bytes = None
             else:
                 max_bytes = (
@@ -1477,27 +1682,44 @@ class RequestManager:
                 content = resp.read(max_bytes + 1)
                 if len(content) > max_bytes:
                     transport_err = "max_bytes_exceeded"
+                    http_status = None
                     body_bytes = None
                 else:
                     body_bytes = content
             conn.close()
         except Exception as e:
             transport_err = str(e)
+            http_status = None
             body_bytes = None
 
         # 4. Handle transport error / inconclusive
         if transport_err is not None or http_status is None:
             term = {
-                "completed_at_utc": datetime.now(timezone.utc).isoformat(),
                 "event": "request_terminal",
-                "http_status_or_transport_error": transport_err or "transport_inconclusive",
+                "http_status": None,
                 "request_id": req_id,
-                "request_kind": kind,
                 "request_state": "transport_inconclusive",
                 "response_bytes": None,
                 "response_relative_path": None,
                 "response_sha256": None,
-                "url": url,
+                "transport_error": transport_err or "transport_inconclusive",
+            }
+            with open(self.journal_file, "a", encoding="utf-8") as jf:
+                jf.write(canonical_json_dumps(term) + "\n")
+                jf.flush()
+                _fsync_file(jf.fileno())
+            return None
+
+        if http_status == 404:
+            term = {
+                "event": "request_terminal",
+                "http_status": 404,
+                "request_id": req_id,
+                "request_state": "http_not_found",
+                "response_bytes": None,
+                "response_relative_path": None,
+                "response_sha256": None,
+                "transport_error": None,
             }
             with open(self.journal_file, "a", encoding="utf-8") as jf:
                 jf.write(canonical_json_dumps(term) + "\n")
@@ -1507,16 +1729,31 @@ class RequestManager:
 
         if http_status != 200:
             term = {
-                "completed_at_utc": datetime.now(timezone.utc).isoformat(),
                 "event": "request_terminal",
-                "http_status_or_transport_error": http_status,
+                "http_status": http_status,
                 "request_id": req_id,
-                "request_kind": kind,
-                "request_state": "http_non_200",
+                "request_state": "response_rejected",
                 "response_bytes": None,
                 "response_relative_path": None,
                 "response_sha256": None,
-                "url": url,
+                "transport_error": None,
+            }
+            with open(self.journal_file, "a", encoding="utf-8") as jf:
+                jf.write(canonical_json_dumps(term) + "\n")
+                jf.flush()
+                _fsync_file(jf.fileno())
+            return None
+
+        if not body_bytes:
+            term = {
+                "event": "request_terminal",
+                "http_status": None,
+                "request_id": req_id,
+                "request_state": "transport_inconclusive",
+                "response_bytes": None,
+                "response_relative_path": None,
+                "response_sha256": None,
+                "transport_error": "empty_response_body",
             }
             with open(self.journal_file, "a", encoding="utf-8") as jf:
                 jf.write(canonical_json_dumps(term) + "\n")
@@ -1535,16 +1772,14 @@ class RequestManager:
             os.close(out_fd)
 
         term = {
-            "completed_at_utc": datetime.now(timezone.utc).isoformat(),
             "event": "request_terminal",
-            "http_status_or_transport_error": 200,
+            "http_status": 200,
             "request_id": req_id,
-            "request_kind": kind,
             "request_state": "response_persisted",
             "response_bytes": len(body_bytes),
             "response_relative_path": rel_path,
             "response_sha256": _file_sha256(out_file),
-            "url": url,
+            "transport_error": None,
         }
         with open(self.journal_file, "a", encoding="utf-8") as jf:
             jf.write(canonical_json_dumps(term) + "\n")
@@ -1645,6 +1880,7 @@ def run_inventory(run_id: str) -> dict[str, Any]:
         parser_mod = _import_verified_frozen_parser(project_root)
         parent_records: list[dict[str, Any]] = []
         archive_package_records: list[dict[str, Any]] = []
+        downloaded_archives: dict[tuple[str, str], tuple[int, int, bytes | None, bytes | None]] = {}
 
         for row in denominator_records:
             title = row["title"]
@@ -1659,7 +1895,14 @@ def run_inventory(run_id: str) -> dict[str, Any]:
             # Target candidate!
             detail_url = f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={source_article_id}"
             detail_rel = f"raw/article_details/{source_article_id}.json"
-            detail_bytes = req_mgr.request(kind="detail", url=detail_url, rel_path=detail_rel)
+            detail_bytes = req_mgr.request(
+                kind="detail",
+                url=detail_url,
+                rel_path=detail_rel,
+                parent_article_id=source_article_id,
+                symbol=None,
+                utc_date=None,
+            )
             row["detail_request_id"] = req_mgr.request_id
 
             if detail_bytes is None:
@@ -1746,69 +1989,93 @@ def run_inventory(run_id: str) -> dict[str, Any]:
                     child_states.append("archive_request_nonpersisted")
                     continue
 
-                launch_dt = datetime.fromtimestamp(launch_time_ms / 1000.0, tz=timezone.utc)
-                utc_date = launch_dt.strftime("%Y-%m-%d")
-
-                archive_base_url = f"https://data.binance.vision/data/futures/um/daily/aggTrades/{sym}/{sym}-aggTrades-{utc_date}.zip"
-                chk_url = archive_base_url + ".CHECKSUM"
-                zip_url = archive_base_url
-
-                chk_rel = f"raw/archive/{sym}/{sym}-aggTrades-{utc_date}.zip.CHECKSUM"
-                zip_rel = f"raw/archive/{sym}/{sym}-aggTrades-{utc_date}.zip"
-
-                chk_bytes = req_mgr.request(kind="checksum", url=chk_url, rel_path=chk_rel)
-                chk_req_id = req_mgr.request_id
-
-                zip_bytes = req_mgr.request(kind="archive", url=zip_url, rel_path=zip_rel)
-                zip_req_id = req_mgr.request_id
-
-                logical_id = {
-                    "market": "futures_um",
-                    "metric": "aggTrades",
-                    "parent_article_id": source_article_id,
-                    "symbol": sym,
-                    "utc_date": utc_date,
-                }
-
-                if chk_bytes is None or zip_bytes is None:
-                    archive_package_records.append({
-                        "checksum_request_id": chk_req_id,
-                        "child_state": "archive_request_nonpersisted",
-                        "first_post_launch_trade_delay_ms": None,
-                        "first_post_launch_trade_time_ms": None,
-                        "last_post_launch_trade_time_ms": None,
-                        "logical_archive_identity": logical_id,
+                required_dates = _compute_required_archive_utc_dates(launch_time_ms)
+                child_date_states: list[str] = []
+                for utc_date in required_dates:
+                    logical_id = {
+                        "market": "futures_um",
+                        "metric": "aggTrades",
                         "parent_article_id": source_article_id,
-                        "post_launch_row_count": 0,
                         "symbol": sym,
                         "utc_date": utc_date,
-                        "zip_request_id": zip_req_id,
-                    })
-                    child_states.append("archive_request_nonpersisted")
+                    }
+
+                    archive_base_url = f"https://data.binance.vision/data/futures/um/daily/aggTrades/{sym}/{sym}-aggTrades-{utc_date}.zip"
+                    chk_url = archive_base_url + ".CHECKSUM"
+                    zip_url = archive_base_url
+
+                    chk_rel = f"raw/archive/{sym}/{sym}-aggTrades-{utc_date}.zip.CHECKSUM"
+                    zip_rel = f"raw/archive/{sym}/{sym}-aggTrades-{utc_date}.zip"
+
+                    phys_key = (sym, utc_date)
+                    if phys_key not in downloaded_archives:
+                        chk_bytes = req_mgr.request(
+                            kind="checksum",
+                            url=chk_url,
+                            rel_path=chk_rel,
+                            parent_article_id=source_article_id,
+                            symbol=sym,
+                            utc_date=utc_date,
+                        )
+                        chk_req_id = req_mgr.request_id
+
+                        zip_bytes = req_mgr.request(
+                            kind="archive",
+                            url=zip_url,
+                            rel_path=zip_rel,
+                            parent_article_id=source_article_id,
+                            symbol=sym,
+                            utc_date=utc_date,
+                        )
+                        zip_req_id = req_mgr.request_id
+                        downloaded_archives[phys_key] = (chk_req_id, zip_req_id, chk_bytes, zip_bytes)
+                    else:
+                        chk_req_id, zip_req_id, chk_bytes, zip_bytes = downloaded_archives[phys_key]
+
+                    if chk_bytes is None or zip_bytes is None:
+                        archive_package_records.append({
+                            "checksum_request_id": chk_req_id,
+                            "child_state": "archive_request_nonpersisted",
+                            "first_post_launch_trade_delay_ms": None,
+                            "first_post_launch_trade_time_ms": None,
+                            "last_post_launch_trade_time_ms": None,
+                            "logical_archive_identity": logical_id,
+                            "parent_article_id": source_article_id,
+                            "post_launch_row_count": 0,
+                            "symbol": sym,
+                            "utc_date": utc_date,
+                            "zip_request_id": zip_req_id,
+                        })
+                        child_date_states.append("archive_request_nonpersisted")
+                    else:
+                        zip_file_path = staging_dir / zip_rel
+                        chk_file_path = staging_dir / chk_rel
+                        pkg_result = validate_archive_package(
+                            zip_path=zip_file_path,
+                            checksum_path=chk_file_path,
+                            symbol=sym,
+                            utc_date=utc_date,
+                            launch_time_ms=launch_time_ms,
+                        )
+                        archive_package_records.append({
+                            "checksum_request_id": chk_req_id,
+                            "child_state": pkg_result["child_state"],
+                            "first_post_launch_trade_delay_ms": pkg_result["first_post_launch_trade_delay_ms"],
+                            "first_post_launch_trade_time_ms": pkg_result["first_post_launch_trade_time_ms"],
+                            "last_post_launch_trade_time_ms": pkg_result["last_post_launch_trade_time_ms"],
+                            "logical_archive_identity": logical_id,
+                            "parent_article_id": source_article_id,
+                            "post_launch_row_count": pkg_result["post_launch_row_count"],
+                            "symbol": sym,
+                            "utc_date": utc_date,
+                            "zip_request_id": zip_req_id,
+                        })
+                        child_date_states.append(pkg_result["child_state"])
+
+                if all(s == "archive_verified_with_post_launch_rows" for s in child_date_states):
+                    child_states.append("archive_verified_with_post_launch_rows")
                 else:
-                    zip_file_path = staging_dir / zip_rel
-                    chk_file_path = staging_dir / chk_rel
-                    pkg_result = validate_archive_package(
-                        zip_path=zip_file_path,
-                        checksum_path=chk_file_path,
-                        symbol=sym,
-                        utc_date=utc_date,
-                        launch_time_ms=launch_time_ms,
-                    )
-                    archive_package_records.append({
-                        "checksum_request_id": chk_req_id,
-                        "child_state": pkg_result["child_state"],
-                        "first_post_launch_trade_delay_ms": pkg_result["first_post_launch_trade_delay_ms"],
-                        "first_post_launch_trade_time_ms": pkg_result["first_post_launch_trade_time_ms"],
-                        "last_post_launch_trade_time_ms": pkg_result["last_post_launch_trade_time_ms"],
-                        "logical_archive_identity": logical_id,
-                        "parent_article_id": source_article_id,
-                        "post_launch_row_count": pkg_result["post_launch_row_count"],
-                        "symbol": sym,
-                        "utc_date": utc_date,
-                        "zip_request_id": zip_req_id,
-                    })
-                    child_states.append(pkg_result["child_state"])
+                    child_states.append("archive_request_nonpersisted")
 
             # Determine parent_state
             if not in_scope_children:
@@ -1827,21 +2094,9 @@ def run_inventory(run_id: str) -> dict[str, Any]:
                 "source_article_id": source_article_id,
             })
 
-        # 6. Extract request records from journal
-        request_records = []
-        for line in (staging_dir / "request_journal.jsonl").read_text(encoding="utf-8").splitlines():
-            rec = json.loads(line)
-            if rec.get("event") == "request_terminal":
-                request_records.append({
-                    "http_status_or_transport_error": rec["http_status_or_transport_error"],
-                    "request_id": rec["request_id"],
-                    "request_kind": rec["request_kind"],
-                    "request_state": rec["request_state"],
-                    "response_bytes": rec["response_bytes"],
-                    "response_relative_path": rec["response_relative_path"],
-                    "response_sha256": rec["response_sha256"],
-                    "url": rec["url"],
-                })
+        # 6. Extract request records from journal using canonical validator
+        journal_lines = (staging_dir / "request_journal.jsonl").read_text(encoding="utf-8").splitlines()
+        _, _, request_records = _validate_request_journal_lines(journal_lines)
 
         # 7. Catalog scan summary info
         tuples_a = [
