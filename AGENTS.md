@@ -127,6 +127,8 @@ These govern how work is executed.
     - `BLOCKED_IMPLEMENTATION_DEFECT`: Local executor misunderstanding of approved design or existing API; fix locally within approved scope and plan without changing design.
     - `BLOCKED_SCOPE_DRIFT`: Implementation requires touching files or contracts outside the approved whitelist; halt and request plan/whitelist revision.
     - `BLOCKED_SPEC_DRIFT`: Approved design/plan has structural contradiction with frozen upstream reality; halt and escalate with a formal Evidence Packet (Failed Invariant, Upstream SSOT reference, Contradiction proof, Proposed architectural delta) back to the Design/Plan workflow.
+17. Cross-Boundary Artifact Schema Integrity: For every newly created or revised persistent artifact that crosses a producer/consumer, process, lifecycle, or downstream-stage trust boundary, its approved Design/Plan MUST name an immutable profile authority tuple, exact key sets, legal enum literals, conditional field combinations, sealed-tree/path rules, and deterministic byte/projection obligations. A producer and its domain loader MUST each enforce their contract. Completion and receipt-closure audits MUST additionally run an independently implemented artifact verifier whose acceptance logic derives only from its literal approved profile constants and artifact bytes, not from the target producer or loader. The audit record MUST bind the exact approved Design SHA, verifier source SHA, profile ID/version and receipt identity. Internal pure-logic unit tests remain exempt when they prove no cross-boundary artifact claim.
+
 
 ## L2 Alpha Research Methodology
 

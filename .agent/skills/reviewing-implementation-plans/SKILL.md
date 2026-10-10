@@ -365,7 +365,15 @@ Red flags:
 - proxy result is treated as live-ready;
 - missing `Allowed Change Scope` whitelist.
 
+### 14. Cross-Boundary Artifact Schema Integrity Gate (Mandatory for Persistent Artifacts)
+
+When an Implementation Plan creates or mutates a persistent artifact crossing producer/consumer, process, lifecycle, or downstream-stage trust boundaries:
+- **Immutable Profile Authority Tuple**: Must declare an immutable external profile authority tuple: `(profile_id, profile_contract_version, governance_design_relative_path, governance_design_sha256, target_stage_design_relative_path, target_stage_design_sha256, target_stage_delta_relative_path, target_stage_delta_sha256, verifier_relative_path, verifier_source_sha256, receipt_root_relative_path, manifest_sha256, summary_sha256, review_sha256, request_journal_sha256)`.
+- **Exact Contract Boundaries**: Must specify exact key sets, legal enum literals, conditional field combinations, nullability rules, sealed-tree/path rules, and deterministic byte/projection obligations.
+- **Independent Verifier Verification**: Must require independent verifier execution (`scripts/governance/verify_artifact_schema.py`) in the Task checklist and verification commands, enforcing Rule 17.
+
 ## High-Risk Red Lines
+
 
 Block or require fixes if any appear:
 
