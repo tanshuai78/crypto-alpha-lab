@@ -13,6 +13,7 @@ Verifies:
 """
 
 import ast
+import copy
 import fcntl
 import hashlib
 import json
@@ -25,11 +26,11 @@ from unittest.mock import patch
 import pytest
 
 # Constants from approved Design and Plan
-APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
-APPROVED_DESIGN_SHA256 = "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
-APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-implementation-plan_CN.md"
-APPROVED_PLAN_SHA256 = "6af426ca5d8c628449820fbd433190f4923971aa2515b16f4bbd398f18fcec7a"
-PLANNING_BASE_SHA = "23708b840384b56d11b17b8d63c131e9ce72f2d3"
+APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-09-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-design-delta_CN.md"
+APPROVED_DESIGN_SHA256 = "f427df9435c8b9c8dd2b4b45c24bbbbd595df2c7e8d209f40f6fe2cd13b00f3c"
+APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-10-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-implementation-plan-r1_CN.md"
+APPROVED_PLAN_SHA256 = "b578ab6b82ffcf36ff3f9bcefd3cb4989bf1be9cf64ae70d09fddfcbb2f76a82"
+PLANNING_BASE_SHA = "647fae2cf3ba09efc1971bb1a87a30e18b86dd5b"
 FROZEN_PARSER_SHA256 = "7e0e696647acf158facbdd8d3d39351bbc68c33b039871f26f4a38bc75ad56e5"
 FROZEN_PARSER_REL_PATH = "src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py"
 
@@ -69,9 +70,13 @@ try:
         UNIVERSE_START_MS,
         Stage1_5JADiagnosticError,
         Stage1_5JAPostRenameDurabilityFailure,
+        _admit_parent_detail,
         _classify_root_state_for_test,
         _import_verified_frozen_parser,
+        _is_positive_non_bool_integer,
         _load_verified_root_for_test,
+        _replay_parent_detail_admission,
+        _validate_archive_package_record,
         _verify_execution_authority_for_test,
         _verify_network_authorization_for_test,
         build_inventory_summary,
@@ -108,6 +113,11 @@ except ImportError as _import_err:
     get_canonical_execution_authority_bundle_path = _unimplemented_stub  # type: ignore[assignment]
     _load_verified_root_for_test = _unimplemented_stub  # type: ignore[assignment]
     _classify_root_state_for_test = _unimplemented_stub  # type: ignore[assignment]
+    _is_positive_non_bool_integer = _unimplemented_stub  # type: ignore[assignment]
+    _validate_archive_package_record = _unimplemented_stub  # type: ignore[assignment]
+    _replay_parent_detail_admission = _unimplemented_stub  # type: ignore[assignment]
+    _admit_parent_detail = _unimplemented_stub  # type: ignore[assignment]
+    _import_verified_frozen_parser = _unimplemented_stub  # type: ignore[assignment]
 
     class Stage1_5JADiagnosticError(Exception):  # type: ignore[no-redef]
         pass
@@ -1919,3 +1929,237 @@ def test_intent_context_applicability(tmp_path: Path) -> None:
             rel_path="test.json",
             parent_article_id="bad_context",
         )
+
+
+def test_archive_package_record_validator_positive() -> None:
+    """Task 1 Step 1: Valid nonpersisted archive record passes the private validator."""
+    valid_record = {
+        "checksum_request_id": 1,
+        "child_state": "archive_request_nonpersisted",
+        "first_post_launch_trade_delay_ms": None,
+        "first_post_launch_trade_time_ms": None,
+        "last_post_launch_trade_time_ms": None,
+        "logical_archive_identity": {
+            "market": "futures_um",
+            "metric": "aggTrades",
+            "parent_article_id": "test_parent",
+            "symbol": "BTCUSDT",
+            "utc_date": "2026-05-01",
+        },
+        "parent_article_id": "test_parent",
+        "post_launch_row_count": None,
+        "symbol": "BTCUSDT",
+        "utc_date": "2026-05-01",
+        "zip_request_id": 2,
+    }
+    _validate_archive_package_record(valid_record)
+
+
+@pytest.mark.parametrize(
+    ("mutated_field", "bad_value"),
+    [
+        ("post_launch_row_count", 0),
+        ("first_post_launch_trade_delay_ms", 100),
+        ("first_post_launch_trade_time_ms", 1722470400000),
+        ("last_post_launch_trade_time_ms", 1722470500000),
+    ],
+)
+def test_archive_package_record_validator_negative(mutated_field: str, bad_value: Any) -> None:
+    """Task 1 Step 1: Nonpersisted record with non-null trade fields fail closed with exact STOP."""
+    record = {
+        "checksum_request_id": 1,
+        "child_state": "archive_request_nonpersisted",
+        "first_post_launch_trade_delay_ms": None,
+        "first_post_launch_trade_time_ms": None,
+        "last_post_launch_trade_time_ms": None,
+        "logical_archive_identity": {
+            "market": "futures_um",
+            "metric": "aggTrades",
+            "parent_article_id": "test_parent",
+            "symbol": "BTCUSDT",
+            "utc_date": "2026-05-01",
+        },
+        "parent_article_id": "test_parent",
+        "post_launch_row_count": None,
+        "symbol": "BTCUSDT",
+        "utc_date": "2026-05-01",
+        "zip_request_id": 2,
+    }
+    record[mutated_field] = bad_value
+    with pytest.raises(
+        Stage1_5JADiagnosticError,
+        match=r"STOP=stage1_5j_a_archive_package_record_invalid:archive_request_nonpersisted_trade_fields_must_be_null",
+    ):
+        _validate_archive_package_record(record)
+
+
+@pytest.mark.parametrize(
+    "invalid_launch_time",
+    [None, True, 0, -1, 1.5, "123"],
+)
+def test_launch_time_admission_red_cases(invalid_launch_time: Any) -> None:
+    """Task 1 Step 2: Canonical-fixture derived launch-time admission RED cases."""
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5j_a/canonical_input_v1")
+    detail_path = fixture_dir / "article_detail_20536b05b2a34b87a3bae99c45d0dc91.json"
+    detail_bytes = detail_path.read_bytes()
+    expected_fixture_sha = "c5d400781f7b94309131ee04adb8a617998d56a8f28e53407deaa80061e94ccd"
+    actual_fixture_sha = _sha256(detail_bytes)
+    assert actual_fixture_sha == expected_fixture_sha, "Canonical article detail fixture SHA mismatch"
+
+    parser_mod = _import_verified_frozen_parser()
+    expected_parser_sha = FROZEN_PARSER_SHA256
+    import inspect
+    actual_parser_sha = _sha256(Path(inspect.getfile(parser_mod)).read_bytes())
+    assert actual_parser_sha == expected_parser_sha, "Frozen parser SHA mismatch"
+
+    detail_payload = json.loads(detail_bytes.decode("utf-8"))
+    extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
+    assert extracted["parser_status"] == "parsed"
+    assert extracted["symbols"] == ["GRVTUSDT"]
+    assert extracted["symbol_launch_times_ms"]["GRVTUSDT"] == 1785501900000
+
+    assert _is_positive_non_bool_integer(invalid_launch_time) is False
+
+    mutated = copy.deepcopy(extracted)
+    mutated["symbol_launch_times_ms"]["GRVTUSDT"] = invalid_launch_time
+
+    # Drive actual producer admission branch directly
+    row = {
+        "candidate_status": None,
+        "detail_request_id": 1,
+        "release_date_ms": 1785501900000,
+        "source_article_id": "20536b05b2a34b87a3bae99c45d0dc91",
+        "title": "Binance Will List GRVT (GRVT)",
+    }
+    with patch.object(parser_mod, "extract_symbol_candidates_from_bapi_article_payload", return_value=mutated):
+        parent_rec, in_scope_children = _admit_parent_detail(
+            row=row,
+            detail_payload=detail_payload,
+            detail_sha=_sha256(detail_bytes),
+            parser_mod=parser_mod,
+        )
+
+    assert row["candidate_status"] == "catalog_detail_unresolved"
+    assert parent_rec["detail_status"] == "detail_parser_unresolved"
+    assert parent_rec["children"] == []
+    assert parent_rec["parent_state"] == "coverage_evidence_gap_detail"
+    assert in_scope_children is None
+
+    # Assert INV-15J-A-N-00: producer suppresses child archive requests and records on admission failure
+    archive_package_records: list[dict[str, Any]] = []
+    if in_scope_children is not None:
+        for c in in_scope_children:
+            archive_package_records.append({"symbol": c["symbol"]})
+    assert archive_package_records == [], "Producer must emit zero archive requests/records on admission failure"
+
+
+@pytest.mark.parametrize(
+    "invalid_launch_time",
+    [None, True, 0, -1, 1.5, "123"],
+)
+def test_strict_loader_replay_launch_time_red_proof(invalid_launch_time: Any) -> None:
+    """Task 1 Step 3: Strict loader replay RED proof accepting unresolved, rejecting forged."""
+    fixture_dir = Path("tests/fixtures/external_signal_shadow/stage1_5j_a/canonical_input_v1")
+    detail_path = fixture_dir / "article_detail_20536b05b2a34b87a3bae99c45d0dc91.json"
+    detail_bytes = detail_path.read_bytes()
+    detail_payload = json.loads(detail_bytes.decode("utf-8"))
+    pid = "20536b05b2a34b87a3bae99c45d0dc91"
+
+    parser_mod = _import_verified_frozen_parser()
+    base_extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
+    assert base_extracted["parser_status"] == "parsed"
+
+    mutated_extracted = copy.deepcopy(base_extracted)
+    mutated_extracted["symbol_launch_times_ms"]["GRVTUSDT"] = invalid_launch_time
+
+    unresolved_parent_record = {
+        "children": [],
+        "detail_payload_sha256": _sha256(detail_bytes),
+        "detail_request_id": 1,
+        "detail_status": "detail_parser_unresolved",
+        "parent_state": "coverage_evidence_gap_detail",
+        "source_article_id": pid,
+    }
+    unresolved_denom_record = {
+        "candidate_status": "catalog_detail_unresolved",
+        "detail_request_id": 1,
+        "release_date_ms": 1785501900000,
+        "source_article_id": pid,
+        "title": "Binance Will List GRVT (GRVT)",
+    }
+
+    # 1. Genuine unresolved admission replays successfully
+    with patch.object(parser_mod, "extract_symbol_candidates_from_bapi_article_payload", return_value=mutated_extracted):
+        _replay_parent_detail_admission(detail_payload, unresolved_parent_record, unresolved_denom_record, parser_mod=parser_mod)
+
+    # 2. Sibling forged parent record (detail_status validated_target_detail) is rejected
+    forged_parent_record = {
+        "children": [{
+            "child_scope": "in_scope_usdt",
+            "symbol": "GRVTUSDT",
+            "symbol_launch_time_ms": invalid_launch_time,
+        }],
+        "detail_payload_sha256": _sha256(detail_bytes),
+        "detail_request_id": 1,
+        "detail_status": "validated_target_detail",
+        "parent_state": "coverage_evidence_gap_detail",
+        "source_article_id": pid,
+    }
+    with patch.object(parser_mod, "extract_symbol_candidates_from_bapi_article_payload", return_value=mutated_extracted):
+        with pytest.raises(
+            Stage1_5JADiagnosticError,
+            match=rf"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}",
+        ):
+            _replay_parent_detail_admission(detail_payload, forged_parent_record, unresolved_denom_record, parser_mod=parser_mod)
+
+    # 3. P0-01: Sibling forged denominator record (candidate_status resolved_target_parent) is rejected
+    forged_denom_record = {
+        "candidate_status": "resolved_target_parent",
+        "detail_request_id": 1,
+        "release_date_ms": 1785501900000,
+        "source_article_id": pid,
+        "title": "Binance Will List GRVT (GRVT)",
+    }
+    with patch.object(parser_mod, "extract_symbol_candidates_from_bapi_article_payload", return_value=mutated_extracted):
+        with pytest.raises(
+            Stage1_5JADiagnosticError,
+            match=rf"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}",
+        ):
+            _replay_parent_detail_admission(detail_payload, unresolved_parent_record, forged_denom_record, parser_mod=parser_mod)
+
+
+def test_task1_production_wiring_proof() -> None:
+    """Task 1 Step 4: AST inspection proving production call paths in run_inventory and loader."""
+    core_path = Path("src/research/external_signal_shadow/stage1_5j_a_historical_archive_coverage_inventory.py")
+    tree = ast.parse(core_path.read_text(encoding="utf-8"))
+
+    run_inv_func = None
+    loader_func = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            if node.name == "run_inventory":
+                run_inv_func = node
+            elif node.name == "_load_verified_stage1_5j_a_historical_archive_coverage_root_internal":
+                loader_func = node
+
+    assert run_inv_func is not None, "run_inventory must be defined"
+    assert loader_func is not None, "_load_verified_stage1_5j_a_historical_archive_coverage_root_internal must be defined"
+
+    def _extract_called_names(func_node: ast.AST) -> set[str]:
+        names: set[str] = set()
+        for sub in ast.walk(func_node):
+            if isinstance(sub, ast.Call):
+                if isinstance(sub.func, ast.Name):
+                    names.add(sub.func.id)
+                elif isinstance(sub.func, ast.Attribute):
+                    names.add(sub.func.attr)
+        return names
+
+    run_inv_calls = _extract_called_names(run_inv_func)
+    loader_calls = _extract_called_names(loader_func)
+
+    assert "_admit_parent_detail" in run_inv_calls, "run_inventory must call _admit_parent_detail"
+    assert "_validate_archive_package_record" in run_inv_calls, "run_inventory must call _validate_archive_package_record"
+
+    assert "_replay_parent_detail_admission" in loader_calls, "loader must call _replay_parent_detail_admission"
+    assert "_validate_archive_package_record" in loader_calls, "loader must call _validate_archive_package_record"

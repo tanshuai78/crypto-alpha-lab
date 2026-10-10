@@ -1,6 +1,6 @@
 # Crypto Alpha Lab 当前文档索引 (Current Document Index)
 
-> **文档生成时间：** 2026-10-03（Stage 1.5G N=3 产品机制分层准入与 Stage 1.5H N=3 流动性摩擦诊断收敛治理更新；其它历史索引条目保留原采集时间）
+> **文档生成时间：** 2026-10-07（Stage 1.5J-A 历史数据归档覆盖度盘点结项、收据闭环审计与路线图同步；Stage 1.5G N=3 / Stage 1.5H N=3 / 其它历史索引条目保留原采集时间）
 > **使用说明：** 本文档为仓库中所有研究、设计、计划、审查与状态文档的**统一事实索引入口**。未来的 AI Agent 在开展任何工作前，必须遵循《10. AI 使用规则》，严禁直接以历史被替代 (superseded) 或已证伪 (falsified) 的文档指导新开发。
 > **历史治理纠偏注记：** 2026-09-28 曾执行局部历史决策记录修正（纠偏 Design SHA-256: `37ff23045de7519b426ff1da71e04ec8d61ce371ccafe3fae96711802201583f`，仅规范 C1、B-Lite 与 Factor Lab 历史措辞，未重新全仓扫描）。
 
@@ -10,11 +10,11 @@
 
 | 属性 | 统计值 / 事实 | 凭据与说明 |
 |---|---|---|
-| **generated_at** | `2026-10-03` | Stage 1.5G N=3 准入与 Stage 1.5H N=3 流动性摩擦诊断收敛治理更新 |
-| **local_commit** | `ea754ae7d0da57d22105e424ab9cee012f765b82` | 本次治理更新时的 `git rev-parse HEAD` |
+| **generated_at** | `2026-10-07` | Stage 1.5J-A 历史数据归档覆盖度盘点结项与收据闭环审计更新 |
+| **local_commit** | `23708b824ca0ff6ff82ad31e13cb36136fa5b8d2` | 本次治理更新时的 `git rev-parse HEAD` |
 | **server_git_commit** | `unknown` | 2026-07-26 服务器快照未成功采集 Git commit；仅能证明三份关键部署文件 SHA256 与本地匹配 |
 | **selected_deployed_file_hash_match** | `true` | `configs/base.py`、1.5D runner、1.5F runner 与 2026-07-26 服务器快照文件 SHA256 匹配 |
-| **scanned_document_count** | `291+` (历史基线 `180`) | 历史全仓静态扫描基线 180 篇 (2026-08)；当前 `docs/` 下 Markdown 文档扩展至 291 篇 |
+| **scanned_document_count** | `293+` (历史基线 `180`) | 历史全仓静态扫描基线 180 篇 (2026-08)；当前 `docs/` 下 Markdown 文档扩展至 293 篇 (含 1.5J-A Design 与 Plan) |
 | **unknown_status_count** | `2` | 包含 `docs/reviews/2026-06-03-route-c1-phases-and-practical-usage-explanation_CN.md` 与 `docs/production_artifacts/Crypto_Trading_101.md` |
 | **conflict_count** | `1` | 1.5D 详情页重试调度重叠计划冲突 (见 8. 文档冲突) |
 
@@ -31,12 +31,13 @@
 | **Stage 1.5F** (L2盘口观察+上线时间闸门) | [1.5F Design](../designs/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-design_CN.md) | [1.5F Terminal Hygiene Plan](../plans/2026-07-24-external-signal-shadow-lab-stage1-5f-historical-anchor-terminal-ignore-rejection-hygiene-hotfix-plan_CN.md) | [1.5F Review](../reviews/2026-06-26-external-signal-shadow-lab-stage1-5f-live-depth-observer-review_CN.md) | `implemented` | `deployed` (PID 88770) | `server_runtime_snapshot...txt:L26` |
 | **Stage 1.5G** (N=3产品机制分层准入) | [1.5G N=3准入 Design](../designs/2026-10-02-external-signal-shadow-lab-stage1-5g-n3-regime-stratified-admission-design_CN.md) | [1.5G N=3准入 Plan](../plans/2026-10-02-external-signal-shadow-lab-stage1-5g-n3-regime-stratified-admission-implementation-plan_CN.md) | [1.5G N=3 生产准入回执](../../data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json) | `implemented` | `implemented` (Offline) | 52 项自动化测试全通；独立审计评定 COMPLETE (Commit `9484dd3`)；达成 Gate 3 样本数量门槛（3 篇独立公告、3 个父事件、9 个正式子标的按 3 类产品机制分层 clean pass）；下游消费强制 Fail-Closed 硬阻断 |
 | **Stage 1.5H** (N=3产品机制分层流动性摩擦诊断) | [1.5H N=3分层诊断 Design](../designs/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-design_CN.md) | [1.5H N=3分层诊断 Plan](../plans/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-implementation-plan_CN.md) | [1.5H N=3 生产诊断回执](../../data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json) | `implemented` | `implemented` (Offline) | 39 项自动化测试通过；独立审计评定 COMPLETE (Commit `ab5043d`)；基于 1.5G N=3 的 3 个父事件与 9 个子标的完成机制分层 P95 滑点摩擦诊断；证实三种产品机制摩擦显著分化（标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps），严禁跨机制池化或统一定价；结论保持 `evidence_insufficient`，`stage1_5g_gate3_complete=false`；下游消费强制 Fail-Closed 硬阻断，无任何交易或执行权限 |
+| **Stage 1.5J-A** (历史归档覆盖度盘点) | [1.5J-A Design](../designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md) | [1.5J-A Plan](../plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md) | [1.5J-A 生产盘点回执](../../data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json) | `implemented` | `implemented` (Offline) | 88 项测试全通；独立审计与 Design §7.2 变异审计评定 COMPLETE (Commit `23708b8`)；盘点 365 天窗口内 335 篇公告，131 篇目标新上线公告，125 篇解析成功 (281 USDT 标的，278 标的归档完整，3 标的归档缺口)，118 篇父事件完整，13 篇父事件存在证据缺口 (6 detail unresolved, 4 no in-scope child, 3 archive gaps)；状态严格为 `coverage_inventory_evidence_gap`；13 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断 |
 | **Stage 1.3 R10** (历史信号准入前置校验) | [1.3 R10 Design](../designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md) | [1.3 R10 Plan](../plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md) | Task 6 Independent Review Receipt (`7671bd...`) & Completion Audit (Commit `8c6f3a0`) | `implemented` | `implemented` (Offline) | 69 项自动化测试通过；独立审计评定 COMPLETE；下游消费者硬阻断；严禁任何收益泄漏或实盘权限 |
 | **Stage 1.6 Futures Delisting & Terminal Basis** | [1.6F Conclusion Closure Design](../designs/2026-09-26-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-delta-design_CN.md) | [1.6F Conclusion Closure Plan](../plans/2026-09-27-external-signal-shadow-lab-stage1-6f-terminal-basis-conclusion-closure-implementation-plan_CN.md) | [1.6F W2-0 Diagnostic Manifest](../../data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json) | `implemented` | `diagnostic_completed` (Offline) | 1.6A-C 已实现并通过完成审计；1.6F-W2-0 探索性诊断完成（180 物理源对象，41 标的 / 27 父事件，19 个 window-defined 父事件子集证实终局基差发散/非自然收敛，严格保持 exploratory/outcome_seen，无后续交易权限，结项 closure only）；1.6D 远端实盘观察保持未授权部署 ([Current 1.6D Runbook](../ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md)) |
 
 ---
 
-## 3. External Signal Shadow Lab (Stage 0 – 1.5H)
+## 3. External Signal Shadow Lab (Stage 0 – 1.5J-A)
 
 | Stage | Document Type | File | Status | Decision | Implemented | Deployed | Supersedes | Superseded By | Notes |
 |---|---|---|---|---|---|---|---|---|---|
@@ -84,6 +85,9 @@
 | **Stage 1.5H N=3** | Design | [docs/designs/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-design_CN.md](../designs/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-design_CN.md) | `current_authority` | Approved | Yes | Offline Tool | Stage 1.5H V3 Design | None | N=3产品机制分层流动性摩擦诊断设计规范 (严禁跨机制池化、13项false治理标志) |
 | **Stage 1.5H N=3** | Plan | [docs/plans/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-implementation-plan_CN.md](../plans/2026-10-03-external-signal-shadow-lab-stage1-5h-n3-regime-stratified-liquidity-friction-diagnostic-implementation-plan_CN.md) | `current_authority` | Approved | Yes | Offline Tool | Stage 1.5H V3 Plan | None | 39项测试全通，5项P0闭环审计评定 COMPLETE，Commit `ab5043d` |
 | **Stage 1.5H N=3** | Receipt | [data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json](../../data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json) | `current_authority` | Diagnostic Complete | Yes | Offline Tool | 2026-10-01 V3诊断回执 | None | 生产诊断回执：9个子标的机制分层 P95 滑点摩擦评估；标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps；严格 evidence_insufficient，无交易/执行权限 |
+| **Stage 1.5J-A** | Design | [docs/designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md](../designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md) | `current_authority` | Approved | Yes | Offline Tool | None | None | 365天全量历史公告与 Vision aggTrades 归档覆盖度盘点设计规范 (严格单次网络凭据、两阶段扫描、流式归档解包校验、§7.2变异闭环审计协议) |
+| **Stage 1.5J-A** | Plan | [docs/plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md](../plans/2026-10-06-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-implementation-plan_CN.md) | `current_authority` | Approved | Yes | Offline Tool | None | None | 历史归档覆盖度盘点实施计划 (88项测试全通，独立审计与变异审计评定 COMPLETE，Commit `23708b8`) |
+| **Stage 1.5J-A** | Receipt | [data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json](../../data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json) | `current_authority` | Inventory Complete | Yes | Offline Tool | None | None | 生产盘点回执 (744 MB)：盘点 365 天 335 篇公告，131 篇目标父事件，125 篇解析成功 (281 USDT 标的，278 标的归档完整，3 标的归档缺口)，118 篇父事件完整，13 篇父事件证据缺口；严格 coverage_inventory_evidence_gap，13 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断 |
 
 ---
 
@@ -143,6 +147,8 @@
    `Design (2026-10-03 N=3 Design)` -> `Plan (2026-10-03 Plan)` -> `Code (stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py)` -> `Test (39 passed)` -> `Production Receipt (stage1_5h_n3_regime_stratified_friction_20261003T070500Z)` -> `Markdown Review (stage1_5h_n3_regime_stratified_friction_review_CN.md)`
 5. **Stage 1.6 Futures Delisting 历史证据、审计与终局基差诊断链**：
    `1.6A Source/Schema Contract (2026-08-18)` -> `1.6B Historical Capture and Sealed Export` -> `1.6C Sealed-Export Adapter v2` -> `H2 Grammar Delta` -> `Independent Completed-Consumer Audit (source_audit_passed=true)` -> `1.6D Deployment Authorization Design & Runbook` -> `1.6D Live Observation (not deployed)`；`1.6F 历史对照与终局基差探索性诊断: W1/W2 扩展 -> W2-0 诊断 (w2_0_exploratory_20260926T071500Z) -> 终局基差发散探索性结项 (conclusion closure only)`。
+6. **Stage 1.5J-A 历史数据归档覆盖度盘点与闭环审计链**：
+   `Design (2026-10-05 1.5J-A Design)` -> `Plan (2026-10-06 Plan)` -> `Code (stage1_5j_a_historical_archive_coverage_inventory.py)` -> `Test (88 passed)` -> `Production Scan (744 MB Receipt: stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z)` -> `Strict Loader Full Replay & §7.2 Semantic Mutation Closure Audit (COMPLETE)` -> `Summary JSON & Review Markdown`。
 
 ---
 

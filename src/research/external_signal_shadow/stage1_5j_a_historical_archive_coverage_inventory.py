@@ -55,11 +55,11 @@ __all__ = [
 ]
 
 # Immutable Design & Plan Bindings
-APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
-APPROVED_DESIGN_SHA256 = "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
-APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-implementation-plan_CN.md"
-APPROVED_PLAN_SHA256 = "6af426ca5d8c628449820fbd433190f4923971aa2515b16f4bbd398f18fcec7a"
-PLANNING_BASE_SHA = "23708b840384b56d11b17b8d63c131e9ce72f2d3"
+APPROVED_DESIGN_REL_PATH = "docs/designs/2026-10-09-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-design-delta_CN.md"
+APPROVED_DESIGN_SHA256 = "f427df9435c8b9c8dd2b4b45c24bbbbd595df2c7e8d209f40f6fe2cd13b00f3c"
+APPROVED_PLAN_REL_PATH = "docs/plans/2026-10-10-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-implementation-plan-r1_CN.md"
+APPROVED_PLAN_SHA256 = "b578ab6b82ffcf36ff3f9bcefd3cb4989bf1be9cf64ae70d09fddfcbb2f76a82"
+PLANNING_BASE_SHA = "647fae2cf3ba09efc1971bb1a87a30e18b86dd5b"
 FROZEN_PARSER_REL_PATH = "src/research/external_signal_shadow/stage1_5d_live_event_source_parser.py"
 FROZEN_PARSER_SHA256 = "7e0e696647acf158facbdd8d3d39351bbc68c33b039871f26f4a38bc75ad56e5"
 
@@ -163,6 +163,167 @@ class Stage1_5JADiagnosticError(Exception):
 class Stage1_5JAPostRenameDurabilityFailure(Stage1_5JADiagnosticError):
     """Raised when fsync fails after atomic rename, indicating durability failure."""
     pass
+
+
+def _is_positive_non_bool_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _validate_archive_package_record(record: dict[str, Any]) -> None:
+    """Validates archive package record nullability invariants for archive_request_nonpersisted."""
+    if record.get("child_state") == "archive_request_nonpersisted":
+        if (
+            record.get("post_launch_row_count") is not None
+            or record.get("first_post_launch_trade_delay_ms") is not None
+            or record.get("first_post_launch_trade_time_ms") is not None
+            or record.get("last_post_launch_trade_time_ms") is not None
+        ):
+            raise Stage1_5JADiagnosticError(
+                "STOP=stage1_5j_a_archive_package_record_invalid:archive_request_nonpersisted_trade_fields_must_be_null"
+            )
+
+
+def _admit_parent_detail(
+    row: dict[str, Any],
+    detail_payload: dict[str, Any],
+    detail_sha: str | None,
+    parser_mod: Any = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]] | None]:
+    """Admits target parent detail in producer pipeline.
+
+    Evaluates event classification, parsed structure, and positive non-bool integer launch times.
+    Mutates row["candidate_status"] and returns (parent_record, in_scope_children).
+    When admission fails (unresolved), in_scope_children is None.
+    """
+    if parser_mod is None:
+        parser_mod = _import_verified_frozen_parser()
+    source_article_id = row["source_article_id"]
+    detail_data = validate_detail_envelope(detail_payload, source_article_id)
+    detail_title = detail_data["title"]
+
+    detail_cat_type = parser_mod.classify_event_type(detail_title)
+    if detail_cat_type != EXTERNAL_SIGNAL_STAGE1_5D_PRIMARY_EVENT_TYPE:
+        row["candidate_status"] = "catalog_detail_unresolved"
+        parent_rec = {
+            "children": [],
+            "detail_payload_sha256": detail_sha,
+            "detail_request_id": row["detail_request_id"],
+            "detail_status": "detail_title_disagreement",
+            "parent_state": "coverage_evidence_gap_detail",
+            "source_article_id": source_article_id,
+        }
+        return parent_rec, None
+
+    extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
+    if extracted.get("parser_status") != "parsed":
+        row["candidate_status"] = "catalog_detail_unresolved"
+        parent_rec = {
+            "children": [],
+            "detail_payload_sha256": detail_sha,
+            "detail_request_id": row["detail_request_id"],
+            "detail_status": "detail_parser_unresolved",
+            "parent_state": "coverage_evidence_gap_detail",
+            "source_article_id": source_article_id,
+        }
+        return parent_rec, None
+
+    all_launch_valid = all(
+        _is_positive_non_bool_integer(extracted.get("symbol_launch_times_ms", {}).get(s))
+        for s in extracted.get("symbols", [])
+    )
+    if not all_launch_valid:
+        row["candidate_status"] = "catalog_detail_unresolved"
+        parent_rec = {
+            "children": [],
+            "detail_payload_sha256": detail_sha,
+            "detail_request_id": row["detail_request_id"],
+            "detail_status": "detail_parser_unresolved",
+            "parent_state": "coverage_evidence_gap_detail",
+            "source_article_id": source_article_id,
+        }
+        return parent_rec, None
+
+    row["candidate_status"] = "resolved_target_parent"
+    children = []
+    for sym in extracted.get("symbols", []):
+        child_scope = "in_scope_usdt" if sym.endswith("USDT") else "out_of_scope_non_usdt"
+        launch_time = extracted.get("symbol_launch_times_ms", {}).get(sym)
+        children.append({
+            "child_scope": child_scope,
+            "symbol": sym,
+            "symbol_launch_time_ms": launch_time,
+        })
+    in_scope_children = [c for c in children if c["child_scope"] == "in_scope_usdt"]
+    parent_rec = {
+        "children": children,
+        "detail_payload_sha256": detail_sha,
+        "detail_request_id": row["detail_request_id"],
+        "detail_status": "validated_target_detail",
+        "parent_state": "coverage_complete",
+        "source_article_id": source_article_id,
+    }
+    return parent_rec, in_scope_children
+
+
+def _replay_parent_detail_admission(
+    detail_payload: dict[str, Any],
+    parent_record: dict[str, Any],
+    denominator_record: dict[str, Any] | None = None,
+    parser_mod: Any = None,
+) -> None:
+    """Replays target parent detail parsing and launch-time admission per Sections 5.3 and 7."""
+    if parser_mod is None:
+        parser_mod = _import_verified_frozen_parser()
+    pid = parent_record["source_article_id"]
+    detail_data = validate_detail_envelope(detail_payload, pid)
+    detail_title = detail_data["title"]
+    det_type = parser_mod.classify_event_type(detail_title)
+    if det_type != EXTERNAL_SIGNAL_STAGE1_5D_PRIMARY_EVENT_TYPE:
+        if parent_record["detail_status"] != "detail_title_disagreement":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
+        if denominator_record is not None and denominator_record.get("candidate_status") != "catalog_detail_unresolved":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}")
+        return
+
+    extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
+    if extracted.get("parser_status") != "parsed":
+        if parent_record["detail_status"] != "detail_parser_unresolved":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
+        if denominator_record is not None and denominator_record.get("candidate_status") != "catalog_detail_unresolved":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}")
+        return
+
+    all_launch_valid = all(
+        _is_positive_non_bool_integer(extracted.get("symbol_launch_times_ms", {}).get(sym))
+        for sym in extracted.get("symbols", [])
+    )
+    if not all_launch_valid:
+        if denominator_record is not None and denominator_record.get("candidate_status") != "catalog_detail_unresolved":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}")
+        if parent_record["detail_status"] != "detail_parser_unresolved":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
+        if parent_record.get("children") != []:
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:children_mismatch:{pid}")
+        if parent_record.get("parent_state") != "coverage_evidence_gap_detail":
+            raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_state_mismatch:{pid}")
+        return
+
+    if denominator_record is not None and denominator_record.get("candidate_status") != "resolved_target_parent":
+        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}")
+    if parent_record["detail_status"] != "validated_target_detail":
+        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
+
+    exp_children = []
+    for sym in extracted.get("symbols", []):
+        child_scope = "in_scope_usdt" if sym.endswith("USDT") else "out_of_scope_non_usdt"
+        launch_time = extracted.get("symbol_launch_times_ms", {}).get(sym)
+        exp_children.append({
+            "child_scope": child_scope,
+            "symbol": sym,
+            "symbol_launch_time_ms": launch_time,
+        })
+    if parent_record.get("children") != exp_children:
+        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:children_mismatch:{pid}")
 
 
 def _compute_required_archive_utc_dates(launch_time_ms: int) -> list[str]:
@@ -1373,40 +1534,19 @@ def _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
     if len(parents) != len(target_pids):
         raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_reduction_mismatch:parent_count_mismatch")
 
+    summary_denom_by_id = {r["source_article_id"]: r for r in summary_denom}
     for p in parents:
         pid = p["source_article_id"]
+        denom_row = summary_denom_by_id.get(pid)
         detail_file = details_dir / f"{pid}.json" if details_dir.is_dir() else None
         if detail_file and detail_file.is_file():
             detail_payload = json.loads(detail_file.read_text(encoding="utf-8"))
-            detail_data = validate_detail_envelope(detail_payload, pid)
-            detail_title = detail_data["title"]
-            det_type = parser_mod.classify_event_type(detail_title)
-            if det_type != EXTERNAL_SIGNAL_STAGE1_5D_PRIMARY_EVENT_TYPE:
-                if p["detail_status"] != "detail_title_disagreement":
-                    raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
-            else:
-                extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
-                if extracted.get("parser_status") != "parsed":
-                    if p["detail_status"] != "detail_parser_unresolved":
-                        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
-                else:
-                    if p["detail_status"] != "validated_target_detail":
-                        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
-                    # Replay children
-                    exp_children = []
-                    for sym in extracted.get("symbols", []):
-                        child_scope = "in_scope_usdt" if sym.endswith("USDT") else "out_of_scope_non_usdt"
-                        launch_time = extracted.get("symbol_launch_times_ms", {}).get(sym)
-                        exp_children.append({
-                            "child_scope": child_scope,
-                            "symbol": sym,
-                            "symbol_launch_time_ms": launch_time,
-                        })
-                    if p.get("children") != exp_children:
-                        raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:children_mismatch:{pid}")
+            _replay_parent_detail_admission(detail_payload, p, denom_row, parser_mod)
         else:
             if p["detail_status"] != "detail_nonpersisted":
                 raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:parent_detail_status:{pid}")
+            if denom_row is not None and denom_row.get("candidate_status") != "catalog_detail_unresolved":
+                raise Stage1_5JADiagnosticError(f"STOP=stage1_5j_a_reduction_mismatch:candidate_status_mismatch:{pid}")
 
     # Replay archive packages
     archive_dir = root_dir / "raw" / "archive"
@@ -1434,6 +1574,7 @@ def _load_verified_stage1_5j_a_historical_archive_coverage_root_internal(
         raise Stage1_5JADiagnosticError("STOP=stage1_5j_a_reduction_mismatch:archive_package_date_set_mismatch")
 
     for ap in packages:
+        _validate_archive_package_record(ap)
         sym = ap["symbol"]
         utc_date = ap["utc_date"]
         pid = ap["parent_article_id"]
@@ -1918,77 +2059,19 @@ def run_inventory(run_id: str) -> dict[str, Any]:
                 continue
 
             detail_payload = json.loads(detail_bytes.decode("utf-8"))
-            detail_data = validate_detail_envelope(detail_payload, source_article_id)
-            detail_title = detail_data["title"]
+            validate_detail_envelope(detail_payload, source_article_id)
             detail_sha = _sha256(detail_bytes)
-
-            detail_cat_type = parser_mod.classify_event_type(detail_title)
-            if detail_cat_type != EXTERNAL_SIGNAL_STAGE1_5D_PRIMARY_EVENT_TYPE:
-                row["candidate_status"] = "catalog_detail_unresolved"
-                parent_records.append({
-                    "children": [],
-                    "detail_payload_sha256": detail_sha,
-                    "detail_request_id": row["detail_request_id"],
-                    "detail_status": "detail_title_disagreement",
-                    "parent_state": "coverage_evidence_gap_detail",
-                    "source_article_id": source_article_id,
-                })
+            parent_rec, in_scope_children = _admit_parent_detail(row, detail_payload, detail_sha, parser_mod)
+            if in_scope_children is None:
+                parent_records.append(parent_rec)
                 continue
 
-            extracted = parser_mod.extract_symbol_candidates_from_bapi_article_payload(detail_payload)
-            if extracted.get("parser_status") != "parsed":
-                row["candidate_status"] = "catalog_detail_unresolved"
-                parent_records.append({
-                    "children": [],
-                    "detail_payload_sha256": detail_sha,
-                    "detail_request_id": row["detail_request_id"],
-                    "detail_status": "detail_parser_unresolved",
-                    "parent_state": "coverage_evidence_gap_detail",
-                    "source_article_id": source_article_id,
-                })
-                continue
-
-            row["candidate_status"] = "resolved_target_parent"
-            children = []
-            for sym in extracted.get("symbols", []):
-                child_scope = "in_scope_usdt" if sym.endswith("USDT") else "out_of_scope_non_usdt"
-                launch_time = extracted.get("symbol_launch_times_ms", {}).get(sym)
-                children.append({
-                    "child_scope": child_scope,
-                    "symbol": sym,
-                    "symbol_launch_time_ms": launch_time,
-                })
-
-            in_scope_children = [c for c in children if c["child_scope"] == "in_scope_usdt"]
 
             # 5. Archive packages for in-scope USDT children
             child_states: list[str] = []
             for c in in_scope_children:
                 sym = c["symbol"]
                 launch_time_ms = c["symbol_launch_time_ms"]
-                if launch_time_ms is None:
-                    archive_package_records.append({
-                        "checksum_request_id": None,
-                        "child_state": "archive_request_nonpersisted",
-                        "first_post_launch_trade_delay_ms": None,
-                        "first_post_launch_trade_time_ms": None,
-                        "last_post_launch_trade_time_ms": None,
-                        "logical_archive_identity": {
-                            "market": "futures_um",
-                            "metric": "aggTrades",
-                            "parent_article_id": source_article_id,
-                            "symbol": sym,
-                            "utc_date": "unknown",
-                        },
-                        "parent_article_id": source_article_id,
-                        "post_launch_row_count": 0,
-                        "symbol": sym,
-                        "utc_date": "unknown",
-                        "zip_request_id": None,
-                    })
-                    child_states.append("archive_request_nonpersisted")
-                    continue
-
                 required_dates = _compute_required_archive_utc_dates(launch_time_ms)
                 child_date_states: list[str] = []
                 for utc_date in required_dates:
@@ -2033,7 +2116,7 @@ def run_inventory(run_id: str) -> dict[str, Any]:
                         chk_req_id, zip_req_id, chk_bytes, zip_bytes = downloaded_archives[phys_key]
 
                     if chk_bytes is None or zip_bytes is None:
-                        archive_package_records.append({
+                        rec = {
                             "checksum_request_id": chk_req_id,
                             "child_state": "archive_request_nonpersisted",
                             "first_post_launch_trade_delay_ms": None,
@@ -2041,11 +2124,13 @@ def run_inventory(run_id: str) -> dict[str, Any]:
                             "last_post_launch_trade_time_ms": None,
                             "logical_archive_identity": logical_id,
                             "parent_article_id": source_article_id,
-                            "post_launch_row_count": 0,
+                            "post_launch_row_count": None,
                             "symbol": sym,
                             "utc_date": utc_date,
                             "zip_request_id": zip_req_id,
-                        })
+                        }
+                        _validate_archive_package_record(rec)
+                        archive_package_records.append(rec)
                         child_date_states.append("archive_request_nonpersisted")
                     else:
                         zip_file_path = staging_dir / zip_rel
@@ -2085,14 +2170,8 @@ def run_inventory(run_id: str) -> dict[str, Any]:
             else:
                 parent_state = "coverage_evidence_gap_archive"
 
-            parent_records.append({
-                "children": children,
-                "detail_payload_sha256": detail_sha,
-                "detail_request_id": row["detail_request_id"],
-                "detail_status": "validated_target_detail",
-                "parent_state": parent_state,
-                "source_article_id": source_article_id,
-            })
+            parent_rec["parent_state"] = parent_state
+            parent_records.append(parent_rec)
 
         # 6. Extract request records from journal using canonical validator
         journal_lines = (staging_dir / "request_journal.jsonl").read_text(encoding="utf-8").splitlines()

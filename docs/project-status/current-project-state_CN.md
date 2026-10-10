@@ -1,10 +1,10 @@
 # Crypto Alpha Lab 当前项目状态 (Current Project State)
 
-> **文档生成时间：** 2026-10-03T23:50:00+08:00 (Local Evidence UTC: 2026-10-03T15:50:00Z)
+> **文档生成时间：** 2026-10-07T23:45:00+08:00 (Local Evidence UTC: 2026-10-07T15:45:00Z)
 > **双态事实数据源：**
-> - **本地代码库与治理基线：** Git HEAD `ea754ae7d0da57d22105e424ab9cee012f765b82`（2026-10-03，包含 Stage 1.3 R10、Stage 1.5G N=3、Stage 1.5H N=3 与 Stage 1.6F W2-0 探索性诊断结项）
+> - **本地代码库与治理基线：** Git HEAD `23708b824ca0ff6ff82ad31e13cb36136fa5b8d2`（2026-10-07，包含 Stage 1.5J-A 历史数据归档覆盖度盘点结项、收据闭环审计、Stage 1.3 R10、Stage 1.5G N=3、Stage 1.5H N=3 与 Stage 1.6F W2-0 探索性诊断结项）
 > - **服务器运行时快照基线：** `../../_project_context/server_runtime_snapshot_20260726T021054Z.txt`（2026-07-26 采集，PID 88580 与 PID 88770 稳定运行，直至下次 VPS 同步）
-> - **生产回执与运行证据目录：** `data/external_signal_shadow/`（含 1.5G N=3、1.5H N=3、1.6F W2-0 回执）与 `../../_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest`
+> - **生产回执与运行证据目录：** `data/external_signal_shadow/`（含 1.5J-A、1.5G N=3、1.5H N=3、1.6F W2-0 回执）与 `../../_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest`
 
 ---
 
@@ -12,9 +12,9 @@
 
 | 属性 | 当前真实状态 | 证据来源 |
 |---|---|---|
-| **文档更新时间** | 2026-10-03T23:50:00+08:00 (UTC 2026-10-03 15:50:00) | 本次 Stage 1.5G N=3 / 1.5H N=3 收敛治理更新 |
+| **文档更新时间** | 2026-10-07T23:45:00+08:00 (UTC 2026-10-07 15:45:00) | 本次 Stage 1.5J-A 归档覆盖度盘点结项更新 |
 | **本地 Branch** | `feature/external-signal-shadow-stage1` | `git branch --show-current` |
-| **本地 Commit** | `ea754ae7d0da57d22105e424ab9cee012f765b82` | `git rev-parse HEAD` |
+| **本地 Commit** | `23708b824ca0ff6ff82ad31e13cb36136fa5b8d2` | `git rev-parse HEAD` |
 | **服务器 Git Commit** | `unknown` | 2026-07-26 服务器快照未成功采集 `git rev-parse HEAD` |
 | **关键部署文件 Hash Match** | `MATCH` (仅限 2026-07-26 快照比对) | 历史 SHA256 比对（见下表）；不能外推为当前服务器 Git commit 匹配 |
 | **本地工作区状态** | `Clean` (跟踪文件无越界修改) | `git status --short` |
@@ -49,7 +49,7 @@
 | `alpha_interpretation_allowed` | `False` | 禁止将观察数据解构为独立 Alpha 结论 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
 | `execution_feasibility_claim_allowed` | `False` | 禁止宣称流动性/深度具备可执行性 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
 | `stage1_5g_gate3_complete` | `False` | Stage 1.5H N=3 诊断结论为证据不充分，Gate 3 未开放通过 | `data/external_signal_shadow/stage1_5h/.../summary.json` |
-| `consumer_admission_allowed` | `False` | 下游消费者强制 Fail-Closed 硬阻断 (`STOP=...`) | Stage 1.3 R10 / 1.5G N=3 / 1.5H N=3 核心模块 |
+| `consumer_admission_allowed` | `False` | 下游消费者强制 Fail-Closed 硬阻断 (`STOP=...`) | Stage 1.3 R10 / 1.5G N=3 / 1.5H N=3 / 1.5J-A 核心模块 |
 
 ---
 
@@ -76,10 +76,11 @@ crypto-alpha-lab/
 │       ├── stage1_5g_n3_regime_stratified_admission.py # 1.5G N=3 产品机制分层事件族准入模块
 │       ├── stage1_5h_n3_regime_stratified_liquidity_friction_diagnostic.py # 1.5H N=3 产品机制分层流动性摩擦诊断模块
 │       ├── stage1_5h_static_execution_* # 1.5H 历史静态执行代理报告生成器 (Strict Read-Only)
+│       ├── stage1_5j_a_historical_archive_coverage_inventory.py # 1.5J-A 历史数据归档覆盖度盘点核心模块 (Two-pass scan + 365天全量盘点 + flock原子发布 + 严格反短路)
 │       └── stage1_6*                  # 1.6 Futures Delisting 历史源契约、密封适配器、H2 语法回放与终局基差诊断模块
 ├── scripts/
 │   ├── review_external_signal_shadow_stage1_3_r10_readmission.py # 1.3 R10 离线准入复核 CLI 脚本
-│   └── external_signal_shadow/        # 影子观察、准入与审查脚本集 (含 1.5G N=3、1.5H N=3 runner)
+│   └── external_signal_shadow/        # 影子观察、准入与审查脚本集 (含 1.5G N=3、1.5H N=3、1.5J-A runner)
 ```
 
 ---
@@ -103,6 +104,7 @@ crypto-alpha-lab/
 | **Stage 1.5G N=3** | N=3 产品机制分层事件族准入 | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5g/n3_regime_stratified_admissions/stage1_5g_n3_regime_stratified_admission_20261002T110403Z/stage1_5g_n3_regime_stratified_admission_summary.json` | 52 项测试全通，独立审计评定 COMPLETE (Commit `9484dd3`)；准入 3 篇独立公告、3 个父事件、9 个正式子标的（CTUSDT、MOONSHOTUSDT、7 个 batch7 标的）按 3 类产品机制分层 clean pass；**达成 Gate 3 样本数量门槛（$\ge 3$ 个独立事件且 $\ge 3$ 篇公告）**；下游消费强制 Fail-Closed 硬阻断 | 推进 Stage 1.5H N=3 机制分层流动性摩擦诊断 |
 | **Stage 1.5H (历史静态报告)** | 静态执行代理报告生成器 (Read-Only Report Generator) | `implemented_locally`, `committed`, `reviewed` | `Yes` | Offline Tool | `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md` | 报告生成器治理审查通过；当前本地 `data/stage1_5h` artifact 未同步进工作区 | 维持纯只读报告工具定位，已被 N=3 诊断替代 |
 | **Stage 1.5H N=3** | N=3 产品机制分层流动性摩擦诊断 | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` | 39 项测试通过；独立审计评定 COMPLETE (Commit `ab5043d`)；基于 1.5G N=3 的 3 个父事件与 9 个子标的完成机制分层 P95 滑点摩擦诊断；证实三种产品机制摩擦显著分化（标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps），严禁跨机制池化或统一定价；结论保持 `evidence_insufficient`，`stage1_5g_gate3_complete=false`；下游消费强制 Fail-Closed 硬阻断，无任何交易或执行权限 | 下游只读微观结构研究；维持零交易/执行权限 |
+| **Stage 1.5J-A** | 历史数据归档覆盖度盘点 (365天全量历史与归档闭环审计) | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json` | 88 项测试全通；独立审计与 Design §7.2 变异审计评定 COMPLETE (Commit `23708b8`)；盘点 365 天窗口内 335 篇公告，131 篇目标新上线公告，125 篇解析成功 (281 USDT 标的，278 标的归档完整，3 标的归档缺口)，118 篇父事件完整，13 篇父事件存在证据缺口 (6 detail unresolved, 4 no in-scope child, 3 archive gaps)；状态严格为 `coverage_inventory_evidence_gap`；13 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断 | 推进 Stage 1.5J 历史事件驱动微观结构研究 (基于 118 个完整父事件) 或 1.5I 实时抽样中价响应诊断 |
 | **Stage 1.6A-C** | Futures Delisting 历史源契约、密封导出与适配器 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Completed | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` | 1.6A-C 历史源契约、密封导出与 H2 语法适配器完成独立审计 (`source_audit_passed=true`) | 1.6D 远端部署授权评估 |
 | **Stage 1.6D** | Futures Delisting VPS 实时源观察 | `implemented_locally`, `committed`, `planned_only` | `Yes` | `False` (1_6D_not_deployed) | `docs/ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md` | 部署设计与 Runbook 就绪；需 target preflight transcript 与显式用户部署授权 | 待用户显式授权 |
 | **Stage 1.6F & W2-0** | 历史对照机制与终局基差探索性诊断结项 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json` | 180 物理源对象；41 标的 / 27 父事件；19 个 window-defined 父事件子集证实终局基差发散/非自然收敛（仅 3/19 负值，16/19 正值）；严格保持 outcome_seen/exploratory_only，无后续交易权限，结项 closure only | `none_from_current_evidence` |
@@ -193,6 +195,19 @@ crypto-alpha-lab/
   - `tradfi_equity_or_etf_perpetual_batch` (7 个标的): 边际 P95 滑点和中位数为 **80.02 bps**（最高达 87.43 bps）。
 - **硬治理约束**：严禁跨机制池化、统一定价或外推任何 Alpha 假设；下游消费强制 Fail-Closed 硬阻断 (`STOP=stage1_5h_n3_future_consumer_not_authorized`)；零实盘/零模拟盘/零执行引擎权限。
 
+### 7.3 Stage 1.5J-A 历史数据归档覆盖度盘点 (365天全量历史与归档闭环审计)
+
+- **生产盘点模块与入口**：`src/research/external_signal_shadow/stage1_5j_a_historical_archive_coverage_inventory.py` 及 CLI `scripts/external_signal_shadow/run_stage1_5j_a_historical_archive_coverage_inventory.py`。
+- **生产回执与结论**：
+  - 回执路径：`data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json` (744 MB)
+  - 盘点时间窗口：`2025-10-01T00:00:00Z` 至 `2026-10-01T00:00:00Z` (整 365 天，即 `[1759276800000, 1790812800000)`)
+  - 盘点统计：分母公告 335 篇，目标新上线父事件 131 篇，成功解析 125 篇，关联 281 个 in-scope USDT 子标的 (278 标的归档完整，3 标的归档缺口)；完整父事件 118 篇，存在证据缺口父事件 13 篇 (6 篇详情解析未决 `coverage_evidence_gap_detail`，4 篇无 in-scope USDT 子标的 `coverage_evidence_gap_no_in_scope_usdt_child`，3 篇归档校验缺口 `coverage_evidence_gap_archive`)。
+  - 核心状态与决策：`analysis_state = "coverage_inventory_evidence_gap"`, `decision = "stage1_5j_a_historical_archive_coverage_evidence_gap_published"`。
+- **闭环审计与加载器回放 (Design §7.2)**：
+  - 公开 strict loader 对 744 MB 生产回执全量正向重放通过 (RC=0)。
+  - 6 项独立 `/tmp` 单点语义变异审计探针 (analysis_state, decision, target_parent_count 计算式, Markdown 审查报告, authority Core SHA, manifest artifact hash) 全部以预期 `STOP=...` 错误码 fail-closed 闭环。
+- **硬治理约束**：13 项治理标志严格全 `False`；下游消费强制 Fail-Closed 硬阻断 (`STOP=stage1_5j_a_future_consumer_not_authorized`)；严禁将归档覆盖度提升为 Alpha、回放、信号、执行或交易权限。
+
 ---
 
 ## 8. 最新真实运行证据汇总 (Latest Real Runtime Evidence)
@@ -201,7 +216,7 @@ crypto-alpha-lab/
 
 1. **本地 Git 分支与 Commit**：
    - 路径：`git rev-parse HEAD`
-   - 结论：Branch `feature/external-signal-shadow-stage1`, Commit `ea754ae7d0da57d22105e424ab9cee012f765b82`
+   - 结论：Branch `feature/external-signal-shadow-stage1`, Commit `23708b824ca0ff6ff82ad31e13cb36136fa5b8d2`
 2. **服务器运行进程与 Output Root (2026-07-26 采集快照)**：
    - 路径：`_project_context/server_runtime_snapshot_20260726T021054Z.txt:L20-L26`
    - 结论：
@@ -222,6 +237,9 @@ crypto-alpha-lab/
 7. **Stage 1.6F W2-0 终局基差探索性诊断结项证据**：
    - 路径：`data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json`
    - 结论：180 物理源对象，19 个 window-defined 父事件子集证实终局基差发散，结项 closure only。
+8. **Stage 1.5J-A 历史归档覆盖度盘点与闭环审计证据**：
+   - 路径：`data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json` (744 MB)
+   - 结论：`receipt_published`，88 项测试全通，公开严格加载器正向全量重放通过，Design §7.2 6 项单点语义变异审计探针全部以预期 `STOP=...` fail-closed 闭环，118 个父事件完整，13 个父事件存在证据缺口，结论严格为 `coverage_inventory_evidence_gap`，零交易/执行权限（Commit `23708b8`）。
 
 ---
 
@@ -233,11 +251,16 @@ crypto-alpha-lab/
 - **无**（服务器 1.5D 与 1.5F 进程持续稳定运行；本地各离线研究管线测试全通，0 崩溃）。
 
 ### P1 阻塞项
-- **Blocker**：Stage 1.5H N=3 机制分层诊断显示三种产品机制的流动性摩擦显著分化（17.99 bps vs 31.58 bps vs 80.02 bps），当前证据不足以支撑无差别成本模型或交易可行性。
-- **Evidence**：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` (`research_classification = "evidence_insufficient"`, `stage1_5g_gate3_complete = false`)
-- **Risk**：若跨机制池化或采用单一统一定价模型，将导致传统股票/ETF 永续的高额摩擦被低估，引入严重交易亏损风险。
-- **Required Next Action**：维持机制分层隔离；继续保持服务器 1.5D 与 1.5F 连续影子观察以累积长期自然样本；仅在机制分层约束下推进下游只读微观结构研究。
-- **Stop Condition**：严禁授予任何交易或执行权限；下游消费保持 Fail-Closed。
+- **Blocker 1 (产品机制摩擦分化)**：Stage 1.5H N=3 机制分层诊断显示三种产品机制的流动性摩擦显著分化（17.99 bps vs 31.58 bps vs 80.02 bps），当前证据不足以支撑无差别成本模型或交易可行性。
+  - **Evidence**：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` (`research_classification = "evidence_insufficient"`, `stage1_5g_gate3_complete = false`)
+  - **Risk**：若跨机制池化或采用单一统一定价模型，将导致传统股票/ETF 永续的高额摩擦被低估，引入严重交易亏损风险。
+  - **Required Next Action**：维持机制分层隔离；继续保持服务器 1.5D 与 1.5F 连续影子观察以累积长期自然样本；仅在机制分层约束下推进下游只读微观结构研究。
+  - **Stop Condition**：严禁授予任何交易或执行权限；下游消费保持 Fail-Closed。
+- **Blocker 2 (历史归档覆盖度证据缺口)**：Stage 1.5J-A 历史数据归档覆盖度盘点证实 365 天窗口内存在 13 篇父事件证据缺口（6 篇详情解析未决，4 篇无 in-scope USDT 子标的，3 篇归档校验缺口），不能将历史数据归档假设为 100% 无损完整。
+  - **Evidence**：`data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261007T091336Z/summary.json` (`analysis_state = "coverage_inventory_evidence_gap"`)
+  - **Risk**：若下游研究无视 13 个父事件缺口并强行外推全集无偏统计，将引入幸存者偏差或数据缺失偏差。
+  - **Required Next Action**：下游历史微观结构研究仅能严格基于 118 个完整父事件（278 个完整子标的）展开；严禁填补合成数据或伪造缺口标的；下游消费保持 Fail-Closed。
+  - **Stop Condition**：严禁将覆盖度盘点提升为 Alpha、回放、信号或交易权限。
 
 ### P2 阻塞项
 - **Blocker**：Stage 1.6D (Futures Delisting VPS 实时源观察) 尚未获得生产部署授权。
@@ -250,12 +273,13 @@ crypto-alpha-lab/
 
 ## 10. 下一步工作 (Next Steps)
 
-仅列出当前可以执行的 4 项计划内任务：
+仅列出当前可以执行的 5 项计划内任务：
 
 1. **维持 1.5D 与 1.5F 连续影子观察进程**：监控 PID 88580 与 PID 88770 稳定运行，持续积累新合约上线事件的原始 L2 盘口数据。
-2. **推进 Stage 1.5 机制分层下游只读微观结构研究**：在保持 `crypto_standard_perpetual`、`pre_ipo_equity_perpetual`、`tradfi_equity_or_etf_perpetual_batch` 三类机制严格隔离的前提下，开展只读挂单簿与深度衰减分析，严禁跨机制池化。
-3. **Stage 1.6D 部署前置条件评估**：若需开启期货下架实时源观察，按照 1.6D Runbook 收集目标环境前置证据并请求用户显式部署授权。
-4. **维持 L0/L1 安全与权限阻断**：严格保持 `RISK_LIVE_TRADING_ENABLED = False`，维持下游消费者 fail-closed 硬门禁，零交易/执行权限。
+2. **基于 Stage 1.5J-A 118 个完整父事件开展历史微观结构研究 (Stage 1.5J)**：在排除 13 个证据缺口父事件的前提下，对 118 个完整父事件（278 个 USDT 子标的）开展首个历史只读微观结构与价格形成分析。
+3. **或推进 Stage 1.5I 实时抽样中价响应诊断**：针对实时观察捕获的有效事件开展中价响应测度。
+4. **Stage 1.6D 部署前置条件评估**：若需开启期货下架实时源观察，按照 1.6D Runbook 收集目标环境前置证据并请求用户显式部署授权。
+5. **维持 L0/L1 安全与权限阻断**：严格保持 `RISK_LIVE_TRADING_ENABLED = False`，维持下游消费者 fail-closed 硬门禁，零交易/执行权限。
 
 ---
 
