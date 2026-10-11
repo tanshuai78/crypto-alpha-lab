@@ -15,14 +15,32 @@ import sys
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
-# Profile Constants: stage1_5j_a_receipt_v1
+# Profile Constants: stage1_5j_a_receipt_v1 and stage1_5j_a_receipt_v2
 # -----------------------------------------------------------------------------
 
-PROFILE_ID = "stage1_5j_a_receipt_v1"
-PROFILE_CONTRACT_VERSION = 1
+PROFILE_ID_V1 = "stage1_5j_a_receipt_v1"
+PROFILE_ID_V2 = "stage1_5j_a_receipt_v2"
+PROFILE_CONTRACT_VERSION_V1 = 1
+PROFILE_CONTRACT_VERSION_V2 = 2
+
+PROFILE_ID = PROFILE_ID_V1
+PROFILE_CONTRACT_VERSION = PROFILE_CONTRACT_VERSION_V1
 NETWORK_PROFILE_ID = "stage1_5j_a_public_archive_inventory_v1"
 
-SUPPORTED_PROFILES = frozenset({PROFILE_ID})
+SUPPORTED_PROFILES = frozenset({PROFILE_ID_V1, PROFILE_ID_V2})
+
+GOVERNANCE_PARENT_DESIGN_PATH = (
+    "docs/designs/2026-10-09-governance-cross-boundary-artifact-schema-integrity-design_CN.md"
+)
+GOVERNANCE_PARENT_DESIGN_SHA256 = (
+    "73006481a7a390213e7912d2bc5fb04d61dde77088176d82547cf9110951e4f4"
+)
+GOVERNANCE_PROFILE_DESIGN_DELTA_PATH = (
+    "docs/designs/2026-10-11-governance-stage1-5j-a-replacement-receipt-profile-v2-design-delta_CN.md"
+)
+GOVERNANCE_PROFILE_DESIGN_DELTA_SHA256 = (
+    "1d3155c8a38e53f851aaa0f51c8c2ec6ef6aaaf811e4330d8b1c0a491796a86b"
+)
 
 # Stage 1.5J-A Profile Authority Constants
 TARGET_STAGE_DESIGN_PATH = (
@@ -38,6 +56,27 @@ TARGET_STAGE_DELTA_PATH = (
 )
 TARGET_STAGE_DELTA_SHA256 = (
     "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+)
+TARGET_CONFORMANCE_DELTA_PATH = (
+    "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-"
+    "conformance-remediation-design-delta_CN.md"
+)
+TARGET_CONFORMANCE_DELTA_SHA256 = (
+    "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+)
+TARGET_NULLABILITY_DELTA_PATH = (
+    "docs/designs/2026-10-09-external-signal-shadow-lab-stage1-5j-a-"
+    "archive-nonpersisted-nullability-conformance-remediation-design-delta_CN.md"
+)
+TARGET_NULLABILITY_DELTA_SHA256 = (
+    "f427df9435c8b9c8dd2b4b45c24bbbbd595df2c7e8d209f40f6fe2cd13b00f3c"
+)
+TARGET_REMEDIATION_PLAN_PATH = (
+    "docs/plans/2026-10-10-external-signal-shadow-lab-stage1-5j-a-"
+    "archive-nonpersisted-nullability-conformance-remediation-implementation-plan-r1_CN.md"
+)
+TARGET_REMEDIATION_PLAN_SHA256 = (
+    "b578ab6b82ffcf36ff3f9bcefd3cb4989bf1be9cf64ae70d09fddfcbb2f76a82"
 )
 
 ALLOWED_APPROVED_DESIGNS = frozenset(
@@ -360,9 +399,8 @@ def _check_no_symlinks(root: Path):
 # -----------------------------------------------------------------------------
 
 
-def verify_stage1_5j_a_receipt_v1(project_root: Path, artifact_root_rel: str):
-
-    """Validate artifact tree under project_root against stage1_5j_a_receipt_v1 profile.
+def _verify_stage1_5j_a_receipt(project_root: Path, artifact_root_rel: str, profile_version: int):
+    """Validate artifact tree under project_root against stage1_5j_a_receipt profile version.
 
     Returns diagnostic string on failure, None on success.
     """
@@ -586,15 +624,39 @@ def verify_stage1_5j_a_receipt_v1(project_root: Path, artifact_root_rel: str):
             return f"summary.json authority_packet['{member}'] invalid sha256"
 
     # Verify frozen profile authority bindings
-    design_tuple = (
-        a_packet["approved_design"]["relative_path"],
-        a_packet["approved_design"]["sha256"],
-    )
-    if design_tuple not in ALLOWED_APPROVED_DESIGNS:
-        return (
-            f"summary.json authority_packet approved_design mismatch: "
-            f"observed {design_tuple} not in allowed profile design bindings"
+    if profile_version == PROFILE_CONTRACT_VERSION_V1:
+        design_tuple = (
+            a_packet["approved_design"]["relative_path"],
+            a_packet["approved_design"]["sha256"],
         )
+        if design_tuple not in ALLOWED_APPROVED_DESIGNS:
+            return (
+                f"summary.json authority_packet approved_design mismatch: "
+                f"observed {design_tuple} not in allowed profile design bindings"
+            )
+    elif profile_version == PROFILE_CONTRACT_VERSION_V2:
+        expected_design_tuple = (TARGET_NULLABILITY_DELTA_PATH, TARGET_NULLABILITY_DELTA_SHA256)
+        design_tuple = (
+            a_packet["approved_design"]["relative_path"],
+            a_packet["approved_design"]["sha256"],
+        )
+        if design_tuple != expected_design_tuple:
+            return (
+                f"summary.json authority_packet approved_design mismatch: "
+                f"expected {expected_design_tuple}, observed {design_tuple}"
+            )
+        expected_plan_tuple = (TARGET_REMEDIATION_PLAN_PATH, TARGET_REMEDIATION_PLAN_SHA256)
+        plan_tuple = (
+            a_packet["approved_plan"]["relative_path"],
+            a_packet["approved_plan"]["sha256"],
+        )
+        if plan_tuple != expected_plan_tuple:
+            return (
+                f"summary.json authority_packet approved_plan mismatch: "
+                f"expected {expected_plan_tuple}, observed {plan_tuple}"
+            )
+    else:
+        return f"Internal verifier error: unsupported profile version {profile_version}"
 
     if a_packet["audited_core"]["relative_path"] != AUDITED_CORE_RELATIVE_PATH:
         return (
@@ -980,20 +1042,52 @@ def verify_stage1_5j_a_receipt_v1(project_root: Path, artifact_root_rel: str):
         )
 
     # Persisted response paths must point to manifest members with matching sha
-    for row in completed_projection:
-        p_path = row["response_relative_path"]
-        if p_path is not None:
-            # Must point to root_relative_path/<subpath>
-            prefix = f"{manifest['root_relative_path']}/"
-            if not p_path.startswith(prefix):
-                return f"request_records response_relative_path '{p_path}' does not start with '{prefix}'"
-            subpath = p_path[len(prefix):]
-            if subpath not in manifest_map:
-                return f"request_records response_relative_path '{subpath}' not found in manifest"
-            if manifest_map[subpath]["sha256"] != row["response_sha256"]:
-                return f"request_records response_sha256 mismatch with manifest member '{subpath}'"
+    if profile_version == PROFILE_CONTRACT_VERSION_V1:
+        for row in completed_projection:
+            p_path = row["response_relative_path"]
+            if p_path is not None:
+                # Must point to root_relative_path/<subpath>
+                prefix = f"{manifest['root_relative_path']}/"
+                if not p_path.startswith(prefix):
+                    return f"request_records response_relative_path '{p_path}' does not start with '{prefix}'"
+                subpath = p_path[len(prefix):]
+                if subpath not in manifest_map:
+                    return f"request_records response_relative_path '{subpath}' not found in manifest"
+                if manifest_map[subpath]["sha256"] != row["response_sha256"]:
+                    return f"request_records response_sha256 mismatch with manifest member '{subpath}'"
+    elif profile_version == PROFILE_CONTRACT_VERSION_V2:
+        for row in completed_projection:
+            p_path = row["response_relative_path"]
+            if p_path is not None:
+                if not _is_safe_relative_path(p_path) or not p_path.startswith("raw/"):
+                    return (
+                        f"request_records response_relative_path '{p_path}' "
+                        f"must be safe relative path starting with 'raw/'"
+                    )
+                if p_path not in manifest_map:
+                    return f"request_records response_relative_path '{p_path}' not found in manifest"
+                if manifest_map[p_path]["sha256"] != row["response_sha256"]:
+                    return f"request_records response_sha256 mismatch with manifest member '{p_path}'"
+    else:
+        return f"Internal verifier error: unsupported profile version {profile_version}"
 
     return None
+
+
+def verify_stage1_5j_a_receipt_v1(project_root: Path, artifact_root_rel: str) -> str | None:
+    """Validate artifact tree under project_root against stage1_5j_a_receipt_v1 profile.
+
+    Returns diagnostic string on failure, None on success.
+    """
+    return _verify_stage1_5j_a_receipt(project_root, artifact_root_rel, profile_version=PROFILE_CONTRACT_VERSION_V1)
+
+
+def verify_stage1_5j_a_receipt_v2(project_root: Path, artifact_root_rel: str) -> str | None:
+    """Validate artifact tree under project_root against stage1_5j_a_receipt_v2 profile.
+
+    Returns diagnostic string on failure, None on success.
+    """
+    return _verify_stage1_5j_a_receipt(project_root, artifact_root_rel, profile_version=PROFILE_CONTRACT_VERSION_V2)
 
 
 # -----------------------------------------------------------------------------
@@ -1059,7 +1153,14 @@ def main(argv=None) -> int:
             return 1
 
     # Execute verification
-    diag = verify_stage1_5j_a_receipt_v1(project_root, artifact_root_arg)
+    if args.profile == PROFILE_ID_V1:
+        diag = verify_stage1_5j_a_receipt_v1(project_root, artifact_root_arg)
+    elif args.profile == PROFILE_ID_V2:
+        diag = verify_stage1_5j_a_receipt_v2(project_root, artifact_root_arg)
+    else:
+        sys.stderr.write(f"Error: Unsupported profile '{args.profile}'. Supported: {sorted(SUPPORTED_PROFILES)}\n")
+        return 2
+
     if diag:
         sys.stderr.write(f"Contract violation [{args.profile}]: {diag}\n")
         return 1

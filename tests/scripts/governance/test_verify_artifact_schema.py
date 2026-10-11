@@ -10,6 +10,7 @@ Strictly verifies:
 
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -26,6 +27,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEGATIVE_REF_ROOT = (
     "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/"
     "stage1_5j_a_historical_archive_coverage_inventory_20261008T160500Z"
+)
+POSITIVE_REPLACEMENT_ROOT = (
+    "data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/"
+    "stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z"
 )
 
 
@@ -184,6 +189,12 @@ def test_ast_strict_stdlib_isolation():
                     "system",
                     "popen",
                     "spawn",
+                    "write_text",
+                    "write_bytes",
+                    "remove",
+                    "unlink",
+                    "mkdir",
+                    "rmdir",
                 }, f"Forbidden method call {func.attr}()"
 
         # Check no .git access in string literals
@@ -1382,3 +1393,469 @@ def test_immutable_section_1_negative_reference_root(capsys):
     assert "post_launch_row_count" in diag
     assert "null" in diag
     assert "0" in diag
+
+
+# -----------------------------------------------------------------------------
+# 6. Profile stage1_5j_a_receipt_v2 Tests and Mechanics
+# -----------------------------------------------------------------------------
+
+
+def _snapshot_dir_inventory(dir_path: Path) -> dict:
+    """Read-only capture of file relative paths and their sha256 hashes."""
+    inventory = {}
+    for p in sorted(dir_path.rglob("*")):
+        if p.is_file():
+            rel = str(p.relative_to(dir_path))
+            inventory[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return inventory
+
+
+def _apply_v2_canonical_overlay(receipt_dir: Path, rel_root: str):
+    """Apply the declared v2 authority/path overlay to a minimal valid receipt and update manifest."""
+    # 1. Update summary.json
+    summary_path = receipt_dir / "summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    summary_obj["authority_packet"]["approved_design"] = {
+        "relative_path": (
+            "docs/designs/2026-10-09-external-signal-shadow-lab-stage1-5j-a-"
+            "archive-nonpersisted-nullability-conformance-remediation-design-delta_CN.md"
+        ),
+        "sha256": "f427df9435c8b9c8dd2b4b45c24bbbbd595df2c7e8d209f40f6fe2cd13b00f3c",
+    }
+    summary_obj["authority_packet"]["approved_plan"] = {
+        "relative_path": (
+            "docs/plans/2026-10-10-external-signal-shadow-lab-stage1-5j-a-"
+            "archive-nonpersisted-nullability-conformance-remediation-implementation-plan-r1_CN.md"
+        ),
+        "sha256": "b578ab6b82ffcf36ff3f9bcefd3cb4989bf1be9cf64ae70d09fddfcbb2f76a82",
+    }
+
+    rel_prefix = f"{rel_root}/"
+    for rec in summary_obj.get("request_records", []):
+        resp_path = rec.get("response_relative_path")
+        if resp_path and resp_path.startswith(rel_prefix):
+            rec["response_relative_path"] = resp_path[len(rel_prefix) :]
+
+    summary_path.write_bytes(_canonical_json(summary_obj))
+
+    # 2. Update request_journal.jsonl
+    journal_path = receipt_dir / "request_journal.jsonl"
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    for line in lines:
+        if not line.strip():
+            continue
+        term = json.loads(line)
+        resp_path = term.get("response_relative_path")
+        if resp_path and resp_path.startswith(rel_prefix):
+            term["response_relative_path"] = resp_path[len(rel_prefix) :]
+        new_lines.append(json.dumps(term, sort_keys=True, separators=(",", ":")))
+    journal_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # 3. Update manifest entries
+    manifest_path = receipt_dir / "manifest.json"
+    _update_manifest_entry(manifest_path, "summary.json", summary_path)
+    _update_manifest_entry(manifest_path, "request_journal.jsonl", journal_path)
+
+
+def test_v2_profile_authority_literals_exact():
+    """Verify scripts/governance/verify_artifact_schema.py defines exact v2 literals from Design §4.1."""
+    script_path = PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py"
+    tree = ast.parse(script_path.read_text(encoding="utf-8"), filename=str(script_path))
+
+    constants = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if isinstance(node.value, ast.Constant):
+                        constants[target.id] = node.value.value
+                    elif isinstance(node.value, ast.Call):
+                        if isinstance(node.value.func, ast.Name) and node.value.func.id == "frozenset":
+                            if node.value.args and isinstance(node.value.args[0], (ast.Set, ast.List, ast.Tuple)):
+                                elements = set()
+                                for elt in node.value.args[0].elts:
+                                    if isinstance(elt, ast.Constant):
+                                        elements.add(elt.value)
+                                    elif isinstance(elt, ast.Name):
+                                        elements.add(constants.get(elt.id, elt.id))
+                                constants[target.id] = frozenset(elements)
+
+    assert constants.get("PROFILE_ID_V1") == "stage1_5j_a_receipt_v1"
+    assert constants.get("PROFILE_ID_V2") == "stage1_5j_a_receipt_v2"
+    assert constants.get("PROFILE_CONTRACT_VERSION_V1") == 1
+    assert constants.get("PROFILE_CONTRACT_VERSION_V2") == 2
+    assert constants.get("SUPPORTED_PROFILES") == frozenset({"stage1_5j_a_receipt_v1", "stage1_5j_a_receipt_v2"})
+
+    assert constants.get("GOVERNANCE_PROFILE_DESIGN_DELTA_PATH") == (
+        "docs/designs/2026-10-11-governance-stage1-5j-a-replacement-receipt-profile-v2-design-delta_CN.md"
+    )
+    assert constants.get("GOVERNANCE_PROFILE_DESIGN_DELTA_SHA256") == (
+        "1d3155c8a38e53f851aaa0f51c8c2ec6ef6aaaf811e4330d8b1c0a491796a86b"
+    )
+    assert constants.get("GOVERNANCE_PARENT_DESIGN_PATH") == (
+        "docs/designs/2026-10-09-governance-cross-boundary-artifact-schema-integrity-design_CN.md"
+    )
+    assert constants.get("GOVERNANCE_PARENT_DESIGN_SHA256") == (
+        "73006481a7a390213e7912d2bc5fb04d61dde77088176d82547cf9110951e4f4"
+    )
+    assert constants.get("TARGET_STAGE_DESIGN_PATH") == (
+        "docs/designs/2026-10-05-external-signal-shadow-lab-stage1-5j-a-historical-archive-coverage-inventory-design_CN.md"
+    )
+    assert constants.get("TARGET_STAGE_DESIGN_SHA256") == (
+        "b74c306e92b2bd72935b6791ac5ee38889d27887c90be31c55457a223e4fc15a"
+    )
+    assert constants.get("TARGET_CONFORMANCE_DELTA_PATH") == (
+        "docs/designs/2026-10-08-external-signal-shadow-lab-stage1-5j-a-conformance-remediation-design-delta_CN.md"
+    )
+    assert constants.get("TARGET_CONFORMANCE_DELTA_SHA256") == (
+        "6063ed103d31fcf6c60ad8106eb13650f54b74272182c78bf8e81f9ba48a91ac"
+    )
+    assert constants.get("TARGET_NULLABILITY_DELTA_PATH") == (
+        "docs/designs/2026-10-09-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-design-delta_CN.md"
+    )
+    assert constants.get("TARGET_NULLABILITY_DELTA_SHA256") == (
+        "f427df9435c8b9c8dd2b4b45c24bbbbd595df2c7e8d209f40f6fe2cd13b00f3c"
+    )
+    assert constants.get("TARGET_REMEDIATION_PLAN_PATH") == (
+        "docs/plans/2026-10-10-external-signal-shadow-lab-stage1-5j-a-archive-nonpersisted-nullability-conformance-remediation-implementation-plan-r1_CN.md"
+    )
+    assert constants.get("TARGET_REMEDIATION_PLAN_SHA256") == (
+        "b578ab6b82ffcf36ff3f9bcefd3cb4989bf1be9cf64ae70d09fddfcbb2f76a82"
+    )
+
+
+def test_v2_profile_is_explicit_and_v1_has_no_alias_or_fallback(capsys):
+    """Verify only literal v1 and v2 IDs are accepted; aliases exit rc=2."""
+    for alias in ["stage1_5j_a_receipt_v1.0", "v1", "v2", "stage1_5j_a_receipt_v2.0", "stage1_5j_a_receipt"]:
+        rc = main(["--profile", alias, "--artifact-root", "data/foo/bar"])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "Unsupported profile" in captured.err
+
+    rc_v2 = main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", "data/external_signal_shadow/nonexistent"])
+    captured_v2 = capsys.readouterr()
+    assert rc_v2 == 2
+    assert "does not exist" in captured_v2.err
+    assert "Unsupported profile" not in captured_v2.err
+
+
+def test_stage1_5j_a_receipt_v2_minimal_mechanics_fixture(tmp_path):
+    """Verify minimal valid v2 mechanics fixture returns rc=0."""
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+
+    mock_proj = tmp_path
+    script_copy = mock_proj / "scripts" / "governance" / "verify_artifact_schema.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+
+    receipt_dir = mock_proj / Path(rel_root)
+    _build_minimal_valid_receipt(receipt_dir, run_id, rel_root)
+    _apply_v2_canonical_overlay(receipt_dir, rel_root)
+
+    spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    rc = mod.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root])
+    assert rc == 0
+
+
+def test_stage1_5j_a_receipt_v2_inherited_mutation_matrix(tmp_path, capsys):
+    """Replay every frozen inherited case through the v2 canonical overlay and assert rc=1."""
+    contract_path = (
+        PROJECT_ROOT
+        / ".git/plan-execution/governance_artifact_schema"
+        / "ba362f2480c7872d39eede9254744d6e99216aa73134777658f9f81f05ba7881"
+        / "evidence/v2_inherited_mutation_contract.json"
+    )
+    assert contract_path.exists(), f"Contract must exist: {contract_path}"
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+
+    assert contract["exclusion_replacement_table"] == []
+    assert contract["frozen_case_count"] == 101
+    assert contract["v2_replayed_case_count"] == 101
+    assert contract["ordered_case_ids"] == [m[0] for m in MUTATION_CASES]
+
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+
+    for idx, case_id in enumerate(contract["ordered_case_ids"]):
+        mock_proj = tmp_path / f"case_{idx}"
+        script_copy = mock_proj / "scripts" / "governance" / "verify_artifact_schema.py"
+        script_copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+
+        spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        receipt_dir = mock_proj / Path(rel_root)
+        _build_minimal_valid_receipt(receipt_dir, run_id, rel_root)
+        _apply_v2_canonical_overlay(receipt_dir, rel_root)
+        _apply_mutation(receipt_dir, rel_root, run_id, case_id)
+
+        rc = mod.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root])
+        assert rc == 1, f"Inherited mutation {case_id} under v2 expected rc=1, got {rc}"
+
+
+def test_stage1_5j_a_receipt_v2_authority_chain_rejects_single_field_mutations(tmp_path):
+    """Independently change v2 approved design/plan path and SHA; assert each returns rc=1 at authority gate."""
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+
+    mutations = [
+        ("approved_design", "relative_path", "docs/designs/other.md"),
+        ("approved_design", "sha256", "0" * 64),
+        ("approved_plan", "relative_path", "docs/plans/other.md"),
+        ("approved_plan", "sha256", "0" * 64),
+    ]
+
+    for idx, (section, key, bad_val) in enumerate(mutations):
+        mock_proj = tmp_path / f"auth_{idx}"
+        script_copy = mock_proj / "scripts" / "governance" / "verify_artifact_schema.py"
+        script_copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+
+        spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        receipt_dir = mock_proj / Path(rel_root)
+        _build_minimal_valid_receipt(receipt_dir, run_id, rel_root)
+        _apply_v2_canonical_overlay(receipt_dir, rel_root)
+
+        summary_path = receipt_dir / "summary.json"
+        summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary_obj["authority_packet"][section][key] = bad_val
+        summary_path.write_bytes(_canonical_json(summary_obj))
+        _update_manifest_entry(receipt_dir / "manifest.json", "summary.json", summary_path)
+
+        rc = mod.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root])
+        assert rc == 1, f"Mutation {section}.{key} expected rc=1, got {rc}"
+
+
+def test_stage1_5j_a_receipt_v2_response_path_is_receipt_relative(tmp_path):
+    """Verify v2 requires receipt-relative raw/... paths; rejects root-prefixed and non-manifest paths."""
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+
+    # 1. Valid receipt-relative passes
+    mock_proj_valid = tmp_path / "valid"
+    script_copy = mock_proj_valid / "scripts" / "governance" / "verify_artifact_schema.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+    spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+    mod_valid = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod_valid)
+
+    receipt_dir_valid = mock_proj_valid / Path(rel_root)
+    _build_minimal_valid_receipt(receipt_dir_valid, run_id, rel_root)
+    _apply_v2_canonical_overlay(receipt_dir_valid, rel_root)
+    assert mod_valid.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 0
+
+    # 2. Root-prefixed fails with rc=1
+    mock_proj_prefixed = tmp_path / "prefixed"
+    script_copy = mock_proj_prefixed / "scripts" / "governance" / "verify_artifact_schema.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+    spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+    mod_prefixed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod_prefixed)
+
+    receipt_dir_prefixed = mock_proj_prefixed / Path(rel_root)
+    _build_minimal_valid_receipt(receipt_dir_prefixed, run_id, rel_root)
+    _apply_v2_canonical_overlay(receipt_dir_prefixed, rel_root)
+
+    summary_path = receipt_dir_prefixed / "summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    bad_path = f"{rel_root}/raw/article_details/{'a' * 32}.json"
+    summary_obj["request_records"][0]["response_relative_path"] = bad_path
+    summary_path.write_bytes(_canonical_json(summary_obj))
+    _update_manifest_entry(receipt_dir_prefixed / "manifest.json", "summary.json", summary_path)
+
+    journal_path = receipt_dir_prefixed / "request_journal.jsonl"
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    term = json.loads(lines[1])
+    term["response_relative_path"] = bad_path
+    lines[1] = json.dumps(term, sort_keys=True, separators=(",", ":"))
+    journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _update_manifest_entry(receipt_dir_prefixed / "manifest.json", "request_journal.jsonl", journal_path)
+
+    assert mod_prefixed.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 3. Safe non-manifest raw/... fails with rc=1
+    mock_proj_nonmanifest = tmp_path / "nonmanifest"
+    script_copy = mock_proj_nonmanifest / "scripts" / "governance" / "verify_artifact_schema.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+    spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+    mod_nonmanifest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod_nonmanifest)
+
+    receipt_dir_nonmanifest = mock_proj_nonmanifest / Path(rel_root)
+    _build_minimal_valid_receipt(receipt_dir_nonmanifest, run_id, rel_root)
+    _apply_v2_canonical_overlay(receipt_dir_nonmanifest, rel_root)
+
+    summary_path = receipt_dir_nonmanifest / "summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    unlisted_raw = "raw/article_details/unlisted_file.json"
+    summary_obj["request_records"][0]["response_relative_path"] = unlisted_raw
+    summary_path.write_bytes(_canonical_json(summary_obj))
+    _update_manifest_entry(receipt_dir_nonmanifest / "manifest.json", "summary.json", summary_path)
+
+    journal_path = receipt_dir_nonmanifest / "request_journal.jsonl"
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    term = json.loads(lines[1])
+    term["response_relative_path"] = unlisted_raw
+    lines[1] = json.dumps(term, sort_keys=True, separators=(",", ":"))
+    journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _update_manifest_entry(receipt_dir_nonmanifest / "manifest.json", "request_journal.jsonl", journal_path)
+
+    assert mod_nonmanifest.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+
+def test_stage1_5j_a_receipt_v2_nonpersisted_nullability_and_sealed_tree(tmp_path):
+    """Verify nullability, flags, extra files, disallowed manifest paths, symlinks fail closed in v2."""
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+
+    def _setup_sub(sub_name: str):
+        mock_proj = tmp_path / sub_name
+        script_copy = mock_proj / "scripts" / "governance" / "verify_artifact_schema.py"
+        script_copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+        spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        receipt_dir = mock_proj / Path(rel_root)
+        _build_minimal_valid_receipt(receipt_dir, run_id, rel_root)
+        _apply_v2_canonical_overlay(receipt_dir, rel_root)
+        return mod, receipt_dir
+
+    # 1. post_launch_row_count: null -> 0 on nonpersisted
+    mod1, receipt_dir_null = _setup_sub("null")
+    summary_path = receipt_dir_null / "summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary_obj["archive_package_records"][0]["child_state"] = "archive_request_nonpersisted"
+    summary_obj["archive_package_records"][0]["post_launch_row_count"] = 0
+    summary_path.write_bytes(_canonical_json(summary_obj))
+    _update_manifest_entry(receipt_dir_null / "manifest.json", "summary.json", summary_path)
+    assert mod1.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 2. authority flag True
+    mod2, receipt_dir_flag = _setup_sub("flag")
+    summary_path = receipt_dir_flag / "summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary_obj["authority_flags"]["live_trading_allowed"] = True
+    summary_path.write_bytes(_canonical_json(summary_obj))
+    _update_manifest_entry(receipt_dir_flag / "manifest.json", "summary.json", summary_path)
+    assert mod2.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 3. extra unlisted file
+    mod3, receipt_dir_extra = _setup_sub("extra")
+    (receipt_dir_extra / "unlisted.txt").write_bytes(b"forbidden\n")
+    assert mod3.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 4. grammar-disallowed manifest member
+    mod4, receipt_dir_disallowed = _setup_sub("disallowed")
+    bad_file = receipt_dir_disallowed / "bad.txt"
+    bad_file.write_bytes(b"bad\n")
+    manifest_path = receipt_dir_disallowed / "manifest.json"
+    man_obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+    man_obj["artifacts"].append(
+        {"byte_count": 4, "relative_path": "bad.txt", "sha256": hashlib.sha256(b"bad\n").hexdigest()}
+    )
+    man_obj["artifacts"].sort(key=lambda x: x["relative_path"])
+    manifest_path.write_bytes(_canonical_json(man_obj))
+    assert mod4.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 5. descendant symlink
+    mod5, receipt_dir_symlink = _setup_sub("symlink")
+    rev = receipt_dir_symlink / "review_CN.md"
+    rev.unlink()
+    rev.symlink_to(receipt_dir_symlink / "manifest.json")
+    assert mod5.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+    # 6. unrebuilt manifest member
+    mod6, receipt_dir_unrebuilt = _setup_sub("unrebuilt")
+    (receipt_dir_unrebuilt / "review_CN.md").write_bytes(b"# Mutated review without manifest rebuild\n")
+    assert mod6.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root]) == 1
+
+
+def test_v2_external_identity_comparator_rejects_review_hash_drift(tmp_path):
+    """Mutate review_CN.md with manifest rebuild; structural passes but external comparator rejects."""
+    run_id = "stage1_5j_a_historical_archive_coverage_inventory_20261010T120000Z"
+    mock_proj = tmp_path
+    script_copy = mock_proj / "scripts" / "governance" / "verify_artifact_schema.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(PROJECT_ROOT / "scripts" / "governance" / "verify_artifact_schema.py", script_copy)
+
+    spec = importlib.util.spec_from_file_location("verifier", str(script_copy))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    rel_root = f"data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/{run_id}"
+    receipt_dir = mock_proj / Path(rel_root)
+    _build_minimal_valid_receipt(receipt_dir, run_id, rel_root)
+    _apply_v2_canonical_overlay(receipt_dir, rel_root)
+
+    orig_review_sha = hashlib.sha256((receipt_dir / "review_CN.md").read_bytes()).hexdigest()
+
+    # Mutate review_CN.md and rebuild manifest entry
+    review_file = receipt_dir / "review_CN.md"
+    review_file.write_bytes(b"# Stage 1.5J-A Coverage Inventory Review - Mutated\n")
+    _update_manifest_entry(receipt_dir / "manifest.json", "review_CN.md", review_file)
+
+    # Structural verifier passes (content-only copy with valid manifest)
+    rc = mod.main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", rel_root])
+    assert rc == 0
+
+    # Test-local external comparator rejects review hash drift
+    def compare_external_identity(dir_path: Path, expected_review_sha: str) -> bool:
+        actual_sha = hashlib.sha256((dir_path / "review_CN.md").read_bytes()).hexdigest()
+        return actual_sha == expected_review_sha
+
+    assert compare_external_identity(receipt_dir, orig_review_sha) is False
+
+
+def test_real_roots_have_profile_specific_read_only_results(capsys):
+    """Verify v1 legacy nullability failure and v2 legacy authority/profile failure without mutating roots."""
+    neg_root_path = PROJECT_ROOT / Path(NEGATIVE_REF_ROOT)
+    assert neg_root_path.exists(), f"Negative ref root must exist: {neg_root_path}"
+
+    before_inventory = _snapshot_dir_inventory(neg_root_path)
+
+    # v1 against negative root fails with nullability diagnostic
+    rc_v1 = main(["--profile", "stage1_5j_a_receipt_v1", "--artifact-root", NEGATIVE_REF_ROOT])
+    captured_v1 = capsys.readouterr()
+    assert rc_v1 == 1
+    diag_v1 = captured_v1.err + captured_v1.out
+    assert "post_launch_row_count" in diag_v1
+
+    # v2 against negative root fails with authority/profile violation
+    rc_v2 = main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", NEGATIVE_REF_ROOT])
+    captured_v2 = capsys.readouterr()
+    assert rc_v2 == 1
+    diag_v2 = captured_v2.err + captured_v2.out
+    assert "approved_design" in diag_v2 or "authority" in diag_v2.lower()
+
+    after_inventory = _snapshot_dir_inventory(neg_root_path)
+    assert before_inventory == after_inventory, "Negative root must not be mutated"
+
+
+def test_real_replacement_root_v2_passes_without_writes(capsys):
+    """Verify v2 on genuine replacement root passes rc=0 without mutating root bytes."""
+    pos_root_path = PROJECT_ROOT / Path(POSITIVE_REPLACEMENT_ROOT)
+    assert pos_root_path.exists(), f"Positive replacement root must exist: {pos_root_path}"
+
+    before_inventory = _snapshot_dir_inventory(pos_root_path)
+
+    rc = main(["--profile", "stage1_5j_a_receipt_v2", "--artifact-root", POSITIVE_REPLACEMENT_ROOT])
+    captured = capsys.readouterr()
+    assert rc == 0, f"Expected rc=0, got {rc}. Output: {captured.err + captured.out}"
+
+    after_inventory = _snapshot_dir_inventory(pos_root_path)
+    assert before_inventory == after_inventory, "Positive root must not be mutated"
