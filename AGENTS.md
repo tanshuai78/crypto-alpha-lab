@@ -39,7 +39,7 @@ Always sync from the workspace before making claims or decisions.
 
 - Inspect code and configs before relying on conversation memory.
 - At the start of a substantive session, read `docs/roadmap.md` first (project decisions and context),
-  then check `configs/base.py` (all thresholds and limits).
+  then check `configs/base.py` (all shared/risk thresholds and limits) and, only for Stage 1.5J-B historical receipt compatibility, `configs/stage1_5j_b_historical_aggtrades_launch_response.py`.
 - Treat `.agent/rules/` and `.agent/workflows/` as project policy.
 - Do NOT reference `src/main.py` or `src/config.py` — they do not exist in this project.
 - Before implementing, state material assumptions that affect:
@@ -86,7 +86,7 @@ These rules override everything else.
 
 1. Capital preservation comes before optimization or profit seeking.
 2. No change may increase net exposure uncertainty.
-3. Risk invariants must not be changed implicitly. `configs/base.py` is the only place to change thresholds.
+3. Risk invariants must not be changed implicitly. `configs/base.py` is the only place to change shared, risk, strategy, or execution thresholds. The sole exception is the exact Stage 1.5J-B offline constants in `configs/stage1_5j_b_historical_aggtrades_launch_response.py`, frozen by `docs/designs/2026-10-12-external-signal-shadow-lab-stage1-5j-b-historical-receipt-compatibility-rule17-config-authority-design-delta_CN.md`; no other stage-local config module is allowed without a separately approved project-governance Design.
 4. Any entry, exit, or sizing logic change must be validated in shadow mode for at least one full
    strategy cycle before being treated as live-safe.
 5. Large or unclear changes must be decomposed into small, verifiable chunks.
@@ -211,7 +211,7 @@ These rules apply to all strategy and execution discussions and code changes.
 - Do not add speculative abstractions, configurability, extension points, or new dependencies.
 - If a simpler approach solves the task, state it and prefer it.
 - If a change grows beyond the intended scope, stop and split it into a separate plan.
-- All thresholds must be in `configs/base.py`. No magic numbers inside `src/`.
+- All shared, risk, strategy, and execution thresholds must be in `configs/base.py`. The sole exception is the exact nine offline Stage 1.5J-B constants in `configs/stage1_5j_b_historical_aggtrades_launch_response.py`, frozen by `docs/designs/2026-10-12-external-signal-shadow-lab-stage1-5j-b-historical-receipt-compatibility-rule17-config-authority-design-delta_CN.md`; no other stage-local config module is allowed without a separately approved project-governance Design. No magic numbers inside `src/`.
 - Prefer readable code over clever abstractions.
 - Ensure important state transitions are logged at appropriate levels using `loguru`.
 - Fail gracefully on remote API or data issues. Never crash the main loop on a network error.
