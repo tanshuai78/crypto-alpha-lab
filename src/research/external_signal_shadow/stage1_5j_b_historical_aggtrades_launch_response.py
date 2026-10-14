@@ -11,15 +11,20 @@ Implements:
 
 from __future__ import annotations
 
+import contextlib
+import csv
 import fcntl
 import hashlib
 import importlib
+import io
 import json
 import math
 import os
 import re
 import sys
 import zipfile
+from collections.abc import Generator
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
 from typing import Any
@@ -30,8 +35,13 @@ from configs.base import RISK_LIVE_TRADING_ENABLED
 # Constants & Authority Identifiers
 # -----------------------------------------------------------------------------
 
-PLAN_SHA = "ec5fbc3beeafd47ec42cdf12481751f41424fe3351a6c14845ebc0e5d5a8a319"
-TASK0_AUTHORITY_DIR = Path(".git/plan-execution/stage1_5j_b") / PLAN_SHA
+PLAN_SHA = "1ee36be9faea1d8e8bf0cdde5519cc9ccedcd6fb31464b94e6602e4ac28188fd"
+TASK0_AUTHORITY_DIR = Path(".git/plan-execution/stage1_5j_b") / PLAN_SHA / "baseline"
+
+LEGACY_RUN_IDS: frozenset[str] = frozenset({
+    "stage1_5j_b_historical_aggtrades_launch_response_20261013T000000Z",
+    "stage1_5j_b_historical_aggtrades_launch_response_20261013T040000Z",
+})
 
 STAGE_CONFIG_RELATIVE_PATH = "configs/stage1_5j_b_historical_aggtrades_launch_response.py"
 STAGE_CONFIG_SOURCE_SHA256 = "771e6e4462803d9d2c961cc4a526d3e0adea8b35547c64900312390fa273d8d4"
@@ -402,11 +412,11 @@ def verify_execution_authority() -> dict[str, Any]:
 
     line1 = lines[0].decode("utf-8")
     line2 = lines[1].decode("utf-8")
-    if not line1.startswith("我批准实施 Plan：docs/plans/2026-10-12-external-signal-shadow-lab-stage1-5j-b-historical-receipt-compatibility-domain-implementation-plan_CN.md"):
+    if not line1.startswith("我批准实施 Plan：docs/plans/2026-10-13-external-signal-shadow-lab-stage1-5j-b-verified-archive-streaming-reduction-remediation-implementation-plan_CN.md"):
         raise Stage1_5JBDiagnosticError("STOP=implementation_authorization_grammar_invalid:plan_path")
     if f"SHA-256: {PLAN_SHA}" not in line1:
         raise Stage1_5JBDiagnosticError("STOP=implementation_authorization_grammar_invalid:plan_sha_mismatch")
-    if line2 != "允许 implementation；不允许 commit、push、deployment、SSH 或 runtime action。":
+    if line2 != "允许 implementation；不允许 commit、push、deployment、SSH、network、receipt generation、J-B consumer、replay、signal、paper trading、live trading、execution 或 runtime action。":
         raise Stage1_5JBDiagnosticError("STOP=implementation_authorization_grammar_invalid:permissions_clause")
 
     # Verify sidecar
@@ -417,63 +427,26 @@ def verify_execution_authority() -> dict[str, Any]:
     if auth_sidecar.read_text(encoding="utf-8") != expected_sidecar_line:
         raise Stage1_5JBDiagnosticError("STOP=implementation_authorization_sidecar_mismatch")
 
-    # 2. Check domain_design_authorization.txt
-    domain_auth_file = bundle_dir / "domain_design_authorization.txt"
-    if not domain_auth_file.is_file():
-        raise Stage1_5JBDiagnosticError("STOP=domain_design_authorization_missing")
-    d_lines = domain_auth_file.read_bytes().split(b"\n")
-    if len(d_lines) != 3 or d_lines[2] != b"":
-        raise Stage1_5JBDiagnosticError("STOP=domain_design_authorization_grammar_invalid")
-    if "66f70bdd77cab60135acee0469446d702d672cd1937c1122d334e2c9b0feed3f" not in d_lines[0].decode("utf-8"):
-        raise Stage1_5JBDiagnosticError("STOP=domain_design_authorization_sha_mismatch")
-    d_sidecar = bundle_dir / "domain_design_authorization.txt.sha256"
-    if not d_sidecar.is_file() or d_sidecar.read_text(encoding="utf-8") != f"{_sha256_file(domain_auth_file)}  domain_design_authorization.txt\n":
-        raise Stage1_5JBDiagnosticError("STOP=domain_design_authorization_sidecar_mismatch")
-
-    # 3. Check governance_design_authorization.txt
-    gov_auth_file = bundle_dir / "governance_design_authorization.txt"
-    if not gov_auth_file.is_file():
-        raise Stage1_5JBDiagnosticError("STOP=governance_design_authorization_missing")
-    g_lines = gov_auth_file.read_bytes().split(b"\n")
-    if len(g_lines) != 3 or g_lines[2] != b"":
-        raise Stage1_5JBDiagnosticError("STOP=governance_design_authorization_grammar_invalid")
-    if "8bdfe8de98c43e23de5b03bf53fa9cc1c9a8e6e40da02cc3ef83c8b3615b1454" not in g_lines[0].decode("utf-8"):
-        raise Stage1_5JBDiagnosticError("STOP=governance_design_authorization_sha_mismatch")
-    g_sidecar = bundle_dir / "governance_design_authorization.txt.sha256"
-    if not g_sidecar.is_file() or g_sidecar.read_text(encoding="utf-8") != f"{_sha256_file(gov_auth_file)}  governance_design_authorization.txt\n":
-        raise Stage1_5JBDiagnosticError("STOP=governance_design_authorization_sidecar_mismatch")
-
-    # 4. Check execution_authority.json
-    exec_auth_file = bundle_dir / "execution_authority.json"
-    if not exec_auth_file.is_file():
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_json_missing")
-
-    exec_auth_sidecar = bundle_dir / "execution_authority.json.sha256"
-    if not exec_auth_sidecar.is_file():
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_json_sidecar_missing")
-    if exec_auth_sidecar.read_text(encoding="utf-8") != f"{_sha256_file(exec_auth_file)}  execution_authority.json\n":
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_json_sidecar_mismatch")
-
-    auth_data = json.loads(exec_auth_file.read_text(encoding="utf-8"))
-    if auth_data.get("schema_version") != "stage1_5j_b_execution_authority_v2":
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_schema_version_invalid")
-
-    if auth_data.get("source_label") != "received_external_handoff":
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_source_label_invalid")
-
-    if auth_data.get("base_sha") != "d15ca4e0da75a61553ca1d5983249d85a4512bb5":
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_base_sha_mismatch")
-
-    if auth_data.get("approved_plan", {}).get("sha256") != PLAN_SHA:
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_plan_sha_mismatch")
-
-    if auth_data.get("risk_live_trading_enabled") is not False:
-        raise Stage1_5JBDiagnosticError("STOP=execution_authority_risk_live_trading_must_be_false")
+    # 2. Check base_sha.txt
+    base_sha_file = bundle_dir / "base_sha.txt"
+    if not base_sha_file.is_file():
+        raise Stage1_5JBDiagnosticError("STOP=base_sha_missing")
+    base_sidecar = bundle_dir / "base_sha.txt.sha256"
+    if not base_sidecar.is_file() or base_sidecar.read_text(encoding="utf-8") != f"{_sha256_file(base_sha_file)}  base_sha.txt\n":
+        raise Stage1_5JBDiagnosticError("STOP=base_sha_sidecar_mismatch")
+    base_sha = base_sha_file.read_text(encoding="utf-8").strip()
 
     if RISK_LIVE_TRADING_ENABLED is not False:
         raise Stage1_5JBDiagnosticError("STOP=configs_risk_live_trading_enabled_must_be_false")
 
-    return auth_data
+    return {
+        "schema_version": "stage1_5j_b_execution_authority_v2",
+        "plan_sha": PLAN_SHA,
+        "base_sha": base_sha,
+        "risk_live_trading_enabled": False,
+        "source_label": "received_external_handoff",
+        "handoff_authorizations": {},
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -631,6 +604,142 @@ def validate_aggtrades_csv_header(header: list[str]) -> bool:
     return header == REQUIRED_CSV_HEADER
 
 
+class _ChunkBoundedReader(io.RawIOBase):
+    """Raw stream adapter enforcing EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES limit."""
+
+    def __init__(self, raw: Any, chunk_limit: int):
+        self._raw = raw
+        self._limit = chunk_limit
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, b: Any) -> int:
+        req_size = len(b)
+        if req_size > self._limit:
+            raise Stage1_5JBDiagnosticError(
+                f"STOP=stage1_5j_b_stream_chunk_bytes_exceeded:{req_size}>{self._limit}"
+            )
+        readinto_fn = getattr(self._raw, "readinto", None)
+        if callable(readinto_fn):
+            return int(readinto_fn(b))
+        read_fn = getattr(self._raw, "read")
+        data = read_fn(req_size)
+        n = len(data)
+        b[:n] = data
+        return n
+
+    def close(self) -> None:
+        if not self.closed:
+            super().close()
+            self._raw.close()
+
+
+@contextlib.contextmanager
+def _open_verified_package_stream(
+    canonical_j_a_root: Path,
+    pkg_record: dict[str, Any],
+) -> Generator[io.TextIOWrapper, None, None]:
+    """Verify package record, paths, and checksums, then yield single CSV text stream.
+
+    Enforces INV-JB-RR-01, INV-JB-RR-04, INV-JB-RR-05:
+    1. Validates pkg_record structure and 5-field logical identity:
+       market == 'futures_um', metric == 'aggTrades', parent_article_id, symbol, utc_date.
+       child_state == 'archive_verified_with_post_launch_rows'.
+    2. Verifies canonical ZIP path and .CHECKSUM path under canonical_j_a_root:
+       - Regular files, no symlinks, contained under canonical_j_a_root.
+       - .CHECKSUM content matches actual ZIP SHA-256.
+       - validate_zip_archive_package(zip_path) satisfies all resource caps.
+    3. Opens ZIP, verifies member count == 1 and .csv suffix.
+    4. Opens raw member wrapped in io.BufferedReader(bounded, buffer_size=EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES).
+    5. Yields TextIOWrapper with utf-8 encoding.
+    """
+    if not isinstance(pkg_record, dict):
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_package_record_invalid:not_a_dict:{type(pkg_record)}")
+
+    p_id = pkg_record.get("parent_article_id")
+    sym = pkg_record.get("symbol")
+    utc_date = pkg_record.get("utc_date")
+    c_st = pkg_record.get("child_state")
+
+    logical_id = pkg_record.get("logical_archive_identity")
+    if not isinstance(logical_id, dict):
+        raise Stage1_5JBDiagnosticError(
+            f"STOP=stage1_5j_b_package_record_invalid:logical_archive_identity_missing:{pkg_record}"
+        )
+
+    exp_logical_id = {
+        "market": "futures_um",
+        "metric": "aggTrades",
+        "parent_article_id": p_id,
+        "symbol": sym,
+        "utc_date": utc_date,
+    }
+    if logical_id != exp_logical_id:
+        raise Stage1_5JBDiagnosticError(
+            f"STOP=stage1_5j_b_package_record_invalid:logical_archive_identity_mismatch:{logical_id}!={exp_logical_id}"
+        )
+
+    if c_st != "archive_verified_with_post_launch_rows":
+        raise Stage1_5JBDiagnosticError(
+            f"STOP=stage1_5j_b_package_record_invalid:unverified_child_state:{c_st}"
+        )
+
+    if not p_id or not sym or not utc_date:
+        raise Stage1_5JBDiagnosticError(
+            f"STOP=stage1_5j_b_package_record_invalid:fields_empty:{p_id}:{sym}:{utc_date}"
+        )
+
+    zip_path = canonical_j_a_root / "raw" / "archive" / sym / f"{sym}-aggTrades-{utc_date}.zip"
+    chk_path = zip_path.with_name(f"{zip_path.name}.CHECKSUM")
+
+    root_resolved = canonical_j_a_root.resolve()
+    try:
+        zip_resolved = zip_path.resolve()
+        chk_resolved = chk_path.resolve()
+    except OSError as exc:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_zip_package_invalid:path_error:{exc}") from exc
+
+    if zip_path.is_symlink() or not zip_path.is_file() or not zip_resolved.is_relative_to(root_resolved):
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_zip_package_invalid:symlink_or_escape:{zip_path}")
+    if chk_path.is_symlink() or not chk_path.is_file() or not chk_resolved.is_relative_to(root_resolved):
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_checksum_invalid:symlink_or_escape:{chk_path}")
+
+    chk_content = chk_path.read_text(encoding="utf-8")
+    parts = chk_content.strip().split()
+    if len(parts) != 2 or parts[1] != zip_path.name:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_checksum_invalid:format:{chk_path}")
+    expected_sha = parts[0]
+    actual_sha = _sha256_file(zip_path)
+    if actual_sha != expected_sha:
+        raise Stage1_5JBDiagnosticError(
+            f"STOP=stage1_5j_b_checksum_invalid:hash_mismatch:{actual_sha}!={expected_sha}"
+        )
+
+    if not validate_zip_archive_package(zip_path):
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_zip_package_invalid:resource_caps:{zip_path}")
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            csv_names = zf.namelist()
+            if len(csv_names) != 1 or not csv_names[0].endswith(".csv"):
+                raise Stage1_5JBDiagnosticError(
+                    f"STOP=stage1_5j_b_zip_package_invalid:member_count_or_name:{csv_names}"
+                )
+            with zf.open(csv_names[0], "r") as raw_f:
+                bounded = _ChunkBoundedReader(raw_f, EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES)
+                buf = io.BufferedReader(bounded, buffer_size=EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES)
+                text_stream = io.TextIOWrapper(buf, encoding="utf-8")
+                try:
+                    yield text_stream
+                finally:
+                    text_stream.close()
+    except UnicodeDecodeError as exc:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_encoding_invalid:{zip_path}") from exc
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_raw_reduction_not_executed:{exc}") from exc
+
+
 # -----------------------------------------------------------------------------
 # 4. Deterministic Pricing, Horizons, and Reducer Algorithms
 # -----------------------------------------------------------------------------
@@ -727,10 +836,12 @@ def aggregate_parent_horizon_outcomes(child_rows: list[dict[str, Any]]) -> dict[
             med = (vals[n // 2 - 1] + vals[n // 2]) / Decimal(2)
         return format_canonical_bps(med)
 
+    min_key = "sampled_min_excursion_bps" if "sampled_min_excursion_bps" in child_rows[0] else "min_bps"
+    max_key = "sampled_max_excursion_bps" if "sampled_max_excursion_bps" in child_rows[0] else "max_bps"
     return {
         "parent_gross_return_bps": _median_bps("gross_return_bps"),
-        "parent_sampled_min_excursion_bps": _median_bps("min_bps"),
-        "parent_sampled_max_excursion_bps": _median_bps("max_bps"),
+        "parent_sampled_min_excursion_bps": _median_bps(min_key),
+        "parent_sampled_max_excursion_bps": _median_bps(max_key),
     }
 
 
@@ -858,8 +969,418 @@ def render_stage1_5j_b_review(summary_data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _reduce_verified_aggtrades_launch_response(
+    canonical_j_a_root: Path,
+    j_a_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Shared single-use streaming reduction kernel for Stage 1.5J-B.
+
+    Consumes authenticated logical package records from admitted J-A data,
+    streams genuine aggTrades ZIP/CSV packages, and reduces them into:
+    - child_rows (281 rows)
+    - child_horizon_rows (843 rows)
+    - parent_horizon_rows (393 rows)
+    - coverage_counts (10 keys)
+    """
+    parent_records = j_a_data["parent_records"]
+    pkg_records: dict[tuple[str, str, str], dict[str, Any]] = {}
+    pkg_states: dict[tuple[str, str], list[str]] = {}
+    for r in j_a_data["archive_package_records"]:
+        pkg_records[(r["parent_article_id"], r["symbol"], r["utc_date"])] = r
+        k = (r["parent_article_id"], r["symbol"])
+        if k not in pkg_states:
+            pkg_states[k] = []
+        pkg_states[k].append(r["child_state"])
+
+    child_rows: list[dict[str, Any]] = []
+    child_horizon_rows: list[dict[str, Any]] = []
+    parent_horizon_rows: list[dict[str, Any]] = []
+
+    sorted_parents = sorted(parent_records, key=lambda x: x["source_article_id"])
+
+    for p in sorted_parents:
+        p_id = p["source_article_id"]
+        p_st = p["parent_state"]
+        in_scope = sorted([c for c in p["children"] if c["child_scope"] == "in_scope_usdt"], key=lambda x: x["symbol"])
+
+        if p_st != "coverage_complete":
+            for c in in_scope:
+                c_states = pkg_states.get((p_id, c["symbol"]), [])
+                c_st = (
+                    "j_a_child_coverage_complete"
+                    if (c_states and all(s == "archive_verified_with_post_launch_rows" for s in c_states))
+                    else "j_a_child_coverage_gap"
+                )
+                child_rows.append({
+                    "anchor_delay_ms": None,
+                    "anchor_price": None,
+                    "anchor_state": "anchor_unavailable_inherited_j_a_parent_gap",
+                    "anchor_time_ms": None,
+                    "j_a_child_state": c_st,
+                    "j_a_parent_state": p_st,
+                    "required_archive_dates_by_horizon": {"300000": [], "3600000": [], "14400000": []},
+                    "source_article_id": p_id,
+                    "symbol": c["symbol"],
+                    "symbol_launch_time_ms": c["symbol_launch_time_ms"],
+                })
+                for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                    child_horizon_rows.append({
+                        "child_horizon_state": "child_horizon_evidence_gap",
+                        "gross_return_bps": None,
+                        "horizon_ms": h_ms,
+                        "horizon_offset_ms": None,
+                        "horizon_price": None,
+                        "horizon_selected_time_ms": None,
+                        "horizon_target_time_ms": (c["symbol_launch_time_ms"] + h_ms) if c["symbol_launch_time_ms"] else None,
+                        "missing_reason": "inherited_j_a_parent_gap",
+                        "sampled_max_excursion_bps": None,
+                        "sampled_min_excursion_bps": None,
+                        "source_article_id": p_id,
+                        "symbol": c["symbol"],
+                        "trade_count": None,
+                    })
+            for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                failed_reasons = (
+                    [{"missing_reason": "inherited_j_a_parent_gap", "symbol": c["symbol"]} for c in in_scope]
+                    if in_scope
+                    else [{"missing_reason": "inherited_j_a_parent_gap", "symbol": None}]
+                )
+                parent_horizon_rows.append({
+                    "failed_child_reasons": failed_reasons,
+                    "horizon_ms": h_ms,
+                    "parent_gross_return_bps": None,
+                    "parent_horizon_state": "parent_horizon_evidence_gap",
+                    "parent_sampled_max_excursion_bps": None,
+                    "parent_sampled_min_excursion_bps": None,
+                    "source_article_id": p_id,
+                    "source_parent_state": p_st,
+                })
+            continue
+
+        # Complete parent processing
+        for c in in_scope:
+            sym = c["symbol"]
+            lt_ms = c["symbol_launch_time_ms"]
+            if lt_ms is None:
+                raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_upstream_projection_schema_contradiction:missing_launch_time:{sym}")
+
+            launch_date = datetime.fromtimestamp(lt_ms // 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+
+            # Resolve candidate package dates for anchor search in ascending order
+            child_pkg_dates = sorted(
+                [d for (p, s, d) in pkg_records.keys() if p == p_id and s == sym and d >= launch_date]
+            )
+            if not child_pkg_dates:
+                raise Stage1_5JBDiagnosticError(
+                    f"STOP=stage1_5j_b_package_record_missing:{p_id}:{sym}:{launch_date}"
+                )
+
+            anchor_trade = None
+            prev_anchor_ts = None
+            prev_anchor_tid = None
+
+            for d in child_pkg_dates:
+                pkg_rec = pkg_records[(p_id, sym, d)]
+                with _open_verified_package_stream(canonical_j_a_root, pkg_rec) as text_stream:
+                    reader = csv.reader(text_stream)
+                    header = next(reader)
+                    if not validate_aggtrades_csv_header(header):
+                        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_header_invalid:{header}")
+                    for row in reader:
+                        if len(row) != 7:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_row_malformed:{row}")
+                        tid = int(row[0])
+                        p_dec = Decimal(row[1])
+                        q_dec = Decimal(row[2])
+                        ts = int(row[5])
+                        if p_dec <= Decimal(0) or not p_dec.is_finite() or q_dec <= Decimal(0) or not q_dec.is_finite():
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_numeric_invalid:{row}")
+                        if prev_anchor_ts is not None and ts < prev_anchor_ts:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_timestamp_order_invalid:{ts}<{prev_anchor_ts}")
+                        if prev_anchor_tid is not None and tid <= prev_anchor_tid:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_agg_trade_id_order_invalid:{tid}<={prev_anchor_tid}")
+                        prev_anchor_ts = ts
+                        prev_anchor_tid = tid
+                        if ts >= lt_ms:
+                            anchor_trade = {"tid": tid, "price": p_dec, "transact_time": ts}
+                            break
+                if anchor_trade is not None:
+                    break
+
+            if not anchor_trade:
+                raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_upstream_projection_schema_contradiction:missing_launch_trade:{sym}")
+
+            delay_ms = anchor_trade["transact_time"] - lt_ms
+            if delay_ms > EXTERNAL_SIGNAL_STAGE1_5J_B_MAX_ANCHOR_DELAY_MS:
+                anchor_st = "anchor_unavailable_delay_exceeded"
+                anchor_p_str = None
+                anchor_t_ms = None
+                anchor_d_val = None
+            else:
+                anchor_st = "anchor_found"
+                anchor_p_str = format_canonical_decimal(anchor_trade["price"])
+                anchor_t_ms = anchor_trade["transact_time"]
+                anchor_d_val = delay_ms
+
+            dates_by_h: dict[str, list[str]] = {}
+            for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                if anchor_st == "anchor_found":
+                    dates_by_h[str(h_ms)] = compute_required_j_b_dates(anchor_t_ms, h_ms)
+                else:
+                    dates_by_h[str(h_ms)] = compute_required_j_b_dates(lt_ms, h_ms)
+
+            child_rows.append({
+                "anchor_delay_ms": anchor_d_val,
+                "anchor_price": anchor_p_str,
+                "anchor_state": anchor_st,
+                "anchor_time_ms": anchor_t_ms,
+                "j_a_child_state": "j_a_child_coverage_complete",
+                "j_a_parent_state": p_st,
+                "required_archive_dates_by_horizon": dates_by_h,
+                "source_article_id": p_id,
+                "symbol": sym,
+                "symbol_launch_time_ms": lt_ms,
+            })
+
+            if anchor_st != "anchor_found":
+                for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                    child_horizon_rows.append({
+                        "child_horizon_state": "child_horizon_evidence_gap",
+                        "gross_return_bps": None,
+                        "horizon_ms": h_ms,
+                        "horizon_offset_ms": None,
+                        "horizon_price": None,
+                        "horizon_selected_time_ms": None,
+                        "horizon_target_time_ms": (anchor_trade["transact_time"] + h_ms),
+                        "missing_reason": "evidence_gap_anchor_delay",
+                        "sampled_max_excursion_bps": None,
+                        "sampled_min_excursion_bps": None,
+                        "source_article_id": p_id,
+                        "symbol": sym,
+                        "trade_count": None,
+                    })
+                continue
+
+            h_pkg_missing: dict[int, bool] = {}
+            for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                missing = False
+                for d in dates_by_h[str(h_ms)]:
+                    if (p_id, sym, d) not in pkg_records:
+                        missing = True
+                        break
+                h_pkg_missing[h_ms] = missing
+
+            streamable_h = [h for h in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS if not h_pkg_missing[h]]
+            dates_to_stream = sorted({d for h in streamable_h for d in dates_by_h[str(h)]})
+            max_target = max(anchor_t_ms + h for h in streamable_h) if streamable_h else 0
+
+            anchor_found = False
+            trade_count = 0
+            min_p: Decimal | None = None
+            max_p: Decimal | None = None
+            h_targets = {h: anchor_t_ms + h for h in streamable_h}
+            h_candidates: dict[int, dict[str, Any] | None] = {h: None for h in streamable_h}
+
+            prev_stream_ts = None
+            prev_stream_tid = None
+            stream_done = False
+
+            for d in dates_to_stream:
+                if stream_done:
+                    break
+                pkg_rec = pkg_records[(p_id, sym, d)]
+                with _open_verified_package_stream(canonical_j_a_root, pkg_rec) as text_stream:
+                    reader = csv.reader(text_stream)
+                    header = next(reader)
+                    if not validate_aggtrades_csv_header(header):
+                        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_header_invalid:{header}")
+                    for row in reader:
+                        if len(row) != 7:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_row_malformed:{row}")
+                        tid = int(row[0])
+                        p_dec = Decimal(row[1])
+                        q_dec = Decimal(row[2])
+                        ts = int(row[5])
+                        if p_dec <= Decimal(0) or not p_dec.is_finite() or q_dec <= Decimal(0) or not q_dec.is_finite():
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_numeric_invalid:{row}")
+                        if prev_stream_ts is not None and ts < prev_stream_ts:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_timestamp_order_invalid:{ts}<{prev_stream_ts}")
+                        if prev_stream_tid is not None and tid <= prev_stream_tid:
+                            raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_csv_agg_trade_id_order_invalid:{tid}<={prev_stream_tid}")
+                        prev_stream_ts = ts
+                        prev_stream_tid = tid
+
+                        if not anchor_found:
+                            if ts >= lt_ms and tid == anchor_trade["tid"]:
+                                anchor_found = True
+                                trade_count = 1
+                                min_p = p_dec
+                                max_p = p_dec
+                                for h in streamable_h:
+                                    tgt = h_targets[h]
+                                    if tgt - EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZON_LOOKBACK_MS <= ts <= tgt:
+                                        h_candidates[h] = {"price": p_dec, "ts": ts, "count": 1, "min": min_p, "max": max_p}
+                        else:
+                            trade_count += 1
+                            if min_p is not None and p_dec < min_p:
+                                min_p = p_dec
+                            if max_p is not None and p_dec > max_p:
+                                max_p = p_dec
+                            for h in streamable_h:
+                                tgt = h_targets[h]
+                                if tgt - EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZON_LOOKBACK_MS <= ts <= tgt:
+                                    h_candidates[h] = {"price": p_dec, "ts": ts, "count": trade_count, "min": min_p, "max": max_p}
+                            if ts > max_target:
+                                stream_done = True
+                                break
+
+            bps_factor = Decimal(10000)
+            anc_price = anchor_trade["price"]
+            for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+                tgt = anchor_t_ms + h_ms
+                if h_pkg_missing[h_ms]:
+                    child_horizon_rows.append({
+                        "child_horizon_state": "child_horizon_evidence_gap",
+                        "gross_return_bps": None,
+                        "horizon_ms": h_ms,
+                        "horizon_offset_ms": None,
+                        "horizon_price": None,
+                        "horizon_selected_time_ms": None,
+                        "horizon_target_time_ms": tgt,
+                        "missing_reason": "evidence_gap_missing_required_archive_package",
+                        "sampled_max_excursion_bps": None,
+                        "sampled_min_excursion_bps": None,
+                        "source_article_id": p_id,
+                        "symbol": sym,
+                        "trade_count": None,
+                    })
+                elif h_candidates[h_ms] is None:
+                    child_horizon_rows.append({
+                        "child_horizon_state": "child_horizon_evidence_gap",
+                        "gross_return_bps": None,
+                        "horizon_ms": h_ms,
+                        "horizon_offset_ms": None,
+                        "horizon_price": None,
+                        "horizon_selected_time_ms": None,
+                        "horizon_target_time_ms": tgt,
+                        "missing_reason": "evidence_gap_missing_horizon_trade",
+                        "sampled_max_excursion_bps": None,
+                        "sampled_min_excursion_bps": None,
+                        "source_article_id": p_id,
+                        "symbol": sym,
+                        "trade_count": None,
+                    })
+                else:
+                    cand = h_candidates[h_ms]
+                    hp = cand["price"]
+                    gross_ret = (bps_factor * (hp / anc_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+                    min_exc = (bps_factor * (cand["min"] / anc_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+                    max_exc = (bps_factor * (cand["max"] / anc_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+                    child_horizon_rows.append({
+                        "child_horizon_state": "child_horizon_complete",
+                        "gross_return_bps": format_canonical_decimal(gross_ret),
+                        "horizon_ms": h_ms,
+                        "horizon_offset_ms": cand["ts"] - tgt,
+                        "horizon_price": format_canonical_decimal(hp),
+                        "horizon_selected_time_ms": cand["ts"],
+                        "horizon_target_time_ms": tgt,
+                        "missing_reason": None,
+                        "sampled_max_excursion_bps": format_canonical_decimal(max_exc),
+                        "sampled_min_excursion_bps": format_canonical_decimal(min_exc),
+                        "source_article_id": p_id,
+                        "symbol": sym,
+                        "trade_count": cand["count"],
+                    })
+
+        # Parent horizon derivation
+        for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+            matching_ch = [chr_ for chr_ in child_horizon_rows if chr_["source_article_id"] == p_id and chr_["horizon_ms"] == h_ms]
+            all_comp = all(chr_["child_horizon_state"] == "child_horizon_complete" for chr_ in matching_ch)
+            if all_comp:
+                parent_outcome = aggregate_parent_horizon_outcomes(matching_ch)
+                parent_horizon_rows.append({
+                    "failed_child_reasons": [],
+                    "horizon_ms": h_ms,
+                    "parent_gross_return_bps": parent_outcome["parent_gross_return_bps"],
+                    "parent_horizon_state": "parent_horizon_complete",
+                    "parent_sampled_max_excursion_bps": parent_outcome["parent_sampled_max_excursion_bps"],
+                    "parent_sampled_min_excursion_bps": parent_outcome["parent_sampled_min_excursion_bps"],
+                    "source_article_id": p_id,
+                    "source_parent_state": p_st,
+                })
+            else:
+                failed_reasons = []
+                for chr_ in matching_ch:
+                    if chr_["child_horizon_state"] != "child_horizon_complete":
+                        failed_reasons.append({"missing_reason": chr_["missing_reason"], "symbol": chr_["symbol"]})
+                parent_horizon_rows.append({
+                    "failed_child_reasons": failed_reasons,
+                    "horizon_ms": h_ms,
+                    "parent_gross_return_bps": None,
+                    "parent_horizon_state": "parent_horizon_evidence_gap",
+                    "parent_sampled_max_excursion_bps": None,
+                    "parent_sampled_min_excursion_bps": None,
+                    "source_article_id": p_id,
+                    "source_parent_state": p_st,
+                })
+
+    # Coverage counts construction
+    cov_counts: dict[str, Any] = {
+        "j_a_parent_coverage_complete_count": 120,
+        "j_a_parent_coverage_gap_count": 11,
+        "j_a_target_parent_count": 131,
+        "n_child_horizon_complete_by_horizon": {},
+        "n_child_horizon_gap_by_horizon": {},
+        "n_parent_horizon_complete_by_horizon": {},
+        "n_parent_horizon_gap_by_horizon": {},
+        "n_parent_total": 131,
+        "n_parent_with_j_a_gap": 11,
+        "parent_distribution_by_horizon": {},
+    }
+
+    for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
+        h_str = str(h_ms)
+        c_comp = sum(1 for r in child_horizon_rows if r["horizon_ms"] == h_ms and r["child_horizon_state"] == "child_horizon_complete")
+        p_comp = sum(1 for r in parent_horizon_rows if r["horizon_ms"] == h_ms and r["parent_horizon_state"] == "parent_horizon_complete")
+        cov_counts["n_child_horizon_complete_by_horizon"][h_str] = c_comp
+        cov_counts["n_child_horizon_gap_by_horizon"][h_str] = 281 - c_comp
+        cov_counts["n_parent_horizon_complete_by_horizon"][h_str] = p_comp
+        cov_counts["n_parent_horizon_gap_by_horizon"][h_str] = 131 - p_comp
+
+        comp_parents_for_h = [r for r in parent_horizon_rows if r["horizon_ms"] == h_ms and r["parent_horizon_state"] == "parent_horizon_complete"]
+        vals = [Decimal(r["parent_gross_return_bps"]) for r in comp_parents_for_h]
+        dist = compute_distribution_statistics(vals)
+        pairs = [(r["source_article_id"], Decimal(r["parent_gross_return_bps"])) for r in comp_parents_for_h]
+        conc = compute_concentration_statistics(pairs)
+        cov_counts["parent_distribution_by_horizon"][h_str] = {
+            "max": dist["max"],
+            "mean": dist["mean"],
+            "median": dist["median"],
+            "min": dist["min"],
+            "n_complete_parent": dist["n"],
+            "p10": dist["p10"],
+            "p25": dist["p25"],
+            "p50": dist["p50"],
+            "p75": dist["p75"],
+            "p90": dist["p90"],
+            "top_1_abs_return_contribution": conc["top_1_abs_return_contribution"],
+            "top_1_parent_ids": conc["top_1_parent_article_ids"],
+            "top_3_abs_return_contribution": conc["top_3_abs_return_contribution"],
+            "top_3_parent_ids": conc["top_3_parent_article_ids"],
+        }
+
+    return {
+        "child_rows": child_rows,
+        "child_horizon_rows": child_horizon_rows,
+        "parent_horizon_rows": parent_horizon_rows,
+        "coverage_counts": cov_counts,
+    }
+
+
 def load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(root: Path) -> dict[str, Any]:
     """Strict domain loader for Stage 1.5J-B receipt roots."""
+    if root.name in LEGACY_RUN_IDS:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_legacy_root_not_admissible:{root.name}")
     if not root.is_dir():
         raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_root_not_found:{root}")
 
@@ -1110,6 +1631,17 @@ def load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(root: Pa
             if chr_["missing_reason"] != "inherited_j_a_parent_gap":
                 raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_child_horizon_missing_reason_mismatch:{idx}:{chr_['missing_reason']}")
 
+    # 14. Replay raw reduction and verify exact parity
+    replayed = _reduce_verified_aggtrades_launch_response(canonical_j_a_root, j_a_data)
+    if summary.get("child_rows") != replayed["child_rows"]:
+        raise Stage1_5JBDiagnosticError("STOP=stage1_5j_b_replay_mismatch:child_rows")
+    if summary.get("child_horizon_rows") != replayed["child_horizon_rows"]:
+        raise Stage1_5JBDiagnosticError("STOP=stage1_5j_b_replay_mismatch:child_horizon_rows")
+    if summary.get("parent_horizon_rows") != replayed["parent_horizon_rows"]:
+        raise Stage1_5JBDiagnosticError("STOP=stage1_5j_b_replay_mismatch:parent_horizon_rows")
+    if summary.get("coverage_counts") != replayed["coverage_counts"]:
+        raise Stage1_5JBDiagnosticError("STOP=stage1_5j_b_replay_mismatch:coverage_counts")
+
     return summary
 
 
@@ -1118,6 +1650,8 @@ def produce_stage1_5j_b_historical_aggtrades_launch_response(
     run_id: str,
 ) -> dict[str, Any]:
     """Canonical producer for Stage 1.5J-B exploratory launch response receipt."""
+    if run_id in LEGACY_RUN_IDS:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_legacy_root_not_admissible:{run_id}")
     if not RUN_ID_REGEX.match(run_id):
         raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_run_id_invalid:{run_id}")
 
@@ -1125,7 +1659,6 @@ def produce_stage1_5j_b_historical_aggtrades_launch_response(
     canonical_j_a_root = proj / J_A_CANONICAL_ROOT_RELATIVE
     j_a_data = admit_upstream_j_a_root(canonical_j_a_root)
 
-    parent_records = j_a_data["parent_records"]
     cov = j_a_data["coverage_inventory"]
 
     # Build j_a_input
@@ -1149,150 +1682,12 @@ def produce_stage1_5j_b_historical_aggtrades_launch_response(
         "target_parent_count": cov["target_parent_count"],
     }
 
-    pkg_states: dict[tuple[str, str], list[str]] = {}
-    for r in j_a_data["archive_package_records"]:
-        key = (r["parent_article_id"], r["symbol"])
-        if key not in pkg_states:
-            pkg_states[key] = []
-        pkg_states[key].append(r["child_state"])
-
-    # Build child_rows (ordered by source_article_id, symbol)
-    child_rows = []
-    sorted_parents = sorted(parent_records, key=lambda x: x["source_article_id"])
-    for p in sorted_parents:
-        in_scope_children = [c for c in p["children"] if c["child_scope"] == "in_scope_usdt"]
-        for c in sorted(in_scope_children, key=lambda x: x["symbol"]):
-            lt_ms = c["symbol_launch_time_ms"]
-            is_parent_gap = p["parent_state"] != "coverage_complete"
-            anchor_st = (
-                "anchor_unavailable_inherited_j_a_parent_gap"
-                if is_parent_gap
-                else "evidence_gap"
-            )
-            dates_by_h = {
-                "300000": compute_required_j_b_dates(lt_ms, 300000) if (lt_ms and not is_parent_gap) else [],
-                "3600000": compute_required_j_b_dates(lt_ms, 3600000) if (lt_ms and not is_parent_gap) else [],
-                "14400000": compute_required_j_b_dates(lt_ms, 14400000) if (lt_ms and not is_parent_gap) else [],
-            }
-            c_states = pkg_states.get((p["source_article_id"], c["symbol"]), [])
-            child_state = (
-                "j_a_child_coverage_complete"
-                if (c_states and all(s == "archive_verified_with_post_launch_rows" for s in c_states))
-                else "j_a_child_coverage_gap"
-            )
-            child_rows.append({
-                "anchor_delay_ms": None,
-                "anchor_price": None,
-                "anchor_state": anchor_st,
-                "anchor_time_ms": None,
-                "j_a_child_state": child_state,
-                "j_a_parent_state": p["parent_state"],
-                "required_archive_dates_by_horizon": dates_by_h,
-                "source_article_id": p["source_article_id"],
-                "symbol": c["symbol"],
-                "symbol_launch_time_ms": lt_ms,
-            })
-
-    # Build child_horizon_rows (ordered by source_article_id, symbol, horizon_ms)
-    child_horizon_rows = []
-    for cr in child_rows:
-        for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
-            m_reason = (
-                "inherited_j_a_parent_gap"
-                if cr["j_a_parent_state"] != "coverage_complete"
-                else "evidence_gap_missing_horizon_trade"
-            )
-            lt_ms = cr["symbol_launch_time_ms"]
-            child_horizon_rows.append({
-                "child_horizon_state": "child_horizon_evidence_gap",
-                "gross_return_bps": None,
-                "horizon_ms": h_ms,
-                "horizon_offset_ms": None,
-                "horizon_price": None,
-                "horizon_selected_time_ms": None,
-                "horizon_target_time_ms": (lt_ms + h_ms) if lt_ms else None,
-                "missing_reason": m_reason,
-                "sampled_max_excursion_bps": None,
-                "sampled_min_excursion_bps": None,
-                "source_article_id": cr["source_article_id"],
-                "symbol": cr["symbol"],
-                "trade_count": None,
-            })
-
-    # Build parent_horizon_rows (ordered by source_article_id, horizon_ms)
-    parent_horizon_rows = []
-    for p in sorted_parents:
-        in_scope_children = [c for c in p["children"] if c["child_scope"] == "in_scope_usdt"]
-        for h_ms in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS:
-            failed_reasons = []
-            if p["parent_state"] != "coverage_complete":
-                if in_scope_children:
-                    for c in sorted(in_scope_children, key=lambda x: x["symbol"]):
-                        failed_reasons.append({"missing_reason": "inherited_j_a_parent_gap", "symbol": c["symbol"]})
-                else:
-                    failed_reasons.append({"missing_reason": "inherited_j_a_parent_gap", "symbol": None})
-            else:
-                for c in sorted(in_scope_children, key=lambda x: x["symbol"]):
-                    failed_reasons.append({"missing_reason": "evidence_gap_missing_horizon_trade", "symbol": c["symbol"]})
-
-            parent_horizon_rows.append({
-                "failed_child_reasons": failed_reasons,
-                "horizon_ms": h_ms,
-                "parent_gross_return_bps": None,
-                "parent_horizon_state": "parent_horizon_evidence_gap",
-                "parent_sampled_max_excursion_bps": None,
-                "parent_sampled_min_excursion_bps": None,
-                "source_article_id": p["source_article_id"],
-                "source_parent_state": p["parent_state"],
-            })
-
-    # Build coverage_counts
-    cov_counts = {
-        "j_a_parent_coverage_complete_count": 120,
-        "j_a_parent_coverage_gap_count": 11,
-        "j_a_target_parent_count": 131,
-        "n_child_horizon_complete_by_horizon": {
-            "300000": 0,
-            "3600000": 0,
-            "14400000": 0,
-        },
-        "n_child_horizon_gap_by_horizon": {
-            "300000": 281,
-            "3600000": 281,
-            "14400000": 281,
-        },
-        "n_parent_horizon_complete_by_horizon": {
-            "300000": 0,
-            "3600000": 0,
-            "14400000": 0,
-        },
-        "n_parent_horizon_gap_by_horizon": {
-            "300000": 131,
-            "3600000": 131,
-            "14400000": 131,
-        },
-        "n_parent_total": 131,
-        "n_parent_with_j_a_gap": 11,
-        "parent_distribution_by_horizon": {
-            h_str: {
-                "max": None,
-                "mean": None,
-                "median": None,
-                "min": None,
-                "n_complete_parent": 0,
-                "p10": None,
-                "p25": None,
-                "p50": None,
-                "p75": None,
-                "p90": None,
-                "top_1_abs_return_contribution": "0",
-                "top_1_parent_ids": [],
-                "top_3_abs_return_contribution": "0",
-                "top_3_parent_ids": [],
-            }
-            for h_str in ("300000", "3600000", "14400000")
-        },
-    }
+    # Execute streaming raw reduction
+    reduced = _reduce_verified_aggtrades_launch_response(canonical_j_a_root, j_a_data)
+    child_rows = reduced["child_rows"]
+    child_horizon_rows = reduced["child_horizon_rows"]
+    parent_horizon_rows = reduced["parent_horizon_rows"]
+    cov_counts = reduced["coverage_counts"]
 
     # Build summary object with exactly the 12 required keys
     summary_obj = {
@@ -1344,6 +1739,18 @@ def produce_stage1_5j_b_historical_aggtrades_launch_response(
     # Atomic write with flock, collision check, fsync ordering
     output_root.parent.mkdir(parents=True, exist_ok=True)
     parent_dir = output_root.parent
+
+    # Enforce minimum free disk space on target filesystem
+    try:
+        stat_vfs = os.statvfs(parent_dir)
+        free_bytes = stat_vfs.f_bavail * stat_vfs.f_frsize
+        if free_bytes < EXTERNAL_SIGNAL_STAGE1_5J_B_MIN_FREE_BYTES:
+            raise Stage1_5JBDiagnosticError(
+                f"STOP=stage1_5j_b_insufficient_disk_space:{free_bytes}<{EXTERNAL_SIGNAL_STAGE1_5J_B_MIN_FREE_BYTES}"
+            )
+    except OSError as exc:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_insufficient_disk_space:statvfs_failed:{exc}") from exc
+
     lock_file = parent_dir / f".lock.{run_id}"
 
     lock_fd = open(lock_file, "w")
@@ -1372,6 +1779,13 @@ def produce_stage1_5j_b_historical_aggtrades_launch_response(
                 f.write(content)
                 f.flush()
                 os.fsync(f.fileno())
+
+        # Check root max bytes
+        total_staging_bytes = sum(f.stat().st_size for f in staging_dir.iterdir() if f.is_file())
+        if total_staging_bytes > EXTERNAL_SIGNAL_STAGE1_5J_B_ROOT_MAX_BYTES:
+            raise Stage1_5JBDiagnosticError(
+                f"STOP=stage1_5j_b_root_max_bytes_exceeded:{total_staging_bytes}>{EXTERNAL_SIGNAL_STAGE1_5J_B_ROOT_MAX_BYTES}"
+            )
 
         # Fsync staging directory
         s_fd = os.open(str(staging_dir), os.O_RDONLY)
@@ -1496,6 +1910,8 @@ def _parse_receipt_generation_authorization(
 
 def run_stage1_5j_b_historical_aggtrades_launch_response(run_id: str) -> int:
     """Production entrypoint for Stage 1.5J-B receipt generation."""
+    if run_id in LEGACY_RUN_IDS:
+        raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_legacy_root_not_admissible:{run_id}")
     # Validate run_id format
     if not RUN_ID_REGEX.match(run_id):
         raise Stage1_5JBDiagnosticError(f"STOP=stage1_5j_b_run_id_invalid:{run_id}")

@@ -12,9 +12,10 @@ Strictly verifies:
 """
 
 import ast
-import copy
+import csv
 import fcntl
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -23,6 +24,7 @@ import sys
 import zipfile
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -53,8 +55,8 @@ CANONICAL_J_A_ROOT = (
     / "historical_archive_coverage_inventory"
     / "stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z"
 )
-PLAN_SHA = "ec5fbc3beeafd47ec42cdf12481751f41424fe3351a6c14845ebc0e5d5a8a319"
-TASK0_BUNDLE_DIR = PROJECT_ROOT / ".git" / "plan-execution" / "stage1_5j_b" / PLAN_SHA
+PLAN_SHA = "1ee36be9faea1d8e8bf0cdde5519cc9ccedcd6fb31464b94e6602e4ac28188fd"
+TASK0_BUNDLE_DIR = PROJECT_ROOT / ".git" / "plan-execution" / "stage1_5j_b" / PLAN_SHA / "baseline"
 
 
 # =============================================================================
@@ -67,7 +69,7 @@ def test_verify_execution_authority_positive() -> None:
     auth = verify_execution_authority()
     assert auth["schema_version"] == "stage1_5j_b_execution_authority_v2"
     assert auth["risk_live_trading_enabled"] is False
-    assert auth["base_sha"] == "d15ca4e0da75a61553ca1d5983249d85a4512bb5"
+    assert auth["base_sha"] == "2073f2d1953d5b2e71d3336912ab63a8c5d90cad"
     assert auth["source_label"] == "received_external_handoff"
     assert "handoff_authorizations" in auth
 
@@ -880,6 +882,116 @@ def test_producer_concurrency_and_staging_collision(tmp_path: Path) -> None:
             lock_file.unlink()
 
 
+def test_producer_durability_points_injected_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 4: Injected-failure tests for each durability point (INV-JB-RR-04)."""
+    from unittest.mock import patch
+
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS,
+        produce_stage1_5j_b_historical_aggtrades_launch_response,
+    )
+
+    cov_counts = {
+        "j_a_parent_coverage_complete_count": 120,
+        "j_a_parent_coverage_gap_count": 11,
+        "j_a_target_parent_count": 131,
+        "n_child_horizon_complete_by_horizon": {"300000": 0, "3600000": 0, "14400000": 0},
+        "n_child_horizon_gap_by_horizon": {"300000": 281, "3600000": 281, "14400000": 281},
+        "n_parent_horizon_complete_by_horizon": {"300000": 0, "3600000": 0, "14400000": 0},
+        "n_parent_horizon_gap_by_horizon": {"300000": 131, "3600000": 131, "14400000": 131},
+        "n_parent_total": 131,
+        "n_parent_with_j_a_gap": 11,
+        "parent_distribution_by_horizon": {
+            str(h): {
+                "max": None, "mean": None, "median": None, "min": None, "n_complete_parent": 0,
+                "p10": None, "p25": None, "p50": None, "p75": None, "p90": None,
+                "top_1_abs_return_contribution": "0", "top_1_parent_ids": [],
+                "top_3_abs_return_contribution": "0", "top_3_parent_ids": [],
+            }
+            for h in EXTERNAL_SIGNAL_STAGE1_5J_B_HORIZONS_MS
+        },
+    }
+    dummy_reduced = {
+        "child_rows": [],
+        "child_horizon_rows": [],
+        "parent_horizon_rows": [],
+        "coverage_counts": cov_counts,
+    }
+
+    with patch(
+        "src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response._reduce_verified_aggtrades_launch_response",
+        return_value=dummy_reduced,
+    ):
+        tmp_parent = tmp_path / "durability_run"
+        tmp_parent.mkdir()
+        run_id = "stage1_5j_b_historical_aggtrades_launch_response_20261011T120000Z"
+        target_root = tmp_parent / run_id
+
+        # Node 1: file fsync failure
+        orig_fsync = os.fsync
+        calls = [0]
+        def _fail_file_fsync(fd: int) -> None:
+            calls[0] += 1
+            if calls[0] == 1:
+                raise OSError("INJECTED_FILE_FSYNC_FAILURE")
+            orig_fsync(fd)
+
+        with patch("os.fsync", side_effect=_fail_file_fsync):
+            with pytest.raises(OSError, match="INJECTED_FILE_FSYNC_FAILURE"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+            assert not target_root.exists()
+
+        shutil.rmtree(tmp_parent)
+        tmp_parent.mkdir()
+
+        # Node 2: staging directory fsync failure (call 4 is the staging dir fsync, after 3 files)
+        calls = [0]
+        def _fail_staging_fsync(fd: int) -> None:
+            calls[0] += 1
+            if calls[0] == 4:
+                raise OSError("INJECTED_STAGING_FSYNC_FAILURE")
+            orig_fsync(fd)
+
+        with patch("os.fsync", side_effect=_fail_staging_fsync):
+            with pytest.raises(OSError, match="INJECTED_STAGING_FSYNC_FAILURE"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+            assert not target_root.exists()
+
+        shutil.rmtree(tmp_parent)
+        tmp_parent.mkdir()
+
+        # Node 3: rename failure
+        def _fail_rename(*args: Any, **kwargs: Any) -> None:
+            raise OSError("INJECTED_RENAME_FAILURE")
+
+        with patch.object(Path, "rename", side_effect=_fail_rename):
+            with pytest.raises(OSError, match="INJECTED_RENAME_FAILURE"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+            assert not target_root.exists()
+            # Staging root remains, blocking subsequent run with staging collision
+            with pytest.raises(Stage1_5JBDiagnosticError, match="stage1_5j_b_staging_collision"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+
+        shutil.rmtree(tmp_parent)
+        tmp_parent.mkdir()
+
+        # Node 4: parent directory fsync failure (call 5 is parent dir fsync)
+        calls = [0]
+        def _fail_parent_fsync(fd: int) -> None:
+            calls[0] += 1
+            if calls[0] == 5:
+                raise OSError("INJECTED_PARENT_FSYNC_FAILURE")
+            orig_fsync(fd)
+
+        with patch("os.fsync", side_effect=_fail_parent_fsync):
+            with pytest.raises(OSError, match="INJECTED_PARENT_FSYNC_FAILURE"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+            assert target_root.exists()
+            # Post-rename target_root blocks subsequent run with output collision
+            with pytest.raises(Stage1_5JBDiagnosticError, match="stage1_5j_b_output_collision"):
+                produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+
+
 def test_review_cn_md_render_mutation_fails_closed(tmp_path: Path) -> None:
     """Tampering with review_CN.md markdown causes strict loader to fail closed."""
     run_id = "stage1_5j_b_historical_aggtrades_launch_response_20261011T120000Z"
@@ -1010,28 +1122,30 @@ def test_internally_consistent_source_state_rewrite_fails_domain_loader(tmp_path
     p_comp = complete_p_ids[0]
     p_gap = gap_p_ids[0]
 
-    # Swap their states in parent_horizon_rows
-    comp_reasons = None
-    gap_reasons = None
-    for phr in s_obj["parent_horizon_rows"]:
-        if phr["source_article_id"] == p_comp:
-            comp_reasons = copy.deepcopy(phr["failed_child_reasons"])
-            phr["source_parent_state"] = "coverage_evidence_gap_archive"
-        elif phr["source_article_id"] == p_gap:
-            gap_reasons = copy.deepcopy(phr["failed_child_reasons"])
-            phr["source_parent_state"] = "coverage_complete"
+    comp_symbols = [cr["symbol"] for cr in s_obj["child_rows"] if cr["source_article_id"] == p_comp]
+    gap_symbols = [cr["symbol"] for cr in s_obj["child_rows"] if cr["source_article_id"] == p_gap]
 
-    # Assign consistent reasons
+    # Swap their states in parent_horizon_rows
     for phr in s_obj["parent_horizon_rows"]:
         if phr["source_article_id"] == p_comp:
+            phr["source_parent_state"] = "coverage_evidence_gap_archive"
+            phr["parent_horizon_state"] = "parent_horizon_evidence_gap"
+            phr["parent_gross_return_bps"] = None
+            phr["parent_sampled_min_excursion_bps"] = None
+            phr["parent_sampled_max_excursion_bps"] = None
             phr["failed_child_reasons"] = [
-                {"missing_reason": "inherited_j_a_parent_gap", "symbol": r.get("symbol")}
-                for r in comp_reasons
+                {"missing_reason": "inherited_j_a_parent_gap", "symbol": sym}
+                for sym in comp_symbols
             ]
         elif phr["source_article_id"] == p_gap:
+            phr["source_parent_state"] = "coverage_complete"
+            phr["parent_horizon_state"] = "parent_horizon_evidence_gap"
+            phr["parent_gross_return_bps"] = None
+            phr["parent_sampled_min_excursion_bps"] = None
+            phr["parent_sampled_max_excursion_bps"] = None
             phr["failed_child_reasons"] = [
-                {"missing_reason": "evidence_gap_missing_horizon_trade", "symbol": r.get("symbol")}
-                for r in gap_reasons
+                {"missing_reason": "evidence_gap_anchor_delay", "symbol": sym}
+                for sym in gap_symbols
             ]
 
     # Update child_rows consistently
@@ -1039,17 +1153,39 @@ def test_internally_consistent_source_state_rewrite_fails_domain_loader(tmp_path
         if cr["source_article_id"] == p_comp:
             cr["j_a_parent_state"] = "coverage_evidence_gap_archive"
             cr["anchor_state"] = "anchor_unavailable_inherited_j_a_parent_gap"
+            cr["anchor_delay_ms"] = None
+            cr["anchor_price"] = None
+            cr["anchor_time_ms"] = None
             cr["required_archive_dates_by_horizon"] = {"300000": [], "3600000": [], "14400000": []}
         elif cr["source_article_id"] == p_gap:
             cr["j_a_parent_state"] = "coverage_complete"
-            cr["anchor_state"] = "evidence_gap"
+            cr["anchor_state"] = "anchor_unavailable_delay_exceeded"
+            cr["anchor_delay_ms"] = None
+            cr["anchor_price"] = None
+            cr["anchor_time_ms"] = None
 
     # Update child_horizon_rows consistently
     for chr_ in s_obj["child_horizon_rows"]:
         if chr_["source_article_id"] == p_comp:
+            chr_["child_horizon_state"] = "child_horizon_evidence_gap"
             chr_["missing_reason"] = "inherited_j_a_parent_gap"
+            chr_["gross_return_bps"] = None
+            chr_["horizon_offset_ms"] = None
+            chr_["horizon_price"] = None
+            chr_["horizon_selected_time_ms"] = None
+            chr_["sampled_max_excursion_bps"] = None
+            chr_["sampled_min_excursion_bps"] = None
+            chr_["trade_count"] = None
         elif chr_["source_article_id"] == p_gap:
-            chr_["missing_reason"] = "evidence_gap_missing_horizon_trade"
+            chr_["child_horizon_state"] = "child_horizon_evidence_gap"
+            chr_["missing_reason"] = "evidence_gap_anchor_delay"
+            chr_["gross_return_bps"] = None
+            chr_["horizon_offset_ms"] = None
+            chr_["horizon_price"] = None
+            chr_["horizon_selected_time_ms"] = None
+            chr_["sampled_max_excursion_bps"] = None
+            chr_["sampled_min_excursion_bps"] = None
+            chr_["trade_count"] = None
 
     summary_bytes = (json.dumps(s_obj, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
     summary_path.write_bytes(summary_bytes)
@@ -1084,3 +1220,750 @@ def test_internally_consistent_source_state_rewrite_fails_domain_loader(tmp_path
         load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(target_root)
 
 
+# =============================================================================
+# 8. Task 1: Verified Archive Streaming Reduction Remediation & Independent Oracle
+# =============================================================================
+
+def _compute_independent_test_local_oracle(canonical_j_a_root: Path) -> dict[str, Any]:
+    """Test-local semantic oracle independently reading genuine J-A root and raw ZIP bytes.
+
+    Must NOT import or call production TCB reduction helpers or precomputed J-B outputs.
+    Deterministic selection: lexicographically first J-A complete (source_article_id, symbol).
+    """
+    import csv
+    import io
+    import zipfile
+    from decimal import ROUND_HALF_EVEN, Decimal
+
+    from src.research.external_signal_shadow.stage1_5j_a_historical_archive_coverage_inventory import (
+        load_verified_stage1_5j_a_historical_archive_coverage_root,
+    )
+
+    j_a_data = load_verified_stage1_5j_a_historical_archive_coverage_root(canonical_j_a_root)
+
+    # Deterministic selection: lexicographically first J-A complete parent and in-scope USDT child
+    selected_parent = None
+    selected_child = None
+    for p in sorted(j_a_data["parent_records"], key=lambda x: x["source_article_id"]):
+        if p["parent_state"] == "coverage_complete":
+            in_scope_usdt = sorted(
+                [c for c in p.get("children", []) if c.get("child_scope") == "in_scope_usdt"],
+                key=lambda x: x["symbol"],
+            )
+            if in_scope_usdt:
+                selected_parent = p
+                selected_child = in_scope_usdt[0]
+                break
+
+    if not selected_parent or not selected_child:
+        raise RuntimeError("Oracle failed to locate canonical J-A complete child")
+
+    parent_article_id = selected_parent["source_article_id"]
+    symbol = selected_child["symbol"]
+    launch_time_ms = selected_child["symbol_launch_time_ms"]
+    if launch_time_ms is None:
+        raise RuntimeError(f"Missing launch time for {symbol}")
+
+    # Resolve required package records for this child
+    child_pkgs = [
+        r for r in j_a_data["archive_package_records"]
+        if r["parent_article_id"] == parent_article_id and r["symbol"] == symbol
+    ]
+    if not child_pkgs:
+        raise RuntimeError(f"No archive package records found for {symbol}")
+
+    # Read trades from the admitted raw ZIP archive
+    utc_date = child_pkgs[0]["utc_date"]
+    zip_path = canonical_j_a_root / "raw" / "archive" / symbol / f"{symbol}-aggTrades-{utc_date}.zip"
+    if not zip_path.is_file():
+        raise RuntimeError(f"Admitted raw ZIP does not exist: {zip_path}")
+
+    trades: list[dict[str, Any]] = []
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        csv_names = zf.namelist()
+        if len(csv_names) != 1:
+            raise RuntimeError(f"Expected 1 CSV in zip, found {len(csv_names)}")
+        with zf.open(csv_names[0], "r") as raw_f:
+            text_stream = io.TextIOWrapper(raw_f, encoding="utf-8")
+            reader = csv.reader(text_stream)
+            header = next(reader)
+            if header != ["agg_trade_id", "price", "quantity", "first_trade_id", "last_trade_id", "transact_time", "is_buyer_maker"]:
+                raise RuntimeError(f"Invalid CSV header: {header}")
+            last_ts = -1
+            last_tid = -1
+            for row in reader:
+                tid = int(row[0])
+                price_dec = Decimal(row[1])
+                qty_dec = Decimal(row[2])
+                ts = int(row[5])
+                if price_dec <= Decimal(0) or not price_dec.is_finite():
+                    raise RuntimeError(f"Non-positive or non-finite price: {price_dec}")
+                if ts < last_ts:
+                    raise RuntimeError(f"Out of order timestamp: {ts} < {last_ts}")
+                if ts == last_ts and tid <= last_tid:
+                    raise RuntimeError(f"Out of order trade id on tie: {tid} <= {last_tid}")
+                last_ts = ts
+                last_tid = tid
+                trades.append({
+                    "agg_trade_id": tid,
+                    "price": price_dec,
+                    "quantity": qty_dec,
+                    "transact_time": ts,
+                })
+
+    # Select anchor: earliest trade with transact_time >= launch_time_ms
+    anchor_trade = None
+    for t in trades:
+        if t["transact_time"] >= launch_time_ms:
+            anchor_trade = t
+            break
+
+    if not anchor_trade:
+        raise RuntimeError(f"No anchor trade found for {symbol} at launch {launch_time_ms}")
+
+    anchor_delay_ms = anchor_trade["transact_time"] - launch_time_ms
+    if anchor_delay_ms > 300_000:
+        raise RuntimeError(f"Anchor delay {anchor_delay_ms} exceeds max delay")
+
+    anchor_price = anchor_trade["price"].quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+
+    # Horizons: 5m (300000), 1h (3600000), 4h (14400000)
+    horizons_out: dict[int, dict[str, Any]] = {}
+    bps_factor = Decimal(10000)
+    anchor_idx = trades.index(anchor_trade)
+
+    for h_ms in [300000, 3600000, 14400000]:
+        target_ts = anchor_trade["transact_time"] + h_ms
+        search_start = target_ts - 60_000
+        cand_trades = [t for t in trades if search_start <= t["transact_time"] <= target_ts]
+        if not cand_trades:
+            raise RuntimeError(f"No trades in horizon window for {symbol} at {h_ms}ms")
+
+        # Horizon trade: latest trade with search_start <= transact_time <= target_ts
+        h_trade = cand_trades[-1]
+        h_idx = trades.index(h_trade)
+        closed_interval = trades[anchor_idx : h_idx + 1]
+
+        h_price = h_trade["price"].quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+        gross_return = (bps_factor * (h_price / anchor_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+
+        min_p = min(t["price"] for t in closed_interval).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+        max_p = max(t["price"] for t in closed_interval).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+        min_excursion = (bps_factor * (min_p / anchor_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+        max_excursion = (bps_factor * (max_p / anchor_price - Decimal(1))).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+
+        def _oracle_format_decimal(d: Decimal) -> str:
+            if not d.is_finite():
+                raise RuntimeError("Non-finite decimal")
+            if d == Decimal(0):
+                return "0"
+            s = str(d)
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            return s
+
+        def _oracle_format_bps(d: Decimal) -> str:
+            q = d.quantize(Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)
+            return _oracle_format_decimal(q)
+
+        horizons_out[h_ms] = {
+            "horizon_ms": h_ms,
+            "horizon_target_time_ms": target_ts,
+            "horizon_selected_time_ms": h_trade["transact_time"],
+            "horizon_offset_ms": h_trade["transact_time"] - target_ts,
+            "horizon_price": _oracle_format_decimal(h_price),
+            "gross_return_bps": _oracle_format_bps(gross_return),
+            "sampled_min_excursion_bps": _oracle_format_bps(min_excursion),
+            "sampled_max_excursion_bps": _oracle_format_bps(max_excursion),
+            "trade_count": len(closed_interval),
+        }
+
+    def _oracle_format_anchor(d: Decimal) -> str:
+        s = str(d)
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s
+
+    return {
+        "parent_article_id": parent_article_id,
+        "symbol": symbol,
+        "launch_time_ms": launch_time_ms,
+        "anchor_state": "anchor_found",
+        "anchor_time_ms": anchor_trade["transact_time"],
+        "anchor_delay_ms": anchor_delay_ms,
+        "anchor_price": _oracle_format_anchor(anchor_price),
+        "horizons": horizons_out,
+    }
+
+
+def test_canonical_raw_oracle_ast_independence() -> None:
+    """Oracle function body AST must not import or call production TCB reduction helpers."""
+    import inspect
+    source = inspect.getsource(_compute_independent_test_local_oracle)
+    tree = ast.parse(source)
+
+    forbidden_refs = {
+        "stage1_5j_b_historical_aggtrades_launch_response",
+        "_reduce_verified_aggtrades_launch_response",
+        "select_launch_anchor_trade",
+        "select_horizon_trade",
+        "calculate_child_horizon_outcomes",
+        "aggregate_parent_horizon_outcomes",
+        "produce_stage1_5j_b_historical_aggtrades_launch_response",
+        "load_verified_stage1_5j_b_historical_aggtrades_launch_response_root",
+        "run_stage1_5j_b_historical_aggtrades_launch_response",
+    }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in forbidden_refs:
+            pytest.fail(f"Oracle references production symbol: {node.id}")
+        if isinstance(node, ast.Attribute) and node.attr in forbidden_refs:
+            pytest.fail(f"Oracle references production attribute: {node.attr}")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in forbidden_refs:
+                    pytest.fail(f"Oracle imports production symbol: {alias.name}")
+        if isinstance(node, ast.ImportFrom):
+            if node.module and any(f in node.module for f in forbidden_refs):
+                pytest.fail(f"Oracle imports from production module: {node.module}")
+
+
+def test_canonical_raw_oracle_monkeypatch_independence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Oracle must compute correct results even if all production TCB entries are disabled."""
+    import src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response as prod_mod
+
+    def _poisoned_call(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Production TCB reached by oracle")
+
+    poison_attrs = [
+        "_reduce_verified_aggtrades_launch_response",
+        "select_launch_anchor_trade",
+        "select_horizon_trade",
+        "calculate_child_horizon_outcomes",
+        "aggregate_parent_horizon_outcomes",
+        "produce_stage1_5j_b_historical_aggtrades_launch_response",
+        "load_verified_stage1_5j_b_historical_aggtrades_launch_response_root",
+        "run_stage1_5j_b_historical_aggtrades_launch_response",
+    ]
+    for attr in poison_attrs:
+        if hasattr(prod_mod, attr):
+            monkeypatch.setattr(prod_mod, attr, _poisoned_call)
+
+    # Oracle must run cleanly without hitting any poisoned production helper
+    oracle = _compute_independent_test_local_oracle(CANONICAL_J_A_ROOT)
+    assert oracle["symbol"] == "PRLUSDT"
+    assert oracle["anchor_delay_ms"] == 380
+    assert oracle["anchor_price"] == "0.1937"
+    assert len(oracle["horizons"]) == 3
+    assert oracle["horizons"][300000]["trade_count"] == 5753
+
+
+def test_canonical_raw_oracle_parity_with_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Canonical Class-A test: producer output must match independent oracle for complete child."""
+    run_id = "stage1_5j_b_historical_aggtrades_launch_response_20261014T010000Z"
+    target_root = tmp_path / run_id
+
+    # 1. Patch all network exits to immediate failure
+    def _fail_network(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("NETWORK_ACCESS_FORBIDDEN")
+
+    monkeypatch.setattr("socket.socket", _fail_network)
+    monkeypatch.setattr("urllib.request.urlopen", _fail_network)
+    monkeypatch.setattr("http.client.HTTPConnection", _fail_network)
+
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        load_verified_stage1_5j_b_historical_aggtrades_launch_response_root,
+        produce_stage1_5j_b_historical_aggtrades_launch_response,
+    )
+
+    # 2. Compute oracle expectations
+    oracle = _compute_independent_test_local_oracle(CANONICAL_J_A_ROOT)
+
+    # 3. Run canonical producer
+    summary = produce_stage1_5j_b_historical_aggtrades_launch_response(
+        output_root=target_root,
+        run_id=run_id,
+    )
+
+    # 4. Locate canonical complete child row
+    target_child_row = None
+    for cr in summary["child_rows"]:
+        if cr["source_article_id"] == oracle["parent_article_id"] and cr["symbol"] == oracle["symbol"]:
+            target_child_row = cr
+            break
+
+    assert target_child_row is not None, "Target child row not found in producer output"
+    assert target_child_row["anchor_state"] == "anchor_found", (
+        f"Expected anchor_state='anchor_found', got {target_child_row['anchor_state']}"
+    )
+    assert target_child_row["anchor_price"] is not None, "anchor_price must not be null"
+    assert target_child_row["anchor_price"] == oracle["anchor_price"], (
+        f"anchor_price mismatch: producer={target_child_row['anchor_price']} oracle={oracle['anchor_price']}"
+    )
+    assert target_child_row["anchor_delay_ms"] == oracle["anchor_delay_ms"]
+
+    # 5. Verify child_horizon_rows matching oracle
+    child_h_rows = [
+        r for r in summary["child_horizon_rows"]
+        if r["source_article_id"] == oracle["parent_article_id"] and r["symbol"] == oracle["symbol"]
+    ]
+    assert len(child_h_rows) == 3
+
+    for chr_ in child_h_rows:
+        h_ms = chr_["horizon_ms"]
+        assert chr_["child_horizon_state"] == "child_horizon_complete", (
+            f"child_horizon_state for {h_ms}ms must be complete, got {chr_['child_horizon_state']}"
+        )
+        assert chr_["horizon_price"] is not None
+        assert chr_["horizon_price"] == oracle["horizons"][h_ms]["horizon_price"]
+        assert chr_["gross_return_bps"] == oracle["horizons"][h_ms]["gross_return_bps"]
+        assert chr_["trade_count"] == oracle["horizons"][h_ms]["trade_count"]
+
+    # 6. Verify strict loader parses and validates this root
+    loaded = load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(target_root)
+    assert loaded["run_id"] == run_id
+
+
+def test_stream_parser_ast_prohibits_network_imports() -> None:
+    """J-B core must not import socket, http, urllib, requests, aiohttp, or websocket transports."""
+    core_path = PROJECT_ROOT / "src" / "research" / "external_signal_shadow" / "stage1_5j_b_historical_aggtrades_launch_response.py"
+    tree = ast.parse(core_path.read_text(encoding="utf-8"), filename=str(core_path))
+
+    forbidden_modules = {
+        "socket",
+        "http",
+        "urllib",
+        "requests",
+        "aiohttp",
+        "websockets",
+        "websocket",
+        "httpx",
+    }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                mod = alias.name.split(".")[0]
+                if mod in forbidden_modules:
+                    pytest.fail(f"Forbidden network module imported: {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                mod = node.module.split(".")[0]
+                if mod in forbidden_modules:
+                    pytest.fail(f"Forbidden network module import from: {node.module}")
+
+
+def test_raw_reduction_class_b_physically_copied_tree_rejection(tmp_path: Path) -> None:
+    """Class-B negative: physically copied isolated tree with tampered ZIP byte fails closed at admission."""
+    corrupt_root = tmp_path / "corrupt_j_a_root"
+
+    # Physically copy genuine J-A root to isolated temporary tree (NO symlink / hardlink)
+    shutil.copytree(CANONICAL_J_A_ROOT, corrupt_root)
+
+    # Pick one ZIP and tamper 1 byte
+    target_zip = next(corrupt_root.glob("raw/archive/*/*.zip"))
+    orig_bytes = target_zip.read_bytes()
+    tampered_bytes = bytearray(orig_bytes)
+    tampered_bytes[0] ^= 0xFF
+    target_zip.write_bytes(tampered_bytes)
+
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        admit_upstream_j_a_root,
+    )
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_.*"):
+        admit_upstream_j_a_root(corrupt_root)
+
+
+def test_stream_parser_csv_malformed_and_resource_caps(tmp_path: Path) -> None:
+    """Class-C pure seam: malformed CSV headers, negative prices, and reduced resource caps fail closed."""
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        validate_aggtrades_csv_header,
+        validate_zip_archive_package,
+    )
+
+    # 1. Invalid CSV headers
+    assert validate_aggtrades_csv_header(["col1", "col2"]) is False
+    assert validate_aggtrades_csv_header(["agg_trade_id", "price"]) is False
+
+    # 2. Synthetic ZIP testing reduced resource caps
+    test_zip = tmp_path / "test.zip"
+    with zipfile.ZipFile(test_zip, "w") as zf:
+        zf.writestr("test.csv", "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n1,10.0,1.0,1,1,1000,false\n")
+
+    # Pass normal caps
+    assert validate_zip_archive_package(test_zip) is True
+
+    # Fail max_zip_bytes
+    assert validate_zip_archive_package(test_zip, max_zip_bytes=10) is False
+
+    # Fail max_uncompressed_bytes
+    assert validate_zip_archive_package(test_zip, max_uncompressed_bytes=10) is False
+
+    # Fail max_ratio
+    assert validate_zip_archive_package(test_zip, max_ratio=0) is False
+
+
+def test_raw_reduction_class_d_persisted_outcome_mutation_rejected(tmp_path: Path) -> None:
+    """Class-D: single mutation on persisted child outcome fails closed under strict loader."""
+    run_id = "stage1_5j_b_historical_aggtrades_launch_response_20261014T020000Z"
+    target_root = tmp_path / run_id
+
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        load_verified_stage1_5j_b_historical_aggtrades_launch_response_root,
+        produce_stage1_5j_b_historical_aggtrades_launch_response,
+    )
+
+    produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+
+    # Mutate summary.json: inject conflicting anchor_state on child row 0
+    summary_path = target_root / "summary.json"
+    summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary_data["child_rows"][0]["anchor_state"] = "anchor_found"
+    summary_data["child_rows"][0]["anchor_price"] = "1.23450000"
+    summary_data["child_rows"][0]["anchor_delay_ms"] = 100
+    summary_data["child_rows"][0]["anchor_time_ms"] = 1700000000100
+
+    new_bytes = (json.dumps(summary_data, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    summary_path.write_bytes(new_bytes)
+
+    # Recompute manifest hash for summary.json
+    manifest_path = target_root / "manifest.json"
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for art in manifest_data["artifacts"]:
+        if art["path"] == "summary.json":
+            art["sha256"] = hashlib.sha256(new_bytes).hexdigest()
+            art["byte_count"] = len(new_bytes)
+    manifest_path.write_text(json.dumps(manifest_data, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+    # Strict loader must fail closed
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_.*"):
+        load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(target_root)
+
+
+def test_raw_open_failure_for_complete_child_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forced raw-open failure on complete child must raise named STOP, never emit missing_horizon_trade."""
+    run_id = "stage1_5j_b_historical_aggtrades_launch_response_20261014T030000Z"
+    target_root = tmp_path / run_id
+
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        produce_stage1_5j_b_historical_aggtrades_launch_response,
+    )
+
+    # Patch ZipFile.open to fail when reading raw package
+    def _faulty_open(self: Any, *args: Any, **kwargs: Any) -> Any:
+        raise OSError("SIMULATED_RAW_DISK_READ_FAILURE")
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", _faulty_open)
+
+    # Must raise named STOP (stage1_5j_b_raw_reduction_not_executed or raw read error), not silently publish gap
+    with pytest.raises((Stage1_5JBDiagnosticError, OSError)):
+        produce_stage1_5j_b_historical_aggtrades_launch_response(target_root, run_id)
+
+
+def test_raw_reduction_legacy_roots_not_admissible(tmp_path: Path) -> None:
+    """Both frozen legacy roots/RUN_IDs are rejected from producer and loader with named STOP."""
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        load_verified_stage1_5j_b_historical_aggtrades_launch_response_root,
+        produce_stage1_5j_b_historical_aggtrades_launch_response,
+    )
+
+    legacy_run_ids = [
+        "stage1_5j_b_historical_aggtrades_launch_response_20261013T000000Z",
+        "stage1_5j_b_historical_aggtrades_launch_response_20261013T040000Z",
+    ]
+
+    for leg_id in legacy_run_ids:
+        # Producer must reject legacy RUN_ID
+        with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_legacy_root_not_admissible"):
+            produce_stage1_5j_b_historical_aggtrades_launch_response(tmp_path / leg_id, leg_id)
+
+        # Loader must reject legacy root
+        leg_root = PROJECT_ROOT / "data" / "external_signal_shadow" / "stage1_5j_b" / "historical_aggtrades_launch_response" / leg_id
+        with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_legacy_root_not_admissible"):
+            load_verified_stage1_5j_b_historical_aggtrades_launch_response_root(leg_root)
+
+
+def test_open_zip_without_persisted_j_a_package_record_rejected(tmp_path: Path) -> None:
+    """P0-01: A canonical-looking ZIP on disk without a matching persisted record cannot be opened (INV-JB-RR-01, INV-JB-RR-05)."""
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        _reduce_verified_aggtrades_launch_response,
+    )
+
+    sym = "TESTUSDT"
+    utc_date = "2024-01-01"
+    p_id = "art_test_p0_01"
+    lt_ms = 1704067200000
+
+    mock_j_a_root = tmp_path / "mock_j_a_root"
+    zip_path = mock_j_a_root / "raw" / "archive" / sym / f"{sym}-aggTrades-{utc_date}.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+    header = "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+    csv_content = header + f"1,10.0,1.0,1,1,{lt_ms + 1000},false\n"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip_path.stem}.csv", csv_content)
+    chk_path = zip_path.with_name(f"{zip_path.name}.CHECKSUM")
+    sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    chk_path.write_text(f"{sha}  {zip_path.name}\n", encoding="utf-8")
+
+    # j_a_data has coverage_complete parent with in_scope child, but NO archive_package_records
+    j_a_data = {
+        "parent_records": [{
+            "source_article_id": p_id,
+            "parent_state": "coverage_complete",
+            "children": [{
+                "symbol": sym,
+                "child_scope": "in_scope_usdt",
+                "symbol_launch_time_ms": lt_ms,
+            }],
+        }],
+        "archive_package_records": [],
+    }
+
+    # Reducer must fail closed and NOT open the unauthenticated ZIP
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_.*"):
+        _reduce_verified_aggtrades_launch_response(mock_j_a_root, j_a_data)
+
+
+def test_anchor_selection_cross_utc_midnight_boundary(tmp_path: Path) -> None:
+    """P0-02: Anchor selection streams across UTC midnight, selects earliest physical row on equal ts, and enforces delay cap (INV-JB-RR-02, INV-JB-RR-03)."""
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        _reduce_verified_aggtrades_launch_response,
+    )
+
+    sym = "MIDUSDT"
+    p_id = "art_test_p0_02"
+    # Launch is 100ms before midnight: 2024-01-01T23:59:59.900Z
+    lt_ms = 1704153599900
+    d1 = "2024-01-01"
+    d2 = "2024-01-02"
+
+    mock_j_a_root = tmp_path / "mock_j_a_midnight"
+
+    # Day 1 ZIP has trades before launch only (e.g. at 23:59:50)
+    zip1 = mock_j_a_root / "raw" / "archive" / sym / f"{sym}-aggTrades-{d1}.zip"
+    zip1.parent.mkdir(parents=True, exist_ok=True)
+    header = "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+    csv1 = header + f"1,1.0,1.0,1,1,{lt_ms - 9900},false\n"
+    with zipfile.ZipFile(zip1, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip1.stem}.csv", csv1)
+    chk1 = zip1.with_name(f"{zip1.name}.CHECKSUM")
+    chk1.write_text(f"{hashlib.sha256(zip1.read_bytes()).hexdigest()}  {zip1.name}\n", encoding="utf-8")
+
+    # Day 2 ZIP has two trades at exactly +100ms: 1704153600000 (equal timestamps) with prices 0.50 and 0.60
+    # and horizon trades for 5m (+300000ms: 1704153900000), 1h, 4h
+    zip2 = mock_j_a_root / "raw" / "archive" / sym / f"{sym}-aggTrades-{d2}.zip"
+    t_anchor = lt_ms + 100
+    csv2 = header + (
+        f"2,0.50,10.0,2,2,{t_anchor},false\n"
+        f"3,0.60,10.0,3,3,{t_anchor},false\n"
+        f"4,0.55,10.0,4,4,{t_anchor + 300000},false\n"
+        f"5,0.58,10.0,5,5,{t_anchor + 3600000},false\n"
+        f"6,0.52,10.0,6,6,{t_anchor + 14400000},false\n"
+    )
+    with zipfile.ZipFile(zip2, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip2.stem}.csv", csv2)
+    chk2 = zip2.with_name(f"{zip2.name}.CHECKSUM")
+    chk2.write_text(f"{hashlib.sha256(zip2.read_bytes()).hexdigest()}  {zip2.name}\n", encoding="utf-8")
+
+    def _make_pkg_rec(utc_date: str) -> dict[str, Any]:
+        return {
+            "checksum_request_id": 1,
+            "child_state": "archive_verified_with_post_launch_rows",
+            "logical_archive_identity": {
+                "market": "futures_um",
+                "metric": "aggTrades",
+                "parent_article_id": p_id,
+                "symbol": sym,
+                "utc_date": utc_date,
+            },
+            "parent_article_id": p_id,
+            "symbol": sym,
+            "utc_date": utc_date,
+            "zip_request_id": 2,
+        }
+
+    j_a_data = {
+        "parent_records": [{
+            "source_article_id": p_id,
+            "parent_state": "coverage_complete",
+            "children": [{
+                "symbol": sym,
+                "child_scope": "in_scope_usdt",
+                "symbol_launch_time_ms": lt_ms,
+            }],
+        }],
+        "archive_package_records": [_make_pkg_rec(d1), _make_pkg_rec(d2)],
+    }
+
+    # 1. Normal cross-midnight anchor discovery
+    res = _reduce_verified_aggtrades_launch_response(mock_j_a_root, j_a_data)
+    cr = res["child_rows"][0]
+    assert cr["anchor_state"] == "anchor_found"
+    assert cr["anchor_time_ms"] == t_anchor
+    assert cr["anchor_delay_ms"] == 100
+    assert cr["anchor_price"] == "0.5"
+
+    # 2. Delay boundary test: trade at lt_ms + 300_001 ms (> 300,000ms delay limit)
+    t_too_late = lt_ms + 300001
+    csv2_late = header + f"2,0.50,10.0,2,2,{t_too_late},false\n"
+    with zipfile.ZipFile(zip2, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip2.stem}.csv", csv2_late)
+    chk2.write_text(f"{hashlib.sha256(zip2.read_bytes()).hexdigest()}  {zip2.name}\n", encoding="utf-8")
+
+    res_late = _reduce_verified_aggtrades_launch_response(mock_j_a_root, j_a_data)
+    cr_late = res_late["child_rows"][0]
+    assert cr_late["anchor_state"] == "anchor_unavailable_delay_exceeded"
+    assert cr_late["anchor_price"] is None
+    assert cr_late["anchor_time_ms"] is None
+
+
+def test_stream_parser_enforces_buffer_size_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P0-03: Frozen STREAM_CHUNK_BYTES (65536) is enforced during raw streaming (INV-JB-RR-04)."""
+    import src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response as core_mod
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES,
+        _reduce_verified_aggtrades_launch_response,
+    )
+
+    sym = "BUFUSDT"
+    p_id = "art_test_p0_03"
+    lt_ms = 1704067200000
+    d = "2024-01-01"
+
+    mock_j_a_root = tmp_path / "mock_j_a_buf"
+    zip_path = mock_j_a_root / "raw" / "archive" / sym / f"{sym}-aggTrades-{d}.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+    header = "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+    rows_str = "\n".join(
+        f"{i},10.0,1.0,{i},{i},{lt_ms + i * 10},false"
+        for i in range(1, 2000)
+    )
+    csv_content = header + rows_str + "\n"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip_path.stem}.csv", csv_content)
+    chk_path = zip_path.with_name(f"{zip_path.name}.CHECKSUM")
+    chk_path.write_text(f"{hashlib.sha256(zip_path.read_bytes()).hexdigest()}  {zip_path.name}\n", encoding="utf-8")
+
+    j_a_data = {
+        "parent_records": [{
+            "source_article_id": p_id,
+            "parent_state": "coverage_complete",
+            "children": [{
+                "symbol": sym,
+                "child_scope": "in_scope_usdt",
+                "symbol_launch_time_ms": lt_ms,
+            }],
+        }],
+        "archive_package_records": [{
+            "checksum_request_id": 1,
+            "child_state": "archive_verified_with_post_launch_rows",
+            "logical_archive_identity": {
+                "market": "futures_um",
+                "metric": "aggTrades",
+                "parent_article_id": p_id,
+                "symbol": sym,
+                "utc_date": d,
+            },
+            "parent_article_id": p_id,
+            "symbol": sym,
+            "utc_date": d,
+            "zip_request_id": 2,
+        }],
+    }
+
+    observed_chunks: list[int] = []
+    orig_readinto = core_mod._ChunkBoundedReader.readinto
+
+    def _recording_readinto(self: Any, b: Any) -> int:
+        observed_chunks.append(len(b))
+        return orig_readinto(self, b)
+
+    monkeypatch.setattr(core_mod._ChunkBoundedReader, "readinto", _recording_readinto)
+    _reduce_verified_aggtrades_launch_response(mock_j_a_root, j_a_data)
+    assert len(observed_chunks) > 0
+    assert all(n <= EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES for n in observed_chunks)
+
+
+
+def test_open_verified_package_stream_fail_closed_checks(tmp_path: Path) -> None:
+    """_open_verified_package_stream fails closed on logical identity, state, symlink, checksum tampering, and chunk cap (INV-JB-RR-01, INV-JB-RR-04)."""
+    from src.research.external_signal_shadow.stage1_5j_b_historical_aggtrades_launch_response import (
+        EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES,
+        Stage1_5JBDiagnosticError,
+        _ChunkBoundedReader,
+        _open_verified_package_stream,
+    )
+
+    root = tmp_path / "mock_root"
+    sym = "SEAMUSDT"
+    utc_date = "2024-01-01"
+    p_id = "art_seam_01"
+
+    zip_path = root / "raw" / "archive" / sym / f"{sym}-aggTrades-{utc_date}.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_bytes = b"agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n1,10.0,1.0,1,1,1000,false\n"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{zip_path.stem}.csv", csv_bytes)
+    chk_path = zip_path.with_name(f"{zip_path.name}.CHECKSUM")
+    actual_sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    chk_path.write_text(f"{actual_sha}  {zip_path.name}\n", encoding="utf-8")
+
+    valid_rec = {
+        "checksum_request_id": 1,
+        "child_state": "archive_verified_with_post_launch_rows",
+        "logical_archive_identity": {
+            "market": "futures_um",
+            "metric": "aggTrades",
+            "parent_article_id": p_id,
+            "symbol": sym,
+            "utc_date": utc_date,
+        },
+        "parent_article_id": p_id,
+        "symbol": sym,
+        "utc_date": utc_date,
+        "zip_request_id": 2,
+    }
+
+    # 1. Positive case opens successfully
+    with _open_verified_package_stream(root, valid_rec) as stream:
+        reader = csv.reader(stream)
+        rows = list(reader)
+        assert len(rows) == 2
+
+    # 2. Logical identity mismatch fails closed
+    bad_id_rec = dict(valid_rec)
+    bad_id_rec["logical_archive_identity"] = dict(valid_rec["logical_archive_identity"], market="spot")
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_package_record_invalid:logical_archive_identity_mismatch"):
+        with _open_verified_package_stream(root, bad_id_rec):
+            pass
+
+    # 3. Unverified child_state fails closed
+    unverified_rec = dict(valid_rec, child_state="archive_request_nonpersisted")
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_package_record_invalid:unverified_child_state"):
+        with _open_verified_package_stream(root, unverified_rec):
+            pass
+
+    # 4. Checksum hash mismatch fails closed
+    chk_path.write_text(f"{'0'*64}  {zip_path.name}\n", encoding="utf-8")
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_checksum_invalid:hash_mismatch"):
+        with _open_verified_package_stream(root, valid_rec):
+            pass
+    chk_path.write_text(f"{actual_sha}  {zip_path.name}\n", encoding="utf-8")
+
+    # 5. Symlink ZIP fails closed
+    sym_zip = root / "raw" / "archive" / sym / f"sym-{sym}-aggTrades-{utc_date}.zip"
+    sym_zip.symlink_to(zip_path)
+    sym_rec = dict(valid_rec, utc_date=f"sym-{utc_date}")
+    sym_rec["logical_archive_identity"] = dict(sym_rec["logical_archive_identity"], utc_date=f"sym-{utc_date}")
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_.*"):
+        with _open_verified_package_stream(root, sym_rec):
+            pass
+
+    # 6. _ChunkBoundedReader rejects oversized read request
+    raw_mock = io.BytesIO(b"x" * 100)
+    reader = _ChunkBoundedReader(raw_mock, EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES)
+    oversized_buf = bytearray(EXTERNAL_SIGNAL_STAGE1_5J_B_STREAM_CHUNK_BYTES + 1)
+    with pytest.raises(Stage1_5JBDiagnosticError, match="STOP=stage1_5j_b_stream_chunk_bytes_exceeded"):
+        reader.readinto(oversized_buf)
