@@ -4,176 +4,75 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
 
 # Execute Approved Plan Workflow (受控计划执行流程)
 
-当 Implementation Plan 审查结论为 `Approve`、计划顶部包含完整的 `Allowed Change Scope` 白名单、已记录该 Plan 的精确版本、且已获得用户明确授权时，使用本 Workflow。
+当正式 Implementation Plan 经审查通过、包含完整的 `Allowed Change Scope` 白名单、已绑定精确的 Design/Plan SHA-256、且已获得用户明确授权实施时，使用本 Workflow。
 
-目标：在当前工作区按白名单严格限定变动范围，以 TDD（测试驱动）控制编码过程，杜绝越界改动与全库命令误伤，高质量完成计划。
+（注：仅影响单模块内部的简要计划任务，在用户确认简要计划后直接遵循 `.agent/rules/L1_Engineering_Process.md` §1.1、§2（TDD 与期望值独立推算、步骤门禁与范围控制）与 §4（完成标准）执行 TDD、范围检查与验证命令，无需建立多角色盲审交接包。）
 
----
-
-## 项目执行原则 (Project Execution Rules)
-
-1. **默认原位执行 (In-Place Execution by Default)**：
-   - 本项目个人开发默认在当前工作区原位修改代码。
-   - 这是对通用 `executing-plans` worktree 默认要求的项目级覆盖；仅在用户已授权当前工作区执行、且 Step 1 已保存脏工作区基线时适用。
-   - **默认不新建 git worktree，不自动逐 Task 进行 git commit**（除非用户在 Plan 或指令中明确要求）。
-2. **审计职责分离 (Separation of Execution & Audit)**：
-   - 执行 Agent（运动员）负责编写代码、TDD 测试和提交自查证据。
-   - 最终完成度审计（裁判员）交由**独立 Subagent / 独立 Session / 用户**运行 `.agent/skills/audit-plan-completion` 进行公正判决，避免既当运动员又当裁判员的确认偏误 (Self-confirmation Bias)。
+目标：在受控范围内按计划切片完成实现与验证，严格遵守 `.agent/rules/L1_Engineering_Process.md`（唯一工程流程权威）与 `Allowed Change Scope`，由独立审计闭环验收。
 
 ---
 
-## 执行逻辑方案与顺序 (Execution Flow & Sequence)
+## 上游技能项目适配规则 (Project Adaptation Before Invoking Upstream Skills)
 
-```text
-[Step 1: 冻结 Plan 与记录基线] ──> [Step 2: 确认执行模式] ──> [Step 3: 分批实施与 Scope 校验]
-                                                                            │
-[Step 5: 最终验证、代码审查与独立审计] <── [Step 4: 按需拓扑复核与图谱更新] <──┘
-```
+在调用 `.agent/skills/executing-plans`、`.agent/skills/test-driven-development`、`.agent/skills/systematic-debugging`、`.agent/skills/verification-before-completion`、`.agent/skills/requesting-code-review`、`.agent/skills/ponytail` 或 `.agent/skills/graphify` 前，必须遵守以下项目级覆盖规则：
 
-### Step 1: 冻结 Plan、记录 pre-execution 基线快照与范围校验
-
-1. 记录已批准 Plan 的路径与 SHA-256；该 hash、审核 verdict 和用户授权共同构成执行输入。Plan 在执行前被修改时，必须重新审核。
-2. 记录基线 `BASE_SHA` 和可供独立审计读取的脏工作区快照。基线写入 Git metadata，不进入工作区或提交范围：
-   ```bash
-   BASE_SHA=$(git rev-parse HEAD)
-   EXECUTION_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-   EXECUTION_BASELINE_DIR=$(git rev-parse --git-path "plan-execution/$EXECUTION_RUN_ID")
-   mkdir -p "$EXECUTION_BASELINE_DIR"
-   git status --short --untracked-files=all > "$EXECUTION_BASELINE_DIR/status.txt"
-   git diff --binary > "$EXECUTION_BASELINE_DIR/worktree.patch"
-   git diff --cached --binary > "$EXECUTION_BASELINE_DIR/index.patch"
-   git ls-files --others --exclude-standard > "$EXECUTION_BASELINE_DIR/untracked-paths.txt"
-   while IFS= read -r path; do shasum -a 256 "$path"; done \
-     < "$EXECUTION_BASELINE_DIR/untracked-paths.txt" \
-     > "$EXECUTION_BASELINE_DIR/untracked-sha256.txt"
-   ```
-3. 预先存在的脏路径/未跟踪路径不得在后续执行中重置、覆盖或误归因。
-4. 确认 Plan 顶部的 `Allowed Change Scope` 明确列出了 implementation、verification、documentation、generated/runtime、affected-but-unchanged 和 forbidden 六类；不适用类别必须写 `none`。
+1. **默认原位执行，禁止自动提交**：默认在当前工作区原位修改，不新建 `git worktree`（除非用户显式要求调用 `using-git-worktrees`）；未经用户明确指令，**严禁执行 `git add`、`git commit`、`git push`、`git reset`、`git checkout` 或 `git clean`**。
+2. **审计职责分离**：执行者只负责完成实现、运行验证并提交客观事实记录；完成度审计必须交由独立会话/Subagent 或用户运行 `.agent/skills/audit-plan-completion`，执行者严禁自审给出 `complete`。
+3. **规则单一权威**：工程与测试纪律以 `.agent/rules/L1_Engineering_Process.md` 为准；外部技能中的绝对化口号（如 `no-fixtures` 或强制每步提交）均服从 `L1`。
 
 ---
 
-### Step 2: 确认执行模式 (Execution Mode)
+## 执行步骤
 
-1. **默认模式（主干）**：
-   - 使用当前 Agent 在当前工作区原位执行 Plan。
-   - 遵循 `executing-plans` 的批次检查点：默认每批 1 至 3 个彼此连续的 Task；遇到共享契约、持久化 Schema、生产 Runner 或部署命令时立即结束当前批次并汇报验证结果。
-   - 若 Plan hash、审核结论、用户授权或白名单任一项不匹配，停止执行并返回 Plan 审查。
+### Step 1: 冻结输入与记录 Pre-Execution 基线
 
-2. **高级/可选模式（仅在用户明确要求时）**：
-   - 若用户显式要求隔离开发：唤醒 `using-git-worktrees` 创建独立工作区。
-   - 若用户显式要求多 Agent 并行：唤醒 `subagent-driven-development` 分发独立任务。
+1. 核对已批准 Design 与 Plan 的路径及 SHA-256；若与用户批准绑定值不符，立即停止（`STOP`）。
+2. 在 `.git/plan-execution/` 下记录当前 `BASE_SHA`（`git rev-parse HEAD`）、`git status --short --untracked-files=all`、工作区与暂存区补丁（`git diff --binary`、`git diff --cached --binary`）以及既有未跟踪文件列表与 SHA-256。
+3. 既有脏路径或未跟踪路径在执行期间严禁回退、覆盖或误归因给当前任务。
 
 ---
 
-### Step 3: 分批逐 Task 实施与 Scope 校验 (Per-Task Execution Cycle)
+### Step 2: 逐切片实施与验证 (Per-Task Vertical Slice Loop)
 
-对当前批次的每一个 Task，执行 Agent 严格遵循以下微循环：
+按 Plan 的 Task 依赖顺序分批推进，每个 Task 遵循以下准则：
 
-0. **跨边界契约真实性前置校验 (Pre-RED Contract Reality Check)**：
-   - 若当前 Task 涉及跨模块依赖（消费上游产物、调用上游存储、加载上游 Attestation 或写下游事件契约）：
-     - 严禁直接在测试或实现中凭借记忆或意图手写伪造 mock dict！
-     - 必须首先定位上游权威 SSOT：检查上游 models/dataclass、canonical serializer、真实 loader、或已提交的上游产物生成器。
-     - 确认待消费字段在上游真实输出中是否存在、数据类型是否严格一致、语义与空值行为是否匹配。
-     - 若发现真实上游与当前实现假设不一致（如缺少字段、类型不匹配等），**严禁在下游用 `.get(k, default)`、假 hash 或偷拷 bytes 等手段本地自圆其说**；必须收集证据并触发 **L1 Rule 12 三分类分流评估 (Three-way Architectural Drift Classification)**：
-       - 若属执行者自身理解偏差或忽略了既有公共 helper/API，判定为 `BLOCKED_IMPLEMENTATION_DEFECT`，在当前批准范围与计划内就地修正；
-       - 若需触碰或修改白名单以外的契约/文件，判定为 `BLOCKED_SCOPE_DRIFT`，中止并申请范围/计划增补；
-       - 仅当已批准的设计/计划与冻结的上游真实契约发生不可调和的结构性冲突时，判定为 `BLOCKED_SPEC_DRIFT`，携带标准 Evidence Packet 升级退回 Design/Plan 工作流。
+1. **前置契约核实与偏差分流 (`L1 Rule 16` / alias `Old L1 Rule 12`)**：
+   - 若 Task 消费上游跨模块契约、Schema 或持久化产物，先核实上游真实定义（model/dataclass、serializer、strict loader）。
+   - 严禁在下游用 `.get(k, default)`、伪造 hash 或复制外部 attestation 掩盖上游契约不匹配。
+   - 发现计划与工作区现实冲突时，立即按 `.agent/rules/L1_Engineering_Process.md` §3.2 三分法处置：
+     - `BLOCKED_IMPLEMENTATION_DEFECT`：执行者对现有 API/设计理解偏差且可在当前白名单与设计内修正 → 记录后原地修正；
+     - `BLOCKED_SCOPE_DRIFT`：不改变契约/研究语义/风险边界，但需新增或触碰白名单外文件 → 暂停并走有限范围 Plan 增补（见 `.agent/workflows/remediate-completion-audit.md` 与 `L1` §3.2 的证据绑定检查）；
+     - `BLOCKED_SPEC_DRIFT`：需改变数据结构、契约、研究语义、权限或风险边界 → 立即停止并携 Evidence Packet 退回 Design/Plan 流程。
 
-1. **测试先行 (RED)**：
-   - 行为代码、Bug、契约/序列化语义或行为重构：先在 `Allowed verification paths` 中编写 failing test。
-   - **正向跨边界 Fixture 权威来源约束 (L1 Rule 11)**：所有正向测试的输入数据，必须直接通过上游 canonical 构造器/序列化器生成，或经由上游 strict loader 校验通过的真实产物字节，严禁使用跳过上游校验的伪造字典。
-   - **负向防御测试约束**：负向/fail-closed 测试应优先使用显式单点变异（Single-Point Mutation）以隔离验证因果关系；仅当已批准的状态机/生命周期不变量本身要求复合状态时（如失败恢复、多阶段写失败、部分回滚），允许声明并明确列举多点变异，且必须通过断言证明被系统安全拦截并终止。
-   - 运行测试，确认因预期的原因失败。
-   - 文档、Fixture metadata、生成物和部署命令：执行 Plan 声明的最小可执行验证，不制造无意义 TDD 测试。配置修改必须有 Plan 明确授权和相应行为验证。
+2. **按任务性质执行测试与验证 (`L1` §2 Rule 4 & `L1 Rule 15` / alias `Old L1 Rule 11`)**：
+   - **核心逻辑、状态/契约变更与 Bug 修复**：
+     - Bug 修复先按 `.agent/skills/systematic-debugging` 用测试或日志确认根因；重构先用测试锁定现有公开行为；
+     - 针对公开接口执行 `RED → GREEN → REFACTOR` TDD，不在测试中死锁未来极易变动的私有内部实现细节；
+     - 测试期望值必须依据业务规则或数学公式**独立推算**，严禁把被测函数当场的错误或凑巧输出直接抄进 `assert`；
+     - **Fixture 分级 (`L1 Rule 15`)**：单模块内部纯逻辑与异常/故障分支允许使用最小合成输入或故障注入；跨模块/跨边界正向验证必须使用上游 canonical 构造器/序列化器或经上游 strict loader 校验的产物。
+   - **纯文档、配置说明、静态规则与只读统计脚本**：
+     - 执行 Plan 声明的最小可执行验证（如存在性、引用/链接完整性、样本守恒律、哈希核对），不强行制造伪单元测试。
 
-2. **最小实现 (GREEN - Ponytail)**：
-   - 仅在 `Allowed implementation paths` 中编写满足该 Task 所需的最少代码。
-   - 应用 Ponytail 决策阶梯：复用既有 Helper、优先 stdlib、不添加未要求的抽象层/工厂模式。
-   - 针对有已知上限的有意简化，添加 `ponytail:` 注释说明升级路径。
+3. **最小化实现 (Ponytail)**：
+   - 仅在 `Allowed implementation paths` 内编写满足当前 Task 所需的最少代码（遵循 `.agent/rules/ponytail.md`）。
 
-3. **重构与精简 (REFACTOR)**：
-   - 保持测试通过的同时精简代码。
-
-4. **Task 级 Scope 校验与防投机扫描 (硬性拦截)**：
-   - 每次 Task 完成后检查当前的实际变动路径：
+4. **范围检查与按需扫描 (Scope Check & Conditional Tooling)**：
+   - 每个 Task 或批次完成后，检查实际改动范围是否严格落在 `Allowed Change Scope` 内：
      ```bash
-     git diff --name-only "$BASE_SHA"
-     git diff --cached --name-only "$BASE_SHA"
      git status --short --untracked-files=all
-     git ls-files --others --exclude-standard
+     git diff --name-only "$BASE_SHA"
      ```
-   - **硬门禁 1 (范围白名单)**：所有变动路径必须严格落在 `Allowed Change Scope` 白名单内！
-     若发现越界、全库格式化或无关文件被触碰（例如误跑 `ruff --fix .`），立即停止；保存当前 diff 和基线比对结果，不得自动 `git checkout`、`git reset` 或删除文件。由用户决定保留、拆分或回退。
-   - **硬门禁 2 (AST 差分防投机扫描)**：
-     运行 AST 静态防投机扫描器，自动覆盖从 `$BASE_SHA` 到当前工作态的全量变更（committed、staged、unstaged 与 untracked Python 文件）：
-     ```bash
-     python3 .agent/tools/anti_shortcut_scan.py --base-sha "$BASE_SHA"
-     ```
-     - **Fail-Closed 判定**：扫描器返回任何非 0 退出码（包括语法错误、文件读取失败、`RULE-AST-00-SCANNER-INTEGRITY` 或任何 `ERROR` 级别违规），Task 门禁立即失败，必须彻底修复，严禁进入下一 Task。
-     - **Warning 处置台账 (Disposition Ledger)**：扫描器若产生 `WARNING`（如普通字典 `.get()` 字面值回退、`.setdefault()`），严禁静默忽略；执行 Agent 必须在 Task Execution Report 中记录《Scanner Disposition Ledger》，逐条给出技术说明，证明其未侵蚀严格契约 Schema。
-
-5. **批次检查点**：
-   - 汇报完成的 Task、精确验证命令和结果、实际变动路径及未解决问题。
-   - 不得在前一批的验证或 Scope gate 失败时继续下一批。
+   - **按修改类型触发辅助工具（`.agent/rules/L1_Engineering_Process.md` §4.3 条件化工具）**：
+     - **AST 防投机扫描 (`anti_shortcut_scan.py`)**：仅当本次修改包含 Python 源码/脚本/测试（或进入最终执行收尾检查）时运行 `python3 .agent/tools/anti_shortcut_scan.py --base-sha "$BASE_SHA"`；纯 Markdown/文档子任务无需每步重复运行。若产生 `WARNING`，在执行记录中写明技术原因，确认未弱化契约校验。
+     - **Graphify 图谱 (`graphify`)**：仅在修改共享函数、跨模块契约或公共边界时按需点查；仅当跨模块代码边界实际发生变化且 Plan 的 `Allowed generated/runtime artifacts` 明确允许更新 `graphify-out/` 时，在全部代码修改完成后运行一次 `.venv/bin/python -m graphify update .`。纯文档、规则或单文件内部微调不运行图谱更新。
 
 ---
 
-### Step 4: 拓扑按需查询与单次图谱增量更新 (Disciplined Graphify Usage)
+### Step 3: 最终验证与独立审计交接 (Final Verification & Blind-First Handoff)
 
-1. **小 Task 执行期间**：
-   - 不在每个 Task 完成后都全量更新图谱。
-   - 仅当实际修改共享 SSOT、公共 Helper、Contract、Schema、CLI 或 transport boundary 时，使用精准查询：
-     ```bash
-     graphify query "<exact_symbol>"
-     graphify path "<producer>" "<consumer>"
-     ```
-   - 对 JSON/JSONL 字段、CLI flag、事件类型和路径，再用 `rg` 检查真实消费者。Graphify 只发现候选影响；必须以源码验证，并运行 Plan 声明的兼容性回归。
-2. **全部 Task 代码修改与测试通过后**：
-   - 代码变更后运行一次 AST-only 图谱增量更新；仅文档变更时跳过：
-     ```bash
-     .venv/bin/python -m graphify update .
-     ```
-   - 更新前确认实际会变动的 `graphify-out/` 文件已列入 Plan 的 `Allowed generated/runtime artifacts`，且保持 ignored 或按 Plan 的明确规则处理。
-
----
-
-### Step 5: 最终验证、代码审查与交接独立 Completion Audit (Separation of Roles)
-
-所有 Task 执行完毕且单项测试通过后：
-
-1. **执行 Agent 自查**：
-   - 调用 `verification-before-completion`，运行 Plan 要求的完整 targeted/integration/deployment/safety verification，并运行 `git diff --check "$BASE_SHA"` 与 `git diff --cached --check "$BASE_SHA"`。
-   - 对重大代码修改调用 `requesting-code-review`；修复其必须问题后重新运行受影响验证。
-   - 输出不落库的《Task Execution Report》：Plan hash、`BASE_SHA`、baseline 目录、每个 Task 的文件/符号、验证命令与结果、实际变动路径和未解决问题。
-2. **交接独立 Completion Audit（裁判员视角与盲审交接协议）**：
-   - 由**独立 Subagent / 独立 Session / 用户**运行 [`.agent/skills/audit-plan-completion`](../skills/audit-plan-completion/SKILL.md)。
-   - **盲审交接协议 (Blind-First Audit Handoff Protocol)**：
-     - 执行 Agent 交接给独立审计员时，仅移交客观权威输入元数据：
-       1. Approved Implementation Plan 路径与 SHA-256；
-       2. Approved Design 路径与 SHA-256；
-       3. Planning `BASE_SHA`；
-       4. Pre-execution Baseline 目录路径 (`EXECUTION_BASELINE_DIR`)；
-       5. `Allowed Change Scope` 白名单路径集合；
-       6. 执行过程中客观记录的未决已知缺陷或阻塞（若有）。
-     - **严禁向审计 Subagent 注入“所有任务均已完美完成/完全达标”等自我证明型自夸总结**，避免审计员产生证实偏误与锚定效应 (Anchoring Bias)。审计员必须基于权威文档和源码事实独立进行证据收集与判决。
-   - 独立审计视角审查：白名单合规性、生产 Runner 是否真正接入新逻辑、部署 Glob 转义正确性、不可变式生产接线映射、测试夹具权威来源。
-   - 只有当 Completion Audit 给出 **`complete`** 结论时，整体开发才正式判定为完成。
-
----
-
-## 3 个工具在本 Workflow 中的应用细节
-
-### 1. Superpowers 的应用
-- **`executing-plans`**：作为原位执行的主干流程，驱动 Agent 按 Task 逐步推进。
-- **`test-driven-development`**：驱动行为代码、Bug 和语义重构的 RED-GREEN-REFACTOR 循环。
-- **`verification-before-completion` / `requesting-code-review`**：提供最终的 fresh evidence 与重大变更的独立代码审查。
-- **`subagent-driven-development` / `using-git-worktrees`**（高级可选）：仅在用户明确要求时唤醒。
-
-### 2. Ponytail 的应用
-- **决策阶梯 (Rung 1~7)**：贯穿每个 Task 的编码阶段，强制寻求最小 Diff、最少行数。
-- **`ponytail:` 注释机制**：对有 Known Ceiling 的临时简化显式打标。
-- **边界**：Ponytail 不删除 trust-boundary validation、Fail-Closed、restart recovery、idempotency、兼容性或 SSOT；范围防护由 Git baseline 和 `Allowed Change Scope` 负责。
-
-### 3. Graphify 的应用
-- **精准点查**：仅在修改共享边界时用 `affected` / `path` 发现候选 Caller，再以源码和 `rg` 验证真实影响。
-- **单次增量更新**：全部代码修改和验证通过后仅执行一次 `graphify update .`，避免频繁写盘；更新产生的 ignored 生成物必须在 Plan 中声明。
+1. **执行者收尾自检**：
+   - 调用 `.agent/skills/verification-before-completion`，完整运行 Plan 要求的最终验证命令集，并检查 `git diff --check "$BASE_SHA"` 与 `git diff --cached --check "$BASE_SHA"`。
+   - 对重大代码变更按需调用 `.agent/skills/requesting-code-review`（基于精确 SHA 范围）。
+2. **盲审交接给独立 Completion Audit**：
+   - 向独立审计会话/Subagent 或用户移交客观事实输入（Approved Design/Plan 路径与 SHA-256、`BASE_SHA`、Pre-execution Baseline 目录、`Allowed Change Scope`、实际运行的命令与退出码、候选文件哈希及已知未决问题）。
+   - 不向审计员注入“已完美完成”等主观自评；只有独立运行 `.agent/skills/audit-plan-completion` 给出 `complete` 且用户最终接受后，任务才告完成。

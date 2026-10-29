@@ -1,147 +1,33 @@
-# Known Closure Revision Failure Patterns
+# Common Revision Failure Patterns
 
-These patterns are drawn from repeated Design/Plan revision failures in this project. Use them as adversarial self-checks.
+Use these patterns as a fast cross-fix self-check before handing a revised Design or Implementation Plan back for review.
 
-## Pattern 1 — Shape Fixed, Primitive Contract Still Ambiguous
+## 1. Patching One Sentence While Leaving Examples or Tasks Stale
 
-Bad revision:
+- **Failure**: Normative text is updated to fix a finding, but an example, table row, `Allowed Change Scope` entry, or Task verification command still reflects the old rule.
+- **Prevention**: Search the target document for all occurrences of the modified field, path, or rule and synchronize them in the same revision pass.
 
-```text
-review asks to freeze nested schema
-revision names required fields
-but leaves integer/decimal/timestamp token grammar undefined
-```
+## 2. Sequential Fix Collision
 
-Check the entire serialized contract, not just key names.
+- **Failure**: Fixing Finding #3 changes a field name, enum literal, or file path that Finding #1's fix relied upon.
+- **Prevention**: Build the full Blocker Ledger first, check pairwise interactions across all planned edits, and run a combined diff review after editing.
 
-## Pattern 2 — Precedence Fix Creates A Second Reducer Conflict
+## 3. Over-Prescribing Ceremonial Gates onto Simple Tasks
 
-Bad revision:
+- **Failure**: Adding 4-state crash matrices, `flock`/`fsync` durability protocols, or standalone `Rule 17` verifiers to a local internal fix or exploratory script just to make the document "look stricter."
+- **Prevention**: Follow `.agent/rules/L1_Engineering_Process.md` §3—include persistence/verifier ceremonies only when the task's actual failure consequences trigger them.
 
-```text
-first-match response reducer
-+ separate post-outcome durability failure
-without explicit supersession
-```
+## 4. Happy-Path-Only Fix on Multi-State Contracts
 
-Check multi-layer precedence and simultaneous failures.
+- **Failure**: When a contract genuinely defines multiple terminal states or failure branches, updating only the success path while leaving `blocked`/`failed` or rollback paths inconsistent.
+- **Prevention**: When revising a state machine or reducer contract, verify all sibling branches declared by that contract.
 
-## Pattern 3 — Fix Introduces A Serialization State With No Legal Enum
+## 5. Overly Broad Static Grep Gate
 
-Bad revision:
+- **Failure**: Adding a verification grep that bans a generic word (e.g., `event_time` or `bugfix.md`) without accounting for legitimate approved identifiers or historical migration tables.
+- **Prevention**: Scope static checks to exact forbidden calls/paths or explicitly classify legitimate historical references.
 
-```text
-new terminal intent = complete:null
-observation enum has only continue/blocked/failed
-```
+## 6. No-Touch Drift & Self-Approval Overclaim
 
-Every new internal intent must have an exact serialized mapping or remain explicitly non-serialized.
-
-## Pattern 4 — Safety Static Gate Rejects An Approved Literal
-
-Bad revision:
-
-```text
-ban substring "event_time"
-approved ProfileCore contains "realized_funding_event_time_ms"
-```
-
-Use specific forbidden dependencies, not generic semantic words.
-
-## Pattern 5 — Lock Test Accidentally Creates Root Resume
-
-Bad revision:
-
-```text
-runner B same run ID waits for runner A lock
-then acquires existing root after release
-```
-
-Lock primitive handoff is not runner/root lifecycle authority. Fresh/no-resume runner must hard reject existing root.
-
-## Pattern 6 — Artifact Producer Exists Only On Happy Path
-
-Bad revision:
-
-```text
-capability_summary produced only after final P4 success
-but blocked/failed states also require complete state vector
-```
-
-Check every sibling terminal state in State × Artifact matrix.
-
-## Pattern 7 — Verifier Mistaken For Producer
-
-Bad revision:
-
-```text
-closed-tree verifier expects capability_summary.json
-Plan never schedules code to write it
-```
-
-Every required artifact needs a production owner/task.
-
-## Pattern 8 — Config Gate Checks One Safety Flag, Not Exact Delta
-
-Bad revision:
-
-```text
-configs/base.py is allowlisted
-completion only asserts RISK_LIVE_TRADING_ENABLED=False
-```
-
-Prove exact additive AST/module delta where required.
-
-## Pattern 9 — Capacity Formula Omits Reserved Bytes
-
-Bad revision:
-
-```text
-ROOT_MAX >= workload
-```
-
-when Design requires:
-
-```text
-ROOT_MAX - ordinary_reserve - emergency_reserve >= workload
-```
-
-Reproduce exact invariant algebra.
-
-## Pattern 10 — Review Fix Is Semantically Right But Evidence Is Weaker
-
-Bad revision:
-
-```text
-review requires all-terminal-path summary coverage
-revision adds prose but only P4 success test
-```
-
-Mechanical evidence must match exact closure criterion.
-
-## Pattern 11 — Review Feedback Applied Sequentially
-
-Bad process:
-
-```text
-fix P0-1
-save
-fix P0-2
-save
-fix P0-3
-```
-
-without checking that P0-3 invalidated P0-1.
-
-Use one blocker ledger, interaction analysis, one patch, cross-fix pass.
-
-## Pattern 12 — No-Touch Drift
-
-Bad revision:
-
-```text
-fix reducer
-also rename endpoint/profile fields for cleanliness
-```
-
-Unrelated frozen edits create fresh review surface. Enforce Mutable / No-Touch sets.
+- **Failure**: Opportunistically refactoring unrelated frozen sections, or claiming `100% CLOSED` / `Approved` when an open question still requires reviewer or user confirmation.
+- **Prevention**: Enforce the `No-Touch Set`, keep `candidate_self_approved = false`, and mark any non-deterministic item as `PARTIALLY_CLOSED` / `OPEN` with clear notes for the reviewer.

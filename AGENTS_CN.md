@@ -1,4 +1,9 @@
-# 项目 AGENTS.md（中文译本）
+# 项目 AGENTS.md（历史中文译本 — 非现行指令入口）
+
+> **重要说明（Governance Notice）**：本文件为早期 `AGENTS.md` 的历史中文译本，正文仅供历史阅读保留，**不再作为现行 AI 指令或工作流入口**。
+> - 当前项目入口与安全摘要以 [`AGENTS.md`](AGENTS.md) 为准；
+> - 工程流程完整权威正文以 [`.agent/rules/L1_Engineering_Process.md`](.agent/rules/L1_Engineering_Process.md) 为准；
+> - 正文中提及的旧版 `.agent/workflows/bugfix.md`、`feature.md`、`refactor.md` 已退役，不再用于任务执行。
 
 本文件定义了在本仓库中工作的 AI 代理需要长期遵循的操作规则。（`AGENTS.md`：仓库级 AI 行为约束文件）
 

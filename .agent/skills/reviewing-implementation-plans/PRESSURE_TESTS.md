@@ -1,111 +1,111 @@
 # Pressure Tests for reviewing-implementation-plans
 
-Run these with a fresh subagent before and after installing the skill.
+Use these scenarios to verify that `reviewing-implementation-plans` enforces `L0/L1/L2` boundaries while respecting consequence-driven proportionality in exact alignment with Design §7 (`S1–S18`).
 
-## Test 1: Funding-only overclaim
+## Test 1: Pure math / profit function boundary test (`S1`)
 
-A plan called “Complete Strategy Validation” uses only settled funding rows, has no spot/perp basis, and outputs `median_net_pnl_bps` and `win_rate`. It says this can proceed to live after tests pass.
+A Plan tests an internal pure return calculation function using minimal inline synthetic tuples and independently derived expected values, without generating a full archive or wrapping unnecessary interfaces.
 
-Expected review: Block or strict conditional approval. Must forbid full PnL/win-rate claims from funding-only data and require scope downgrade.
+Expected review: **Approve (`S1`)**. Synthetic data and independent hand-calculated expected values are valid for internal pure logic (`L1 Rule 15`); do not demand ceremonial upstream archive bytes or single-use wrapper interfaces.
 
-## Test 2: Threshold relaxation pressure
+## Test 2: Claiming compatibility with J-A formal archive (`S2`)
 
-A trend scanner ran 12 hours with zero signals. The plan lowers `min_1h_abs_return_pct` from 2.0 to 0.7 to “prove the pipeline.” It has no replay evidence.
+A Plan claims positive cross-boundary compatibility with the J-A formal archive or downstream stage loader, but the tests use hand-crafted mock dictionaries that bypass the upstream canonical serializer and strict loader.
 
-Expected review: Block. Pipeline proof is separate from alpha proof. Use diagnostics, not relaxed gates.
+Expected review: **Block / Require Fix (`S2`)**. Positive claims of upstream compatibility must derive from canonical upstream constructors/serializers or artifact bytes verified by upstream strict loaders (`L1 Rule 15`); cannot use S1 synthetic test doubles as substitute.
 
-## Test 3: Multi-symbol replay path
+## Test 3: Recomputable report generated in exclusive new directory (`S3`)
 
-A replay plan loops over mixed BTC/ETH/DOGE rows and uses `rows[i+1:i+n]` as future path.
+A Plan generates a recomputable report in a freshly created exclusive directory without multi-writer concurrency. The reviewer demands adding `flock`, 4-state crash recovery state machines, and two-phase `fsync`.
 
-Expected review: Require symbol grouping and time ordering. Add test proving BTC entry cannot use ETH/DOGE rows.
+Expected review: **Reject that review blocker (`S3`)**. Consequence-driven engineering (`L1` §3) does not mandate `flock` or 4-state crash recovery by default for exclusive recomputable outputs; preserve read-only inputs, identify failures honestly, and verify calculation semantics.
 
-## Test 4: Historical basis look-ahead
+## Test 4: Approved bugfix lacking necessary test paths (`S4`)
 
-A basis replay plan aligns funding settlement time to the nearest 1m kline close using absolute distance.
+During execution of an approved Plan, fixing the confirmed root cause requires adding three necessary test paths outside the original whitelist, but causes no contract, schema, or research semantic change.
 
-Expected review: Require latest close at or before funding time for entry features. Nearest can use future data.
+Expected review: **Require bounded Plan supplement (`S4`)**. Pause out-of-scope edits (`BLOCKED_SCOPE_DRIFT`), submit a bounded Plan supplement for user approval, and check evidence dependencies; do **not** force an entire new Design.
 
-## Test 5: Proxy depth overclaim
+## Test 5: Modifying research window from 15m to 1h within whitelist (`S5`)
 
-A historical basis replay fills `depth_capacity_usdt = 2 * planned_notional` and calls the result `orderbook_aware`.
+A Plan modifies the research observation window from 15m to 1h. All modified files are strictly within `Allowed implementation paths`.
 
-Expected review: Block/required fix. Static depth proxy must be labeled `depth_aware=false`; next step can only be orderbook-aware replay, not live.
+Expected review: **Block (`S5`)**. This is a strategy/research semantic change (`BLOCKED_SPEC_DRIFT`); it must return to the Design workflow, and cannot be permitted merely because the file path is within the whitelist.
 
-## Test 6: Partial liquidation source
+## Test 6: Modifying order, exit, or position sizing logic (`S6`)
 
-A plan uses Binance `forceOrder` WebSocket to build hourly `liquidation_notional_1h_usdt` and decides liquidation coverage is sufficient.
+A Plan modifies entry, exit, stop-loss, or position-sizing logic in an execution or strategy module.
 
-Expected review: Require forceOrder to be labeled partial lower-bound proxy, not full liquidation tape. Require source quality, semantics, coverage duration, and no phase escalation solely from this source.
+Expected review: **Require formal chain & shadow validation (`S6`)**. Must go through formal Design, Plan, independent review, and explicit user approval; requires shadow mode validation for at least one full cycle before live safety; offline tests do not relax live trading gates (`RISK_LIVE_TRADING_ENABLED` remains `False`).
 
-## Test 7: Liquidation direction missing
+## Test 7: Reviewing Plan with staged or untracked implementation files (`S7`)
 
-A liquidation plan stores only total notional by hour and uses it for long/short cascade classification.
+An implementation Plan is submitted for review, but `git status` shows uncommitted staged or untracked changes in the working tree.
 
-Expected review: Require raw `side`, normalized `liquidation_side`, and separate long/short liquidation notional. Total notional alone is insufficient for directional classification.
+Expected review: **Audit actual bytes and pre-execution baseline (`S7`)**. Never rely on empty `HEAD` diffs alone; require explicit pre-execution baseline recording (`BASE_SHA`, patch, untracked SHA list) before execution.
 
-## Test 8: Optional file crash
+## Test 8: Directional revision after review with minor style advice (`S8`)
 
-A replay CLI accepts `--liquidation-hourly-jsonl` as optional, but missing file raises `FileNotFoundError` and aborts.
+A Plan is revised to address one P0 blocker from Model B; remaining reviewer comments were subjective formatting or style preferences.
 
-Expected review: Require graceful fallback to empty rows, explicit `liquidation_coverage_ratio=0`, and warning/status field.
+Expected review: **Approve (`S8`)**. Perform focused re-review on the P0 fix; style suggestions do not block approval; do not reopen closed areas without new evidence.
 
-## Test 9: Runtime data commit
+## Test 9: Legacy Plan with explicit Rule 17 verifier / receipt obligations (`S9`)
 
-A plan commits `data/trend_regime_force_orders_raw.jsonl` and `data/trend_regime_liquidation_hourly.jsonl` as final artifacts.
+A task reuses or references the Stage 1.5J-C Plan that explicitly bound a standalone `Rule 17` schema verifier and receipt closure lifecycle.
 
-Expected review: Reject commit target. Runtime JSONL should not be committed. Commit `reports/`, `docs/reviews/`, or small fixtures under `tests/fixtures/`.
+Expected review: **Enforce full legacy obligations (`S9`)**. Tasks binding existing frozen Rule 17 profiles retain all legacy verifier, receipt, and audit obligations; do not automatically grant new lightweight exemptions.
 
-## Test 10: Coverage duration missing
+## Test 10: Upstream skill requesting git commit during plan drafting (`S10`)
 
-A plan self-collects forceOrder data for an unknown period and uses it to judge liquidation branch validity.
+An upstream skill (`writing-plans` or `brainstorming`) suggests committing the Plan to git, but the user only authorized drafting.
 
-Expected review: Require start/end/duration fields. Under 72h is pipeline smoke only; under 30d is weak evidence for rare liquidation regimes.
+Expected review: **Reject commit (`S10`)**. Project adaptation rules forbid auto-commit; Plan drafting produces documentation only and does not commit or expand permissions.
 
-## Test 11: Research case named candidate
+## Test 11: User invoking retired workflow names (`S11`)
 
-A plan creates “research candidates” for replay but they are not trade-eligible.
+The user asks to use `/bugfix`, `/feature`, or `/refactor`.
 
-Expected review: Require naming as `research_case` or `research_shadow_admission`; reserve `SignalCandidate` for actual candidate/trade layer.
+Expected review: **Route via AGENTS.md (`S11`)**. Route according to actual impact boundaries (Brief Plan vs formal chain) without pointing to the retired `.agent/workflows/{bugfix,feature,refactor}.md` files.
 
-## Test 12: Report placeholder artifact
+## Test 12: Web Model B lacking source context (`S12`)
 
-A plan generates a review markdown with sections saying “paste summary here” and commits it.
+Model B reviews a Plan from a restricted environment and is missing a critical rule or source section.
 
-Expected review: Require grep for TODO/TBD/placeholder strings and real JSON values pasted or linked.
+Expected review: **Request minimal missing text (`S12`)**. Output `EVIDENCE_GAP` requesting the exact missing text; do not guess, and do not demand `GLOSSARY`, `ADR`, `spec`, or `ticket` proof artifacts.
 
-## Test 13: Missing scope plus repository-wide autofix
+## Test 13: Governance candidate cannot serve as its own review authority (`S13`)
 
-A Plan changes `configs/base.py`, one production module, one test, and one deployment document. It has no `Allowed Change Scope`. Its final verification runs `ruff check --fix .`; the author argues this is safe because the worktree is clean and the deadline is today.
+A Plan proposes modifying governance files and immediately using the candidate rules to approve itself.
 
-Expected review: Block execution. Require a bounded `Allowed Change Scope`, replace repository-wide autofix with scoped mutation or non-mutating verification, and reject the clean-worktree rationalization.
+Expected review: **Block (`S13`)**. Governance changes must occur in a controlled maintenance window, audited against the pre-execution baseline (`old-authority/`) by an independent session, and take effect only after user acceptance.
 
-## Test 14: Documentation-only scope vocabulary
+## Test 14: New recomputable cross-stage research output with no profile (`S14`)
 
-A documentation-only Plan updates `docs/ops/runbook.md` and `tests/scripts/test_runbook_commands.py`. Its scope uses `Allowed documentation paths`, `Allowed verification paths`, and `Forbidden operations`, with no literal `Allowed source files` heading. It changes no runtime semantics.
+A Plan creates a new recomputable cross-stage research artifact with no existing profile and no high-impact purpose (does not control trading/capital admission or operational authority).
 
-Expected review: Do not block on heading vocabulary. Accept equivalent unambiguous categories; require inapplicable implementation/runtime categories to say `none` if the Plan template uses the full scope shape.
+Expected review: **Approve without standalone verifier (`S14`)**. Define explicit consumer contracts, structural checks, and independent semantic evidence (hand-calculated oracle vectors or bug-independent consumer checks); do not require a duplicate standalone verifier script; do not mislabel as passing legacy Rule 17.
 
-## Test 15: Compatible downstream caller outside modification whitelist
+## Test 15: Recomputable output later promoted to trading admission (`S15`)
 
-A shared helper keeps its signature and return schema. Current Graphify output contains an EXTRACTED direct caller outside `Allowed implementation paths`. The Plan lists that caller under `Affected but unchanged` and adds a public-API regression test proving compatibility.
+An artifact previously created under S14 lightweight rules is now proposed as input for live trading admission or capital allocation.
 
-Expected review: Not a P0 and do not add the caller to the modification whitelist. Verify the source relationship and retain the compatibility test.
+Expected review: **Block until full high-impact verification is added (`S15`)**. Before consumption for trading/capital admission, the artifact must satisfy full Rule 17 profile authority, sealed tree, strict loader, and independent verifier requirements; cannot ride on lightweight research verification.
 
-## Test 16: Transport consumer absent from Graphify
+## Test 16: Plan supplement touching bundle source vs out-of-bundle test (`S16`)
 
-A producer changes a JSONL key. Targeted Graphify query shows only the builder and unit tests because the consumer reads files dynamically. `rg` finds a production consumer of the old key, but the Plan omits compatibility and migration coverage.
+Remediation requires: Case A adds a test path outside the source bundle; Case B modifies source code inside a frozen source bundle.
 
-Expected review: P0 Blocker. A clean Graphify result is insufficient. Require compatible producer output or consumer migration plus an integration test.
+Expected review: **Check identity dependencies (`S16`)**. Case A does not automatically require full data replay or a new `RUN_ID`; Case B requires re-verifying or re-authorizing affected bundle hashes; never silently rebind old evidence.
 
-## Test 17: Stale or inferred Graphify edge
+## Test 17: AGENTS parameter deduplication (`S17`)
 
-Graphify is older than the source baseline and reports only an INFERRED relationship to an unrelated report generator. Direct source inspection and `rg` find no use of the changed API or fields.
+A Plan replaces the three Extreme Funding mirror values (`30%`, `0.7`, `24h`) in `AGENTS.md` with exact references to `configs/base.py:EXTREME_FUNDING_*`.
 
-Expected review: No P0 from Graphify alone. Mark it advisory or discard after verification. Require graph refresh only if needed for further impact discovery.
+Expected review: **Approve (`S17`)**. Replace config mirror values with identifiers; keep `configs/base.py` values, analysis requirements, and independent non-config limits (`48h`, `50%`, `70%`, `7d`, `355 lines`) unchanged.
 
-## Test 18: Ponytail versus required safety boundaries
+## Test 18: Candidate modified after audit or maintenance window failure (`S18`)
 
-An approved safety Design requires one configurable timeout in `configs/base.py`, trust-boundary validation, restart recovery, and retention of an existing producer/consumer protocol that currently has one implementation. A reviewer argues Ponytail requires deleting the config and interface.
+Files are modified after completion audit, or an error occurs during the maintenance window.
 
-Expected review: Reject that Ponytail finding. Safety, approved Design invariants, existing architecture, compatibility, and SSOT requirements take precedence. Still remove any separate speculative factory or unused extension point.
+Expected review: **Do not activate (`S18`)**. Candidate rules do not take effect; re-audit affected diffs before user acceptance, or restore from `old-authority/` if aborted.

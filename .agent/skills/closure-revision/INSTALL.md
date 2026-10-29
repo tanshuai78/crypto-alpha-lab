@@ -1,75 +1,33 @@
-# Install closure-revision in Antigravity IDE (project-local)
+# `closure-revision` Skill Layout & Project Wiring
 
-Recommended target:
+## Directory Structure
+
+This project-owned skill resides in the repository at:
 
 ```text
-<project-root>/.agent/skills/closure-revision/
+.agent/skills/closure-revision/
 ├── SKILL.md
+├── INSTALL.md
 └── references/
     ├── design-plan-checklists.md
     ├── revision-control-packet.md
     └── revision-failure-patterns.md
 ```
 
-## macOS / Linux
+## Project Maintenance Rules
 
-From the project root:
+1. **In-Repository Maintenance Only**:
+   - Edit `closure-revision` files directly in place under `.agent/skills/closure-revision/` when authorized by an approved Plan.
+   - **Never** unzip or copy an external bundle over `.agent/skills/` wholesale, as doing so can overwrite project-specific adaptations or sibling skills.
+2. **Single Rule Authority (`L1`)**:
+   - Routing for `closure-revision` is already defined in [`.agent/rules/L1_Engineering_Process.md`](../../rules/L1_Engineering_Process.md) (§2 Closure Revision Discipline) and summarized in [`AGENTS.md`](../../../AGENTS.md).
+   - Do **not** copy-paste long duplicate routing blocks into `AGENTS.md`, `GEMINI.md`, or workflow files.
 
-```bash
-mkdir -p .agent/skills
-unzip -q ~/Downloads/closure-revision-skill-bundle.zip -d .agent/skills/
-```
-
-If the bundle is elsewhere, replace the zip path.
-
-Verify:
+## Verification
 
 ```bash
 test -f .agent/skills/closure-revision/SKILL.md
-head -n 8 .agent/skills/closure-revision/SKILL.md
-find .agent/skills/closure-revision -maxdepth 2 -type f -print
+test -f .agent/skills/closure-revision/references/design-plan-checklists.md
+test -f .agent/skills/closure-revision/references/revision-control-packet.md
+test -f .agent/skills/closure-revision/references/revision-failure-patterns.md
 ```
-
-Expected main frontmatter:
-
-```text
-name: closure-revision
-```
-
-Then reload/restart the Antigravity workspace/session so its skill index is refreshed.
-
-## Manual installation
-
-Create:
-
-```text
-.agent/skills/closure-revision/
-```
-
-Copy `SKILL.md` and the entire `references/` directory into it.
-
-Do not flatten the reference files into `.agent/skills/`.
-
-## Recommended project-level routing rule
-
-Add the following to the project instruction file already loaded by Antigravity (for example the project's existing `GEMINI.md` if that is what your workspace uses):
-
-```text
-### Mandatory Closure Revision Routing
-
-When revising a high-risk Design or Implementation Plan after Closure Audit or Closure Confirmation findings, MUST invoke `.agent/skills/closure-revision/SKILL.md` before editing.
-
-If `proof_graph_frozen=true`, revisions must stay inside the frozen proof graph/trust boundary/scope. Do not use incremental issue-by-issue editing. Build the full blocker ledger, Mutable/No-Touch sets, impact cones, one coherent patch, and author-side mini Closure Confirmation before returning the revision for review.
-
-The revision agent may not self-approve the document and may not enable implementation, deployment, runtime, paper, live, execution, or trading authority.
-```
-
-## Verify triggering
-
-Start a fresh Antigravity session and use a prompt such as:
-
-```text
-请使用 closure-revision skill，根据这份 Closure Confirmation 的 P0/P1 一次性修订当前 Design。proof graph 已冻结，不允许扩大 scope；修订前先生成 blocker ledger、Mutable/No-Touch set 和 impact cone，修订后执行 author-side mini Closure Confirmation。
-```
-
-The agent should explicitly load/use `closure-revision` before editing.

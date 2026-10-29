@@ -1,31 +1,17 @@
-# reviewing-implementation-plans v3
+# reviewing-implementation-plans
 
-This skill reviews implementation, refactor, replay, research, deployment, and trading-strategy plans before execution.
+This project-owned skill reviews Implementation Plans before execution to ensure scope discipline, vertical task slicing, consequence-driven verification, and alignment with `.agent/rules/L1_Engineering_Process.md` and `.agent/rules/L2_Alpha_Research_Methodology.md`.
 
-Version 3 adds bounded execution and impact-analysis gates:
+## Key Responsibilities
 
-- mandatory `Allowed Change Scope` for state-mutating plans;
-- Ponytail minimality below safety, approved Design, compatibility, existing architecture, and SSOT requirements;
-- targeted Graphify discovery followed by source verification;
-- `Affected but unchanged` coverage for compatible consumers;
-- `rg` fallback for schema, JSONL, CLI, and file-path dependencies.
+- **`Allowed Change Scope` enforcement**: verifies bounded implementation, verification, documentation, runtime artifact, and `Affected but unchanged` paths; blocks unscoped mutating commands (`ruff check --fix .`, `git clean -fdx`).
+- **Vertical slicing & Ponytail minimality**: checks that tasks are independently verifiable slices with explicit dependencies, pruning speculative abstractions while preserving safety and approved contract invariants.
+- **Targeted topology & consumer checks**: uses `rg` and source verification (plus targeted Graphify queries when shared boundaries change) to ensure downstream consumers are either updated in scope or proven compatible.
+- **Consequence-driven verification**: aligns test requirements with `.agent/rules/L1_Engineering_Process.md` (`Rule 4` independent expected values, `Rule 15` fixture grading, and `Rule 17` consequence-driven persistent artifact checks without imposing ceremonial verifiers on local/exploratory tasks).
+- **Safety & research honesty**: enforces `L0` execution isolation and (when applicable) `L2` point-in-time, sample-unit, and market-data evidence boundaries.
 
-It retains the version 2 red lines for market-data evidence semantics:
+## Files
 
-- partial exchange streams;
-- liquidation side preservation;
-- coverage duration;
-- runtime data commit policy;
-- proxy metrics versus full-data thresholds.
-
-Install under:
-
-```text
-.agent/skills/reviewing-implementation-plans/
-```
-
-Recommended trigger rule:
-
-```text
-When reviewing any implementation, refactor, bugfix, replay, research, deployment, or strategy plan, use the reviewing-implementation-plans skill before approving execution.
-```
+- [`SKILL.md`](SKILL.md): Core review instructions and output format.
+- [`REVIEW_CHECKLIST.md`](REVIEW_CHECKLIST.md): Pre-flight checklist by impact category.
+- [`PRESSURE_TESTS.md`](PRESSURE_TESTS.md): Adversarial review scenarios (`S1–S18` aligned).

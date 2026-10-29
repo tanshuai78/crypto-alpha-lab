@@ -1,110 +1,38 @@
 # Plan Review Checklist
 
-Use this as a fast pre-flight checklist.
+Use this pre-flight checklist to audit an Implementation Plan against [`.agent/rules/L1_Engineering_Process.md`](../../rules/L1_Engineering_Process.md) and the approved Design.
 
-## Scope
+## 1. Scope & Authority (`Allowed Change Scope`)
 
-- [ ] State-mutating Plan has a bounded `Allowed Change Scope`.
-- [ ] Applicable implementation, verification, documentation, and runtime artifact paths are listed; if the full template is retained, inapplicable categories say `none`.
-- [ ] Compatible consumers that require no edits are listed under `Affected but unchanged` with verification evidence.
-- [ ] No unscoped mutating command such as `ruff check --fix .`, repository-wide auto-format, or `git clean -fdx`.
-- [ ] Title matches actual evidence and output.
-- [ ] Goal, tasks, outputs, and Done Definition agree.
-- [ ] Plan states what it proves and what it does not prove.
-- [ ] Research/proxy/shadow/live labels are accurate.
-- [ ] Next allowed decision is explicit.
+- [ ] State-mutating Plan includes an explicit `Allowed Change Scope` block (`Allowed implementation paths`, `Allowed verification paths`, `Allowed documentation paths`, `Allowed generated/runtime artifacts`, `Affected but unchanged`, `Forbidden`; inapplicable categories marked `none`).
+- [ ] Compatible consumers requiring no code edits are listed under `Affected but unchanged` with compatibility verification.
+- [ ] No unscoped mutating command (`ruff check --fix .`, repo-wide auto-format, `git clean -fdx`) or automatic per-task `git commit`.
+- [ ] Plan does not alter `configs/base.py` thresholds, research semantics, or authority boundaries without explicit Design approval.
+- [ ] Execution baseline capture (`BASE_SHA`, pre-execution `git status`) and independent completion audit (`audit-plan-completion`) are specified for formal Plans.
 
-## Minimality
+## 2. Vertical Slicing, Dependencies & Minimality (Ponytail)
 
-- [ ] Each Task is necessary for an approved requirement, safety invariant, compatibility obligation, or verification gate.
-- [ ] Existing helpers and stdlib/native capabilities are reused where suitable.
-- [ ] No speculative registry, one-product factory, or new one-implementation interface without an approved boundary reason.
-- [ ] Ponytail does not remove validation, failure handling, restart recovery, idempotency, required SSOT config, or existing layer interfaces.
+- [ ] Tasks are broken into independently verifiable vertical slices with explicit `Dependencies`, exact file paths, verification commands, and expected outputs (no external ticket files required).
+- [ ] Existing helpers and Python stdlib are reused; no speculative registries, single-product factories, or unrequested refactors.
+- [ ] Minimality does not remove required safety gates, Fail-Closed checks, restart/idempotency logic, or approved contract boundaries.
 
-## Topology and Contract Impact
+## 3. Topology & Consumer Compatibility (When Shared Boundaries Change)
 
-- [ ] Shared SSOT/public helper/contract changes use targeted Graphify query/path checks when the graph is current.
-- [ ] Graphify clues are verified at actual source lines; inferred/ambiguous edges are not blockers alone.
-- [ ] Changed JSON keys, schema fields, event types, CLI flags, and file paths are searched with `rg`.
-- [ ] Verified consumers requiring edits appear in `Allowed implementation paths` and Tasks.
-- [ ] Verified compatible consumers appear in `Affected but unchanged` with regression/integration tests.
-- [ ] A clean or stale Graphify result is not treated as proof that no consumers exist.
+- [ ] Changed shared functions, schemas, JSON/JSONL keys, CLI flags, and file paths are checked against actual source consumers via `rg` (and targeted Graphify queries when applicable).
+- [ ] Graphify `INFERRED`/stale results are verified against source before raising a blocker.
+- [ ] Verified consumers needing edits are in `Allowed implementation paths`; compatible consumers are in `Affected but unchanged`.
 
-## Safety
+## 4. Consequence-Driven Verification & Fixture Grading (`L1` §2–§3)
 
-- [ ] No private API / secrets / balance access in research code.
-- [ ] No `src.execution` import unless explicitly intended and reviewed.
-- [ ] No `TradeIntent` from observation/research paths.
-- [ ] Live switches remain unchanged and default false.
-- [ ] Observation outputs are `executable=false`.
-- [ ] Risk thresholds live in SSOT.
+- [ ] Core logic, bugfixes, and contract changes use public-interface `RED → GREEN → REFACTOR` TDD with **independently calculated expected values**.
+- [ ] Single-module internal pure logic and fault-injection tests are permitted to use minimal local synthetic inputs (`L1 Rule 15`).
+- [ ] Cross-module/cross-boundary positive contract tests derive from canonical upstream constructors/serializers or strict loaders (`L1 Rule 15`).
+- [ ] Pure documentation, static rules, or read-only diagnostic scripts use matching structural/reference/conservation verification rather than fake TDD unit tests.
+- [ ] `Rule 17` independent Verifier and full sealed-tree profile requirements are included **only** when the artifact directly grants operational authority, controls trading/capital admission, underpins an irreversible migration, or reuses an existing frozen Rule 17 profile (`L1` §3.3). Recomputable cross-stage research outputs declare consumer contracts and independent semantic evidence without forcing a standalone duplicate verifier.
 
-## Layer Semantics
+## 5. Safety & Alpha Research Semantics (When Applicable)
 
-- [ ] Watch events are not called trade candidates.
-- [ ] Research cases are not emitted as `SignalCandidate` unless Layer C/trade gate passes.
-- [ ] Shadow/replay outputs cannot be mistaken for live approval.
-- [ ] Proxy-only data is not labeled `execution_ready`, `live_ready`, or `orderbook_aware`.
-
-## Data Lineage
-
-- [ ] Source data and transformations are explicit.
-- [ ] Source quality is declared: full / partial / sampled / proxy / delayed.
-- [ ] No future data leakage.
-- [ ] No cross-symbol path contamination.
-- [ ] Empty/missing data emits explicit status.
-- [ ] Optional inputs degrade gracefully.
-- [ ] Coverage duration and coverage ratio are reported.
-
-## Market Data Evidence Semantics
-
-- [ ] Exchange streams that are partial/sampled are labeled as such.
-- [ ] Binance `forceOrder` is treated as partial lower-bound proxy, not full liquidation tape.
-- [ ] Kline close is treated as price proxy, not executable price.
-- [ ] Mark price is treated as reference/risk price, not fill price.
-- [ ] Partial-source metrics are not used alone for live/phase escalation.
-- [ ] Full-data thresholds are not compared to proxy data without warning.
-
-## Directional Evidence
-
-- [ ] Long/short features preserve direction.
-- [ ] Liquidation raw data includes `side` and normalized `liquidation_side`.
-- [ ] Aggregation separates long and short liquidation notional.
-- [ ] Directional strategy summaries split long vs short.
-
-## Tests
-
-- [ ] Happy path.
-- [ ] Reject/failure branches.
-- [ ] Boundary thresholds.
-- [ ] Empty input.
-- [ ] Missing fields.
-- [ ] Missing optional file.
-- [ ] No future data.
-- [ ] No cross-symbol path.
-- [ ] Source-quality metadata.
-- [ ] Safety grep.
-- [ ] Report placeholder check.
-
-## Parameters
-
-- [ ] Personal-investor cost assumptions are conservative.
-- [ ] Stress cost scenario exists where relevant.
-- [ ] Holding windows are justified.
-- [ ] Thresholds are not relaxed only to create signals.
-- [ ] Long/short, regime type, and symbol tier are split in reports.
-- [ ] Aggregate performance is not used as sole evidence.
-
-## Reports and Artifacts
-
-- [ ] Summary JSON contains required fields, not just console print.
-- [ ] Review document includes real values, not placeholders.
-- [ ] Runtime `data/*.jsonl` is not committed unless converted to a small fixture.
-- [ ] Reports go under `reports/` and decisions under `docs/reviews/`.
-
-## Decision Gate
-
-- [ ] Decision is one of: approve, conditional approve, block, defer.
-- [ ] Required fixes are concrete and testable.
-- [ ] Stop conditions are explicit.
-- [ ] The plan cannot accidentally progress to live/execution.
+- [ ] No private API, secret/balance access, `src/execution` import, or `TradeIntent` generation in research/shadow paths; `RISK_LIVE_TRADING_ENABLED` remains `False`.
+- [ ] For `L2` Alpha/replay tasks: independent sampling unit, PIT anti-hindsight alignment, symbol-grouped replay paths, outcome distribution metrics, cost/capacity boundaries, and explicit `phenomenon_supported / evidence_insufficient / alpha_candidate / falsified` status semantics match the approved Design.
+- [ ] Partial/proxy market-data sources (e.g., `forceOrder`, kline close, mark price) and directional fields (`side`) are accurately labeled and never overclaimed as live-executable proof.
+- [ ] Runtime `data/*.jsonl` outputs remain uncommitted unless converted into small deterministic test fixtures.

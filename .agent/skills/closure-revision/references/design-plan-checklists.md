@@ -1,131 +1,33 @@
-# Closure Revision Detailed Checklists
+# Closure Revision Checklists (Consequence-Driven)
 
-## 1. State × Artifact Sibling-State Prompts
+Use only the checklist sections that match the actual contracts present in the Design or Implementation Plan being revised. Reference [`.agent/rules/L1_Engineering_Process.md`](../../../rules/L1_Engineering_Process.md) for rule authority.
 
-For every affected terminal/state machine contract ask:
+## 1. Core Document Synchronization Checklist (All Revisions)
 
-```text
-What exists after success?
-What exists after blocked?
-What exists after failed?
-What exists for not-probed/skipped siblings?
-What exists after local write failure?
-What exists after read-back/hash failure?
-What must explicitly NOT exist?
-What is consumable?
-Can later work continue?
-Can root/run be retried/resumed/reused?
-```
+- [ ] Final claim, scope, and non-goals remain unchanged (unless a scope change was explicitly requested and routed).
+- [ ] All code identifiers, config names (`configs/base.py`), file paths, and enum literals match workspace reality and retain exact English names.
+- [ ] Normative definitions, tables, examples, and task verification steps agree with each other (no stale example contradicting updated text).
+- [ ] `No-Touch Set` sections remain untouched.
+- [ ] Authority boundaries remain strictly preserved:
+  - Design approval != Plan approval
+  - Plan approval != implementation authorization
+  - Implementation completion != commit / deployment / runtime / trading authorization (`RISK_LIVE_TRADING_ENABLED = False`)
 
-Typical artifacts:
+## 2. Implementation Plan Specific Checklist (When Revising a Plan)
 
-```text
-raw
-observation
-state row
-summary
-terminal
-manifest/seal
-checkpoint/watermark
-recovery/quarantine evidence
-```
+- [ ] Every Design invariant (`INV-*`) maps to at least one Task and verification command.
+- [ ] `Allowed Change Scope` accurately covers all implementation, verification, documentation, runtime, and `Affected but unchanged` paths.
+- [ ] If files were added to `Allowed Change Scope` (`BLOCKED_SCOPE_DRIFT`), identity/source-bundle/authorization/`RUN_ID`/evidence dependencies were checked per `L1` §3.2.
+- [ ] Behavioral/logic tasks specify public-interface `RED → GREEN → REFACTOR` TDD with independently derived expected values (`L1` §2 Rule 4) and `L1 Rule 15` fixture grading.
+- [ ] Documentation/static/read-only tasks specify matching structural/reference/conservation checks without fake TDD.
 
-## 2. Transition × Failure Prompts
+## 3. Conditional Multi-State / Persistence / `Rule 17` Prompts (Only When Applicable)
 
-For every adjacent transition:
+Apply the prompts below **only** when the target Design/Plan actually defines persistent state machines, crash/restart recovery, lock lifecycles, or `L1 Rule 17` cross-boundary formal artifacts:
 
-```text
-A -> B
-```
-
-ask:
-
-```text
-failure before B?
-partial B?
-B durable but C not started?
-read-back failure?
-second simultaneous failure?
-crash/restart behavior?
-retry allowed?
-resume allowed?
-```
-
-Freeze precedence when multiple failures coexist.
-
-## 3. Authority Prompts
-
-For every changed action verify:
-
-```text
-Who may approve document revision?
-Who may modify src/config/scripts/tests?
-Who may create production root?
-Who may make external request?
-Who may deploy/restart?
-Does this revision accidentally upgrade authority?
-```
-
-Always preserve:
-
-```text
-Design approval != Plan approval
-Plan approval != implementation authorization
-implementation complete != deployment authorization
-sealed evidence != alpha/trading authority
-```
-
-## 4. Invariant × Mechanical Evidence Prompts
-
-For each changed invariant require:
-
-```text
-implementation owner
-positive evidence
-negative test
-completion gate
-```
-
-Reject weak proxies.
-
-## 5. Design Revision Checklist
-
-```text
-final claim unchanged
-scope/non-goals unchanged
-source-of-truth single and explicit
-schema/enums exact
-identity/hash projection exact
-failure precedence unique
-all sibling states modeled
-artifact producer all required states
-consumer/validator aligned
-crash/restart/no-resume complete
-PIT anti-hindsight preserved
-manifest/seal exact
-permission boundary unchanged
-TCB unchanged
-examples agree with normative text
-```
-
-## 6. Implementation Plan Revision Checklist
-
-```text
-Design invariant -> task -> RED test -> implementation -> GREEN -> completion gate
-configs/base.py exact allowed delta
-no old risk binding changes
-changed-path allowlist exact
-fresh baseline/provenance executable
-Plan/Design SHA rebind executable
-raw-before-parse/persistence ordering exact
-failure precedence tested
-lock primitive separate from runner lifecycle
-shared resource values from current SSOT
-all required artifact producer tasks exist
-blocked/failed/not-probed producer paths exist
-same-ID collision obeys fresh/no-resume
-static gates do not reject approved schema literals
-final code-review loop covers final diff
-completion audit after final review
-implementation/deployment permissions remain false
-```
+- **State & Sibling Paths (when the contract defines multiple terminal states)**:
+  - Are required outputs and failure precedence defined across all applicable sibling states (e.g., `success`, `blocked`, `failed`, `not_probed`) rather than only the happy path?
+- **Persistence, Crash & Lock Boundaries (when the contract writes durable state or coordinates processes)**:
+  - Are partial-write failure, read-back verification, lock lifecycle vs. runner lifecycle, and restart/no-resume rules consistent across the updated sections?
+- **High-Impact / Authority Artifacts (`L1 Rule 17`, when the artifact grants operational authority, controls trading/capital admission, underpins irreversible migration, or reuses an existing frozen Rule 17 profile)**:
+  - Do producer tasks, domain strict loader checks, sealed-tree rules, and independent verifier invocations (`scripts/governance/verify_artifact_schema.py`) match the frozen schema and receipt hash bindings?
