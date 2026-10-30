@@ -86,6 +86,9 @@
 | **Stage 1.5F (Live Depth Observer)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5f/live_depth_observer_summary.json` (2026-07-26) | 服务器 PID 88770 持续运行。上线时间闸门正常；76 个 pre-bootstrap 历史锚点终端 Ignore。 | 捕获 Clean 级 L2 订单簿盘口证据。 | 网络错误率 > 5% 或 0 心跳。 |
 | **Stage 1.5G (Depth Evidence Reviewer)** | `active` | `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/stage1_5g_cross_root_admission_summary.json` (2026-09-30) | 离线审查器与跨 Root 准入门禁活跃。跨 Root 事件族准入已通过 Gate 3 证据数量门槛（2 篇独立公告、2 个父事件、8 个正式子标的：`MOONSHOTUSDT` + 7 个 `batch7` 标的）。`stage1_5g_gate3_complete = false`（采集器连续运行稳定性边界仍在 VPS）。下游消费者严格 Fail-Closed 硬阻断（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。 | 已被 Stage 1.5H V3 跨 Root 流动性摩擦诊断安全消费；保持 VPS 实时采集。 | 连续运行 30 天无新增 clean/quarantine-valid 样本。 |
 | **Stage 1.5H (Cross-Root Liquidity Friction Diagnostic)** | `completed` | `data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/stage1_5h_v3_cross_root_friction_summary.json` (2026-10-01) | 只读诊断模块完成 2 个父事件 / 8 个子标的 P95 滑点摩擦诊断。结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`。强制 14 项 false 否定授权标志；下游消费 Fail-Closed。 | 等待 VPS 持续采集累积更多独立上线事件样本，或规划后续多交易所微观结构只读研究。 | 出现任何交易信号、执行可行性声明或授权外泄。 |
+| **Stage 1.5J-A (历史归档覆盖度盘点)** | `completed` | `data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z/summary.json` (2026-10-10) | 365天全量上线公告归档盘点。替换根符合严格空值语义与 Rule 17 `stage1_5j_a_receipt_v2` profile。120 篇父事件完整（280 个完整 USDT 子标的），11 篇父事件证据缺口。严格加载器与闭环审计全通；状态严格为 `coverage_inventory_evidence_gap`；13 项 false 标志；下游强制 Fail-Closed。 | 作为 Stage 1.5J-B 历史 aggTrades 价格反应探索研究输入。 | 出现任何交易信号、执行可行性声明或下游消费越权。 |
+| **Stage 1.5J-B (上线锚点价格反应探索性研究)** | `completed` | `data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json` (2026-10-14) | 重放 280 个 ZIP 归档；278 个标的成功捕获上线锚点。多周期价格反应中位数持续为负（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps），呈现显著右偏长尾异值依赖。无条件开盘买入在扣除手续费与滑点（50-80 bps）后期望为负。严格加载器、Rule 17 v2 校验器与闭环审计全通。12 项 false 标志；零 Alpha/交易权限。 | 作为 Stage 1.5J-C 路径可行性诊断输入。 | 出现任何交易信号、执行可行性声明或下游消费越权。 |
+| **Stage 1.5J-C (上线时间与路径可行性诊断)** | `completed` | `docs/designs/2026-10-23-external-signal-shadow-lab-stage1-5j-c-launch-time-path-feasibility-design_CN.md` (2026-10-24) / Commit `71a44ff` | 评估 71 个标的（18 个 Pre-Market，53 个 Standard）；实测证实首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。简单开盘动量追涨/追空策略被确凿证伪。结题封存，关闭无条件开盘动量路线。 | 转向路线 B（新永续公告对既有现货的传导影响）准备度核对。 | 满足（首触风险线 > 80%，扣除摩擦后期望持续为负）。 |
 | **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | 验证币安期货下架公告源、BAPI H2 版本化语法及 3 个时间戳锚点。 | Stage 1.6B 下架目录。 | 交割/结算语义不明确或缺失时间戳锚点。 |
 | **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | 规范下架目录、突发队列故障恢复及 Checkpoint 契约已完成验证。 | Stage 1.6E 标的能力审计。 | 突发负载下出现不可恢复的队列丢包。 |
 | **Stage 1.6E (Market Data Observer & Capability Audit)** | `completed` | `docs/reviews/2026-09-04-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-completion-audit_CN.md` (2026-09-04) | 实时语义触发观察器与历史 1s kline / mark / index 标的能力审计完成。 | Stage 1.6F 匹配对照。 | Kline/mark/index 覆盖率 < 80%。 |
@@ -173,12 +176,46 @@ Stage 1.6F-W2-0 探索性诊断
 
 ## 6. 当前阻塞项 (Current Blockers)
 
-按类别整理：
+按优先级整理：
 
-* **数据与验证阻塞 (P3 - Stage 1.5G 实时盘口深度)**：
-  * **问题描述**：Stage 1.5G 虽已通过跨 Root 准入满足 Gate 3 事件族样本数量门槛（2 篇独立公告、2 个父事件、8 个子标的），但 1.5D+1.5F 实时观测仍需维持运行以持续捕获更多独立事件。
-  * **事实证据**：Stage 1.5G 生产准入回执 `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/` 及 VPS 连续运行心跳。
-  * **解封动作**：保持 VPS 端 1.5D + 1.5F 进程持续运行以累积更多独立上线事件样本，或规划后续多交易所微观结构只读研究。
+### P0 阻塞项
+- **无**（服务器 1.5D 进程 PID 4431 与 1.5F 进程 PID 4470 稳定运行；本地离线测试全通，0 崩溃）。
+
+### P1 阻塞项
+* **阻塞项 1 (产品机制流动性摩擦分化)**：
+  * **问题描述**：Stage 1.5H N=3 机制分层诊断证实三种产品机制的流动性摩擦显著分化（标准加密货币 17.99 bps vs Pre-IPO 31.58 bps vs 传统股票/ETF 永续 80.02 bps），严禁跨机制池化或统一定价。
+  * **事实证据**：`data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` (`research_classification = "evidence_insufficient"`, `stage1_5g_gate3_complete = false`)。
+  * **潜在风险**：若跨机制池化或采用统一定价，将严重低估传统股票/ETF 永续的高额摩擦，引发巨大执行亏损。
+  * **解封动作**：维持机制分层隔离；继续保持服务器 1.5D 与 1.5F 连续影子观察以累积长期自然样本；仅在机制分层约束下推进下游只读研究。
+  * **停止条件**：严禁授予任何交易或执行权限；下游消费保持 Fail-Closed。
+
+* **阻塞项 2 (历史归档覆盖度证据缺口)**：
+  * **问题描述**：Stage 1.5J-A 历史归档盘点证实 365 天窗口内存在 11 篇父事件证据缺口（6 篇详情解析未决，4 篇无 in-scope USDT 子标的，1 篇归档校验缺口 AIAUSDT），不能将历史归档假设为 100% 无损完整。
+  * **事实证据**：`data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z/summary.json` (`analysis_state = "coverage_inventory_evidence_gap"`)。
+  * **潜在风险**：若下游研究无视 11 个父事件缺口并强行外推全集无偏统计，将引入幸存者偏差或数据缺失偏差。
+  * **解封动作**：下游微观结构研究仅能严格基于 120 个完整父事件（280 个完整子标的）展开；严禁填补合成数据或伪造缺口标的。
+  * **停止条件**：严禁将覆盖度盘点提升为 Alpha 或交易权限；下游消费保持 Fail-Closed。
+
+* **阻塞项 3 (新币上线无条件买入负期望与路径动量证伪)**：
+  * **问题描述**：Stage 1.5J-B 实证揭示开盘买入具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps）且均值严重依赖极端右偏异值；Stage 1.5J-C 进一步对 71 个标的完成 15m 路径可行性诊断，实测证实首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。开盘追涨动量策略期望持续为负。
+  * **事实证据**：Stage 1.5J-B 生产回执与 Stage 1.5J-C 诊断结果（Commit `71a44ff`）。
+  * **潜在风险**：在缺乏前置微观结构优势下盲目开盘追单，将面临极高概率的开盘套牢与滑点损耗。
+  * **解封动作**：彻底关闭并封存无条件开盘动量追涨路线（`falsified`）；后续研究根据《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`）单线转向路线 B（新永续合约上线公告对同所既有现货的传导影响）数据源与资格核对。
+  * **停止条件**：开盘追涨路线永久停机；下游消费保持 Fail-Closed。
+
+### P2 阻塞项
+* **阻塞项 4 (期货下架 VPS 实时源观察部署授权)**：
+  * **问题描述**：Stage 1.6D 运维 Runbook 就绪但未获生产环境部署授权。
+  * **事实证据**：`docs/ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md` (`deployment_status: 1_6D_not_deployed`)。
+  * **潜在风险**：服务器无法实时采集期货下架事件与盘口响应。
+  * **解封动作**：如需推进 1.6D 部署，须先完成目标环境 preflight transcript 验证并获得用户显式部署授权。
+  * **停止条件**：用户显式授权或维持未部署状态。
+
+### P3 阻塞项
+* **阻塞项 5 (Stage 1.5G 实时盘口深度样本累积)**：
+  * **问题描述**：虽然 Gate 3 样本数量门槛已达成（3 篇公告、3 个事件、9 个标的），但近期捕获的样本多为 TradFi 批次永续合约；仍需持续积累加密货币标准永续（`crypto_standard_perpetual`）的新上线样本。
+  * **事实证据**：`20261029T154429Z` 审查回执与 VPS 连续运行心跳。
+  * **解封动作**：保持 VPS 端 1.5D（PID 4431）与 1.5F（PID 4470）后台稳定运行以累积自然加密货币样本。
 
 ---
 
@@ -186,11 +223,31 @@ Stage 1.6F-W2-0 探索性诊断
 
 ### 关卡 3：Stage 1.5G 事件族证据充分性校验
 * **前置依赖**：Stage 1.5D 和 1.5F 持续稳定运行。
-* **所需证据**：累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`，并通过跨 Root 准入生成 `stage1_5g_cross_root_admission_summary.json`。
-* **当前状态**：证据数量门槛已达成（2 篇独立公告、2 个父事件、8 个子标的已通过生产准入回执 `stage1_5g_cross_root_admission_20260930T104859Z` 验证）；运行稳定性持续观测中。
-* **通过标准**：达到事件族样本量门槛且无致命污染。
-* **拒绝/停止条件**：连续 30 天无有效新样本或数据丢失率 $> 10\%$。
+* **所需证据**：累积至少 3 个独立上线标的的 `stage1_5g_live_depth_evidence_review_summary.json`，并通过分层准入生成 `stage1_5g_n3_regime_stratified_admission_summary.json`。
+* **当前状态**：**已通过（样本数量门槛已于 2026-10-02 达成）**。3 篇独立公告、3 个父事件、9 个子标的已通过生产准入回执 `stage1_5g_n3_regime_stratified_admission_20261002T110403Z` 验证，分属 3 种产品机制。
+* **持续要求**：服务器后台守护进程（PID 4431 / 4470）维持挂机采集。
 * **安全边界**：观察模式 (`trade_signal_allowed = False`)。
+
+### 关卡 4：Stage 1.5J 历史归档盘点与开盘路径可行性关卡
+* **前置依赖**：365 天历史归档盘点（1.5J-A）与 aggTrades 价格反应（1.5J-B）。
+* **所需证据**：Rule 17 严格校验收据、流式 ZIP 归约及 15m 路径可行性评估（1.5J-C）。
+* **当前状态**：**已结题 / 已证伪（2026-10-24 结项）**。
+  * 1.5J-A 替换根生成并通过闭环审计（Commit `d15ca4e`，120 个完整父事件 / 280 个完整子标的）。
+  * 1.5J-B 生产回执确立无条件买入负期望（Commit `981780f`）。
+  * 1.5J-C 路径可行性完成 71 个标的诊断（Commit `71a44ff`），证实多空双向超 80%~90% 先击穿 -100 bps 止损线，开盘路径动量策略证伪并关闭。
+* **安全边界**：仅限研究；零交易/执行权限。
+
+### 关卡 5（当前活跃关卡）：路线 B 研究准备度前置门禁
+* **前置依赖**：《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`）批准。
+* **核心问题**：币安新永续合约上线公告对同所既有现货的传导影响，在考虑真实获知时延与交易成本后，是否存在可捕捉的持续调整窗口？
+* **所需证据**：低成本（$\le 6$ 人时）数据源与方向资格核对：
+  1. 从既有公告目录定义现货标的候选集合；
+  2. 核对单市场（同所）既有现货历史数据源及准确获知时间戳可得性；
+  3. 梳理方向资格分层（价格可观察 vs 现货可买入 vs 做空/借币渠道可验证）。
+* **当前状态**：**活跃（下一步待开展）**。等待开启数据源与资格核对。
+* **通过标准**：可信的点在时（PIT）获知时间戳、可得的现货历史价格序列，以及可核验的借币/做空历史记录，且无需先建大型数据基础设施。
+* **拒绝/停止条件**：获知时间不可靠、历史现货数据缺失，或借币/做空渠道在预算内长期不可核验。
+* **安全边界**：纯只读核验（`trade_signal_allowed = False`，`execution_engine_allowed = False`）。
 
 ---
 
@@ -215,6 +272,10 @@ Stage 1.6F-W2-0 探索性诊断
 * **2026-09-30**：批准 Stage 1.5G 跨 Root 事件族准入设计（`docs/designs/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-design_CN.md`，SHA-256 `51a25377537dade47c7a234f93802aa445db75348f7e10b4e9c354888d4cefc7`）与实施计划（`docs/plans/2026-09-30-external-signal-shadow-lab-stage1-5g-cross-root-event-family-admission-implementation-plan_CN.md`，SHA-256 `8bb2a6ff906d54e209d8bca6c0885211c101664b87af65e2bee0b17483369c73`）。
 * **2026-09-30**：完成 Stage 1.5G 跨 Root 事件族准入模块（`src/research/external_signal_shadow/stage1_5g_cross_root_event_family_admission.py`）、CLI 入口（`scripts/external_signal_shadow/run_stage1_5g_cross_root_event_family_admission.py`）及 102 项自动化测试。完成审计闭环整改并解决 P0-1（授权数据包严格校验）与 P0-2（独立重新准入与子标的投影身份校验）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。成功生成首份生产准入回执 `data/external_signal_shadow/stage1_5g/event_family_admissions/stage1_5g_cross_root_admission_20260930T104859Z/`，准入 2 篇独立公告、2 个父事件、8 个正式子标的及 13 项 false 治理安全标志；下游消费门禁生效 Fail-Closed（`STOP=stage1_5g_cross_root_future_consumer_not_authorized`）。
 * **2026-10-01**：批准 Stage 1.5H V3 跨 Root 流动性摩擦诊断设计（`docs/designs/2026-09-30-external-signal-shadow-lab-stage1-5h-v3-cross-root-liquidity-friction-diagnostic-design_CN.md`，SHA-256 `416b394bf809e1dcc159f9d39ecd175b57962022434d09478f5e0d97fa5a9276`）与实施计划（`docs/plans/2026-09-30-external-signal-shadow-lab-stage1-5h-v3-cross-root-liquidity-friction-diagnostic-implementation-plan_CN.md`，SHA-256 `7a1e8a5a2b0f803677bb9342d5167b8a2ec8d9458dc3c7cf8abf543c4ec53ceb`）。完成核心模块（`src/research/external_signal_shadow/stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`）、CLI 入口（`scripts/external_signal_shadow/run_stage1_5h_v3_cross_root_liquidity_friction_diagnostic.py`）及 26 项自动化测试。完成 3 轮审计闭环整改并解决全部 4 项 P0 发现（不可变授权文本、阴影模块预加载防御、Manifest byte_count 校验、全线祖先目录软链接穿透防御）。独立 Completion Audit 评定为 `COMPLETE`（0 项 OPEN finding）。成功生成生产诊断回执 `data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/`；研究结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`；下游消费门禁生效 Fail-Closed；零实盘/模拟/执行/Alpha 权限。
+* **2026-10-07**：完成 Stage 1.5J-A 归档覆盖度盘点与生产网络扫描，生成 744 MB 生产回执并完成收据闭环审计。365 天窗口内 335 篇公告，120 篇父事件完整（280 个完整 USDT 子标的），11 篇父事件证据缺口；状态定级为 `coverage_inventory_evidence_gap`。
+* **2026-10-14**：完成 Stage 1.5J-B 生产回执生成（`stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z`），完整重放 280 个归档包。实测证实无条件开盘买入具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps）与极强的右偏异值依赖，扣除手续费与滑点后期望为负。
+* **2026-10-24**：完成 Stage 1.5J-C 新合约上线时间与路径可行性诊断核心模块实现（Commit `71a44ff`，37 项测试全通）。对 71 个标的在 60s 观察 + 3s 延迟入场、15m 终点协议下完成路径回放。实测证实多空双向先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。开盘路径动量追涨/追空策略被确凿证伪，路线正式结题并关闭。
+* **2026-10-29**：完成项目治理精简计划（Commit `ec67c52`），确立 L1 为唯一工程规则权威，精简工作流与 Rule 17 验证分层。VPS 端重启 1.5D（PID 4431）与 1.5F（PID 4470）守护进程，完成最新 TradFi 批次深度审查（`20261029T154429Z`）。
 
 ---
 

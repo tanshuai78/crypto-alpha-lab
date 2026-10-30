@@ -109,7 +109,8 @@ crypto-alpha-lab/
 | **Stage 1.5H (历史静态报告)** | 静态执行代理报告生成器 (Read-Only Report Generator) | `implemented_locally`, `committed`, `reviewed` | `Yes` | Offline Tool | `docs/reviews/2026-07-12-external-signal-shadow-lab-stage1-5h-read-only-report-generator-governance-review_CN.md` | 报告生成器治理审查通过；当前本地 `data/stage1_5h` artifact 未同步进工作区 | 维持纯只读报告工具定位，已被 N=3 诊断替代 |
 | **Stage 1.5H N=3** | N=3 产品机制分层流动性摩擦诊断 | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5h/n3_regime_stratified_friction/stage1_5h_n3_regime_stratified_friction_20261003T070500Z/stage1_5h_n3_regime_stratified_friction_summary.json` | 39 项测试通过；独立审计评定 COMPLETE (Commit `ab5043d`)；基于 1.5G N=3 的 3 个父事件与 9 个子标的完成机制分层 P95 滑点摩擦诊断；证实三种产品机制摩擦显著分化（标准加密 17.99 bps vs Pre-IPO 31.58 bps vs 传统股指 80.02 bps），严禁跨机制池化或统一定价；结论保持 `evidence_insufficient`，`stage1_5g_gate3_complete=false`；下游消费强制 Fail-Closed 硬阻断，无任何交易或执行权限 | 下游只读微观结构研究；维持零交易/执行权限 |
 | **Stage 1.5J-A** | 历史数据归档覆盖度盘点 (365天全量历史与归档闭环审计) | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z/summary.json` | 替换根完成生成与审计 (Commit `d15ca4e`)；严格符合空值语义与 Rule 17 `stage1_5j_a_receipt_v2` profile；365 天窗口内 335 篇公告，131 篇目标新上线公告，125 篇解析成功 (281 USDT 标的，280 标的归档完整，1 标的 AIAUSDT 缺口)，120 篇父事件完整，11 篇父事件存在证据缺口；状态严格为 `coverage_inventory_evidence_gap`；13 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断 | 作为 Stage 1.5J-B 上游数据源输入 |
-| **Stage 1.5J-B** | 历史 aggTrades 上线锚点价格反应探索性诊断 (5m/1h/4h 窗口与机制分层) | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json` | 域内严格加载器、Rule 17 v2 结构化验证器及收据闭环审计全通 (RECEIPT_CLOSURE_AUDITED, Commit `981780f`)；基于 1.5J-A 280 个完整 ZIP 归档完成 281 个 USDT 标的上线锚点撮合与窗口价格反应归约；278 个标的成功捕获锚点分笔成交，3 个标的超过 60s 首笔延迟，1 个标的继承 J-A 归档缺口；多周期（5m/1h/4h）价格反应中位数持续为负（-40.7 bps, -81.9 bps, -85.3 bps），呈现显著右偏长尾极端依赖（Top-1 暴涨 220% 贡献 24.8% 方差）；在实际交易手续费与薄盘口滑点摩擦（50-80 bps）下无条件追多新币期望为负；12 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断，无任何交易/执行/Alpha 权限 | 规划 Stage 1.5J-C 条件 Alpha / 订单流失衡分析或维持 VPS 1.5G 实时样本累积 |
+| **Stage 1.5J-B** | 历史 aggTrades 上线锚点价格反应探索性诊断 (5m/1h/4h 窗口与机制分层) | `implemented_locally`, `committed`, `reviewed`, `receipt_published`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json` | 域内严格加载器、Rule 17 v2 结构化验证器及收据闭环审计全通 (RECEIPT_CLOSURE_AUDITED, Commit `981780f`)；基于 1.5J-A 280 个完整 ZIP 归档完成 281 个 USDT 标的上线锚点撮合与窗口价格反应归约；278 个标的成功捕获锚点分笔成交，3 个标的超过 60s 首笔延迟，1 个标的继承 J-A 归档缺口；多周期（5m/1h/4h）价格反应中位数持续为负（-40.7 bps, -81.9 bps, -85.3 bps），呈现显著右偏长尾极端依赖（Top-1 暴涨 220% 贡献 24.8% 方差）；在实际交易手续费与薄盘口滑点摩擦（50-80 bps）下无条件追多新币期望为负；12 项权限开关全 False，下游消费强制 Fail-Closed 硬阻断，无任何交易/执行/Alpha 权限 | 作为 Stage 1.5J-C 上线时间与路径可行性诊断输入 |
+| **Stage 1.5J-C** | 历史新合约上线时间与路径可行性诊断 (60s观察+3s延迟+15m终点路径) | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Offline Tool | `docs/designs/2026-10-23-external-signal-shadow-lab-stage1-5j-c-launch-time-path-feasibility-design_CN.md` / Commit `71a44ff` | 基于 J-A 280 个完整 ZIP 归档完成 71 个选入标的（18 个 Pre-Market，53 个 Standard Crypto，50 个完整）在 15m 窗口内的路径可行性诊断；实测表明做多与做空在 15m 内先触及 -100 bps 风险线的比例高达 80%~90%，先触及 +200 bps 目标线仅占 ~4%；开盘首分钟观察后进场追涨/追空的简单路径动量假说在统计上被确凿证伪；该假说研究状态定级为 falsified，正式结题并关闭该无条件路线；12 项权限开关全 False，零实盘/模拟/执行/Alpha 权限 | 转向路线 B（新永续公告对既有现货的传导影响）准备度核对；维持 VPS 1.5D/1.5F 实时深度采集 |
 | **Stage 1.6A-C** | Futures Delisting 历史源契约、密封导出与适配器 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Completed | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` | 1.6A-C 历史源契约、密封导出与 H2 语法适配器完成独立审计 (`source_audit_passed=true`) | 1.6D 远端部署授权评估 |
 | **Stage 1.6D** | Futures Delisting VPS 实时源观察 | `implemented_locally`, `committed`, `planned_only` | `Yes` | `False` (1_6D_not_deployed) | `docs/ops/2026-08-25-external-signal-shadow-lab-stage1-6d-vps-live-source-observation-runbook_CN.md` | 部署设计与 Runbook 就绪；需 target preflight transcript 与显式用户部署授权 | 待用户显式授权 |
 | **Stage 1.6F & W2-0** | 历史对照机制与终局基差探索性诊断结项 | `implemented_locally`, `committed`, `reviewed`, `audit_complete` | `Yes` | Offline Tool | `data/external_signal_shadow/stage1_6f/w2_0_exploratory_diagnostics/w2_0_exploratory_20260926T071500Z/stage1_6f_w2_0_bundle_manifest.json` | 180 物理源对象；41 标的 / 27 父事件；19 个 window-defined 父事件子集证实终局基差发散/非自然收敛（仅 3/19 负值，16/19 正值）；严格保持 outcome_seen/exploratory_only，无后续交易权限，结项 closure only | `none_from_current_evidence` |
@@ -289,11 +290,11 @@ crypto-alpha-lab/
   - **Risk**：若下游研究无视 11 个父事件缺口并强行外推全集无偏统计，将引入幸存者偏差或数据缺失偏差。
   - **Required Next Action**：下游历史微观结构研究仅能严格基于 120 个完整父事件（280 个完整子标的）展开；严禁填补合成数据或伪造缺口标的；下游消费保持 Fail-Closed。
   - **Stop Condition**：严禁将覆盖度盘点提升为 Alpha、回放、信号或交易权限。
-- **Blocker 3 (新币上线无条件买入负期望与长尾异值依赖)**：Stage 1.5J-B 生产回执与 278 个成功捕获上线锚点的标的实证表明，无条件买入新币具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps），且均值严重依赖极端右偏异常值（Top-1 事件贡献 24.8% 方差）。在扣除实际手续费和开盘薄盘口真实滑点（50-80 bps）后，无条件开盘买入并持有期望收益为负。
-  - **Evidence**：`data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json`
-  - **Risk**：若将少数暴涨币的表观均值误当作全样本普适 Alpha，将面临极大概率的开盘套牢与滑点损耗。
-  - **Required Next Action**：绝不开展无条件交易或直接生成交易信号；下一步仅可在 Stage 1.5J-C 探索前置过滤条件（例如订单流失衡、挂单不平衡、初期成交量爆发等微观结构特征）。
-  - **Stop Condition**：严禁将探索性价格反应提升为 Alpha 结论或交易权限；下游消费保持 Fail-Closed。
+- **Blocker 3 (新币上线无条件买入负期望与路径动量证伪)**：Stage 1.5J-B 生产回执与 278 个成功捕获上线锚点的标的实证表明，无条件买入新币具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps），且均值严重依赖极端右偏异常值（Top-1 事件贡献 24.8% 方差）。Stage 1.5J-C 进一步对 71 个标的完成 15m 路径可行性诊断，实测证实无论多空，首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 仅占 ~4%。在扣除实际手续费和真实滑点摩擦后，无条件开盘买入/追涨路径动量期望持续为负。
+  - **Evidence**：`data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json` 及 `docs/designs/2026-10-23-external-signal-shadow-lab-stage1-5j-c-launch-time-path-feasibility-design_CN.md` / Commit `71a44ff`
+  - **Risk**：若将少数暴涨币的表观均值误当作全样本普适 Alpha，或在缺乏前置微观结构优势下盲目开盘追单，将面临极大概率的开盘套牢与滑点损耗。
+  - **Required Next Action**：彻底关闭并封存无条件开盘动量追涨路线（`falsified`）；后续研究根据《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`）单线转向路线 B（新永续合约上线公告对同所既有现货的传导影响）数据源与资格核对。
+  - **Stop Condition**：严禁将探索性价格反应提升为 Alpha 结论或交易权限；开盘追涨路线永久保持停机；下游消费保持 Fail-Closed。
 
 ### P2 阻塞项
 - **Blocker**：Stage 1.6D (Futures Delisting VPS 实时源观察) 尚未获得生产部署授权。
@@ -308,8 +309,8 @@ crypto-alpha-lab/
 
 仅列出当前可以执行的 5 项计划内任务：
 
-1. **维持 1.5D 与 1.5F 连续影子观察进程**：监控 PID 88580 与 PID 88770 稳定运行，持续积累新合约上线事件的原始 L2 盘口数据。
-2. **推进 Stage 1.5J-C 历史只读微观结构与条件 Alpha 研究**：基于 Stage 1.5J-B 生产回执揭示的无条件负期望与异值依赖事实，在保持 12 项治理开关为 False 与下游消费者 fail-closed 的前提下，规划首个条件过滤微观结构设计（如前置订单流失衡、初期成交量突增或首分钟 VWAP 动量分层）。
+1. **维持 1.5D 与 1.5F 连续影子观察进程**：监控 PID 4431 与 PID 4470 稳定运行，持续积累新合约上线事件的原始 L2 盘口数据。
+2. **推进路线 B 历史数据与资格准备度核查**：在 Stage 1.5J-C 证实简单开盘路径动量为负期望并结题证伪后，按照《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`），单线推进路线 B（新永续合约上线公告对同所既有现货的传导影响）数据源与交易资格核对。
 3. **或推进 Stage 1.5I 实时抽样中价响应诊断**：针对实时观察捕获的有效事件开展中价响应测度。
 4. **Stage 1.6D 部署前置条件评估**：若需开启期货下架实时源观察，按照 1.6D Runbook 收集目标环境前置证据并请求用户显式部署授权。
 5. **维持 L0/L1 安全与权限阻断**：严格保持 `RISK_LIVE_TRADING_ENABLED = False`，维持下游消费者 fail-closed 硬门禁，零交易/执行权限。
@@ -323,6 +324,7 @@ crypto-alpha-lab/
 | **`carry_core` / `tactical_carry`** | `stopped` | BTC 期限结构进入 Flat 状态 (Term structure slope = 0.000)，无 Carry 收益空间 | 作为期限结构基线与过滤逻辑保留在代码库 |
 | **`mr_core` / `medium_conviction_mr`** | `stopped` | OKX 现货 API 频繁超时，无法满足 60 周期连续历史要求 | 保留策略基线与超时防御逻辑 |
 | **Stage 1.3 - 1.4E** (Vision OI & 爆仓快照) | `superseded` | 爆仓快照受到交易所严重限频，被 Stage 1.5 催化剂公告路线替代 | 留存历史 Replay 审查文档 |
+| **Stage 1.5J-C** (开盘路径动量诊断) | `falsified` / `completed` | 首笔成交 60s 观察 + 3s 延迟入场后，15m 路径先触及 -100 bps 风险线比例超 80%~90%，先触及 +200 bps 仅 ~4%，扣除摩擦后期望持续为负，简单开盘动量追涨/追空策略被证伪 | 固化 280 个 ZIP 历史路径归约算法、独立 Schema 校验器及 37 项自动化测试，作为微观结构诊断基础 |
 | **Stage 1.6H** (Spot Listing After-First-Hour) | `abandoned` | 首小时由做市商/MEV 主导，扣除成本后胜率极低，且 1.5 已覆盖合约上线 | 仅留存为 `first_hour_no_trade` 执行纪律清单 |
 | **Stage 1.6G** 复杂社交音量 (LunarCrush/Santiment) | `abandoned` | 极易被水军/KOL 操纵，数据噪声过高，依赖高价第三方 API | 仅保留 alternative.me F&G + Google Trends 简易日志 |
 | **Stage 1.6D** (Scheduled Token Unlock) | `frozen` | 缺乏 Point-In-Time 历史快照容易落入后视镜偏差陷阱 (`unlocked != sold`) | 仅保留链上 Vesting 合约校验小课题研究 |
