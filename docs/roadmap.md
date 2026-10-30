@@ -71,8 +71,8 @@ Core implications:
 * **Stage 1.5G Cross-Root Admission & 1.5H V3 Friction Diagnostic (Historical N=2, Superseded)**:
   * 2026-09-30 Stage 1.5G cross-root admission (`stage1_5g_cross_root_admission_20260930T104859Z`) and 2026-10-01 Stage 1.5H V3 diagnostic (`stage1_5h_v3_cross_root_friction_20261001T120000Z`) admitted and diagnosed 2 parent events / 8 child symbols; both are superseded by N=3 regime-stratified implementations.
 * **Active Server Processes**:
-  * **Stage 1.5D Live Collector**: PID 88580 running `run_stage1_5d_live_event_source_smoke_collector.py` under root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
-  * **Stage 1.5F Live Depth Observer**: PID 88770 running `run_stage1_5f_live_depth_observer.py` under root `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix` (tmux session `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`).
+  * **Stage 1.5D Live Collector**: PID 4431 running `run_stage1_5d_live_event_source_smoke_collector.py` under root `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20261029T152122Z` (tmux session `stage1_5d_continuous_20261029T152122Z`).
+  * **Stage 1.5F Live Depth Observer**: PID 4470 running `run_stage1_5f_live_depth_observer.py` under root `data/external_signal_shadow/stage1_5f/live_depth_observer_20261029T152122Z` (tmux session `stage1_5f_live_depth_20261029T152122Z`).
 * **Active Verification State**:
   * Stage 1.5D: BAPI detail parser + 202 retry scheduler running continuously; zero detail retry starvation.
   * Stage 1.5F: Watermark Schema V2 active; 2643 heartbeats recorded; 76 pre-bootstrap historical anchors terminal ignored.

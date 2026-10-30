@@ -13,7 +13,7 @@ Core principle:
 
 > **Do not patch reviewer comments one-by-one in isolation, and do not re-audit unrelated frozen sections. Build one complete blocker ledger for all `OPEN` findings, trace their shared impact cone on directly affected contracts, apply one coherent revision, and report honest closure status for independent review.**
 
-Reference [`.agent/rules/L1_Engineering_Process.md`](../../rules/L1_Engineering_Process.md) (§2 Closure Revision Discipline & §3) as the authoritative engineering process rule.
+Reference [`.agent/rules/L1_Engineering_Process.md`](../../rules/L1_Engineering_Process.md) (§2 Rule 10 & §3) as the authoritative engineering process rule.
 
 ---
 

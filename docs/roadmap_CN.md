@@ -54,8 +54,8 @@
   * 成功生成生产诊断回执：`data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/`（状态 `receipt_published`，评估 2 个父事件、8 个子标的 P95 滑点摩擦）。
   * 研究结论严格判定为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`；下游消费门禁生效 Fail-Closed；零实盘/模拟/执行/Alpha 权限。
 * **服务器活跃进程**：
-  * **Stage 1.5D 实时公告采集器**：运行进程 PID 88580（tmux `stage1_5d_continuous_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20260724T065511Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
-  * **Stage 1.5F 实时盘口观察器**：运行进程 PID 88770（tmux `stage1_5f_live_depth_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`），运行根目录为 `data/external_signal_shadow/stage1_5f/live_depth_observer_20260724T070442Z_7d_bapi_detail_launch_gate_terminal_hygiene_hotfix`。
+  * **Stage 1.5D 实时公告采集器**：运行进程 PID 4431（tmux `stage1_5d_continuous_20261029T152122Z`），运行根目录为 `data/external_signal_shadow/stage1_5d/live_event_source_continuous_20261029T152122Z`。
+  * **Stage 1.5F 实时盘口观察器**：运行进程 PID 4470（tmux `stage1_5f_live_depth_20261029T152122Z`），运行根目录为 `data/external_signal_shadow/stage1_5f/live_depth_observer_20261029T152122Z`。
 * **活跃验证状态**：
   * Stage 1.5D：BAPI 详情页解析与 202 异步重试调度器稳定挂载，已消除重试饥饿。
   * Stage 1.5F：Watermark Schema V2 升级完成；已统计 2643 个 Heartbeat；76 个 pre-bootstrap 历史锚点被终端 Ignore 去重。
