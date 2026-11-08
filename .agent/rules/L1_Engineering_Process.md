@@ -48,6 +48,11 @@ name: L1 – Superpowers Engineering Process Rules
 5. **Defensive Review Reception (`§2.5`)**: When receiving review or audit feedback (`.agent/skills/receiving-code-review`), perform objective source/test verification and push back with evidence if a suggestion violates project invariants, YAGNI, or approved scope. Avoid performative agreement. Mandatory review findings must cite the requirement, concrete evidence, reachable failure or critical verification gap, and minimum fix; style preferences are advisory.
 6. **Closure Revision Discipline (`§2.6`)**: When revising a Design or Implementation Plan after review findings, load `.agent/skills/closure-revision/SKILL.md`. Review only previous `OPEN` / `PARTIALLY_CLOSED` findings, directly affected proof edges, and revision-introduced defects; do not reopen closed areas without new evidence, and do not fabricate self-proving claims solely to force an "all CLOSED" label.
 7. **Step Gate & Scope Control (`§2.7`)**: Every multi-step task must specify intended change, verification command, and expected result. Do not proceed past a failed gate without user approval.
+8. **Evidence-Linked Minimality (`§2.8`, Ponytail 落实)**:
+   - **冻结前取舍**：在现有 Design 或适用的 Brief Plan 中简述目标会改变的判断、较小替代、主要新增工程负担及延后/停止投入条件；局部简单任务可一句话说明，不新增模板、工时承诺、审批或台账。
+   - **主要复用承诺**：在现有 Plan 中写明主要已有能力及调用/适配边界；实施与审计核对实际调用位置或符合获批要求的不复用理由。导入语句、文件数、行数、scanner clean 或测试通过均不能单独证明复用和最小化。接口不兼容时不强行复用或建设通用包装；若必须偏离明确的获批要求，按 Rule 16 分流，不静默重写。
+   - **验收边界**：违反明确获批要求与一般精简建议分开处理；后者不得仅因可缩行或个人偏好升级为 P0/P1 阻断，finding 仍须满足 §2.5 的证据要求。保留必要边界校验、失败处理和独立数值期望，不默认增加调用次数测试或独立检查工具。
+   - **前瞻适用**：本条落实既有最小化原则，不改变任务分级、批准链或权限；不因本次澄清或代码行数回溯重开已验收任务。真实安全/正确性新证据仍按既有流程处理，不据此豁免缺陷。
 
 ---
 

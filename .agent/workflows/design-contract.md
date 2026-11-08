@@ -34,6 +34,7 @@ description: 设计契约与架构选型流程 (Design Contract Workflow)
 
 3. **范围收敛与最小化 (Ponytail Minimality)**：
    - 遵循 `.agent/rules/ponytail.md` 与 `.agent/skills/ponytail/SKILL.md`：优先复用库内既有结构与 Python 标准库，禁止在 Design 中引入无真实多实现需求的抽象接口、插件注册表、通用工厂或未请求的配置开关。
+   - 按 `L1` §2.8 在现有目标/关键决策中说明较小替代与主要新增负担，不以“薄脚本”或“只新增两文件”代替投入取舍；没有正向研究结果也可以完成预定问题。
    - 最小化不得削弱 `L0` 资金安全、`L1` 跨边界不变量或 `L2` 研究诚实性。
 
 4. **撰写 Design 文档（核心结构 + 按后果增补）**：

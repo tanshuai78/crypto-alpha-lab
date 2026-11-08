@@ -80,6 +80,8 @@ Check that each invariant is backed by the appropriate evidence class:
 - **Config / Safety invariants**: exact `configs/base.py` constant and `RISK_LIVE_TRADING_ENABLED is False`.
 - **Documentation / Governance deliverables**: exact file existence, normative consistency, and link/reference integrity (do not demand fake Python unit tests for pure documentation tasks).
 
+Apply `L1` §2.8 to the Plan's major reuse commitments: inspect actual call/adaptation sites or approved-compatible non-reuse reasons, not just imports, file counts, or passing tests. Use the existing matrix; do not add a separate minimality certificate or mandatory call-count tests. Separate unmet approved obligations from optional lean suggestions, and do not reopen accepted tasks merely because of this clarification or line counts.
+
 ### 4. Audit Test Quality, Fixture Provenance & Consequence-Driven `Rule 17`
 
 Verify alignment with [`.agent/rules/L1_Engineering_Process.md`](../../rules/L1_Engineering_Process.md):

@@ -53,6 +53,7 @@ description: 实施计划与白名单规范流程 (Implementation Plan Workflow)
 
 4. **Ponytail 任务剪枝**：
    - 检查所有 Task，裁掉未请求的重构、单实现接口、多余包装层或重复验证步骤，确保用最少文件与最小改动满足全部 `INV-*`。
+   - 按 `L1` §2.8 在现有 Task 或复用边界中列明主要已有能力、拟调用位置/适配差异及核验方式；不为每个小函数建清单，不把文件白名单当作实现复杂度证明。
 
 5. **执行基线与完成审计约定**：
    - Plan 必须声明：执行前记录 `BASE_SHA`、脏工作区/未跟踪文件快照；执行后由独立会话/Subagent 运行 `.agent/skills/audit-plan-completion` 审计，执行者不得自审宣告 `complete`。

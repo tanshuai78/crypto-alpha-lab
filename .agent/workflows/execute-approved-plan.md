@@ -55,6 +55,7 @@ description: 已批准实施计划的受控执行流程 (Execute Approved Plan W
 
 3. **最小化实现 (Ponytail)**：
    - 仅在 `Allowed implementation paths` 内编写满足当前 Task 所需的最少代码（遵循 `.agent/rules/ponytail.md`）。
+   - 按 `L1` §2.8 落实 Plan 的主要复用承诺，在原有交接中给出实际调用位置或符合获批要求的不复用理由；发现接口不兼容先核实并按 Rule 16 分流，不以保持文件数不变为由静默重新实现。
 
 4. **范围检查与按需扫描 (Scope Check & Conditional Tooling)**：
    - 每个 Task 或批次完成后，检查实际改动范围是否严格落在 `Allowed Change Scope` 内：
