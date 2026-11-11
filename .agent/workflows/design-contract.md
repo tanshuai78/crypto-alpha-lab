@@ -23,6 +23,7 @@ description: 设计契约与架构选型流程 (Design Contract Workflow)
 1. **同步事实与选择性澄清 (Fact Sync & Selective Clarification)**：
    - 调用 `.agent/skills/using-superpowers` 与 `.agent/skills/brainstorming`，先从工作区读取 `docs/roadmap.md`、`configs/base.py`、`.agent/rules/L1_Engineering_Process.md`、相关源码/测试/Fixture 及 `git status --short --untracked-files=all`。
    - 若任务涉及 alpha discovery、策略假设、事件研究、factor、replay/backtest、策略晋级/证伪、expectancy、PnL 或 economic-edge claim，必须同时读取 `.agent/rules/L2_Alpha_Research_Methodology.md`（L2 仅约束研究方法，不授予任何交易或执行权限）。
+   - 研究方向选择或关键前提变化时，按 `L2` §14.1 先在现有讨论中完成轻量初筛；沿用已有答案，只补影响决策的缺口，不在每轮讨论重问，也不新增表单或审批。
    - 执行 `.agent/rules/L1_Engineering_Process.md` §1.3 的**选择性澄清（Selective Clarification）**：
      - 凡能通过源码、配置、测试或现有文档查明的事实，直接查证，不向用户重复提问；
      - 仅当未知项会改变**实现范围、研究语义、权限边界、风险暴露或验收标准**时，向用户提出收敛、具体的问题；

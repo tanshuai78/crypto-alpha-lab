@@ -340,6 +340,19 @@ engineering/operational_cost
 
 Portfolio diversification never authorizes relaxing strategy-level evidence or L0 safety gates.
 
+### 14.1 Lightweight research-direction screening
+
+Before committing substantial collection or development effort to a concrete research direction, answer the four questions below. Revisit only when a material premise changes, not for every message, result explanation, or local repair. Read existing workspace evidence first, reuse known answers, and summarize in the existing discussion or Design; do not require a separate form or document.
+
+1. **Mechanism:** Who might pay for the proposed return, because of what need or constraint, and what risk would we bear? State a falsifiable economic hypothesis, not an assertion about unobserved trader identities.
+2. **Opportunity:** How many independent opportunities could accumulate over a useful validation horizon, with what capacity, dependence, and engineering/operating burden? There is no universal 50-100-events-per-year admission or statistical-sufficiency threshold. Sparse opportunities may justify only a low-cost observation branch.
+3. **Verifiability:** Can decision-time data availability and fees, spread/slippage, and funding costs be measured or credibly bounded, and can the proposed information be compared with a suitable simple benchmark? For cheap exploration, explicitly labeled conservative assumptions or unknowns are acceptable; they are not verified PIT evidence or measured net returns.
+4. **Bounded effort:** What is the smallest useful next step, its time/expense/engineering budget, and the evidence conditions for continuing, pausing, or falsifying the hypothesis? Budget exhaustion or missing data is not scientific falsification.
+
+Under L1 selective clarification, ask only about unresolved gaps that change the decision. If needed, probe the falsifying observation, timing boundary, or benchmark; do not expand a fixed interview. Unknowns may justify a bounded data preflight instead of automatic rejection.
+
+This is research prioritization, not a new approval gate. It neither replaces Section 15 nor changes L0/L1 authority boundaries or frozen research semantics. Do not reopen accepted historical work solely to backfill this screen.
+
 ## 15. Mandatory Design Requirements for Alpha Research
 
 Any Design whose purpose includes alpha discovery, strategy evaluation, replay/backtest, event study, factor research, strategy promotion/falsification, or economic-edge claims must explicitly define or mark `N/A` with justification for:
