@@ -744,3 +744,45 @@ echo "STAGE1_5G_REVIEW_COMPLETED: $STAGE1_5G_OUT"
 1. **彻底拒绝历史复用**：V3 引入了 86 字段状态校验与强闭树检查，旧 root 不支持原地 upgrade，必须启全新 output root。
 2. **Cutoff 冻结确认**：启动 1.5D 后必须看到 `catalog_bootstrap_cutoff_ms` 成功落盘（见 4.2 节验证代码）。
 3. **存量历史事件隔离**：历史公告（如 POPMART、UNITREE 等）会被自动转为不可恢复的 Tombstone 墓碑，杜绝后台重试队列饥饿。
+
+---
+
+## 9. 延期上线就绪门禁、有界重检与 `--future-launch-recovery` 新建 Root 运维规范
+
+本节对应 `2026-11-13` 延期上线与补采修复（`Stage 1.5D/1.5F`）：
+
+### 9.1 Stage 1.5F 盘前 `exchangeInfo` 就绪门禁与冲突隔离
+1. **就绪判定 (`evaluate_exchangeinfo_symbol_readiness`)**：
+   - `PENDING_TRADING` 在 `now_ms < symbol_visibility_deadline_ms` 时保持 `waiting`（等待开盘），不盲目启动空盘口采集。
+   - 仅当 `exchangeInfo` 中该标的 `status == "TRADING"` 且不存在与公告锚点 `S` 的冲突时，才允许进入 `active` 深度采集。
+2. **冲突隔离**：
+   - 当 `exchangeInfo.onboardDate` (`O`) 与公告锚点 `S` 满足 `O > S + 60_000`（60 秒容差）时，判定为延期/冲突（`waiting_exchangeinfo_schedule_conflict`），阻断误开盘采集，并记录诊断信息。
+3. **Deadline 收口**：
+   - **无冲突分支**（`PENDING_TRADING` 或未见冲突）：固定使用 `symbol_visibility_deadline_ms = S + EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS`（`S + 15m`），超时即拒绝为 `rejected_launch_not_trading_timeout`。
+   - **明确冲突分支**（`O > S + 60_000`）：使用固定未决冲突 episode 期限 `anchor_resolution_deadline_ms`（`6h`），仅当当前新鲜完整 `exchangeInfo` 的 `O` 与可信 `S` 在 `60s` 内一致时才解除冲突，否则到期拒绝为 `rejected_anchor_conflict_unresolved_timeout`。
+
+### 9.2 Stage 1.5D 有界改期重检与 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 启用前置条件
+1. **默认安全开关**：
+   - `configs/base.py` 中 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 默认保持 `False`，且 `RISK_LIVE_TRADING_ENABLED` 默认保持 `False`。未获明确批准前严禁翻转为 `True`。
+2. **有界重检参数**（均冻结于 `configs/base.py`）：
+   - `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_INTERVAL_SEC = 600`（单文章最小冷却 600 秒）
+   - `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_BUDGET_PER_POLL = 1`（每轮 poll 最多重检 1 篇文章）
+   - 重检复用现有 `launch_schedule_revision_detail` 队列、`detail_budget_remaining` 总预算及 `persisted_articles`（`next_schedule_recheck_at_ms` / `schedule_recheck_deadline_ms`，固定 14 天 deadline），从 `events/*.jsonl` 使用 `select_latest_applicable_official_schedule` 读取最新合法修订，永不挤占新公告首次抓取预算。
+3. **开启 Producer 前置条件与真实 Fixture 核验**：
+   - 仅当经独立审计与用户明确批准后，方可进入四项启用配置（含 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = True`），且部署树必须与通过验收的 proof commit SHA 完全一致（无未提交/未跟踪 Python 源码）。
+   - 开启时必须向 1.5D 传入有效的 `--stage1-5f-consumer-root-contract` 与 `--stage1-5f-consumer-summary`，确保下游 1.5F 消费者静态与运行时证明均已通过。
+   - 离线实源契约核验须设置只读外置目录环境变量 `STAGE15_POSTPONEMENT_REAL_FIXTURE_DIR` 并运行 `test_postponement_real_source_contract_when_authorized`（分别核验真实 AIA 与同页改期样例，确认原始字节、manifest SHA-256 与 formal event 契约均通过）。
+
+### 9.3 `--future-launch-recovery` 新建 Root 启动顺序与停止条件
+当历史/旧 root 中某未来上线公告（如 `2d89a5966b174a2689ab2c2a15db1757:HYPEUSDC,TRXUSDC`）因早期契约缺陷需在**全新独立 root** 补采时，必须严格遵守以下顺序（严禁使用 `find ... | tail -1` 隐式选择 root，必须显式指定新 `RUN_ID`、绝对 D/F root 路径及互指 proof 路径）：
+1. **Fresh Root 约束**：
+   - `--output-root` 必须为全新目录，严禁存在旧 `detail_retry_state.json`、`formal_launch_identity_index.jsonl` 或任何 `events/*.jsonl`。
+   - `--future-launch-recovery <32位小写hex文章ID>:<SYM1,SYM2>` 与 `--active-root-recovery-*` 互斥，不可同时传入。
+2. **推荐启动顺序（D 先行 -> F Bootstrap 退出 -> F 常驻 -> D 校验发射）**：
+   - **Step 1（启动新 root D）**：启动新 root Stage 1.5D（携带 `--future-launch-recovery <id>:<syms>`、`--stage1-5f-consumer-root-contract`、`--stage1-5f-consumer-summary`）。Poll 1 在 F 尚未就绪时仅写入包含 `future_launch_recovery` 的 `live_safety_gate_summary.json`，**不会**提前发射补采事件。
+   - **Step 2（F Bootstrap 并退出）**：先以一次性命令运行新 root Stage 1.5F `--bootstrap-watermark`（携带 `--stage1-5d-runtime-gate <新D_root>/live_safety_gate_summary.json`），等待该 bootstrap 命令成功退出（写入 `observer_root_contract.json` 与 `watermark.json`）。
+   - **Step 3（启动常驻 F Consumer）**：bootstrap 退出后，再启动不带 `--bootstrap-watermark` 的常驻 Stage 1.5F consumer（携带同一 `--stage1-5d-runtime-gate <新D_root>/live_safety_gate_summary.json`），持续发布新鲜 `live_depth_observer_summary.json` 与完整运行时证明。
+   - **Step 4（D 次轮校验发射）**：1.5D 在后续 poll 验证 `schedule_revision_producer_effective_enabled`、`verify_stage1_5f_consumer_proof()`、同根 `watermark.json`（`load_watermark` 严格校验 `bootstrap_root_id` 与 `bootstrap_source_root`）及一致的 `future_launch_recovery` 均就绪后，重新请求 BAPI 详情页并对照 `exchangeInfo` 校验；全部符号就绪且有效锚点均大于当前时刻时，发射带 `detail_recovery_provenance = "explicit_future_launch_revalidation_v1"` 的 formal v2 事件。
+   - **Step 5（F 降级上限接收）**：1.5F 对所有带恢复 marker 的行均先核验精确 `future_launch_recovery` 选择，入站后强制 `evidence_start_class = "recovery_start"`、`live_depth_evidence_basis = "recovery_validation_only"` 与 `admission_max_evidence_class = latest_max_evidence_class = "recovery_validation_only"`，并受 `S + 15m` 晚开上限及最新官方终点 `+ 12h` 观测窗口约束。
+3. **停止条件**：
+   - 若旧 root 仍存在未关闭进程、或新 root 检测到 `detail_retry_state.json`/`events/*.jsonl` 非空、或 bound `future_launch_recovery` 选择被改写、或 `exchangeInfo` 拒绝标的状态/锚点已过期/存储预算不足，立即停止补采并排查，严禁强行覆盖旧 root 或修改历史数据。

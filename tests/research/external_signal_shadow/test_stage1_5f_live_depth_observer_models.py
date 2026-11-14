@@ -174,3 +174,41 @@ def test_legacy_watermark_defaults_do_not_enable_historical_classification():
     })
     assert getattr(w, "watermark_schema_version", 1) == 1
     assert getattr(w, "bootstrap_max_seen_detected_at_ms", None) is None
+
+
+def test_postponement_event_symbol_state_preserves_visibility_and_conflict_deadlines():
+    row = {
+        "event_symbol_id": "es_postpone_1",
+        "event_id": "evt_postpone_1",
+        "symbol": "HYPEUSDC",
+        "detected_at_ms": 1794373300000,
+        "status": "pending_exchangeinfo_not_trading",
+        "pending_reason": "pending_exchangeinfo_not_trading",
+        "observation_anchor_ms": 1794389400000,
+        "symbol_visibility_deadline_ms": 1794390300000,
+        "anchor_resolution_started_at_ms": 0,
+        "anchor_resolution_deadline_ms": 0,
+    }
+    state = EventSymbolState.from_dict(row)
+    assert state.status == "pending_exchangeinfo_not_trading"
+    assert state.symbol_visibility_deadline_ms == 1794390300000
+    assert state.anchor_resolution_started_at_ms is None
+    assert state.anchor_resolution_deadline_ms is None
+    roundtrip = EventSymbolState.from_dict(state.to_dict())
+    assert roundtrip.symbol_visibility_deadline_ms == 1794390300000
+
+    zero_vis = EventSymbolState.from_dict({**row, "symbol_visibility_deadline_ms": 0})
+    assert zero_vis.symbol_visibility_deadline_ms is None
+
+
+def test_postponement_event_symbol_state_preserves_detail_recovery_provenance():
+    row = {
+        "event_symbol_id": "es_postpone_rec",
+        "event_id": "evt_postpone_rec",
+        "symbol": "HYPEUSDC",
+        "detected_at_ms": 1794373300000,
+        "detail_recovery_provenance": "explicit_future_launch_revalidation_v1",
+    }
+    st = EventSymbolState.from_dict(row)
+    assert st.detail_recovery_provenance == "explicit_future_launch_revalidation_v1"
+    assert EventSymbolState.from_dict(st.to_dict()).detail_recovery_provenance == "explicit_future_launch_revalidation_v1"

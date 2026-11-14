@@ -113,6 +113,7 @@ class EventSymbolState:
     launch_anchor_post_bootstrap_watermark: bool | None = None
     capacity_defer_count: int = 0
     anchor_resolution_attempt_count: int = 0
+    detail_recovery_provenance: str | None = None
     pending_terminal_reason: str = ""
     expected_snapshot_count: int = 0
     unique_snapshot_bucket_count: int = 0
@@ -191,6 +192,7 @@ class EventSymbolState:
             "last_anchor_resolution_at_ms",
             "anchor_resolution_started_at_ms",
             "anchor_resolution_deadline_ms",
+            "symbol_visibility_deadline_ms",
             "bootstrap_watermark_max_seen_detected_at_ms",
             "admission_watermark_at_first_seen_ms",
             "terminal_at_ms",
@@ -217,6 +219,7 @@ class EventSymbolState:
             "last_anchor_resolution_at_ms",
             "anchor_resolution_started_at_ms",
             "anchor_resolution_deadline_ms",
+            "symbol_visibility_deadline_ms",
             "bootstrap_watermark_max_seen_detected_at_ms",
             "admission_watermark_at_first_seen_ms",
             "terminal_at_ms",

@@ -1008,3 +1008,89 @@ def test_unresolved_episode_deadline_tracking_and_no_sliding_deadline():
     updated_2 = apply_anchor_contract_revision_to_state(updated_1, unresolved_revision, now_ms=1_200_000)
     assert updated_2.anchor_resolution_started_at_ms == 1_100_000
     assert updated_2.anchor_resolution_deadline_ms == 1_100_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
+
+
+def test_postponement_create_pending_and_revision_deadlines():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        apply_anchor_contract_revision_to_state,
+        create_pending_observation_state,
+    )
+
+    s0 = 1_794_389_400_000  # 2026-11-11 09:30:00 UTC
+    s1 = 1_794_817_800_000  # 2026-11-16 08:30:00 UTC
+    base_row = {
+        "event_symbol_id": "es_hype",
+        "event_id": "evt_hype",
+        "symbol": "HYPEUSDC",
+        "detected_at_ms": s0 - 16_100_000,
+        "source_contract_status": "formal_v2_valid",
+    }
+
+    not_trading_state = create_pending_observation_state(
+        event_symbol_row=base_row,
+        status="pending_exchangeinfo_not_trading",
+        diagnostics={"observation_anchor_ms": s0, "source_contract_status": "formal_v2_valid"},
+        now_ms=s0 + 30_000,
+    )
+    assert not_trading_state.symbol_visibility_deadline_ms == s0 + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+    assert not_trading_state.anchor_resolution_deadline_ms is None
+
+    conflict_state = create_pending_observation_state(
+        event_symbol_row=base_row,
+        status="pending_anchor_conflict",
+        diagnostics={
+            "observation_anchor_ms": s0,
+            "observation_anchor_conflict_active": True,
+            "source_contract_status": "formal_v2_valid",
+        },
+        now_ms=s0 + 60_000,
+    )
+    assert conflict_state.symbol_visibility_deadline_ms is None
+    assert conflict_state.anchor_resolution_deadline_ms == s0 + 60_000 + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
+
+    v1_conflict_state = create_pending_observation_state(
+        event_symbol_row={**base_row, "source_contract_status": "formal_v1_valid"},
+        status="pending_anchor_conflict",
+        diagnostics={
+            "observation_anchor_ms": s0,
+            "observation_anchor_conflict_active": True,
+            "source_contract_status": "formal_v1_valid",
+        },
+        now_ms=s0 + 60_000,
+    )
+    resolved_rev = {
+        "revision_id": "rev_postpone_s1",
+        "revision_semantic_id": "rev_postpone_s1",
+        "revision_application_id": "rev_postpone_s1",
+        "symbol_official_schedule_statuses": {"HYPEUSDC": "scheduled"},
+        "symbol_revised_anchor_ms": {"HYPEUSDC": s1},
+    }
+    resolved_state = apply_anchor_contract_revision_to_state(v1_conflict_state, resolved_rev, now_ms=s0 + 1_800_000)
+    assert resolved_state.status == "pending_launch_time_in_future"
+    assert resolved_state.observation_anchor_ms == s1
+    assert resolved_state.anchor_resolution_deadline_ms is None
+    assert resolved_state.symbol_visibility_deadline_ms is None
+
+
+def test_postponement_promote_caps_future_launch_revalidation_to_recovery_validation_only():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        promote_pending_to_active_observation,
+    )
+
+    s0 = 1_794_389_400_000
+    pending = create_pending_observation_state(
+        event_symbol_row={
+            "event_symbol_id": "es_rec_1",
+            "event_id": "evt_rec_1",
+            "symbol": "HYPEUSDC",
+            "detected_at_ms": s0 - 60_000,
+            "detail_recovery_provenance": "explicit_future_launch_revalidation_v1",
+        },
+        status="pending_launch_time_in_future",
+        diagnostics={"observation_anchor_ms": s0, "formal_event_contract_version": 2},
+        now_ms=s0 - 30_000,
+    )
+    assert pending.detail_recovery_provenance == "explicit_future_launch_revalidation_v1"
+    # Even if caller passes "clean_start", recovery provenance caps it to "recovery_start"
+    active = promote_pending_to_active_observation(pending, now_ms=s0 + 5_000, evidence_start_class="clean_start")
+    assert active.evidence_start_class == "recovery_start"

@@ -285,6 +285,24 @@ def validate_root_mode_and_suffix(output_root: str, allow_v1_compat: bool) -> st
     return "v2_production"
 
 
+def load_future_launch_recovery_from_gate(gate_path: str | None) -> dict | None:
+    if not gate_path:
+        return None
+    p = Path(gate_path)
+    if p.is_dir():
+        p = p / "live_safety_gate_summary.json"
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    rec = data.get("future_launch_recovery")
+    return dict(rec) if isinstance(rec, dict) and rec else None
+
+
 def write_observer_root_contract_atomically(
     output_root: str,
     root_mode: str,
@@ -292,6 +310,7 @@ def write_observer_root_contract_atomically(
     *,
     storage_guard: Any,
     source_binding_facts: dict | None = None,
+    future_launch_recovery: dict | None = None,
 ) -> dict:
     if storage_guard is None:
         raise TypeError("storage_guard_required")
@@ -311,6 +330,8 @@ def write_observer_root_contract_atomically(
     }
     if source_binding_facts:
         content.update(source_binding_facts)
+    if future_launch_recovery:
+        content["future_launch_recovery"] = future_launch_recovery
 
     serialized_bytes = json.dumps(content, indent=2).encode("utf-8")
     old_size = root_path.stat().st_size if root_path.exists() else 0
@@ -950,6 +971,7 @@ def _main():
         sys.exit(1)
 
     # 1. Check watermark bootstrap mode
+    gate_future_launch_recovery = load_future_launch_recovery_from_gate(args.stage1_5d_runtime_gate)
     if args.bootstrap_watermark:
         logger.info("Watermark bootstrap mode requested.")
         events = load_all_events(args.fixture_events_jsonl, args.stage1_5d_events_glob)
@@ -958,6 +980,7 @@ def _main():
             root_mode,
             reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "bootstrap_watermark",
             storage_guard=storage_guard,
+            future_launch_recovery=gate_future_launch_recovery,
         )
 
         from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
@@ -1016,6 +1039,7 @@ def _main():
             reason=args.formal_v1_compatibility_reason if args.allow_formal_v1_compatibility else "runtime_start",
             storage_guard=storage_guard,
             source_binding_facts=consumer_proof_facts,
+            future_launch_recovery=gate_future_launch_recovery,
         )
 
     # 2. Validate Stage 1.5D summary. A dedicated runtime gate, when provided,
@@ -1268,6 +1292,7 @@ def _main():
             live_public_readonly=args.live_public_readonly,
             mock_exchangeinfo_payload=mock_exinfo_payload,
         )
+        now_ms = max(now_ms, int(time.time() * 1000))
 
         if exchangeinfo_cache.get("manifest_row"):
             from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
@@ -1388,18 +1413,34 @@ def _main():
                 current_contract = json.loads(root_contract_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 current_contract = {}
-            contract_is_current = (
-                current_contract.get("root_mode") == root_mode
-                and all(current_contract.get(key) == value for key, value in consumer_proof_facts.items())
-            )
-            if not contract_is_current:
-                write_observer_root_contract_atomically(
-                    output_root,
-                    root_mode,
-                    reason="runtime_source_binding_validated",
-                    storage_guard=storage_guard,
-                    source_binding_facts=consumer_proof_facts,
+            poll_future_launch_recovery = load_future_launch_recovery_from_gate(gate_target)
+            if current_contract and current_contract.get("future_launch_recovery") != poll_future_launch_recovery:
+                gate_valid = False
+                gate_res = {
+                    **gate_res,
+                    "valid": False,
+                    "reason": "future_launch_recovery_selection_rebind_forbidden",
+                }
+                logger.error(
+                    "Stage 1.5D runtime gate changed bound future_launch_recovery selection ({} -> {}). Failing closed.",
+                    current_contract.get("future_launch_recovery"),
+                    poll_future_launch_recovery,
                 )
+            else:
+                contract_is_current = (
+                    current_contract.get("root_mode") == root_mode
+                    and all(current_contract.get(key) == value for key, value in consumer_proof_facts.items())
+                    and current_contract.get("future_launch_recovery") == poll_future_launch_recovery
+                )
+                if not contract_is_current:
+                    write_observer_root_contract_atomically(
+                        output_root,
+                        root_mode,
+                        reason="runtime_source_binding_validated",
+                        storage_guard=storage_guard,
+                        source_binding_facts=consumer_proof_facts,
+                        future_launch_recovery=poll_future_launch_recovery,
+                    )
 
         block_new_event_admission = not gate_valid
         if not gate_valid:
@@ -1514,6 +1555,13 @@ def _main():
                     break
 
                 # action == "new_event_symbol"
+                active_future_launch_recovery = None
+                try:
+                    _rc_data = json.loads(root_contract_path.read_text(encoding="utf-8"))
+                    if isinstance(_rc_data, dict) and isinstance(_rc_data.get("future_launch_recovery"), dict):
+                        active_future_launch_recovery = _rc_data["future_launch_recovery"]
+                except (OSError, json.JSONDecodeError):
+                    active_future_launch_recovery = None
                 status, reason, eligibility_diag = classify_event_symbol_eligibility_with_diagnostics(
                     row=flat_event,
                     symbol=symbol,
@@ -1521,6 +1569,7 @@ def _main():
                     watermark=watermark,
                     exchangeinfo_state=exchangeinfo_state,
                     budget_state=budget_state,
+                    future_launch_recovery=active_future_launch_recovery,
                 )
                 logger.info(f"Classified event {event_symbol_id} ({symbol}): status={status}, reason={reason}")
 

@@ -142,6 +142,8 @@ def test_legacy_event_never_becomes_active_without_formal_v1_valid_revision():
         "available": True,
         "symbols": {"ABCUSDT"},
         "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+        "fetched_at_ms": 1000,
+        "payload_sha256": "h",
     }
 
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
@@ -166,6 +168,8 @@ def test_legacy_event_with_exchangeinfo_anchor_remains_pending_without_formal_re
         "available": True,
         "symbols": {"ABCUSDT"},
         "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+        "fetched_at_ms": 1000,
+        "payload_sha256": "h",
     }
 
     status, reason = classify_event_symbol_eligibility(event, "ABCUSDT", 1000, w, exinfo, {})
@@ -187,6 +191,8 @@ def test_formal_v1_valid_event_can_become_eligible():
         "available": True,
         "symbols": {"ABCUSDT"},
         "symbol_rows": {"ABCUSDT": {"status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": 1000}},
+        "fetched_at_ms": 1000,
+        "payload_sha256": "h",
     }
 
     status, reason = classify_event_symbol_eligibility(formal_event, "ABCUSDT", 1000, w, exinfo, {})
@@ -466,7 +472,12 @@ def test_anchor_conflict_can_resolve_after_event_revision():
     }
     revision = _formalize_launch_event(revision, "ABCUSDT")
 
-    result = re_resolve_pending_anchor(pending, [revision], {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}, now_ms=9_000)
+    result = re_resolve_pending_anchor(
+        pending,
+        [revision],
+        {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {"ABCUSDT": {"status": "PENDING_TRADING", "onboardDate": 10_000}}, "fetched_at_ms": 9_000, "payload_sha256": "h"},
+        now_ms=9_000,
+    )
 
     assert result.status == "pending_launch_time_in_future"
     assert result.observation_anchor_conflict_active is False
@@ -483,7 +494,7 @@ def test_launch_time_in_future_is_persisted_pending_status():
         "symbol_effective_launch_times_ms": {"ABCUSDT": now_ms + 600_000},
     }
     w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {"ABCUSDT": {"status": "TRADING", "onboardDate": now_ms + 600_000}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(event, "ABCUSDT", now_ms, w, exinfo, {})
 
@@ -523,7 +534,7 @@ def test_late_launch_start_is_recovery_only_not_clean():
     }
     event = _formalize_launch_event(event, "ABCUSDT")
     w = Watermark(1, now_ms - 120_000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {}}
+    exinfo = {"available": True, "symbols": {"ABCUSDT"}, "symbol_rows": {"ABCUSDT": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(event, "ABCUSDT", now_ms, w, exinfo, {})
 
@@ -648,7 +659,7 @@ def test_delayed_launch_event_with_launch_time_after_watermark_bypasses_detected
     }
     event = _formalize_launch_event(event, "SPCXUSD1")
     w = Watermark(1, now_ms - 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"SPCXUSD1"}}
+    exinfo = {"available": True, "symbols": {"SPCXUSD1"}, "symbol_rows": {"SPCXUSD1": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
         event, "SPCXUSD1", now_ms, w, exinfo, {}
@@ -681,7 +692,7 @@ def test_delayed_launch_event_seen_by_watermark_still_rejected_as_pre_watermark(
         [],
         now_ms,
     )
-    exinfo = {"available": True, "symbols": {"SPCXUSD1"}}
+    exinfo = {"available": True, "symbols": {"SPCXUSD1"}, "symbol_rows": {"SPCXUSD1": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason = classify_event_symbol_eligibility(event, "SPCXUSD1", now_ms, w, exinfo, {})
 
@@ -815,7 +826,7 @@ def test_delayed_launch_event_uses_symbol_effective_launch_time_for_age_gate():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": now_ms - 5 * 60 * 1000}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
@@ -871,7 +882,7 @@ def test_launch_time_age_just_inside_15m_window_is_eligible():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
@@ -891,7 +902,7 @@ def test_launch_time_age_just_outside_15m_window_is_rejected():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason = classify_event_symbol_eligibility(event, "ETHUSD1", now_ms, w, exinfo, {})
 
@@ -963,7 +974,7 @@ def test_eligibility_diagnostics_expose_observation_age_basis():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": now_ms - 5 * 60 * 1000}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
         event, "ETHUSD1", now_ms, w, exinfo, {}
@@ -986,7 +997,7 @@ def test_rejected_age_exceeded_diagnostics_expose_observation_age_basis():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, now_ms - 7 * 60 * 60 * 1000, [], [], [], now_ms)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": launch_ms}}, "fetched_at_ms": now_ms, "payload_sha256": "h"}
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
         event, "ETHUSD1", now_ms, w, exinfo, {}
@@ -1065,7 +1076,7 @@ def test_regression_ethusd1_onboard_launch_time_delay_accepts():
     }
     event = _formalize_launch_event(event, "ETHUSD1")
     w = Watermark(1, 1783009167053, [], [], [], 1783009167053)
-    exinfo = {"available": True, "symbols": {"ETHUSD1"}}
+    exinfo = {"available": True, "symbols": {"ETHUSD1"}, "symbol_rows": {"ETHUSD1": {"status": "TRADING", "onboardDate": 1783069200000}}, "fetched_at_ms": 1783069534532, "payload_sha256": "h"}
 
     # Verify eligibility classification
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
@@ -1663,6 +1674,7 @@ def test_v2_contract_is_validated_and_official_anchor_overrides_exchangeinfo_onb
             }
         },
         "payload_sha256": "exchangeinfo-sha",
+        "fetched_at_ms": 10_500,
     }
 
     source_res = classify_stage1_5d_source_contract(row, symbol)
@@ -1727,6 +1739,7 @@ def test_v2_eligibility_emits_admission_and_latest_anchor_hashes():
             }
         },
         "payload_sha256": "exchangeinfo-sha",
+        "fetched_at_ms": 10_500,
     }
 
     status, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
@@ -1979,7 +1992,7 @@ def test_classify_event_symbol_eligibility_recovery_provenance_contrast():
         max_seen_detected_at_ms=T0 - 1000,
         updated_at_ms=T0 - 1000,
     )
-    exchangeinfo_state = {"available": True, "symbols": {"BTCUSDT"}}
+    exchangeinfo_state = {"available": True, "symbols": {"BTCUSDT"}, "symbol_rows": {"BTCUSDT": {"status": "TRADING", "onboardDate": LAUNCH_MS}}, "fetched_at_ms": OBSERVE_MS, "payload_sha256": "h"}
 
     # 1. Normal event produces clean_start
     normal_status, normal_reason, normal_diag = classify_event_symbol_eligibility_with_diagnostics(
@@ -2406,3 +2419,558 @@ def test_stage1_5f_synthetic_v3_root_binding_and_admission_rejection(tmp_path):
     )
     assert res["valid"] is True
     assert res["status"] == "READY"
+
+
+def _make_postponement_v2_event(symbol: str, anchor_ms: int, detected_at_ms: int) -> dict:
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    raw = {
+        "event_id": f"evt_{symbol}_{anchor_ms}",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "symbols": [symbol],
+        "symbol": symbol,
+        "detected_at_ms": detected_at_ms,
+        "first_detected_at_ms": detected_at_ms,
+        "source_published_at_ms": detected_at_ms - 60_000,
+        "detail_fetch_attempted": True,
+        "detail_fetch_status": "success",
+        "detail_payload_hash": "a" * 64,
+        "detail_fetched_at_ms": detected_at_ms + 5_000,
+        "symbol_extraction_source": "bapi_article_body",
+        "symbol_validation_status": "validated",
+        "source_detail_url_normalized": "https://www.binance.com/bapi/apex/v1/public/apex/cms/article/detail/query?articleCode=2d89a5966b174a2689ab2c2a15db1757",
+        "symbol_launch_times_ms": {symbol: anchor_ms},
+        "candidate_provenance": {
+            symbol: {
+                "raw_time_text": "2026-11-11 09:30 (UTC)",
+                "timezone_text": "UTC",
+                "node_path": "body.child[0]",
+                "logical_block_id": f"2d89a5966b174a2689ab2c2a15db1757:{symbol}",
+                "schedule_text_context": "2026-11-11 09:30 (UTC)",
+                "mapping_method": "per_symbol_official_schedule",
+                "payload_sha256": "a" * 64,
+                "parser_version": "stage1_5d_symbol_extraction_v3",
+            }
+        },
+    }
+    contract = build_symbol_anchor_contract(
+        symbol=symbol,
+        official_schedule_anchor_ms=anchor_ms,
+        exchangeinfo_onboard_date_ms=None,
+        anchor_contract_decision_at_ms=detected_at_ms + 10_000,
+        official_schedule_revision_id=None,
+        official_schedule_available_at_ms=detected_at_ms + 5_000,
+        mapping_confidence="exact_per_symbol_row",
+        provenance=raw["candidate_provenance"][symbol],
+    )
+    return build_formal_event_anchor_contract_row(base_event=raw, symbol_contracts={symbol: contract})
+
+
+def test_postponement_readiness_gate_and_snapshot_age_oracles():
+    s0 = 1_794_389_400_000  # 2026-11-11 09:30:00 UTC
+    detected_at = s0 - 16_100_000
+    wm = Watermark(max_seen_detected_at_ms=detected_at - 10_000, updated_at_ms=detected_at - 10_000)
+
+    for sym in ("HYPEUSDC", "BTCUSDT"):
+        ev = _make_postponement_v2_event(sym, s0, detected_at)
+        now_clean = s0 + 120_000  # 09:32 inclusive clean
+
+        for bad_state in (
+            {"available": False, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "PENDING_TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "PRE_TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "SETTLING", "onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING"}}, "fetched_at_ms": now_clean, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean, "payload_sha256": ""},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}}, "fetched_at_ms": 0, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean + 30_001, "payload_sha256": "b" * 64},
+            {"available": True, "symbols": {sym}, "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}}, "fetched_at_ms": now_clean - 300_001, "payload_sha256": "b" * 64},
+        ):
+            st, reason, _ = classify_event_symbol_eligibility_with_diagnostics(ev, sym, now_clean, wm, bad_state, {})
+            assert st == "pending", f"{sym} bad_state={bad_state} got {st}/{reason}"
+
+        # TRADING + conflicting future onboardDate (O > S + 60_000) -> pending_anchor_conflict
+        conflict_ex = {
+            "available": True,
+            "symbols": {sym},
+            "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0 + 60_001}},
+            "fetched_at_ms": now_clean,
+            "payload_sha256": "b" * 64,
+        }
+        st_c, r_c, _ = classify_event_symbol_eligibility_with_diagnostics(ev, sym, now_clean, wm, conflict_ex, {})
+        assert (st_c, r_c) == ("pending", "pending_anchor_conflict")
+
+        # Valid boundary snapshots: -30_000ms and +300_000ms, O = S + 60_000
+        for fetched_at in (now_clean + 30_000, now_clean - 300_000):
+            ok_ex = {
+                "available": True,
+                "symbols": {sym},
+                "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0 + 60_000}},
+                "fetched_at_ms": fetched_at,
+                "payload_sha256": "b" * 64,
+            }
+            st_ok, r_ok, _ = classify_event_symbol_eligibility_with_diagnostics(ev, sym, now_clean, wm, ok_ex, {})
+            assert (st_ok, r_ok) == ("eligible", "eligible_clean_start")
+
+        # 09:45 recovery inclusive; 09:45:00.001 rejected
+        ok_rec = {
+            "available": True,
+            "symbols": {sym},
+            "symbol_rows": {sym: {"status": "TRADING", "onboardDate": s0}},
+            "fetched_at_ms": s0 + 900_000,
+            "payload_sha256": "b" * 64,
+        }
+        assert classify_event_symbol_eligibility_with_diagnostics(ev, sym, s0 + 900_000, wm, ok_rec, {})[1] == "eligible_recovery_only"
+        ok_late = dict(ok_rec, fetched_at_ms=s0 + 900_001)
+        assert classify_event_symbol_eligibility_with_diagnostics(ev, sym, s0 + 900_001, wm, ok_late, {})[0] == "rejected"
+
+        # Non-TRADING past 15m -> rejected_launch_not_trading_timeout
+        not_tr_late = {
+            "available": True,
+            "symbols": {sym},
+            "symbol_rows": {sym: {"status": "PENDING_TRADING", "onboardDate": s0}},
+            "fetched_at_ms": s0 + 900_001,
+            "payload_sha256": "b" * 64,
+        }
+        st_nt, r_nt, _ = classify_event_symbol_eligibility_with_diagnostics(ev, sym, s0 + 900_001, wm, not_tr_late, {})
+        assert (st_nt, r_nt) == ("rejected", "rejected_launch_not_trading_timeout")
+
+
+def test_postponement_conflict_sequence_6h_vs_15m_and_revision_clearance():
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+
+    s0 = 1_794_389_400_000  # 11-11 09:30 UTC
+    s1 = 1_794_817_800_000  # 11-16 08:30 UTC
+    t_conflict = s0 + 60_000  # 09:31 UTC
+    t_past_15m = s0 + 900_001  # 09:45:00.001 UTC
+    t_rev = s0 + 1_800_000  # 10:00 UTC
+    t_6h = t_conflict + 21_600_000  # 15:31 UTC
+
+    ev = _make_postponement_v2_event("HYPEUSDC", s0, s0 - 16_100_000)
+    flat = dict(ev, symbol="HYPEUSDC", event_symbol_id=make_event_symbol_id(ev, "HYPEUSDC"))
+    conflict_ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "PENDING_TRADING", "onboardDate": s1}},
+        "fetched_at_ms": t_conflict,
+        "payload_sha256": "c" * 64,
+    }
+    st0 = create_pending_observation_state(
+        flat,
+        "pending_anchor_conflict",
+        {"observation_anchor_ms": s0, "observation_anchor_conflict_active": True, "source_contract_status": "formal_v2_valid"},
+        t_conflict,
+    )
+    assert st0.anchor_resolution_deadline_ms == t_6h
+    assert st0.symbol_visibility_deadline_ms is None
+
+    # At S0+15m+1ms, still pending_anchor_conflict (not killed by 15m)
+    st1 = re_resolve_pending_anchor(
+        st0,
+        [ev],
+        dict(conflict_ex, fetched_at_ms=t_past_15m),
+        t_past_15m,
+    )
+    assert st1.status == "pending_anchor_conflict"
+    assert st1.anchor_resolution_deadline_ms == t_6h
+
+    # Reload via to_dict/from_dict preserves fixed 6h deadline
+    reloaded = EventSymbolState.from_dict(st1.to_dict())
+    assert reloaded.anchor_resolution_deadline_ms == t_6h
+
+    # If API flips to TRADING or disappears without matching S0, conflict stays active
+    trading_mismatch_ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s1}},
+        "fetched_at_ms": t_past_15m + 60_000,
+        "payload_sha256": "d" * 64,
+    }
+    st_still = re_resolve_pending_anchor(reloaded, [ev], trading_mismatch_ex, t_past_15m + 60_000)
+    assert st_still.status == "pending_anchor_conflict"
+
+    st_missing = re_resolve_pending_anchor(st_still, [ev], {"available": False, "symbols": set(), "symbol_rows": {}}, t_past_15m + 120_000)
+    assert st_missing.status == "pending_anchor_conflict"
+
+    # P1-04 counterexamples: (a) existing conflict + valid revision + API unavailable -> conflict NOT cleared!
+    rev_event_tmp = build_formal_schedule_revision_row(
+        source_article_id=ev["source_article_id"],
+        supersedes_source_article_id=ev["source_article_id"],
+        symbol="HYPEUSDC",
+        revised_anchor_ms=s1,
+        superseded_anchor_ms=s0,
+        revision_id="rev_postpone_s1_unavail",
+        revision_semantic_id="rev_postpone_s1_unavail",
+        revision_payload_version_id="pv_postpone_s1_unavail",
+        revision_application_id="rev_postpone_s1_unavail",
+        revision_observation_id="obs_postpone_s1_unavail",
+        revision_payload_hash="e" * 64,
+        raw_payload_sha256="e" * 64,
+        revision_available_at_ms=t_rev,
+        producer_decision_at_ms=t_rev,
+        linking_index_as_of_ms=t_rev,
+        provenance={
+            "payload_sha256": "e" * 64,
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "raw_time_text": "2026-11-16 08:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body.child[0]",
+            "logical_block_id": "2d89a5966b174a2689ab2c2a15db1757:HYPEUSDC",
+            "schedule_text_context": "2026-11-16 08:30 (UTC)",
+            "mapping_method": "per_symbol_official_schedule",
+        },
+    )
+    st_rev_unavail = re_resolve_pending_anchor(
+        st_still, [ev, rev_event_tmp], {"available": False, "symbols": set(), "symbol_rows": {}}, t_rev
+    )
+    assert st_rev_unavail.status == "pending_anchor_conflict"
+    assert st_rev_unavail.observation_anchor_conflict_active is True
+    assert st_rev_unavail.anchor_resolution_deadline_ms == t_6h
+
+    # (b) existing conflict + TRADING with O 120s earlier than S0 -> conflict NOT cleared!
+    early_o_ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s0 - 120_000}},
+        "fetched_at_ms": t_past_15m + 180_000,
+        "payload_sha256": "d" * 64,
+    }
+    st_early_o = re_resolve_pending_anchor(st_still, [ev], early_o_ex, t_past_15m + 180_000)
+    assert st_early_o.status == "pending_anchor_conflict"
+    assert st_early_o.observation_anchor_conflict_active is True
+    assert st_early_o.anchor_resolution_deadline_ms == t_6h
+
+    # At 10:00, legal revision to S1 arrives and API O matches S1 -> clears conflict to future pending
+    rev_event = build_formal_schedule_revision_row(
+        source_article_id=ev["source_article_id"],
+        supersedes_source_article_id=ev["source_article_id"],
+        symbol="HYPEUSDC",
+        revised_anchor_ms=s1,
+        superseded_anchor_ms=s0,
+        revision_id="rev_postpone_s1",
+        revision_semantic_id="rev_postpone_s1",
+        revision_payload_version_id="pv_postpone_s1",
+        revision_application_id="rev_postpone_s1",
+        revision_observation_id="obs_postpone_s1",
+        revision_payload_hash="e" * 64,
+        raw_payload_sha256="e" * 64,
+        revision_available_at_ms=t_rev,
+        producer_decision_at_ms=t_rev,
+        linking_index_as_of_ms=t_rev,
+        provenance={
+            "payload_sha256": "e" * 64,
+            "parser_version": "stage1_5d_symbol_extraction_v3",
+            "raw_time_text": "2026-11-16 08:30 (UTC)",
+            "timezone_text": "UTC",
+            "node_path": "body.child[0]",
+            "logical_block_id": "2d89a5966b174a2689ab2c2a15db1757:HYPEUSDC",
+            "schedule_text_context": "2026-11-16 08:30 (UTC)",
+            "mapping_method": "per_symbol_official_schedule",
+        },
+    )
+    matching_s1_ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "PENDING_TRADING", "onboardDate": s1}},
+        "fetched_at_ms": t_rev,
+        "payload_sha256": "f" * 64,
+    }
+    st_cleared = re_resolve_pending_anchor(st_missing, [ev, rev_event], matching_s1_ex, t_rev)
+    assert st_cleared.status == "pending_launch_time_in_future"
+    assert st_cleared.observation_anchor_ms == s1
+    assert st_cleared.anchor_resolution_deadline_ms is None
+
+    # Control branch: no revision until 15:31 -> rejected_anchor_conflict_unresolved_timeout, late rev does not revive
+    st_timeout = re_resolve_pending_anchor(
+        st1,
+        [ev],
+        dict(conflict_ex, fetched_at_ms=t_6h),
+        t_6h,
+    )
+    assert st_timeout.status == "rejected_anchor_conflict_unresolved_timeout"
+    st_after = re_resolve_pending_anchor(st_timeout, [ev, rev_event], dict(matching_s1_ex, fetched_at_ms=t_6h + 60_000), t_6h + 60_000)
+    assert st_after.status == "rejected_anchor_conflict_unresolved_timeout"
+
+
+def test_postponement_same_page_l1_revision_updates_anchor_and_deadline():
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    s1 = 1_794_389_400_000
+    s2 = s1 + 5 * 86_400_000
+    t_rev = s1 - 600_000
+    ev = {
+        "event_id": f"event_{art_id}",
+        "source_article_id": art_id,
+        "symbols": ["HYPEUSDC"],
+        "detected_at_ms": s1 - 3_600_000,
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "event_all_symbols_consumable_by_stage1_5f": True,
+        "symbol_official_schedule_anchor_ms": {"HYPEUSDC": s1},
+        "symbol_effective_observation_anchor_ms": {"HYPEUSDC": s1},
+        "symbol_effective_observation_anchor_sources": {"HYPEUSDC": "official_schedule_anchor"},
+        "symbol_anchor_validation_statuses": {"HYPEUSDC": "valid"},
+        "symbol_max_evidence_classes": {"HYPEUSDC": "clean_or_recovery"},
+        "symbol_official_schedule_statuses": {"HYPEUSDC": "selected"},
+        "symbol_anchor_provenance": {"HYPEUSDC": {"payload_sha256": "a" * 64}},
+    }
+    rev_same_page = build_formal_schedule_revision_row(
+        source_article_id=art_id,
+        supersedes_source_article_id=art_id,
+        symbol="HYPEUSDC",
+        revised_anchor_ms=s2,
+        superseded_anchor_ms=s1,
+        revision_intent="rescheduled_with_new_anchor",
+        link_status="linked",
+        revision_id="rev_same_page_1",
+        revision_semantic_id="rev_same_page_1",
+        revision_application_id="rev_same_page_1",
+        revision_payload_version_id="b" * 64,
+        revision_observation_id="c" * 64,
+        revision_payload_hash="d" * 64,
+        revision_available_at_ms=t_rev,
+        provenance={"payload_sha256": "d" * 64, "parser_version": "v2"},
+    )
+    st = create_pending_observation_state(
+        {
+            "event_symbol_id": f"event_{art_id}:HYPEUSDC",
+            "event_id": f"event_{art_id}",
+            "symbol": "HYPEUSDC",
+            "detected_at_ms": s1 - 3_600_000,
+            "source_article_id": art_id,
+            "effective_observation_anchor_source": "official_schedule_anchor",
+        },
+        "pending_launch_time_in_future",
+        {
+            "observation_anchor_ms": s1,
+            "effective_observation_anchor_source": "official_schedule_anchor",
+            "formal_event_contract_version": 2,
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art_id}|HYPEUSDC",
+        },
+        s1 - 3_600_000,
+    )
+    ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "PENDING_TRADING", "onboardDate": s2}},
+        "fetched_at_ms": t_rev,
+        "payload_sha256": "c" * 64,
+    }
+    updated = re_resolve_pending_anchor(st, [ev, rev_same_page], ex, t_rev)
+    assert updated.status == "pending_launch_time_in_future"
+    assert updated.observation_anchor_ms == s2
+    assert updated.symbol_visibility_deadline_ms is None
+
+    # Once now >= s2 while still PENDING_TRADING, visibility deadline is s2 + 900_000
+    t_after = s2 + 60_000
+    ex_after = dict(ex, fetched_at_ms=t_after)
+    updated_after = re_resolve_pending_anchor(updated, [ev, rev_same_page], ex_after, t_after)
+    assert updated_after.status == "pending_exchangeinfo_not_trading"
+    assert updated_after.symbol_visibility_deadline_ms == s2 + 900_000
+
+
+def test_postponement_future_launch_revalidation_watermark_exception_and_recovery_cap():
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_event_symbol_eligibility_with_diagnostics,
+        delayed_launch_event_symbol_is_post_watermark,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
+        Watermark,
+    )
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    wm_ms = 1_794_400_000_000
+    s_future = wm_ms + 3 * 86_400_000
+    wm = Watermark(1, wm_ms, ["evt_already_seen"], [], [], wm_ms)
+    rec_cfg = {
+        "source_article_id": art_id,
+        "symbols": ["HYPEUSDC"],
+    }
+    row = {
+        "event_id": "evt_new_rec",
+        "source_article_id": art_id,
+        "event_type": "futures_contract_launch",
+        "symbols": ["HYPEUSDC"],
+        "detected_at_ms": wm_ms - 1_000_000,  # pre-bootstrap article date
+        "formal_event_contract_version": 2,
+        "formal_event_consumable_by_stage1_5f": True,
+        "source_contract_status": "formal_v2_valid",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "event_all_symbols_consumable_by_stage1_5f": True,
+        "detail_recovery_provenance": "explicit_future_launch_revalidation_v1",
+        "symbol_official_schedule_anchor_ms": {"HYPEUSDC": s_future},
+        "symbol_effective_observation_anchor_ms": {"HYPEUSDC": s_future},
+        "symbol_effective_observation_anchor_sources": {"HYPEUSDC": "official_schedule_anchor"},
+        "symbol_anchor_validation_statuses": {"HYPEUSDC": "valid"},
+        "symbol_max_evidence_classes": {"HYPEUSDC": "clean_or_recovery"},
+        "symbol_official_schedule_statuses": {"HYPEUSDC": "selected"},
+        "symbol_anchor_provenance": {
+            "HYPEUSDC": {
+                "payload_sha256": "a" * 64,
+                "parser_version": "stage1_5d_symbol_extraction_v3",
+                "raw_time_text": "2026-11-16 09:30 (UTC)",
+                "timezone_text": "UTC",
+                "node_path": "body.child[0]",
+                "logical_block_id": f"{art_id}:HYPEUSDC",
+                "schedule_text_context": "2026-11-16 09:30 (UTC): HYPEUSDC",
+                "mapping_method": "per_symbol_official_schedule",
+                "mapping_confidence": "exact_per_symbol_row",
+            }
+        },
+    }
+
+    # Without matching future_launch_recovery config -> rejected
+    assert delayed_launch_event_symbol_is_post_watermark(row, "HYPEUSDC", wm) is False
+    # With matching future_launch_recovery config -> allowed
+    assert delayed_launch_event_symbol_is_post_watermark(row, "HYPEUSDC", wm, future_launch_recovery=rec_cfg) is True
+    # bootstrap_seen is NEVER exempted
+    assert delayed_launch_event_symbol_is_post_watermark({**row, "event_id": "evt_already_seen"}, "HYPEUSDC", wm, future_launch_recovery=rec_cfg) is False
+
+    # At anchor + 10s with TRADING -> eligible_recovery_only and live_depth_evidence_basis == recovery_validation_only
+    now_ok = s_future + 10_000
+    ex_ok = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s_future}},
+        "fetched_at_ms": now_ok,
+        "payload_sha256": "b" * 64,
+    }
+    decision, reason, diag = classify_event_symbol_eligibility_with_diagnostics(
+        row, "HYPEUSDC", now_ok, wm, ex_ok, {}, future_launch_recovery=rec_cfg
+    )
+    assert decision == "eligible"
+    assert reason == "eligible_recovery_only"
+    assert diag["evidence_start_class"] == "recovery_start"
+    assert diag["live_depth_evidence_basis"] == "recovery_validation_only"
+    assert diag["admission_max_evidence_class"] == "recovery_validation_only"
+    assert diag["latest_max_evidence_class"] == "recovery_validation_only"
+
+    # P1-02 counterexamples: post-watermark row with recovery marker MUST fail when selection is missing or mismatched
+    post_wm_row = {**row, "detected_at_ms": wm_ms + 1_000}
+    d_no_cfg, r_no_cfg, _ = classify_event_symbol_eligibility_with_diagnostics(
+        post_wm_row, "HYPEUSDC", now_ok, wm, ex_ok, {}, future_launch_recovery=None
+    )
+    assert d_no_cfg == "diagnostic_only"
+    assert r_no_cfg == "future_launch_recovery_selection_mismatch"
+
+    d_other, r_other, _ = classify_event_symbol_eligibility_with_diagnostics(
+        post_wm_row,
+        "HYPEUSDC",
+        now_ok,
+        wm,
+        ex_ok,
+        {},
+        future_launch_recovery={"source_article_id": "f" * 32, "symbols": ["TRXUSDC"]},
+    )
+    assert d_other == "diagnostic_only"
+    assert r_other == "future_launch_recovery_selection_mismatch"
+
+    # Past 15m late-start deadline -> still rejected!
+    now_late = s_future + 960_000
+    ex_late = dict(ex_ok, fetched_at_ms=now_late)
+    d_late, r_late, _ = classify_event_symbol_eligibility_with_diagnostics(
+        row, "HYPEUSDC", now_late, wm, ex_late, {}, future_launch_recovery=rec_cfg
+    )
+    assert d_late == "rejected"
+    assert r_late == "rejected_launch_late_start_timeout"
+
+
+def test_postponement_pending_reresolution_preserves_recovery_ceiling_and_hashes():
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+
+    now_ms = 1_794_400_000_000
+    s_future = now_ms + 3 * 86_400_000
+    source_hash = "9" * 64
+    target_row = {
+        "event_id": "evt_rec_pend",
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "event_type": "futures_contract_launch",
+        "symbols": ["HYPEUSDC"],
+        "detected_at_ms": now_ms - 10_000,
+        "formal_event_contract_version": 2,
+        "formal_event_consumable_by_stage1_5f": True,
+        "source_contract_status": "formal_v2_valid",
+        "anchor_precedence_policy": "official_schedule_priority_v1",
+        "event_all_symbols_consumable_by_stage1_5f": True,
+        "detail_recovery_provenance": "explicit_future_launch_revalidation_v1",
+        "symbol_official_schedule_anchor_ms": {"HYPEUSDC": s_future},
+        "symbol_effective_observation_anchor_ms": {"HYPEUSDC": s_future},
+        "symbol_effective_observation_anchor_sources": {"HYPEUSDC": "official_schedule_anchor"},
+        "symbol_anchor_validation_statuses": {"HYPEUSDC": "valid"},
+        "symbol_max_evidence_classes": {"HYPEUSDC": "clean_or_recovery"},
+        "symbol_official_schedule_statuses": {"HYPEUSDC": "selected"},
+        "symbol_source_anchor_contract_hashes": {"HYPEUSDC": source_hash},
+    }
+    pending = create_pending_observation_state(
+        {**target_row, "symbol": "HYPEUSDC", "event_symbol_id": "evt_rec_pend:HYPEUSDC"},
+        "pending_launch_time_in_future",
+        {
+            "pending_reason": "pending_launch_time_in_future",
+            "observation_anchor_ms": s_future,
+            "observation_anchor_basis": "official_schedule_anchor",
+            "observation_anchor_confidence": "high",
+            "observation_anchor_candidates": {"official_schedule_anchor": s_future},
+            "observation_anchor_disagreement_max_ms": 0,
+            "observation_anchor_conflict_active": False,
+            "source_anchor_contract_hash": source_hash,
+            "anchor_precedence_policy": "official_schedule_priority_v1",
+            "admission_anchor_evidence_level": "clean_or_recovery",
+            "latest_anchor_evidence_level": "clean_or_recovery",
+            "admission_max_evidence_class": "recovery_validation_only",
+            "latest_max_evidence_class": "recovery_validation_only",
+            "live_depth_evidence_basis": "recovery_validation_only",
+            "effective_observation_anchor_source": "official_schedule_anchor",
+        },
+        now_ms - 60_000,
+    )
+    ex_ok = {
+        "available": True,
+        "fetched_at_ms": now_ms,
+        "symbols": {
+            "HYPEUSDC": {
+                "symbol": "HYPEUSDC",
+                "status": "PENDING_TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDC",
+                "marginAsset": "USDC",
+                "onboardDate": s_future,
+            }
+        },
+    }
+    updated = re_resolve_pending_anchor(
+        pending,
+        [target_row],
+        ex_ok,
+        now_ms,
+    )
+    assert updated.admission_max_evidence_class == "recovery_validation_only"
+    assert updated.latest_max_evidence_class == "recovery_validation_only"
+    assert updated.source_anchor_contract_hash == source_hash
+    assert updated.admission_anchor_contract_hash == updated.latest_anchor_contract_hash
+    assert len(updated.admission_anchor_contract_hash) == 64

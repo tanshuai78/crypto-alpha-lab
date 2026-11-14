@@ -182,3 +182,17 @@ def test_runtime_gate_writer_requires_guard_and_reserves_by_gate_status(tmp_path
     )
     write_stage1_5d_runtime_gate_atomic(tmp_path, failed_gate, storage_guard=guard)
     assert guard.artifact_classes == ["ordinary_control_plane", "terminal_control_plane"]
+
+
+def test_postponement_runtime_gate_propagates_future_launch_recovery(tmp_path):
+    rec = {
+        "article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "symbols": ["HYPEUSDC", "TRXUSDC"],
+        "provenance": "explicit_future_launch_revalidation_v1",
+    }
+    gate = build_stage1_5d_runtime_gate(
+        _build_test_gate_context(output_root=tmp_path, future_launch_recovery=rec)
+    )
+    assert gate["future_launch_recovery"] == rec
+    gate_none = build_stage1_5d_runtime_gate(_build_test_gate_context(output_root=tmp_path))
+    assert gate_none["future_launch_recovery"] is None

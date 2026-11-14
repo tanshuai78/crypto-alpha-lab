@@ -167,6 +167,27 @@ def validate_stage1_5d_runtime_gate(
                 "gate_summary": gate_data,
             }
 
+    rec = gate_data.get("future_launch_recovery")
+    if rec is not None:
+        rec_valid = (
+            isinstance(rec, dict)
+            and set(rec.keys()) == {"source_article_id", "symbols"}
+            and isinstance(rec.get("source_article_id"), str)
+            and bool(re.fullmatch(r"[0-9a-f]{32}", rec["source_article_id"]))
+            and isinstance(rec.get("symbols"), list)
+            and len(rec["symbols"]) > 0
+            and all(isinstance(s, str) and bool(s.strip()) and s == s.strip().upper() for s in rec["symbols"])
+            and rec["symbols"] == sorted(set(rec["symbols"]))
+        )
+        if not rec_valid:
+            return {
+                "valid": False,
+                "decision": gate_data.get("decision"),
+                "status": gate_data.get("status"),
+                "reason": "runtime_gate_future_launch_recovery_invalid",
+                "gate_summary": gate_data,
+            }
+
     gate_root_path = Path(gate_data.get("source_root") or "").resolve()
     return {
         "valid": True,
@@ -567,6 +588,107 @@ def _get_symbol_time(row: dict, field: str, symbol: str) -> int | None:
     return _valid_ms(data.get(sym) or data.get(symbol))
 
 
+def evaluate_exchangeinfo_symbol_readiness(
+    symbol: str,
+    anchor_ms: int | None,
+    exchangeinfo_state: dict | None,
+    decision_now_ms: int,
+) -> dict:
+    """Evaluate exchangeInfo snapshot freshness, symbol readiness, and onboardDate conflict."""
+    sym = str(symbol or "").strip().upper()
+    if not isinstance(exchangeinfo_state, dict) or not exchangeinfo_state.get("available", False):
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_unavailable",
+            "onboard_date_ms": None,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": "",
+        }
+
+    payload_sha256 = str(exchangeinfo_state.get("payload_sha256") or "").strip()
+    fetched_at_ms = _valid_ms(exchangeinfo_state.get("fetched_at_ms"))
+    if not payload_sha256 or fetched_at_ms is None:
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_unavailable",
+            "onboard_date_ms": None,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": "",
+        }
+
+    age_ms = decision_now_ms - fetched_at_ms
+    if (
+        age_ms < -base.EXTERNAL_SIGNAL_STAGE1_5F_CLOCK_SKEW_TOLERANCE_MS
+        or age_ms > base.EXTERNAL_SIGNAL_STAGE1_5F_EXCHANGEINFO_REFRESH_SEC * 1000
+    ):
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_unavailable",
+            "onboard_date_ms": None,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": "",
+        }
+
+    symbols_in_exchange = exchangeinfo_state.get("symbols") or set()
+    if sym not in symbols_in_exchange and symbol not in symbols_in_exchange:
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_symbol_not_visible_after_anchor",
+            "onboard_date_ms": None,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": "",
+        }
+
+    symbol_rows = exchangeinfo_state.get("symbol_rows")
+    ex_row = symbol_rows.get(sym) or symbol_rows.get(symbol) if isinstance(symbol_rows, dict) else None
+    if not isinstance(ex_row, dict):
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_not_trading",
+            "onboard_date_ms": None,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": "",
+        }
+
+    ex_status = str(ex_row.get("status") or "").strip()
+    ex_onboard = _valid_ms(ex_row.get("onboardDate"))
+    if anchor_ms is not None and ex_onboard is not None:
+        disagreement_ms = ex_onboard - anchor_ms
+        if ex_onboard > anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_DISAGREEMENT_MS:
+            return {
+                "ready": False,
+                "reason": "pending_anchor_conflict",
+                "onboard_date_ms": ex_onboard,
+                "conflict": True,
+                "disagreement_ms": disagreement_ms,
+                "status": ex_status,
+            }
+
+    if ex_onboard is None or ex_status != "TRADING":
+        return {
+            "ready": False,
+            "reason": "pending_exchangeinfo_not_trading",
+            "onboard_date_ms": ex_onboard,
+            "conflict": False,
+            "disagreement_ms": 0,
+            "status": ex_status,
+        }
+
+    return {
+        "ready": True,
+        "reason": "ready",
+        "onboard_date_ms": ex_onboard,
+        "conflict": False,
+        "disagreement_ms": 0,
+        "status": ex_status,
+    }
+
+
 def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_state: dict, now_ms: int) -> dict:
     sym = symbol.strip().upper()
     candidates = {}
@@ -594,6 +716,12 @@ def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_sta
             if isinstance(disagreement_map, dict):
                 disagreement_ms = int(disagreement_map.get(sym) or disagreement_map.get(symbol) or 0)
 
+            conflict_active = bool(val.get("observation_anchor_conflict_active", False))
+            readiness = evaluate_exchangeinfo_symbol_readiness(sym, effective_anchor, exchangeinfo_state, now_ms)
+            if readiness["conflict"]:
+                conflict_active = True
+                disagreement_ms = max(disagreement_ms, int(readiness["disagreement_ms"]))
+
             source_hashes = row.get("symbol_source_anchor_contract_hashes", {})
             evidence_levels = row.get("symbol_anchor_evidence_levels", {})
             max_classes = row.get("symbol_max_evidence_classes", {})
@@ -604,7 +732,7 @@ def resolve_depth_observation_anchor_ms(row: dict, symbol: str, exchangeinfo_sta
                 "observation_anchor_confidence": "high" if effective_source == "official_schedule_anchor" else "medium",
                 "observation_anchor_candidates": candidates,
                 "observation_anchor_disagreement_max_ms": disagreement_ms,
-                "observation_anchor_conflict_active": bool(val.get("observation_anchor_conflict_active", False)),
+                "observation_anchor_conflict_active": conflict_active,
                 "exchangeinfo_anchor_clean_eligible": False,
                 "exchangeinfo_anchor_evidence": {
                     "payload_sha256": str(exchangeinfo_state.get("payload_sha256") or "") if isinstance(exchangeinfo_state, dict) else "",
@@ -836,6 +964,14 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
             d["observation_anchor_ms"] = selection.revised_anchor_ms
             d["observation_anchor_basis"] = selection.effective_observation_anchor_source
             d["effective_observation_anchor_source"] = selection.effective_observation_anchor_source
+            is_rec_pending = getattr(pending_state, "detail_recovery_provenance", None) in {
+                "active_root_retry_cycle_recovery_v1",
+                "explicit_future_launch_revalidation_v1",
+            }
+            if is_rec_pending:
+                d["admission_max_evidence_class"] = "recovery_validation_only"
+                d["latest_max_evidence_class"] = "recovery_validation_only"
+                d["live_depth_evidence_basis"] = "recovery_validation_only"
             applied_ids = list(getattr(pending_state, "applied_schedule_revision_ids", []) or [])
             if selection.revision_application_id and selection.revision_application_id not in applied_ids:
                 d["applied_schedule_revision_ids"] = [*applied_ids, selection.revision_application_id]
@@ -848,16 +984,19 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
                     or anchor_diag.get("source_anchor_contract_hash")
                 )
                 if prev_hash:
+                    latest_contract_payload = {
+                        "symbol": pending_state.symbol,
+                        "symbol_revised_anchor_ms": selection.revised_anchor_ms,
+                        "revision_id": selection.revision_id,
+                        "revision_payload_hash": selection.revision_payload_hash,
+                        "anchor_precedence_policy": selection.anchor_precedence_policy,
+                    }
+                    if is_rec_pending:
+                        latest_contract_payload["latest_max_evidence_class"] = "recovery_validation_only"
                     d["latest_anchor_contract_hash"] = compute_latest_anchor_contract_hash(
                         previous_latest_anchor_contract_hash=prev_hash,
                         revision_application_id=selection.revision_application_id,
-                        latest_contract={
-                            "symbol": pending_state.symbol,
-                            "symbol_revised_anchor_ms": selection.revised_anchor_ms,
-                            "revision_id": selection.revision_id,
-                            "revision_payload_hash": selection.revision_payload_hash,
-                            "anchor_precedence_policy": selection.anchor_precedence_policy,
-                        },
+                        latest_contract=latest_contract_payload,
                     )
 
     d["anchor_resolution_attempt_count"] = pending_state.anchor_resolution_attempt_count + 1
@@ -888,15 +1027,79 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         if val not in (None, ""):
             d[key] = val
 
+    is_rec_pending = (
+        getattr(pending_state, "detail_recovery_provenance", None)
+        in {"active_root_retry_cycle_recovery_v1", "explicit_future_launch_revalidation_v1"}
+        or d.get("detail_recovery_provenance")
+        in {"active_root_retry_cycle_recovery_v1", "explicit_future_launch_revalidation_v1"}
+        or getattr(pending_state, "admission_max_evidence_class", None) == "recovery_validation_only"
+    )
+    if is_rec_pending:
+        d["admission_max_evidence_class"] = "recovery_validation_only"
+        d["latest_max_evidence_class"] = "recovery_validation_only"
+        d["live_depth_evidence_basis"] = "recovery_validation_only"
+        source_hash = str(d.get("source_anchor_contract_hash") or "")
+        if source_hash:
+            adm_hash = compute_admission_anchor_contract_hash(
+                source_anchor_contract_hash=source_hash,
+                admission_snapshot={
+                    "admission_at_ms": d.get("first_seen_at_ms") or now_ms,
+                    "observation_anchor_ms": d.get("observation_anchor_ms"),
+                    "evidence_start_class": d.get("evidence_start_class"),
+                    "admission_max_evidence_class": d["admission_max_evidence_class"],
+                },
+            )
+            d["admission_anchor_contract_hash"] = adm_hash
+            if not d.get("applied_schedule_revision_ids"):
+                d["latest_anchor_contract_hash"] = adm_hash
+
     retry_interval_ms = base.EXTERNAL_SIGNAL_STAGE1_5F_ANCHOR_RESOLUTION_RETRY_INTERVAL_SEC * 1000
     d["next_anchor_resolution_at_ms"] = now_ms + retry_interval_ms
+
+    prior_conflict = (
+        pending_state.status == "pending_anchor_conflict"
+        or bool(getattr(pending_state, "observation_anchor_conflict_active", False))
+    )
+    if anchor_ms is not None and not conflict_active:
+        readiness = evaluate_exchangeinfo_symbol_readiness(pending_state.symbol, anchor_ms, exchangeinfo_state, now_ms)
+        if readiness["conflict"]:
+            conflict_active = True
+            d["observation_anchor_conflict_active"] = True
+            d["observation_anchor_disagreement_max_ms"] = max(
+                int(d.get("observation_anchor_disagreement_max_ms") or 0),
+                int(readiness["disagreement_ms"]),
+            )
+        elif prior_conflict:
+            # Existing unresolved conflict only clears when valid fresh API onboardDate agrees with S within 60s.
+            onboard_ms = readiness.get("onboard_date_ms")
+            if (
+                onboard_ms is None
+                or readiness["reason"] == "pending_exchangeinfo_unavailable"
+                or abs(int(onboard_ms) - int(anchor_ms)) > 60_000
+            ):
+                conflict_active = True
+                d["observation_anchor_conflict_active"] = True
+                if onboard_ms is not None:
+                    d["observation_anchor_disagreement_max_ms"] = max(
+                        int(d.get("observation_anchor_disagreement_max_ms") or 0),
+                        abs(int(onboard_ms) - int(anchor_ms)),
+                    )
+    else:
+        readiness = None
+        if prior_conflict:
+            conflict_active = True
+            d["observation_anchor_conflict_active"] = True
 
     if conflict_active:
         d["status"] = "pending_anchor_conflict"
         d["pending_reason"] = "pending_anchor_conflict"
         d["pending_terminal_reason"] = ""
         d["observation_anchor_ms"] = None
-        deadline = pending_state.anchor_resolution_deadline_ms or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+        d["symbol_visibility_deadline_ms"] = None
+        started_at = pending_state.anchor_resolution_started_at_ms or now_ms
+        deadline = pending_state.anchor_resolution_deadline_ms or (started_at + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
+        d["anchor_resolution_started_at_ms"] = started_at
+        d["anchor_resolution_deadline_ms"] = deadline
         if now_ms >= deadline:
             d["status"] = "rejected_anchor_conflict_unresolved_timeout"
             d["pending_terminal_reason"] = "rejected_anchor_conflict_unresolved_timeout"
@@ -915,6 +1118,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
 
         d["pending_terminal_reason"] = ""
         d["observation_anchor_ms"] = None
+        d["symbol_visibility_deadline_ms"] = None
         if now_ms >= deadline:
             d["status"] = "rejected_launch_anchor_unavailable_timeout"
             d["pending_terminal_reason"] = "rejected_launch_anchor_unavailable_timeout"
@@ -923,6 +1127,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
         d["observation_anchor_ms"] = anchor_ms
         d["observation_anchor_basis"] = anchor_diag.get("observation_anchor_basis", "")
         d["observation_anchor_confidence"] = anchor_diag.get("observation_anchor_confidence", "")
+        d["observation_anchor_conflict_active"] = False
         d["anchor_resolution_started_at_ms"] = None
         d["anchor_resolution_deadline_ms"] = None
 
@@ -930,6 +1135,7 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
             d["status"] = "pending_source_event_unvalidated"
             d["pending_reason"] = "pending_source_event_unvalidated"
             d["pending_terminal_reason"] = ""
+            d["symbol_visibility_deadline_ms"] = None
             legacy_wait_ms = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5F_LEGACY_SOURCE_REVISION_WAIT_MS", 24 * 60 * 60 * 1000)
             deadline = getattr(pending_state, "legacy_source_revision_wait_deadline_ms", None) or (now_ms + legacy_wait_ms)
             if now_ms >= deadline:
@@ -940,26 +1146,39 @@ def re_resolve_pending_anchor(pending_state, event_revisions: list[dict], exchan
             d["status"] = "pending_launch_time_in_future"
             d["pending_reason"] = "pending_launch_time_in_future"
             d["pending_terminal_reason"] = ""
+            d["symbol_visibility_deadline_ms"] = None
             d["next_admission_check_at_ms"] = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
-        elif not exchangeinfo_state or not exchangeinfo_state.get("available", False):
-            d["status"] = "pending_exchangeinfo_unavailable"
-            d["pending_reason"] = "pending_exchangeinfo_unavailable"
-            d["pending_terminal_reason"] = ""
-        elif pending_state.symbol not in exchangeinfo_state.get("symbols", set()):
-            if now_ms - anchor_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
-                d["status"] = "pending_exchangeinfo_symbol_not_visible_after_anchor"
-                d["pending_reason"] = "pending_exchangeinfo_symbol_not_visible_after_anchor"
-                d["pending_terminal_reason"] = ""
-            else:
-                d["status"] = "rejected_launch_symbol_not_visible_timeout"
-                d["pending_terminal_reason"] = "rejected_launch_symbol_not_visible_timeout"
-                return pending_state.__class__.from_dict(d)
         else:
-            d["status"] = "pending_ready_for_admission"
-            d["pending_reason"] = "pending_ready_for_admission"
-            d["pending_terminal_reason"] = ""
-            d["next_admission_check_at_ms"] = now_ms
-            _attach_admission_anchor_lineage(d, now_ms)
+            if pending_state.observation_anchor_ms == anchor_ms and pending_state.symbol_visibility_deadline_ms is not None:
+                vis_deadline = pending_state.symbol_visibility_deadline_ms
+            else:
+                vis_deadline = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+            d["symbol_visibility_deadline_ms"] = vis_deadline
+            if readiness is None:
+                readiness = evaluate_exchangeinfo_symbol_readiness(pending_state.symbol, anchor_ms, exchangeinfo_state, now_ms)
+            if not readiness["ready"]:
+                if now_ms > vis_deadline:
+                    term_reason = (
+                        "rejected_launch_symbol_not_visible_timeout"
+                        if readiness["reason"] == "pending_exchangeinfo_symbol_not_visible_after_anchor"
+                        else "rejected_launch_not_trading_timeout"
+                    )
+                    d["status"] = term_reason
+                    d["pending_terminal_reason"] = term_reason
+                    return pending_state.__class__.from_dict(d)
+                d["status"] = readiness["reason"]
+                d["pending_reason"] = readiness["reason"]
+                d["pending_terminal_reason"] = ""
+            elif now_ms > vis_deadline:
+                d["status"] = "rejected_launch_anchor_age_exceeded"
+                d["pending_terminal_reason"] = "rejected_launch_anchor_age_exceeded"
+                return pending_state.__class__.from_dict(d)
+            else:
+                d["status"] = "pending_ready_for_admission"
+                d["pending_reason"] = "pending_ready_for_admission"
+                d["pending_terminal_reason"] = ""
+                d["next_admission_check_at_ms"] = now_ms
+                _attach_admission_anchor_lineage(d, now_ms)
 
     return pending_state.__class__.from_dict(d)
 
@@ -997,9 +1216,27 @@ def _event_identity_seen_by_watermark(row: dict, watermark) -> bool:
     return stable_key in watermark.seen_stable_event_keys
 
 
-def delayed_launch_event_symbol_is_post_watermark(row: dict, symbol: str, watermark) -> bool:
+def delayed_launch_event_symbol_is_post_watermark(
+    row: dict,
+    symbol: str,
+    watermark,
+    *,
+    future_launch_recovery: dict | None = None,
+) -> bool:
     if _event_identity_seen_by_watermark(row, watermark):
         return False
+
+    if row.get("detail_recovery_provenance") == "explicit_future_launch_revalidation_v1":
+        if not isinstance(future_launch_recovery, dict):
+            return False
+        if row.get("source_article_id") != future_launch_recovery.get("source_article_id"):
+            return False
+        if symbol not in (future_launch_recovery.get("symbols") or []):
+            return False
+        launch_time_ms = _get_symbol_time(row, "symbol_effective_observation_anchor_ms", symbol)
+        if launch_time_ms is None:
+            launch_time_ms = _get_symbol_time(row, "symbol_effective_launch_times_ms", symbol)
+        return launch_time_ms is not None and launch_time_ms > watermark.max_seen_detected_at_ms
 
     if row.get("symbol_extraction_source") not in {"title_contract_symbol", "detail_contract_symbol"}:
         return False
@@ -1252,6 +1489,8 @@ def classify_event_symbol_eligibility_with_diagnostics(
     watermark,
     exchangeinfo_state: dict,
     budget_state: dict,
+    *,
+    future_launch_recovery: dict | None = None,
 ) -> tuple[str, str, dict]:
     norm_id = normalize_event_symbol_identity(row, symbol)
     if not norm_id["identity_valid"]:
@@ -1292,8 +1531,28 @@ def classify_event_symbol_eligibility_with_diagnostics(
     elif source_status == "malformed":
         return "diagnostic_only", "malformed_source_contract", diag
 
+    recovery_prov = row.get("detail_recovery_provenance")
+    if recovery_prov is not None:
+        if recovery_prov not in {
+            "active_root_retry_cycle_recovery_v1",
+            "explicit_future_launch_revalidation_v1",
+        }:
+            diag["evidence_start_class"] = "malformed_provenance"
+            return "diagnostic_only", "malformed_recovery_provenance", diag
+        if recovery_prov == "explicit_future_launch_revalidation_v1":
+            if (
+                not isinstance(future_launch_recovery, dict)
+                or row.get("source_article_id") != future_launch_recovery.get("source_article_id")
+                or symbol not in (future_launch_recovery.get("symbols") or [])
+            ):
+                return "diagnostic_only", "future_launch_recovery_selection_mismatch", diag
+        diag["evidence_start_class"] = "recovery_start"
+        diag["live_depth_evidence_basis"] = "recovery_validation_only"
+        diag["admission_max_evidence_class"] = "recovery_validation_only"
+        diag["latest_max_evidence_class"] = "recovery_validation_only"
+
     if not event_is_post_watermark(row, watermark) and not delayed_launch_event_symbol_is_post_watermark(
-        row, symbol, watermark
+        row, symbol, watermark, future_launch_recovery=future_launch_recovery
     ):
         return "rejected", "pre_watermark", {}
 
@@ -1312,16 +1571,19 @@ def classify_event_symbol_eligibility_with_diagnostics(
     if source_status not in {"formal_v1_valid", "formal_v2_valid"}:
         return "pending", "pending_source_event_unvalidated", diag
 
-    if not exchangeinfo_state or not exchangeinfo_state.get("available", False):
-        return "pending", "pending_exchangeinfo_unavailable", diag
+    readiness = evaluate_exchangeinfo_symbol_readiness(symbol, anchor_ms, exchangeinfo_state, now_ms)
+    if readiness["conflict"]:
+        return "pending", "pending_anchor_conflict", diag
 
-    symbols_in_exchange = exchangeinfo_state.get("symbols", set())
-    if symbol not in symbols_in_exchange:
+    if not readiness["ready"]:
         delay_ms = now_ms - anchor_ms
-        if delay_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
-            return "pending", "pending_exchangeinfo_symbol_not_visible_after_anchor", diag
-        else:
+        if readiness["reason"] == "pending_exchangeinfo_symbol_not_visible_after_anchor":
+            if delay_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
+                return "pending", "pending_exchangeinfo_symbol_not_visible_after_anchor", diag
             return "rejected", "rejected_launch_symbol_not_visible_timeout", diag
+        if delay_ms <= base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS:
+            return "pending", readiness["reason"], diag
+        return "rejected", "rejected_launch_not_trading_timeout", diag
 
     if budget_state and budget_state.get("budget_exceeded", False):
         return "pending", "pending_observation_capacity", diag
@@ -1332,15 +1594,27 @@ def classify_event_symbol_eligibility_with_diagnostics(
 
     recovery_prov = row.get("detail_recovery_provenance")
     if recovery_prov is not None:
-        if recovery_prov != "active_root_retry_cycle_recovery_v1":
+        if recovery_prov not in {
+            "active_root_retry_cycle_recovery_v1",
+            "explicit_future_launch_revalidation_v1",
+        }:
             diag["evidence_start_class"] = "malformed_provenance"
             return "diagnostic_only", "malformed_recovery_provenance", diag
 
     max_evidence_class = diag.get("admission_max_evidence_class") or diag.get("latest_max_evidence_class") or "clean_or_recovery"
-    if recovery_prov == "active_root_retry_cycle_recovery_v1":
+    if recovery_prov in {
+        "active_root_retry_cycle_recovery_v1",
+        "explicit_future_launch_revalidation_v1",
+    }:
+        if delay_ms > recovery_delay_max:
+            return "rejected", "rejected_launch_late_start_timeout", diag
         diag["evidence_start_class"] = "recovery_start"
         diag["live_depth_evidence_basis"] = "recovery_validation_only"
-        diag["clean_start_forbidden_reason"] = "active_root_retry_cycle_recovery_marker"
+        diag["clean_start_forbidden_reason"] = (
+            "active_root_retry_cycle_recovery_marker"
+            if recovery_prov == "active_root_retry_cycle_recovery_v1"
+            else "explicit_future_launch_revalidation_marker"
+        )
         _attach_admission_anchor_lineage(diag, now_ms)
         return "eligible", "eligible_recovery_only", diag
     elif max_evidence_class != "clean_or_recovery":

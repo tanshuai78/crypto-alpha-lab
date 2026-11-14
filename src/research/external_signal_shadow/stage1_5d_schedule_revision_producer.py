@@ -409,3 +409,78 @@ def emit_schedule_revision_batch(
         "is_late_conflict": is_late_conflict,
         "emitted_row_count": len(prepared_rows),
     }
+
+
+def detect_and_emit_same_page_schedule_revision(
+    *,
+    source_article_id: str,
+    old_symbols: list[str],
+    new_symbols: list[str],
+    old_anchors_ms: dict[str, int],
+    new_anchors_ms: dict[str, int],
+    old_payload_sha256: str,
+    new_payload_sha256: str,
+    index_rows: list[dict[str, Any]],
+    available_at_ms: int,
+    producer_effective_enabled: bool,
+    lookback_days: int = 14,
+    emitted_ids: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Detect and emit a same-page L1 postponement revision when all safety gates hold."""
+    article_id = str(source_article_id or "").strip()
+    old_hash = str(old_payload_sha256 or "").strip()
+    new_hash = str(new_payload_sha256 or "").strip()
+    old_syms = [str(s).strip().upper() for s in (old_symbols or []) if str(s).strip()]
+    new_syms = [str(s).strip().upper() for s in (new_symbols or []) if str(s).strip()]
+
+    if not article_id or not old_syms:
+        return [], {"status": "revision_diagnostic", "reason": "missing_article_or_symbols"}
+    if not old_hash or not new_hash:
+        return [], {"status": "revision_diagnostic", "reason": "missing_payload_sha256"}
+    if new_hash == old_hash:
+        return [], {"status": "not_revision", "reason": "payload_hash_unchanged"}
+    if set(new_syms) != set(old_syms):
+        return [], {"status": "revision_diagnostic", "reason": "symbol_set_changed"}
+
+    symbol_candidates = {}
+    for sym in old_syms:
+        old_ms = old_anchors_ms.get(sym)
+        new_ms = new_anchors_ms.get(sym)
+        if not isinstance(old_ms, int) or old_ms <= 0 or not isinstance(new_ms, int) or new_ms <= 0:
+            return [], {"status": "revision_diagnostic", "reason": "missing_anchor_ms", "symbol": sym}
+        if new_ms <= old_ms:
+            return [], {"status": "revision_diagnostic", "reason": "new_anchor_not_strictly_later", "symbol": sym}
+        symbol_candidates[sym] = {
+            "symbol": sym,
+            "supersedes_source_article_id": article_id,
+            "link_level_candidate": "L1_exact_article_id",
+            "revised_anchor_ms": new_ms,
+            "superseded_anchor_ms": old_ms,
+        }
+
+    batch_candidate = {
+        "source_article_id": article_id,
+        "revision_intent": "rescheduled_with_new_anchor",
+        "symbols": old_syms,
+        "symbol_candidates": symbol_candidates,
+        "payload_sha256": new_hash,
+        "is_late_conflict": False,
+    }
+    rows, batch_result = emit_schedule_revision_batch(
+        batch_candidate,
+        index_rows,
+        available_at_ms=available_at_ms,
+        lookback_days=lookback_days,
+        emitted_ids=emitted_ids,
+    )
+    if batch_result["batch_status"] == "already_emitted":
+        return [], {"status": "revision_replay_noop", "batch_result": batch_result}
+    if not producer_effective_enabled:
+        return [], {
+            "status": "revision_diagnostic",
+            "reason": "producer_disabled_or_prerequisites_unmet",
+            "candidate": batch_candidate,
+        }
+    if not rows:
+        return [], {"status": "revision_diagnostic", "reason": batch_result}
+    return rows, {"status": "revision_emitted", "emitted_count": len(rows), "batch_result": batch_result}

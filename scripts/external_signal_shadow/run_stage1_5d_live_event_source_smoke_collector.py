@@ -629,6 +629,8 @@ def build_stage1_5d_terminal_tombstone(
         "quote_derivation_source": None,
         "retry_count": int((existing.get("retry_count") if existing else 0) or 0),
         "schedule_revision_producer_status": None,
+        "next_schedule_recheck_at_ms": None,
+        "schedule_recheck_deadline_ms": None,
     }
     return row
 
@@ -746,6 +748,8 @@ def build_stage1_5d_v3_active_article(
         "quote_derivation_source": quote_derivation_source,
         "retry_count": int((existing.get("retry_count") if existing else 0) or 0),
         "schedule_revision_producer_status": existing.get("schedule_revision_producer_status") if existing else None,
+        "next_schedule_recheck_at_ms": existing.get("next_schedule_recheck_at_ms") if existing else None,
+        "schedule_recheck_deadline_ms": existing.get("schedule_recheck_deadline_ms") if existing else None,
     }
     return row
 
@@ -1862,34 +1866,81 @@ def apply_formal_launch_event_contract(
     article_id = str(norm_event.get("source_article_id") or state.get("source_article_id") or "")
     payload_hash = str(
         norm_event.get("detail_payload_hash")
+        or state.get("detail_payload_hash")
+        or state.get("last_bapi_payload_hash")
         or norm_event.get("payload_sha256")
-        or state.get("last_bapi_payload_sha256")
         or state.get("payload_sha256")
         or ""
     )
+    if payload_hash and not norm_event.get("detail_payload_hash"):
+        norm_event["detail_payload_hash"] = payload_hash
     parser_version = str(norm_event.get("parser_version") or PARSER_VERSION)
     title = str(norm_event.get("title") or state.get("title") or "")
     mapping_confidence = "exact_single_symbol" if len(symbols) == 1 else "exact_per_symbol_row"
 
+    cand_prov_by_sym = {
+        str(p.get("symbol") or "").strip().upper(): p
+        for p in (state.get("candidate_provenance") or [])
+        if isinstance(p, dict) and p.get("symbol")
+    }
+    provenance_incomplete = False
     symbol_contracts = {}
     for sym in symbols:
         official_ms = int(launch_times.get(sym) or 0) or None
         onboard_ms = int(onboard_times.get(sym) or 0) or None
-        raw_time_text = str(
-            (state.get("symbol_launch_times_utc") or {}).get(sym)
-            or (state.get("symbol_effective_launch_times_utc") or {}).get(sym)
-            or official_ms
-            or onboard_ms
-            or ""
-        )
+        prov_entry = cand_prov_by_sym.get(str(sym or "").strip().upper()) or {}
+        if detail_attempted and official_ms is not None:
+            has_cand_prov_list = state.get("candidate_provenance") is not None
+            is_bapi_variant = state.get("detail_fetch_variant") == "bapi_article_detail_query"
+            if prov_entry:
+                node_path = str(
+                    prov_entry.get("time_node_path")
+                    or prov_entry.get("symbol_node_path")
+                    or prov_entry.get("body_node_path")
+                    or ""
+                )
+                raw_time_text = str(
+                    prov_entry.get("raw_time_text")
+                    or (state.get("symbol_launch_times_utc") or {}).get(sym)
+                    or (state.get("symbol_effective_launch_times_utc") or {}).get(sym)
+                    or ""
+                )
+                schedule_text_context = str(prov_entry.get("local_text_span") or title)
+                if not payload_hash or not node_path or not raw_time_text:
+                    provenance_incomplete = True
+            elif has_cand_prov_list or is_bapi_variant:
+                node_path = ""
+                raw_time_text = ""
+                schedule_text_context = title
+                provenance_incomplete = True
+            else:
+                node_path = "bapi_article_body"
+                raw_time_text = str(
+                    (state.get("symbol_launch_times_utc") or {}).get(sym)
+                    or (state.get("symbol_effective_launch_times_utc") or {}).get(sym)
+                    or official_ms
+                )
+                schedule_text_context = title
+                if not payload_hash:
+                    provenance_incomplete = True
+        else:
+            node_path = "title_or_exchangeinfo"
+            raw_time_text = str(
+                (state.get("symbol_launch_times_utc") or {}).get(sym)
+                or (state.get("symbol_effective_launch_times_utc") or {}).get(sym)
+                or official_ms
+                or onboard_ms
+                or ""
+            )
+            schedule_text_context = title
         provenance = {
             "payload_sha256": payload_hash,
             "parser_version": parser_version,
             "raw_time_text": raw_time_text,
-            "timezone_text": "UTC",
-            "node_path": "bapi_article_body" if detail_attempted else "title_or_exchangeinfo",
-            "logical_block_id": f"{article_id}:{sym}" if article_id else sym,
-            "schedule_text_context": title,
+            "timezone_text": str(prov_entry.get("timezone_text") or "UTC"),
+            "node_path": node_path,
+            "logical_block_id": f"{article_id}:{sym}" if article_id else str(prov_entry.get("logical_block_id") or sym),
+            "schedule_text_context": schedule_text_context,
             "mapping_method": "per_symbol_official_schedule" if official_ms is not None else "exchangeinfo_fallback",
             "mapping_confidence": mapping_confidence,
         }
@@ -1923,6 +1974,8 @@ def apply_formal_launch_event_contract(
         if int((launch_times.get(sym) or onboard_times.get(sym) or effective_observation_times.get(sym) or 0)) > 0
     }
     norm_event["launch_time_source"] = "official_schedule_priority_v1"
+    if provenance_incomplete:
+        norm_event["event_all_symbols_consumable_by_stage1_5f"] = False
     norm_event["formal_event_consumable_by_stage1_5f"] = bool(norm_event.get("event_all_symbols_consumable_by_stage1_5f"))
     norm_event["source_contract_status"] = "formal_v2_valid" if norm_event["formal_event_consumable_by_stage1_5f"] else "formal_v2_invalid"
     norm_event["symbol_identity_validation_status"] = "validated_by_exchangeinfo"
@@ -2249,6 +2302,7 @@ def parse_args(argv=None):
         choices=["active_root_retry_cycle_recovery_v1"],
         default=None,
     )
+    parser.add_argument("--future-launch-recovery", type=str, default=None)
 
     args = parser.parse_args(argv)
 
@@ -2260,6 +2314,16 @@ def parse_args(argv=None):
         import re
         if not re.fullmatch(r"[0-9a-f]{32}", args.active_root_recovery_source_article_id):
             parser.error("Invalid --active-root-recovery-source-article-id: must be exactly 32 lowercase hex characters.")
+    if args.future_launch_recovery is not None:
+        import re
+        if has_art or has_prov:
+            parser.error("--future-launch-recovery is mutually exclusive with --active-root-recovery-*.")
+        m_flr = re.fullmatch(r"([0-9a-f]{32}):([A-Z0-9,]+)", args.future_launch_recovery)
+        if not m_flr:
+            parser.error("Invalid --future-launch-recovery: must match <32-hex-article-id>:<SYM1,SYM2>.")
+        flr_parts = m_flr.group(2).split(",")
+        if any(not s for s in flr_parts) or len(set(flr_parts)) != len(flr_parts):
+            parser.error("Invalid --future-launch-recovery symbols: must be non-empty unique uppercase symbols.")
 
     return args
 
@@ -2448,6 +2512,12 @@ def _main():
         output_root / "revision_payload_versions.jsonl"
     )
     emitted_revision_semantic_ids = load_emitted_revision_semantic_ids(output_root / "events")
+    raw_watches = scheduler_state.get("schedule_recheck_watches")
+    schedule_recheck_watches: dict[str, dict] = (
+        {str(k): dict(v) for k, v in raw_watches.items() if isinstance(v, dict)}
+        if isinstance(raw_watches, dict)
+        else {}
+    )
     persisted_articles = scheduler_state.get("articles", {})
     endpoint_health = scheduler_state.get("endpoint_health", {})
     if not isinstance(endpoint_health, dict):
@@ -2586,6 +2656,33 @@ def _main():
     source_parent_url = "https://www.binance.com/en/support/announcement"
     output_root.mkdir(parents=True, exist_ok=True)
     active_root_recovery_authority = None
+    future_launch_recovery = None
+    future_launch_recovery_emitted = False
+    if getattr(args, "future_launch_recovery", None):
+        import re as _re_flr
+        m_flr = _re_flr.fullmatch(r"([0-9a-f]{32}):([A-Z0-9,]+)", args.future_launch_recovery)
+        if not m_flr:
+            logger.error("Invalid --future-launch-recovery format: {}", args.future_launch_recovery)
+            sys.exit(1)
+        flr_art_id = m_flr.group(1)
+        flr_symbols = m_flr.group(2).split(",")
+        if any(not s for s in flr_symbols) or len(set(flr_symbols)) != len(flr_symbols):
+            logger.error("Invalid --future-launch-recovery symbols: {}", args.future_launch_recovery)
+            sys.exit(1)
+        if (
+            (output_root / "detail_retry_state.json").exists()
+            or (output_root / "formal_launch_identity_index.jsonl").exists()
+            or ((output_root / "events").exists() and any((output_root / "events").glob("*.jsonl")))
+        ):
+            logger.error(
+                "--future-launch-recovery requires a fresh output_root without existing detail_retry_state.json, "
+                "formal_launch_identity_index.jsonl, or events/*.jsonl"
+            )
+            sys.exit(1)
+        future_launch_recovery = {
+            "source_article_id": flr_art_id,
+            "symbols": sorted(flr_symbols),
+        }
     if args.active_root_recovery_source_article_id:
         target_art = args.active_root_recovery_source_article_id
         art_info = persisted_articles.get(target_art)
@@ -2740,6 +2837,7 @@ def _main():
             1 for row in persisted_articles.values()
             if row.get("terminal_failure_type") == "detail_never_attempted_budget_starved"
         ),
+        **({"future_launch_recovery": future_launch_recovery} if future_launch_recovery is not None else {}),
         **schedule_revision_producer_attestation,
     }
     write_stage1_5d_runtime_gate(
@@ -3159,6 +3257,205 @@ def _main():
             ]
 
             # Detail fallback processing
+            recheck_budget = int(getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_BUDGET_PER_POLL", 1))
+            recheck_interval_ms = int(getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_INTERVAL_SEC", 600)) * 1000
+            recheck_index_rows: list[dict] = []
+            recheck_revisions_by_art_sym: dict[tuple[str, str], list[dict]] = {}
+            recheck_context_by_art: dict[str, dict] = {}
+            if args.live_public_readonly and recheck_budget > 0:
+                recheck_now_ms = now_ms
+                recheck_index_rows, idx_blockers = load_valid_formal_launch_identity_index(
+                    stream_paths["formal_launch_identity_index"],
+                    as_of_ms=recheck_now_ms,
+                    snapshot_path=args.formal_launch_identity_index_snapshot,
+                )
+                recheck_transport_invalid_articles: set[str] = set()
+                if recheck_index_rows and not idx_blockers:
+                    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+                        select_latest_applicable_official_schedule,
+                        validate_schedule_revision_contract,
+                    )
+
+                    def _project_revision_transport_for_selector(erow: dict, sym_u: str) -> dict | None:
+                        val = validate_schedule_revision_contract(erow)
+                        if not val.get("valid") or val.get("symbol") != sym_u:
+                            return None
+                        avail = (erow.get("symbol_official_schedule_revision_available_at_ms") or {}).get(sym_u)
+                        if isinstance(avail, bool) or not isinstance(avail, int):
+                            return None
+                        raw_st = (erow.get("symbol_official_schedule_statuses") or {}).get(sym_u)
+                        rev_id = (
+                            (erow.get("symbol_official_schedule_revision_ids") or {}).get(sym_u)
+                            or erow.get("revision_id")
+                            or erow.get("revision_semantic_id")
+                        )
+                        sup_id = erow.get("supersedes_revision_id") or erow.get("supersedes_source_article_id")
+                        if raw_st == "cancelled":
+                            return {
+                                "symbol": sym_u,
+                                "available_at_ms": avail,
+                                "status": "cancelled",
+                                "anchor_ms": None,
+                                "revision_id": rev_id,
+                                "supersedes_revision_id": sup_id,
+                            }
+                        if raw_st == "postponed_without_anchor":
+                            return {
+                                "symbol": sym_u,
+                                "available_at_ms": avail,
+                                "status": "postponed_without_anchor",
+                                "anchor_ms": None,
+                                "revision_id": rev_id,
+                                "supersedes_revision_id": sup_id,
+                            }
+                        anc = (erow.get("symbol_revised_anchor_ms") or {}).get(sym_u)
+                        if isinstance(anc, bool) or not isinstance(anc, int) or anc <= 0:
+                            return None
+                        return {
+                            "symbol": sym_u,
+                            "available_at_ms": avail,
+                            "status": "scheduled",
+                            "anchor_ms": anc,
+                            "revision_id": rev_id,
+                            "supersedes_revision_id": sup_id,
+                        }
+
+                    events_dir = output_root / "events"
+                    if events_dir.exists():
+                        for ef in sorted(events_dir.glob("*.jsonl")):
+                            try:
+                                elines = ef.read_text(encoding="utf-8").splitlines()
+                            except (OSError, UnicodeDecodeError):
+                                continue
+                            for eline in elines:
+                                if not eline.strip():
+                                    continue
+                                try:
+                                    erow = json.loads(eline)
+                                except json.JSONDecodeError:
+                                    continue
+                                if not isinstance(erow, dict):
+                                    continue
+                                if erow.get("event_type") != "futures_contract_launch_schedule_revision":
+                                    continue
+                                art_key = str(erow.get("supersedes_source_article_id") or erow.get("source_article_id") or "").strip()
+                                syms_raw = erow.get("symbols") or ([erow.get("symbol")] if erow.get("symbol") else [])
+                                if not art_key or not syms_raw:
+                                    if art_key:
+                                        recheck_transport_invalid_articles.add(art_key)
+                                    continue
+                                for sym in syms_raw:
+                                    sym_u = str(sym or "").strip().upper()
+                                    if not sym_u:
+                                        continue
+                                    proj = _project_revision_transport_for_selector(erow, sym_u)
+                                    if proj is None:
+                                        recheck_transport_invalid_articles.add(art_key)
+                                    else:
+                                        recheck_revisions_by_art_sym.setdefault((art_key, sym_u), []).append(proj)
+
+                    by_article: dict[str, list[dict]] = {}
+                    for ir in recheck_index_rows:
+                        art = str(ir.get("supersedes_source_article_id") or ir.get("source_article_id") or "").strip()
+                        if art:
+                            by_article.setdefault(art, []).append(ir)
+
+                    ex_by_sym, ex_recheck_ok = get_exchangeinfo_by_symbol()
+                    due_rechecks = []
+                    for art_id, a_rows in by_article.items():
+                        if art_id in detail_retry_state or art_id in recheck_transport_invalid_articles:
+                            continue
+                        persisted = persisted_articles.get(art_id) or {}
+                        watch = schedule_recheck_watches.get(art_id) or {}
+                        if art_id not in formal_completed_source_article_ids and not persisted.get("terminal_state"):
+                            continue
+                        first_obs = min(int(r.get("identity_first_observed_at_ms") or r.get("original_source_published_at_ms") or recheck_now_ms) for r in a_rows)
+                        deadline_ms = int(watch.get("schedule_recheck_deadline_ms") or persisted.get("schedule_recheck_deadline_ms") or (first_obs + 14 * 86_400_000))
+                        if recheck_now_ms > deadline_ms:
+                            continue
+                        next_at = watch.get("next_schedule_recheck_at_ms")
+                        if not isinstance(next_at, int):
+                            next_at = persisted.get("next_schedule_recheck_at_ms")
+                        if isinstance(next_at, int):
+                            if recheck_now_ms < next_at:
+                                continue
+                        else:
+                            durable_ms = max(int(r.get("formal_row_durable_at_ms") or 0) for r in a_rows)
+                            if durable_ms > 0 and (recheck_now_ms - durable_ms) < recheck_interval_ms:
+                                continue
+
+                        sym_statuses = {}
+                        skip_article_watch = False
+                        for r in a_rows:
+                            sym = str(r.get("symbol") or "").upper()
+                            revs = recheck_revisions_by_art_sym.get((art_id, sym), [])
+                            sel = select_latest_applicable_official_schedule(sym, revs, recheck_now_ms) if revs else {"status": "missing"}
+                            st_sel = sel.get("status")
+                            if st_sel in ("cancelled", "official_schedule_conflict"):
+                                skip_article_watch = True
+                                break
+                            sym_statuses[sym] = sel
+                        if skip_article_watch:
+                            continue
+
+                        if ex_recheck_ok:
+                            all_settled = True
+                            for r in a_rows:
+                                sym = str(r.get("symbol") or "").upper()
+                                sel = sym_statuses.get(sym, {"status": "missing"})
+                                if sel.get("status") == "selected":
+                                    cur_anchor = int(sel.get("effective_official_anchor_ms") or 0)
+                                elif sel.get("status") == "missing":
+                                    cur_anchor = int(r.get("official_schedule_anchor_ms") or 0)
+                                else:
+                                    all_settled = False
+                                    break
+                                meta = ex_by_sym.get(sym)
+                                if not meta or meta.get("status") != "TRADING" or cur_anchor <= 0 or recheck_now_ms < cur_anchor:
+                                    all_settled = False
+                                    break
+                                onboard_ms = meta.get("onboardDate")
+                                if not isinstance(onboard_ms, (int, float)) or abs(int(onboard_ms) - cur_anchor) > 60_000:
+                                    all_settled = False
+                                    break
+                            if all_settled:
+                                continue
+
+                        due_rechecks.append((int(next_at or 0), first_obs, art_id, a_rows, deadline_ms, persisted, watch))
+
+                    due_rechecks.sort(key=lambda x: (x[0], x[1], x[2]))
+                    for _, _, art_id, a_rows, deadline_ms, persisted, watch in due_rechecks[:recheck_budget]:
+                        recheck_item = build_stage1_5d_v3_active_article(
+                            existing=persisted,
+                            source_article_id=art_id,
+                            title=str(persisted.get("title") or ""),
+                            source_detail_url_normalized=str(persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{art_id}"),
+                            source_parent_url=source_parent_url,
+                            source_published_at_ms=persisted.get("source_published_at_ms"),
+                            detected_at_ms=int(persisted.get("detected_at_ms") or recheck_now_ms),
+                            first_detected_at_ms=int(persisted.get("first_detected_at_ms") or recheck_now_ms),
+                            raw=persisted.get("raw") or {"code": art_id, "title": str(persisted.get("title") or "")},
+                            event_type="futures_contract_launch",
+                            detail_work_type="launch_schedule_revision_detail",
+                            detail_fetch_attempted=True,
+                            detail_fetch_status="pending",
+                        )
+                        recheck_context_by_art[art_id] = {
+                            "detail_payload_hash": (
+                                watch.get("detail_payload_hash")
+                                or persisted.get("detail_payload_hash")
+                                or a_rows[0].get("payload_sha256")
+                            ),
+                            "next_schedule_recheck_at_ms": (
+                                watch.get("next_schedule_recheck_at_ms")
+                                or persisted.get("next_schedule_recheck_at_ms")
+                            ),
+                            "schedule_recheck_deadline_ms": deadline_ms,
+                            "prior_terminal": dict(persisted),
+                            "index_rows": a_rows,
+                        }
+                        detail_retry_state[art_id] = recheck_item
+
             detail_budget_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 3)
             detail_http_requests_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 4)
             source_parent_url = "https://www.binance.com/en/support/announcement"
@@ -3848,6 +4145,12 @@ def _main():
                     if bapi_is_trusted:
                         bapi_detail_success_count += 1
                         bapi_detail_trusted_payload_count += 1
+                        state["detail_fetch_attempted"] = True
+                        state["detail_payload_hash"] = bapi_write_res.get("raw_payload_sha256")
+                        state["detail_fetched_at_ms"] = bapi_manifest["fetched_at_ms"]
+                        state["detail_fetch_url_used"] = bapi_manifest["final_url"]
+                        state["detail_fetch_variant"] = "bapi_article_detail_query"
+                        state["detail_payload_trusted"] = True
                         payload_version_available_at_ms = record_payload_version_first_observed(
                             stream_paths["revision_payload_versions"],
                             source_article_id=code,
@@ -3912,8 +4215,95 @@ def _main():
                                 schedule_revision_integration_health = "blocked_index_collision"
 
                         if state.get("detail_work_type") == "launch_schedule_revision_detail":
-                            state["detail_fetch_status"] = "success"
-                            state["detail_retryable"] = False
+                            new_hash = str(bapi_write_res.get("raw_payload_sha256") or "")
+                            rctx = recheck_context_by_art.get(code) or {}
+                            if revision_result["status"] != "revision_emitted" and rctx.get("index_rows"):
+                                from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+                                    select_latest_applicable_official_schedule,
+                                )
+                                from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
+                                    detect_and_emit_same_page_schedule_revision,
+                                )
+
+                                a_rows = rctx["index_rows"]
+                                old_syms = [str(r.get("symbol") or "").upper() for r in a_rows]
+                                old_anchors = {}
+                                old_anchor_blocked = False
+                                for r in a_rows:
+                                    sym_u = str(r.get("symbol") or "").upper()
+                                    revs = recheck_revisions_by_art_sym.get((code, sym_u), [])
+                                    sel = select_latest_applicable_official_schedule(sym_u, revs, now_ms) if revs else {"status": "missing"}
+                                    if sel.get("status") == "selected":
+                                        old_anchors[sym_u] = int(sel.get("effective_official_anchor_ms") or 0)
+                                    elif sel.get("status") == "missing":
+                                        old_anchors[sym_u] = int(r.get("official_schedule_anchor_ms") or 0)
+                                    else:
+                                        old_anchor_blocked = True
+                                        break
+                                prior_term = rctx.get("prior_terminal") or {}
+                                old_watch = schedule_recheck_watches.get(code) or {}
+                                old_hash = str(
+                                    old_watch.get("detail_payload_hash")
+                                    or rctx.get("detail_payload_hash")
+                                    or prior_term.get("detail_payload_hash")
+                                    or a_rows[0].get("payload_sha256")
+                                    or ""
+                                )
+                                if not old_anchor_blocked:
+                                    rev_rows, rev_diag = detect_and_emit_same_page_schedule_revision(
+                                        source_article_id=code,
+                                        old_symbols=old_syms,
+                                        new_symbols=bapi_parsed_symbols,
+                                        old_anchors_ms=old_anchors,
+                                        new_anchors_ms=bapi_extraction.get("symbol_launch_times_ms") or {},
+                                        old_payload_sha256=old_hash,
+                                        new_payload_sha256=new_hash,
+                                        index_rows=recheck_index_rows,
+                                        available_at_ms=payload_version_available_at_ms,
+                                        producer_effective_enabled=schedule_revision_producer_effective_enabled,
+                                        lookback_days=base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS,
+                                        emitted_ids=emitted_revision_semantic_ids,
+                                    )
+                                    if rev_diag.get("status") == "revision_emitted" and rev_rows:
+                                        for rrow in rev_rows:
+                                            written_rev = append_formal_schedule_revision(stream_paths, rrow)
+                                            if written_rev is not None:
+                                                schedule_revision_emitted_count += 1
+                                                emitted_revision_semantic_ids.add(str(written_rev["revision_semantic_id"]))
+                                        state["schedule_revision_producer_status"] = "revision_emitted"
+                                    elif rev_diag.get("status") == "revision_diagnostic":
+                                        schedule_revision_diagnostic_count += 1
+                                        append_stage1_5d_diagnostic(stream_paths, rev_diag)
+                                        state["schedule_revision_producer_status"] = "revision_diagnostic"
+
+                            prev_watch = schedule_recheck_watches.get(code) or {}
+                            watch_hash = prev_watch.get("detail_payload_hash") or rctx.get("detail_payload_hash")
+                            if state.get("schedule_revision_producer_status") == "revision_emitted" and new_hash:
+                                watch_hash = new_hash
+                            elif not watch_hash and new_hash:
+                                watch_hash = new_hash
+                            schedule_recheck_watches[code] = {
+                                "next_schedule_recheck_at_ms": now_ms + recheck_interval_ms,
+                                "schedule_recheck_deadline_ms": rctx.get("schedule_recheck_deadline_ms"),
+                                "detail_payload_hash": watch_hash,
+                                "schedule_revision_producer_status": state.get("schedule_revision_producer_status"),
+                            }
+                            prior_term = rctx.get("prior_terminal")
+                            if code in formal_completed_source_article_ids:
+                                persisted_articles.pop(code, None)
+                            elif isinstance(prior_term, dict) and prior_term.get("terminal_state"):
+                                restored = dict(prior_term)
+                                restored["next_schedule_recheck_at_ms"] = now_ms + recheck_interval_ms
+                                restored["schedule_recheck_deadline_ms"] = rctx.get("schedule_recheck_deadline_ms")
+                                restored["schedule_revision_producer_status"] = state.get("schedule_revision_producer_status")
+                                if state.get("schedule_revision_producer_status") == "revision_emitted" and new_hash:
+                                    restored["detail_payload_hash"] = new_hash
+                                elif not restored.get("detail_payload_hash") and new_hash:
+                                    restored["detail_payload_hash"] = new_hash
+                                persisted_articles[code] = restored
+                            else:
+                                state["detail_fetch_status"] = "success"
+                                state["detail_retryable"] = False
                             detail_retry_state.pop(code, None)
                             continue
 
@@ -3973,6 +4363,8 @@ def _main():
                                         "detail_fetch_attempted": True,
                                         "detail_fetch_status": "success",
                                         "detail_fetch_variant": "bapi_article_detail_query",
+                                        "detail_fetch_url_used": state.get("detail_fetch_url_used"),
+                                        "detail_payload_hash": state.get("detail_payload_hash"),
                                         "detail_payload_trusted": True,
                                         "symbol_validation_status": symbol_validation_status,
                                     },
@@ -3981,7 +4373,7 @@ def _main():
                                 norm_event["symbol_onboard_times_ms"] = state.get("symbol_onboard_times_ms", {})
                                 norm_event["symbol_effective_launch_times_ms"] = effective_launch.get("symbol_effective_launch_times_ms", {})
                                 norm_event["first_detected_at_ms"] = state["first_detected_at_ms"]
-                                norm_event["detail_fetched_at_ms"] = now_ms
+                                norm_event["detail_fetched_at_ms"] = state.get("detail_fetched_at_ms") or now_ms
                                 norm_event["symbol_resolved_at_ms"] = now_ms
                                 norm_event["symbol_resolution_latency_ms"] = now_ms - state["first_detected_at_ms"]
 
@@ -4690,11 +5082,24 @@ def _main():
                             detail_retry_state.pop(code, None)
                         continue
 
+            # Restore any deferred/unfetched revision-recheck items so launch terminal state is never mutated
+            for code in list(detail_retry_state.keys()):
+                st = detail_retry_state[code]
+                if st.get("detail_work_type") == "launch_schedule_revision_detail":
+                    rctx = recheck_context_by_art.get(code) or {}
+                    if code in formal_completed_source_article_ids:
+                        persisted_articles.pop(code, None)
+                    elif isinstance(rctx.get("prior_terminal"), dict):
+                        persisted_articles[code] = dict(rctx["prior_terminal"])
+                    detail_retry_state.pop(code, None)
+
             # Persist scheduler state
             for code, st in detail_retry_state.items():
                 persisted_articles[code] = st
             scheduler_state["articles"] = serialize_stage1_5d_v3_articles(persisted_articles)
             scheduler_state["endpoint_health"] = endpoint_health
+            if schedule_recheck_watches:
+                scheduler_state["schedule_recheck_watches"] = schedule_recheck_watches
             write_detail_retry_scheduler_state(
                 output_root,
                 scheduler_state,
@@ -4815,6 +5220,213 @@ def _main():
         schedule_revision_producer_effective_enabled = schedule_revision_producer_attestation[
             "schedule_revision_producer_effective_enabled"
         ]
+
+        if future_launch_recovery is not None and not future_launch_recovery_emitted:
+            flr_art_id = future_launch_recovery["source_article_id"]
+            flr_symbols = list(future_launch_recovery["symbols"])
+            flr_consumer_ready = False
+            if (
+                schedule_revision_producer_effective_enabled
+                and consumer_proof_result is not None
+                and consumer_proof_result.get("valid") is True
+                and args.stage1_5f_consumer_root_contract
+                and args.stage1_5f_consumer_summary
+            ):
+                rc_path = Path(args.stage1_5f_consumer_root_contract)
+                sum_path = Path(args.stage1_5f_consumer_summary)
+                wm_path = rc_path.parent / "watermark.json"
+                if rc_path.exists() and sum_path.exists() and wm_path.exists():
+                    try:
+                        rc_data = json.loads(rc_path.read_text(encoding="utf-8"))
+                        sum_data = json.loads(sum_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        rc_data = None
+                        sum_data = None
+                    wm_obj = None
+                    if isinstance(rc_data, dict) and isinstance(sum_data, dict):
+                        try:
+                            from src.research.external_signal_shadow.stage1_5f_live_depth_observer_watermark import (
+                                load_watermark,
+                            )
+                            wm_obj = load_watermark(str(wm_path))
+                        except Exception:
+                            wm_obj = None
+                    if wm_obj is not None:
+                        boot_created = getattr(wm_obj, "bootstrap_created_at_ms", None)
+                        boot_max_det = getattr(wm_obj, "bootstrap_max_seen_detected_at_ms", None)
+                        wm_src = str(getattr(wm_obj, "bootstrap_source_root", "") or "")
+                        boot_root_id = str(getattr(wm_obj, "bootstrap_root_id", "") or "")
+                        wm_boot_root_ok = False
+                        if (
+                            getattr(wm_obj, "watermark_schema_version", None) == 2
+                            and boot_created is not None
+                            and boot_max_det is not None
+                            and wm_src
+                            and boot_root_id
+                        ):
+                            expected_boot_payload = (
+                                f"{os.path.abspath(str(rc_path.parent))}"
+                                f"|{boot_created}"
+                                f"|{wm_src}"
+                                f"|{boot_max_det}"
+                            )
+                            expected_boot_root_id = hashlib.sha256(
+                                expected_boot_payload.encode("utf-8")
+                            ).hexdigest()
+                            wm_boot_root_ok = boot_root_id == expected_boot_root_id
+                        wm_src_root_ok = False
+                        if wm_src:
+                            if "*" in wm_src:
+                                wm_src_path = Path(wm_src.split("*")[0]).resolve()
+                                wm_src_root_ok = wm_src_path == output_root.resolve() or wm_src_path.parent == output_root.resolve()
+                            else:
+                                wm_src_root_ok = Path(wm_src).resolve() == output_root.resolve()
+                        if (
+                            rc_data.get("future_launch_recovery") == future_launch_recovery
+                            and wm_boot_root_ok
+                            and wm_src_root_ok
+                        ):
+                            flr_consumer_ready = True
+            if flr_consumer_ready:
+                flr_now_ms = int(time.time() * 1000)
+                flr_bapi_url = f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={flr_art_id}"
+                flr_bapi_res = fetch_public_bapi_article_detail(
+                    flr_art_id,
+                    live_public_readonly=args.live_public_readonly,
+                    timeout_sec=getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_REQUEST_TIMEOUT_SEC", 10.0),
+                )
+                if flr_bapi_res.get("ok") and isinstance(flr_bapi_res.get("payload"), dict):
+                    flr_raw_bytes = flr_bapi_res.get("raw_bytes") or json.dumps(flr_bapi_res["payload"]).encode("utf-8")
+                    flr_write_res = write_detail_payload_append_only(
+                        root=output_root,
+                        timestamp_ms=flr_now_ms,
+                        source_article_id=flr_art_id,
+                        detail_fetch_variant="bapi_article_detail_query",
+                        raw_bytes=flr_raw_bytes,
+                        parsed_payload=flr_bapi_res.get("payload"),
+                        http_status=flr_bapi_res.get("http_status"),
+                        storage_guard=storage_guard,
+                    )
+                    flr_hash = str(flr_write_res.get("raw_payload_sha256") or "")
+                    flr_ext = extract_symbol_candidates_from_bapi_article_payload(
+                        flr_bapi_res["payload"],
+                        max_symbols=max_symbols,
+                    )
+                    flr_parsed_syms = [str(s).upper() for s in (flr_ext.get("symbols") or [])]
+                    if flr_hash and len(flr_parsed_syms) == len(flr_symbols) and set(flr_parsed_syms) == set(flr_symbols):
+                        flr_ex_by_sym, flr_ex_ok = get_exchangeinfo_by_symbol()
+                        if flr_ex_ok:
+                            flr_val_res = validate_candidate_symbols_against_exchangeinfo(
+                                candidates=flr_symbols,
+                                exchangeinfo_by_symbol=flr_ex_by_sym,
+                                allowed_margin_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_MARGIN_ASSETS,
+                                allowed_quote_assets=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_FUTURES_QUOTE_ASSETS,
+                                allowed_contract_types=base.EXTERNAL_SIGNAL_STAGE1_5D_ALLOWED_CONTRACT_TYPES,
+                                validatable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_VALIDATABLE_SYMBOL_STATUSES,
+                                emittable_statuses=base.EXTERNAL_SIGNAL_STAGE1_5D_EMITTABLE_SYMBOL_STATUSES,
+                                now_ms=flr_now_ms,
+                            )
+                            flr_validated = set((flr_val_res.get("symbol_exchangeinfo") or {}).keys())
+                            if set(flr_symbols).issubset(flr_validated) and not flr_val_res.get("rejected_symbols"):
+                                flr_payload_data = flr_bapi_res["payload"].get("data") if isinstance(flr_bapi_res["payload"].get("data"), dict) else flr_bapi_res["payload"]
+                                flr_raw_art = {
+                                    "code": flr_art_id,
+                                    "title": str(flr_payload_data.get("title") or ""),
+                                    "releaseDate": flr_payload_data.get("publishDate") or flr_payload_data.get("releaseDate") or flr_now_ms,
+                                }
+                                flr_effective_launch = build_effective_launch_times_ms(
+                                    candidate_symbols=flr_symbols,
+                                    symbol_onboard_times_ms=flr_val_res.get("symbol_onboard_times_ms", {}),
+                                    symbol_launch_times_ms=flr_ext.get("symbol_launch_times_ms", {}),
+                                    source_published_at_ms=flr_raw_art.get("releaseDate") or 0,
+                                    first_detected_at_ms=flr_now_ms,
+                                    allow_release_date_fallback=False,
+                                    allow_legacy_max_age_fallback=False,
+                                )
+                                flr_eff_map = flr_effective_launch.get("symbol_effective_launch_times_ms", {})
+                                if all(int(flr_eff_map.get(s) or 0) > flr_now_ms for s in flr_symbols):
+                                    flr_is_multi = len(flr_symbols) > 1
+                                    flr_state = {
+                                        "raw": flr_raw_art,
+                                        "event_type": "futures_contract_launch",
+                                        "first_detected_at_ms": flr_now_ms,
+                                        "detail_fetched_at_ms": flr_now_ms,
+                                        "detail_fetch_attempted": True,
+                                        "detail_fetch_status": "success",
+                                        "detail_fetch_variant": "bapi_article_detail_query",
+                                        "detail_fetch_url_used": flr_bapi_url,
+                                        "detail_payload_hash": flr_hash,
+                                        "detail_payload_trusted": True,
+                                        "candidate_provenance": flr_ext.get("candidate_provenance") or {},
+                                        "symbol_onboard_times_ms": flr_val_res.get("symbol_onboard_times_ms", {}),
+                                        "symbol_launch_times_ms": flr_ext.get("symbol_launch_times_ms", {}),
+                                        "symbol_effective_launch_times_ms": flr_eff_map,
+                                        "launch_time_source": flr_effective_launch.get("launch_time_source"),
+                                        "detail_recovery_provenance": "explicit_future_launch_revalidation_v1",
+                                    }
+                                    flr_norm = normalize_live_event(
+                                        raw=flr_raw_art,
+                                        source_parent_url=source_parent_url,
+                                        detected_at_ms=flr_now_ms,
+                                        source_published_at_ms=flr_raw_art.get("releaseDate"),
+                                        source_published_at_ms_confidence="medium",
+                                        symbols_override=tuple(flr_symbols),
+                                        extraction_metadata={
+                                            "evidence_source": "official_article_body_confirmed",
+                                            "detail_transport": "bapi_article_detail_query",
+                                            "symbol_extraction_source": "bapi_article_body",
+                                            "content_provenance": "binance_official_announcement",
+                                            "source_transport": "binance_first_party_public_web_bapi_undocumented",
+                                            "detail_fetch_attempted": True,
+                                            "detail_fetch_status": "success",
+                                            "detail_fetch_variant": "bapi_article_detail_query",
+                                            "detail_fetch_url_used": flr_bapi_url,
+                                            "detail_payload_hash": flr_hash,
+                                            "detail_payload_trusted": True,
+                                            "symbol_validation_status": "validated_candidate_set" if flr_is_multi else "validated_by_exchangeinfo",
+                                        },
+                                    )
+                                    flr_norm["symbol_launch_times_ms"] = flr_state["symbol_launch_times_ms"]
+                                    flr_norm["symbol_onboard_times_ms"] = flr_state["symbol_onboard_times_ms"]
+                                    flr_norm["symbol_effective_launch_times_ms"] = flr_eff_map
+                                    flr_norm["first_detected_at_ms"] = flr_now_ms
+                                    flr_norm["detail_fetched_at_ms"] = flr_now_ms
+                                    flr_norm["symbol_resolved_at_ms"] = flr_now_ms
+                                    flr_norm["symbol_resolution_latency_ms"] = 0
+                                    flr_norm["detail_recovery_provenance"] = "explicit_future_launch_revalidation_v1"
+                                    apply_formal_launch_event_contract(
+                                        flr_norm,
+                                        flr_state,
+                                        flr_val_res,
+                                        flr_symbols,
+                                        flr_effective_launch,
+                                    )
+                                    if flr_is_multi:
+                                        flr_identity = build_candidate_symbol_set_identity(flr_symbols)
+                                        flr_em_id = build_multi_symbol_emission_id(
+                                            flr_art_id,
+                                            "futures_contract_launch",
+                                            flr_identity["candidate_symbol_set_hash"],
+                                        )
+                                        apply_multi_symbol_candidate_set_contract(
+                                            flr_norm,
+                                            flr_state,
+                                            flr_val_res,
+                                            flr_symbols,
+                                            flr_identity,
+                                            flr_em_id,
+                                            flr_effective_launch,
+                                            flr_now_ms,
+                                        )
+                                    if flr_norm.get("formal_event_consumable_by_stage1_5f") and flr_norm["event_id"] not in seen_event_ids:
+                                        flr_written = record_formal_futures_launch_event(
+                                            stream_paths=stream_paths,
+                                            row=flr_norm,
+                                            seen_event_ids=seen_event_ids,
+                                            events_detected=events_detected,
+                                        )
+                                        if flr_written is not None:
+                                            future_launch_recovery_emitted = True
         loop_gate_context = {
             "output_root": output_root,
             "run_id": output_root.name,
@@ -4843,6 +5455,7 @@ def _main():
                 1 for row in persisted_articles.values()
                 if row.get("terminal_failure_type") == "detail_never_attempted_budget_starved"
             ),
+            **({"future_launch_recovery": future_launch_recovery} if future_launch_recovery is not None else {}),
             **schedule_revision_producer_attestation,
         }
         write_stage1_5d_runtime_gate(
@@ -4992,8 +5605,6 @@ def _main():
             "all_detail_sources_degraded": source_health_diag["all_detail_sources_degraded"],
         },
     )
-
-
 
     write_smoke_summary_atomically(
         output_summary_path,

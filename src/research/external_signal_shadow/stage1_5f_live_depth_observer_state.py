@@ -252,10 +252,25 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
     legacy_deadline_ms = d.get("legacy_source_revision_wait_deadline_ms") or (now_ms + legacy_wait_ms)
 
     anchor_ms = d.get("observation_anchor_ms")
+    visibility_deadline_ms = None
     if status == "pending_launch_time_in_future" and anchor_ms is not None:
         deadline_ms = None
         resolution_started_ms = None
         next_check = anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+        next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
+    elif status in {
+        "pending_exchangeinfo_not_trading",
+        "pending_exchangeinfo_symbol_not_visible_after_anchor",
+        "pending_exchangeinfo_unavailable",
+        "pending_ready_for_admission",
+        "pending_observation_capacity",
+    } and anchor_ms is not None and not d.get("observation_anchor_conflict_active", False):
+        deadline_ms = None
+        resolution_started_ms = None
+        visibility_deadline_ms = d.get("symbol_visibility_deadline_ms") or (
+            anchor_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+        )
+        next_check = d.get("next_admission_check_at_ms") or (now_ms + retry_interval_ms)
         next_res = d.get("next_anchor_resolution_at_ms") or (now_ms + retry_interval_ms)
     else:
         deadline_ms = d.get("anchor_resolution_deadline_ms") or (now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS)
@@ -302,6 +317,7 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         next_anchor_resolution_at_ms=next_res,
         anchor_resolution_started_at_ms=resolution_started_ms,
         anchor_resolution_deadline_ms=deadline_ms,
+        symbol_visibility_deadline_ms=visibility_deadline_ms,
         bootstrap_watermark_max_seen_detected_at_ms=d.get("bootstrap_watermark_max_seen_detected_at_ms"),
         admission_watermark_at_first_seen_ms=d.get("admission_watermark_at_first_seen_ms"),
         announcement_capture_post_bootstrap_watermark=d.get("announcement_capture_post_bootstrap_watermark"),
@@ -324,11 +340,22 @@ def create_pending_observation_state(event_symbol_row: dict, status: str, diagno
         anchor_contract_decision_at_ms=d.get("anchor_contract_decision_at_ms"),
         admission_anchor_evidence_level=d.get("admission_anchor_evidence_level", ""),
         latest_anchor_evidence_level=d.get("latest_anchor_evidence_level", ""),
-        admission_max_evidence_class=d.get("admission_max_evidence_class", ""),
-        latest_max_evidence_class=d.get("latest_max_evidence_class", ""),
+        admission_max_evidence_class=(
+            "recovery_validation_only"
+            if (event_symbol_row.get("detail_recovery_provenance") or d.get("detail_recovery_provenance"))
+            in {"active_root_retry_cycle_recovery_v1", "explicit_future_launch_revalidation_v1"}
+            else (d.get("admission_max_evidence_class") or "")
+        ),
+        latest_max_evidence_class=(
+            "recovery_validation_only"
+            if (event_symbol_row.get("detail_recovery_provenance") or d.get("detail_recovery_provenance"))
+            in {"active_root_retry_cycle_recovery_v1", "explicit_future_launch_revalidation_v1"}
+            else (d.get("latest_max_evidence_class") or "")
+        ),
         clean_start_sla_pass=d.get("clean_start_sla_pass", False),
         clean_evidence_start_allowed=d.get("clean_evidence_start_allowed", False),
         latest_source_semantic_fingerprint=str(d.get("latest_source_semantic_fingerprint") or ""),
+        detail_recovery_provenance=event_symbol_row.get("detail_recovery_provenance") or d.get("detail_recovery_provenance"),
     )
 
 
@@ -336,6 +363,13 @@ def promote_pending_to_active_observation(pending_state: EventSymbolState, now_m
     anchor_ms = pending_state.observation_anchor_ms
     win_start = anchor_ms if anchor_ms is not None else now_ms
     win_end = win_start + base.EXTERNAL_SIGNAL_STAGE1_5F_OBSERVATION_WINDOW_MS
+
+    is_rec_marker = getattr(pending_state, "detail_recovery_provenance", None) in {
+        "active_root_retry_cycle_recovery_v1",
+        "explicit_future_launch_revalidation_v1",
+    }
+    if is_rec_marker:
+        evidence_start_class = "recovery_start"
 
     d = pending_state.to_dict()
     acceptance_id = pending_state.acceptance_id or make_acceptance_id(pending_state)
@@ -350,6 +384,26 @@ def promote_pending_to_active_observation(pending_state: EventSymbolState, now_m
         "acceptance_id": acceptance_id,
         "acceptance_state": "accepted_state_committed",
     })
+    if is_rec_marker:
+        d["admission_max_evidence_class"] = "recovery_validation_only"
+        d["latest_max_evidence_class"] = "recovery_validation_only"
+        d["live_depth_evidence_basis"] = "recovery_validation_only"
+        source_hash = str(d.get("source_anchor_contract_hash") or "")
+        if source_hash:
+            from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+                compute_admission_anchor_contract_hash,
+            )
+            adm_hash = compute_admission_anchor_contract_hash(
+                source_anchor_contract_hash=source_hash,
+                admission_snapshot={
+                    "admission_at_ms": now_ms,
+                    "observation_anchor_ms": anchor_ms,
+                    "evidence_start_class": "recovery_start",
+                    "admission_max_evidence_class": "recovery_validation_only",
+                },
+            )
+            d["admission_anchor_contract_hash"] = adm_hash
+            d["latest_anchor_contract_hash"] = adm_hash
     return EventSymbolState.from_dict(d)
 
 
@@ -442,23 +496,29 @@ def apply_anchor_contract_revision_to_state(state: EventSymbolState, revision: d
             d["pending_terminal_reason"] = ""
             d["observation_anchor_ms"] = None
             d["next_admission_check_at_ms"] = None
+            d["symbol_visibility_deadline_ms"] = None
 
             if is_new_application or state.anchor_resolution_started_at_ms is None:
                 d["anchor_resolution_started_at_ms"] = now_ms
                 d["anchor_resolution_deadline_ms"] = now_ms + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_ANCHOR_RESOLUTION_AGE_MS
         elif rev_anchor is not None:
-            new_status = "pending_launch_time_in_future" if now_ms < rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS else "pending_ready_for_admission"
+            is_future = now_ms < rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
+            new_status = "pending_launch_time_in_future" if is_future else "pending_ready_for_admission"
             d.update({
                 "status": new_status,
                 "pending_reason": new_status,
                 "pending_terminal_reason": "",
                 "observation_anchor_ms": rev_anchor,
+                "observation_anchor_conflict_active": False,
                 "anchor_contract_decision_at_ms": now_ms,
                 "latest_anchor_evidence_level": "official_schedule",
                 "latest_max_evidence_class": "clean_or_recovery",
                 "next_admission_check_at_ms": rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS,
                 "anchor_resolution_started_at_ms": None,
                 "anchor_resolution_deadline_ms": None,
+                "symbol_visibility_deadline_ms": None if is_future else (
+                    rev_anchor + base.EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS
+                ),
             })
     elif is_depth_collection_active_status(state.status):
         if is_cancelled:

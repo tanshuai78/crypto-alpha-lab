@@ -7493,3 +7493,957 @@ def test_validate_stage1_5d_v3_inflight_intent():
     # 6. Invalid stage_work_type rejected
     bad_work = dict(valid_intent, stage_work_type="invalid_work")
     assert any("invalid_stage_work_type" in b for b in validate_stage1_5d_v3_inflight_intent(bad_work))
+
+
+def test_postponement_two_symbol_bapi_pending_pre_trading_preserves_provenance_across_reload(tmp_path):
+    import hashlib
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+    )
+
+    hex32 = "2d89a5966b174a2689ab2c2a15db1757"
+    now_ms = int(time.time() * 1000)
+    t1_ms = now_ms + 3_600_000
+    t2_ms = now_ms + 3_900_000
+    t1_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(t1_ms / 1000))
+    t2_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(t2_ms / 1000))
+    # Round expected ms to minute precision matching parsed schedule string
+    t1_expected_ms = (t1_ms // 60_000) * 60_000
+    t2_expected_ms = (t2_ms // 60_000) * 60_000
+
+    list_payload = {
+        "data": {
+            "catalogs": [{
+                "articles": [{
+                    "code": hex32,
+                    "title": "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC and TRXUSDC Perpetual Contracts (2026-11-11)",
+                    "releaseDate": now_ms - 1000,
+                }]
+            }]
+        }
+    }
+    bapi_payload = {
+        "code": "000000",
+        "data": {
+            "code": hex32,
+            "title": "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC and TRXUSDC Perpetual Contracts (2026-11-11)",
+            "body": json.dumps({
+                "node": "root",
+                "child": [
+                    {"node": "text", "text": f"{t1_utc}: HYPEUSDC Perpetual Contract"},
+                    {"node": "text", "text": f"{t2_utc}: TRXUSDC Perpetual Contract"},
+                ],
+            }),
+        },
+    }
+    raw_bapi_bytes = json.dumps(bapi_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    expected_sha256 = hashlib.sha256(raw_bapi_bytes).hexdigest()
+    bapi_final_url = f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={hex32}"
+
+    output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
+    c1, c = _write_valid_upstream(tmp_path)
+
+    bapi_fetch_count = 0
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        nonlocal bapi_fetch_count
+        bapi_fetch_count += 1
+        return {
+            "ok": True,
+            "payload": bapi_payload,
+            "raw_bytes": raw_bapi_bytes,
+            "final_url": bapi_final_url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": list_payload, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex_pre_trading(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {"symbols": []},
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_ex_trading(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [
+                    {
+                        "symbol": "HYPEUSDC",
+                        "status": "TRADING",
+                        "contractType": "PERPETUAL",
+                        "quoteAsset": "USDC",
+                        "marginAsset": "USDC",
+                        "onboardDate": t1_expected_ms,
+                    },
+                    {
+                        "symbol": "TRXUSDC",
+                        "status": "TRADING",
+                        "contractType": "PERPETUAL",
+                        "quoteAsset": "USDC",
+                        "marginAsset": "USDC",
+                        "onboardDate": t2_expected_ms,
+                    },
+                ]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--max-polls", "1",
+    ]
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_pre_trading(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args1):
+                assert main() == 0
+
+    assert bapi_fetch_count == 1
+    assert len(_read_jsonl_files(output_root / "events")) == 0
+
+    # Poll 2: reload persisted state, exchangeInfo now TRADING -> Block 2.5 emits without BAPI refetch
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_trading(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+            with patch("sys.argv", args1):
+                assert main() == 0
+
+    assert bapi_fetch_count == 1
+    events = _read_jsonl_files(output_root / "events")
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["detail_payload_hash"] == expected_sha256
+    assert ev["detail_fetch_url_used"] == bapi_final_url
+    assert isinstance(ev["detail_fetched_at_ms"], int) and ev["detail_fetched_at_ms"] > 0
+
+    prov = ev["symbol_anchor_provenance"]
+    assert prov["HYPEUSDC"]["payload_sha256"] == expected_sha256
+    assert prov["TRXUSDC"]["payload_sha256"] == expected_sha256
+    assert prov["HYPEUSDC"]["raw_time_text"] == t1_utc
+    assert prov["TRXUSDC"]["raw_time_text"] == t2_utc
+    assert prov["HYPEUSDC"]["node_path"] != "title_or_exchangeinfo"
+    assert prov["TRXUSDC"]["node_path"] != "title_or_exchangeinfo"
+
+    idx_lines = [
+        json.loads(line)
+        for line in (output_root / "formal_launch_identity_index.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert {r["symbol"]: r["payload_sha256"] for r in idx_lines} == {
+        "HYPEUSDC": expected_sha256,
+        "TRXUSDC": expected_sha256,
+    }
+
+
+def test_postponement_apply_formal_launch_event_contract_fail_closed_on_missing_provenance():
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        apply_formal_launch_event_contract,
+    )
+
+    base_norm = {
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "title": "Binance Futures Will Launch Multiple Contracts",
+        "source_published_at_ms": 1794373200000,
+        "detected_at_ms": 1794373250000,
+        "detail_fetch_attempted": True,
+        "detail_payload_hash": "",
+    }
+    base_state = {
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "title": "Binance Futures Will Launch Multiple Contracts",
+        "detail_fetch_attempted": True,
+        "detail_payload_hash": "",
+        "symbol_launch_times_ms": {"HYPEUSDC": 1794389400000, "TRXUSDC": 1794389700000},
+        "candidate_provenance": [
+            {"symbol": "HYPEUSDC", "time_node_path": "body.child[0]", "raw_time_text": "2026-11-11 09:30 (UTC)"},
+        ],
+    }
+    val_res = {"symbol_onboard_times_ms": {"HYPEUSDC": 1794389400000, "TRXUSDC": 1794389700000}}
+    eff = {
+        "symbol_effective_launch_times_ms": {"HYPEUSDC": 1794389400000, "TRXUSDC": 1794389700000},
+        "symbol_launch_times_ms": {"HYPEUSDC": 1794389400000, "TRXUSDC": 1794389700000},
+    }
+
+    # Case 1: missing payload_sha256 when detail_fetch_attempted=True -> fail-closed
+    ev1 = dict(base_norm)
+    apply_formal_launch_event_contract(ev1, dict(base_state), val_res, ["HYPEUSDC", "TRXUSDC"], eff)
+    assert ev1["formal_event_consumable_by_stage1_5f"] is False
+
+    # Case 2: missing second symbol candidate_provenance when detail_fetch_attempted=True -> fail-closed
+    ev2 = dict(base_norm, detail_payload_hash="b" * 64)
+    st2 = dict(base_state, detail_payload_hash="b" * 64)
+    apply_formal_launch_event_contract(ev2, st2, val_res, ["HYPEUSDC", "TRXUSDC"], eff)
+    assert ev2["formal_event_consumable_by_stage1_5f"] is False
+    assert ev2["symbol_anchor_provenance"]["TRXUSDC"]["raw_time_text"] == ""
+
+
+def _setup_canonical_git_and_consumer_proof(
+    tmp_path: Path,
+    d_out_root: Path,
+    f_root: Path,
+    now_ms: int,
+    *,
+    future_launch_recovery: dict | None = None,
+) -> tuple[Path, Path, Path]:
+    import subprocess
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as f_runner
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        CONSUMER_RUNTIME_MANIFEST,
+        PROTECTED_TREE_MANIFEST,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
+        build_stage1_5d_runtime_gate,
+        write_stage1_5d_runtime_gate,
+    )
+
+    repo_dir = tmp_path / "git_repo"
+    repo_dir.mkdir(exist_ok=True)
+    for rel in sorted(set(PROTECTED_TREE_MANIFEST) | set(CONSUMER_RUNTIME_MANIFEST) | {"configs/base.py"}):
+        p = repo_dir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if rel == "configs/base.py":
+            real_base = Path(__file__).resolve().parents[3] / "configs" / "base.py"
+            p.write_text(real_base.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            p.write_text(f"# {rel}\n", encoding="utf-8")
+
+    subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, capture_output=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    (d_out_root / "events").mkdir(parents=True, exist_ok=True)
+    gate_path = d_out_root / "live_safety_gate_summary.json"
+    if not gate_path.exists():
+        gate_ctx = {
+            "output_root": d_out_root,
+            "run_id": d_out_root.name,
+            "events_stream_relative_path": "events/*.jsonl",
+            "live_public_readonly": True,
+            "generated_at_ms": now_ms,
+            "first_poll_started_at_ms": now_ms - 10_000,
+            "last_poll_finished_at_ms": now_ms,
+            "last_successful_poll_at_ms": now_ms,
+            "poll_attempt_count": 1,
+            "successful_poll_count": 1,
+            "failed_poll_count": 0,
+            "consecutive_failed_polls": 0,
+            "fatal_blockers": [],
+            "prior_stage_safety_prerequisite_met": True,
+            "fixture_run": False,
+            "source_format_drift_active": False,
+            "schema_parse_error_active": False,
+            "storage_budget_passed": True,
+            "storage_guard_blocked": False,
+            "storage_guard_blocker_reason": None,
+            "detail_endpoint_degraded_active": False,
+            "bapi_trusted_payload_rate": 1.0,
+            "symbol_parse_success_rate": 1.0,
+            "symbol_validation_success_rate": 1.0,
+            "scheduler_starved_expired_count": 0,
+            "schedule_revision_producer_supported": True,
+            "schedule_revision_producer_configured_enabled": True,
+            "schedule_revision_producer_consumer_prerequisites_verified": True,
+            "schedule_revision_producer_effective_enabled": False,
+            "schedule_revision_producer_health": "initializing",
+        }
+        if future_launch_recovery is not None:
+            gate_ctx["future_launch_recovery"] = future_launch_recovery
+        write_stage1_5d_runtime_gate(
+            d_out_root,
+            build_stage1_5d_runtime_gate(gate_ctx),
+            storage_guard=StorageGuard(output_root=d_out_root, stage="1.5D"),
+        )
+
+    e_sum = tmp_path / "stage1_5e_summary.json"
+    if not e_sum.exists():
+        e_sum.write_text(
+            json.dumps({
+                "decision": "stage1_5e_ready",
+                "paper_trading_allowed": False,
+                "live_trading_allowed": False,
+                "alpha_interpretation_allowed": False,
+            }),
+            encoding="utf-8",
+        )
+    mock_dir = tmp_path / "f_mock"
+    mock_dir.mkdir(exist_ok=True)
+    (mock_dir / "exchangeInfo.json").write_text(json.dumps({"symbols": []}), encoding="utf-8")
+
+    orig_f_static = f_runner.verify_consumer_static_proof
+    orig_f_runtime = f_runner.verify_consumer_runtime_proof
+    f_root.mkdir(parents=True, exist_ok=True)
+
+    with (
+        patch.object(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", head_sha),
+        patch.object(f_runner, "verify_consumer_static_proof", side_effect=lambda _r, dl=None: orig_f_static(repo_dir, dl)),
+        patch.object(f_runner, "verify_consumer_runtime_proof", side_effect=lambda _r, *a, **kw: orig_f_runtime(repo_dir, *a, **kw)),
+    ):
+        with patch("sys.argv", [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(d_out_root / "events" / "*.jsonl"),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--stage1-5e-summary", str(e_sum),
+            "--output-root", str(f_root),
+            "--bootstrap-watermark",
+        ]):
+            try:
+                f_runner.main()
+            except SystemExit as exc:
+                assert exc.code == 0
+
+        with patch("sys.argv", [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(d_out_root / "events" / "*.jsonl"),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--stage1-5e-summary", str(e_sum),
+            "--output-root", str(f_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]):
+            try:
+                f_runner.main()
+            except SystemExit as exc:
+                assert exc.code == 0
+
+    return repo_dir, f_root / "observer_root_contract.json", f_root / "live_depth_observer_summary.json"
+
+
+def _patch_collector_repo_root(repo_dir: Path):
+    import contextlib
+    import subprocess
+    from unittest.mock import patch
+
+    import scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector as col
+
+    orig_static = col.verify_git_ancestry_and_static_proof
+    orig_runtime = col.verify_stage1_5d_runtime_attestation
+
+    def _static_with_repo(*, repo_root, **kw):
+        return orig_static(repo_root=repo_dir, **kw)
+
+    def _runtime_with_repo(repo_root, startup_head_sha, protected_manifest, deadline_monotonic):
+        return orig_runtime(repo_dir, startup_head_sha, protected_manifest, deadline_monotonic)
+
+    def _read_head():
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    from configs import base as cfg_base
+
+    head_sha = _read_head()
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch.object(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", head_sha))
+    stack.enter_context(patch.object(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True))
+    stack.enter_context(patch.object(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True))
+    stack.enter_context(patch.object(col, "verify_git_ancestry_and_static_proof", side_effect=_static_with_repo))
+    stack.enter_context(patch.object(col, "verify_stage1_5d_runtime_attestation", side_effect=_runtime_with_repo))
+    stack.enter_context(patch.object(col, "read_current_commit_sha", side_effect=_read_head))
+    return stack
+
+
+def test_postponement_revision_recheck_emits_same_page_revision_with_cooldown_and_budget(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+    )
+
+    art1 = "2d89a5966b174a2689ab2c2a15db1757"
+    art2 = "e7a88ff576b541608d0845f3b666ec66"
+    now_ms = int(time.time() * 1000)
+    s1_old = ((now_ms + 3_600_000) // 60_000) * 60_000
+    s1_new = s1_old + 5 * 86_400_000
+    s1_new_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s1_new / 1000))
+
+    output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
+    c1, c = _write_valid_upstream(tmp_path)
+
+    # Seed formal_launch_identity_index.jsonl with 2 eligible articles
+    idx_rows = [
+        {
+            "index_schema_version": 1,
+            "supersedes_source_article_id": art1,
+            "source_article_id": art1,
+            "event_id": f"event_{art1}",
+            "symbol": "HYPEUSDC",
+            "symbols": ["HYPEUSDC"],
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art1}|HYPEUSDC",
+            "official_schedule_anchor_ms": s1_old,
+            "original_source_published_at_ms": now_ms - 800_000,
+            "identity_first_observed_at_ms": now_ms - 800_000,
+            "formal_row_durable_at_ms": now_ms - 700_000,
+            "payload_sha256": "1" * 64,
+        },
+        {
+            "index_schema_version": 1,
+            "supersedes_source_article_id": art2,
+            "source_article_id": art2,
+            "event_id": f"event_{art2}",
+            "symbol": "NUUSDT",
+            "symbols": ["NUUSDT"],
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art2}|NUUSDT",
+            "official_schedule_anchor_ms": s1_old,
+            "original_source_published_at_ms": now_ms - 800_000,
+            "identity_first_observed_at_ms": now_ms - 800_000,
+            "formal_row_durable_at_ms": now_ms - 700_000,
+            "payload_sha256": "2" * 64,
+        },
+    ]
+    (output_root / "formal_launch_identity_index.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in idx_rows) + "\n", encoding="utf-8"
+    )
+
+    f_root = tmp_path / "f_root"
+    repo_dir, rc_path, sum_path = _setup_canonical_git_and_consumer_proof(tmp_path, output_root, f_root, now_ms)
+    monkeypatch.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+
+    rechecked_articles = []
+    current_anchor_by_art = {art1: s1_new_utc, art2: s1_new_utc}
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        rechecked_articles.append(article_code)
+        anchor_utc = current_anchor_by_art[article_code]
+        return {
+            "ok": True,
+            "payload": {
+                "code": "000000",
+                "data": {
+                    "code": article_code,
+                    "title": "Binance Futures Will Launch Perpetual Contract",
+                    "body": json.dumps({
+                        "node": "root",
+                        "child": [
+                            {"node": "text", "text": f"{anchor_utc}: {'HYPEUSDC' if article_code == art1 else 'NUUSDT'} Perpetual Contract"},
+                        ],
+                    }),
+                },
+            },
+            "final_url": f"https://www.binance.com/bapi/detail?articleCode={article_code}",
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_list_fetch(url, **kwargs):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [
+                    {"symbol": "HYPEUSDC", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDC", "marginAsset": "USDC", "onboardDate": s1_old},
+                    {"symbol": "NUUSDT", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": s1_old},
+                ]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--stage1-5f-consumer-root-contract", str(rc_path),
+        "--stage1-5f-consumer-summary", str(sum_path),
+        "--max-polls", "1",
+    ]
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+                # P1-05 counterexample: total detail budget = 0 MUST block recheck!
+                with monkeypatch.context() as m0:
+                    m0.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 0)
+                    with patch("sys.argv", args1):
+                        assert main() == 0
+                assert rechecked_articles == []
+                assert not (output_root / "schedule_recheck_state.json").exists()
+
+                # Normal budget = 1 -> Poll 1 rechecks 1 article and emits formal revision to events/
+                with patch("sys.argv", args1):
+                    assert main() == 0
+                assert len(rechecked_articles) == 1
+                assert not (output_root / "schedule_recheck_state.json").exists()
+                rev_rows = [r for r in _read_jsonl_files(output_root / "events") if r.get("event_type") == "futures_contract_launch_schedule_revision"]
+                assert len(rev_rows) == 1
+                assert rev_rows[0]["supersedes_source_article_id"] == rev_rows[0]["source_article_id"]
+                assert rev_rows[0]["symbol_revised_anchor_ms"]["HYPEUSDC"] == s1_new
+
+                # Poll 2 immediately -> cooldown prevents re-fetching first article; picks second article
+                with patch("sys.argv", args1):
+                    assert main() == 0
+                assert len(rechecked_articles) == 2
+                assert set(rechecked_articles) == {art1, art2}
+
+                # Poll 3 immediately -> both in 600s cooldown -> 0 additional fetches
+                with patch("sys.argv", args1):
+                    assert main() == 0
+                assert len(rechecked_articles) == 2
+
+                # P1-05: watch state MUST live in detail_retry_scheduler_state.json, NOT summary
+                sched_persisted = json.loads((output_root / "detail_retry_scheduler_state.json").read_text(encoding="utf-8"))
+                assert set(sched_persisted.get("schedule_recheck_watches", {}).keys()) == {art1, art2}
+                sum_persisted = json.loads(summary.read_text(encoding="utf-8"))
+                assert "schedule_recheck_next_at_by_article" not in sum_persisted
+                assert "schedule_recheck_payload_hash_by_article" not in sum_persisted
+
+                # Poll 4: expire art1 cooldown (>600s) and simulate second postponement -> MUST emit second revision
+                s1_new2 = s1_new + 2 * 86_400_000
+                current_anchor_by_art[art1] = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s1_new2 / 1000))
+                sched_persisted["schedule_recheck_watches"][art1]["next_schedule_recheck_at_ms"] = now_ms - 1000
+                (output_root / "detail_retry_scheduler_state.json").write_text(
+                    json.dumps(sched_persisted, indent=2), encoding="utf-8"
+                )
+                with patch("sys.argv", args1):
+                    assert main() == 0
+                assert len(rechecked_articles) == 3
+                assert rechecked_articles[-1] == art1
+                rev_rows2 = [r for r in _read_jsonl_files(output_root / "events") if r.get("event_type") == "futures_contract_launch_schedule_revision"]
+                art1_revs = [r for r in rev_rows2 if r.get("source_article_id") == art1]
+                assert len(art1_revs) == 2
+                assert art1_revs[1]["symbol_revised_anchor_ms"]["HYPEUSDC"] == s1_new2
+
+
+def test_postponement_d_future_launch_recovery_cli_mutual_exclusion_fresh_root_and_startup_order(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    import pytest
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+    )
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    c1, c = _write_valid_upstream(tmp_path)
+    out_root = tmp_path / "fresh_d_root"
+    summary = out_root / "binance_futures_launch_smoke_summary.json"
+
+    # 1. Mutual exclusion with --active-root-recovery-*
+    bad_args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(out_root),
+        "--output-summary", str(summary),
+        "--future-launch-recovery", f"{art_id}:HYPEUSDC,TRXUSDC",
+        "--active-root-recovery-source-article-id", art_id,
+        "--active-root-recovery-provenance", "active_root_retry_cycle_recovery_v1",
+    ]
+    with patch("sys.argv", bad_args):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+    # 2. Non-fresh root rejected before network
+    non_fresh = tmp_path / "non_fresh_root"
+    (non_fresh / "events").mkdir(parents=True)
+    (non_fresh / "events" / "2026-11-11.jsonl").write_text("{}\n", encoding="utf-8")
+    nf_args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(non_fresh),
+        "--output-summary", str(non_fresh / "binance_futures_launch_smoke_summary.json"),
+        "--future-launch-recovery", f"{art_id}:HYPEUSDC",
+        "--max-polls", "1",
+    ]
+    with patch("sys.argv", nf_args):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+    # 3. Startup order: Poll 1 without F consumer proof -> writes gate with future_launch_recovery, does NOT fetch target BAPI
+    now_ms = int(time.time() * 1000)
+    s1 = ((now_ms + 3_600_000) // 60_000) * 60_000
+    s1_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s1 / 1000))
+    f_root = tmp_path / "f_root"
+    f_root.mkdir()
+    bapi_calls = []
+
+    def fake_bapi(code, **kw):
+        bapi_calls.append(code)
+        return {
+            "ok": True,
+            "payload": {
+                "code": "000000",
+                "data": {
+                    "code": code,
+                    "title": "Binance Futures Will Launch HYPEUSDC Perpetual Contract",
+                    "body": json.dumps({"node": "root", "child": [{"node": "text", "text": f"{s1_utc}: HYPEUSDC Perpetual Contract"}]}),
+                },
+            },
+            "final_url": f"https://www.binance.com/bapi/detail?articleCode={code}",
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_list(url, **kw):
+        return {"ok": True, "payload": {"data": {"catalogs": [{"articles": []}]}}, "final_url": url, "http_status": 200, "error": None}
+
+    def fake_ex(url, **kw):
+        return {
+            "ok": True,
+            "payload": {"symbols": [{"symbol": "HYPEUSDC", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDC", "marginAsset": "USDC", "onboardDate": s1}]},
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    ok_args = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(out_root),
+        "--output-summary", str(summary),
+        "--future-launch-recovery", f"{art_id}:HYPEUSDC",
+        "--stage1-5f-consumer-root-contract", str(f_root / "observer_root_contract.json"),
+        "--stage1-5f-consumer-summary", str(f_root / "live_depth_observer_summary.json"),
+        "--max-polls", "1",
+    ]
+    with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex(url) if "exchangeInfo" in url else fake_list(url)):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi):
+            with patch("sys.argv", ok_args):
+                assert main() == 0
+
+    gate_data = json.loads((out_root / "live_safety_gate_summary.json").read_text(encoding="utf-8"))
+    assert gate_data["future_launch_recovery"] == {
+        "source_article_id": art_id,
+        "symbols": ["HYPEUSDC"],
+    }
+    assert bapi_calls == []
+    assert len(_read_jsonl_files(out_root / "events")) == 0
+
+    # 4. P1-01 counterexamples: fake minimal watermark OR producer disabled MUST NOT fetch/emit
+    rec_obj = gate_data["future_launch_recovery"]
+    repo_dir, _, _ = _setup_canonical_git_and_consumer_proof(
+        tmp_path, out_root, f_root, now_ms, future_launch_recovery=rec_obj
+    )
+    # (a) producer disabled (default False) even with valid consumer proof & watermark -> 0 fetches
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex(url) if "exchangeInfo" in url else fake_list(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi):
+                with patch("sys.argv", ok_args):
+                    assert main() == 0
+    assert bapi_calls == []
+    assert len(_read_jsonl_files(out_root / "events")) == 0
+
+    # (b) producer enabled, but fake minimal watermark {"max_seen_detected_at_ms": ...} -> 0 fetches
+    from configs import base as cfg_base
+    monkeypatch.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+    saved_wm = (f_root / "watermark.json").read_text(encoding="utf-8")
+    (f_root / "watermark.json").write_text(json.dumps({"max_seen_detected_at_ms": now_ms}), encoding="utf-8")
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex(url) if "exchangeInfo" in url else fake_list(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi):
+                with patch("sys.argv", ok_args):
+                    assert main() == 0
+    assert bapi_calls == []
+    assert len(_read_jsonl_files(out_root / "events")) == 0
+
+    # (c) bootstrap_root_id tampered to consumer_root_id -> MUST reject (0 fetches)
+    wm_tampered = json.loads(saved_wm)
+    rc_obj = json.loads((f_root / "observer_root_contract.json").read_text(encoding="utf-8"))
+    wm_tampered["bootstrap_root_id"] = rc_obj["consumer_root_id"]
+    (f_root / "watermark.json").write_text(json.dumps(wm_tampered), encoding="utf-8")
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex(url) if "exchangeInfo" in url else fake_list(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi):
+                with patch("sys.argv", ok_args):
+                    assert main() == 0
+    assert bapi_calls == []
+    assert len(_read_jsonl_files(out_root / "events")) == 0
+
+    # 5. Canonical consumer proof + moving watermark (max_seen_detected_at_ms > bootstrap_max_seen_detected_at_ms) + producer effective -> Poll fetches & emits
+    wm_moved = json.loads(saved_wm)
+    wm_moved["max_seen_detected_at_ms"] = int(wm_moved["bootstrap_max_seen_detected_at_ms"]) + 60_000
+    (f_root / "watermark.json").write_text(json.dumps(wm_moved), encoding="utf-8")
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex(url) if "exchangeInfo" in url else fake_list(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi):
+                with patch("sys.argv", ok_args):
+                    assert main() == 0
+
+    assert bapi_calls == [art_id]
+    events = _read_jsonl_files(out_root / "events")
+    assert len(events) == 1
+    assert events[0]["source_article_id"] == art_id
+    assert events[0]["detail_recovery_provenance"] == "explicit_future_launch_revalidation_v1"
+
+
+def _verify_real_source_fixture_contract(fixture_dir: Path) -> int:
+    import hashlib
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        validate_bapi_article_detail_payload,
+    )
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_bapi_article_payload,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        classify_stage1_5d_source_contract,
+        iter_stage1_5d_event_rows,
+    )
+
+    assert fixture_dir.is_dir(), f"Missing fixture dir: {fixture_dir}"
+    manifest_path = fixture_dir / "manifest.json"
+    assert manifest_path.is_file(), f"Missing manifest.json in {fixture_dir}"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert isinstance(manifest, dict) and manifest, "manifest.json must be a non-empty JSON object"
+    assert manifest.get("source_article_id") and manifest.get("payload_sha256") and manifest.get("raw_payload_relpath")
+
+    raw_path = fixture_dir / str(manifest["raw_payload_relpath"])
+    assert raw_path.is_file(), f"Missing raw payload file: {raw_path}"
+    raw_bytes = raw_path.read_bytes()
+    assert raw_bytes, "Raw payload bytes must not be empty"
+    assert hashlib.sha256(raw_bytes).hexdigest() == manifest["payload_sha256"]
+
+    raw_payload = json.loads(raw_bytes.decode("utf-8"))
+    trusted = validate_bapi_article_detail_payload(
+        raw_payload,
+        requested_article_code=str(manifest["source_article_id"]),
+        catalog_title=manifest.get("title"),
+    )
+    assert trusted.get("payload_trusted") is True, f"Untrusted BAPI payload: {trusted}"
+    extracted = extract_symbol_candidates_from_bapi_article_payload(
+        raw_payload,
+        title=str(manifest.get("title") or ""),
+    )
+    assert extracted.get("symbols"), "Extracted launch symbols must not be empty"
+    assert extracted.get("symbol_launch_times_ms"), "Extracted launch times must not be empty"
+
+    event_files = sorted(fixture_dir.glob("events/*.jsonl"))
+    assert event_files, f"No events/*.jsonl files found under {fixture_dir}"
+    events = list(iter_stage1_5d_event_rows(str(fixture_dir / "events" / "*.jsonl")))
+    assert events, "events/*.jsonl must contain at least one formal event row"
+    valid_events = []
+    for ev in events:
+        if ev.get("source_article_id") != manifest["source_article_id"]:
+            continue
+        for sym in ev.get("symbols") or []:
+            sc = classify_stage1_5d_source_contract(ev, str(sym))
+            if sc.get("source_contract_status") in {"formal_v1_valid", "formal_v2_valid"}:
+                valid_events.append(ev)
+                break
+    assert valid_events, "events/*.jsonl must pass strict F consumer contract validation"
+    extracted_symbols = {str(s) for s in (extracted.get("symbols") or [])}
+    extracted_times = dict(extracted.get("symbol_launch_times_ms") or {})
+    matched_reconciliation = False
+    for ev in valid_events:
+        ev_symbols = {str(s) for s in (ev.get("symbols") or [])}
+        ev_anchors = ev.get("symbol_official_schedule_anchor_ms") or ev.get("symbol_revised_anchor_ms") or {}
+        if ev_symbols == extracted_symbols and all(
+            ev_anchors.get(sym) == extracted_times.get(sym) for sym in extracted_symbols
+        ):
+            matched_reconciliation = True
+            break
+    assert matched_reconciliation, "Raw BAPI extracted symbols/launch times must reconcile with formal event row"
+    return len(valid_events)
+
+
+def test_postponement_real_source_contract_accepts_canonical_d_output_and_rejects_mismatch(tmp_path, monkeypatch):
+    import hashlib
+    from unittest.mock import patch
+
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+    )
+
+    art1 = "2d89a5966b174a2689ab2c2a15db1757"
+    now_ms = int(time.time() * 1000)
+    s1_old = ((now_ms + 3_600_000) // 60_000) * 60_000
+    s1_old_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s1_old / 1000))
+    title = "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC Perpetual Contract"
+
+    output_root = tmp_path / "out"
+    summary = output_root / "binance_futures_launch_smoke_summary.json"
+    _seed_v3_resumable_root(output_root, cutoff_ms=1)
+    c1, c = _write_valid_upstream(tmp_path)
+    f_root = tmp_path / "f_root"
+    repo_dir, rc_path, sum_path = _setup_canonical_git_and_consumer_proof(tmp_path, output_root, f_root, now_ms)
+
+    def fake_list_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "code": "000000",
+                "data": {
+                    "catalogs": [
+                        {
+                            "catalogId": 161,
+                            "articles": [
+                                {
+                                    "code": art1,
+                                    "title": title,
+                                    "releaseDate": now_ms - 60_000,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_bapi_fetch(article_code, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "code": "000000",
+                "data": {
+                    "code": article_code,
+                    "title": title,
+                    "body": json.dumps({
+                        "node": "root",
+                        "child": [
+                            {"node": "text", "text": f"{s1_old_utc}: HYPEUSDC Perpetual Contract"},
+                        ],
+                    }),
+                },
+            },
+            "final_url": f"https://www.binance.com/bapi/detail?articleCode={article_code}",
+            "http_status": 200,
+            "error": None,
+        }
+
+    def fake_ex_fetch(url, **kwargs):
+        return {
+            "ok": True,
+            "payload": {
+                "symbols": [
+                    {
+                        "symbol": "HYPEUSDC",
+                        "status": "TRADING",
+                        "contractType": "PERPETUAL",
+                        "quoteAsset": "USDC",
+                        "marginAsset": "USDC",
+                        "onboardDate": s1_old,
+                    },
+                ]
+            },
+            "final_url": url,
+            "http_status": 200,
+            "error": None,
+        }
+
+    args1 = [
+        "run_stage1_5d_live_event_source_smoke_collector.py",
+        "--live-public-readonly",
+        "--stage1-5c1-summary", str(c1),
+        "--stage1-5c-summary", str(c),
+        "--output-root", str(output_root),
+        "--output-summary", str(summary),
+        "--stage1-5f-consumer-root-contract", str(rc_path),
+        "--stage1-5f-consumer-summary", str(sum_path),
+        "--max-polls", "1",
+    ]
+    with _patch_collector_repo_root(repo_dir):
+        with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=lambda url, **kw: fake_ex_fetch(url) if "exchangeInfo" in url else fake_list_fetch(url)):
+            with patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi_fetch):
+                with patch("sys.argv", args1):
+                    assert main() == 0
+
+    raw_bins = sorted((output_root / "raw_payloads" / "announcement_detail" / art1).glob("*.bin"))
+    assert raw_bins, "Canonical D run must persist raw BAPI detail payload"
+    raw_relpath = raw_bins[0].relative_to(output_root).as_posix()
+    manifest = {
+        "source_article_id": art1,
+        "title": title,
+        "raw_payload_relpath": raw_relpath,
+        "payload_sha256": hashlib.sha256(raw_bins[0].read_bytes()).hexdigest(),
+    }
+    (output_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    # Positive canonical check: raw payload + manifest + formal D events must pass
+    assert _verify_real_source_fixture_contract(output_root) >= 1
+
+    # Negative mismatch check: valid raw payload with +60s time vs unchanged formal event -> raw/event reconciliation must fail
+    mismatch_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime((s1_old + 60_000) / 1000))
+    raw_obj = json.loads(raw_bins[0].read_bytes().decode("utf-8"))
+    raw_obj["data"]["body"] = json.dumps({
+        "node": "root",
+        "child": [{"node": "text", "text": f"{mismatch_utc}: HYPEUSDC Perpetual Contract"}],
+    })
+    raw_new_bytes = json.dumps(raw_obj).encode("utf-8")
+    raw_bins[0].write_bytes(raw_new_bytes)
+    manifest["payload_sha256"] = hashlib.sha256(raw_new_bytes).hexdigest()
+    (output_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(AssertionError, match="reconcile"):
+        _verify_real_source_fixture_contract(output_root)
+
+
+def test_postponement_real_source_contract_rejects_garbage_raw_and_non_canonical_event(tmp_path):
+    import hashlib
+
+    import pytest
+
+    fdir = tmp_path / "bad_fixture"
+    (fdir / "raw").mkdir(parents=True)
+    (fdir / "events").mkdir(parents=True)
+    garbage_bytes = b"not valid json at all"
+    (fdir / "raw" / "payload.bin").write_bytes(garbage_bytes)
+    (fdir / "manifest.json").write_text(
+        json.dumps({
+            "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+            "payload_sha256": hashlib.sha256(garbage_bytes).hexdigest(),
+            "raw_payload_relpath": "raw/payload.bin",
+        }),
+        encoding="utf-8",
+    )
+    (fdir / "events" / "2026-11-11.jsonl").write_text(
+        json.dumps({
+            "formal_event_contract_version": 2,
+            "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+            "symbol_anchor_provenance": {"HYPEUSDC": {}},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises((AssertionError, json.JSONDecodeError, ValueError)):
+        _verify_real_source_fixture_contract(fdir)
+
+
+def test_postponement_real_source_contract_when_authorized():
+    """Real-source contract check when STAGE15_POSTPONEMENT_REAL_FIXTURE_DIR is explicitly provided."""
+    import os
+
+    fixture_dir_env = os.environ.get("STAGE15_POSTPONEMENT_REAL_FIXTURE_DIR")
+    if not fixture_dir_env:
+        pytest.skip("STAGE15_POSTPONEMENT_REAL_FIXTURE_DIR not set; real-source check skipped.")
+
+    _verify_real_source_fixture_contract(Path(fixture_dir_env))

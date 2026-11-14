@@ -127,6 +127,7 @@ def build_stage1_5d_runtime_gate(context: dict | None = None, **kwargs) -> dict:
         "multi_symbol_candidate_set_pending_count": int(ctx.get("multi_symbol_candidate_set_pending_count") or 0),
         "multi_symbol_full_emit_count": int(ctx.get("multi_symbol_full_emit_count") or 0),
         "multi_symbol_emission_registry_count": int(ctx.get("multi_symbol_emission_registry_count") or 0),
+        "future_launch_recovery": ctx.get("future_launch_recovery"),
         # The runner owns attestation. Missing evidence must never become an
         # optimistic producer health claim in this serializer.
         "schedule_revision_producer_supported": bool(ctx.get("schedule_revision_producer_supported", False)),

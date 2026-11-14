@@ -286,8 +286,9 @@ def test_runner_mock_response_dir_keeps_network_disabled(tmp_path):
 def test_runner_finalizes_expired_active_state_before_fetching_depth(tmp_path):
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
+    import time as _time
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "onboardDate": int(_time.time() * 1000) - 10_000}]}))
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         f.write(json.dumps({
             "bids": [["100.0", "10.0"]],
@@ -444,7 +445,7 @@ def test_runner_accepts_delayed_launch_event_using_effective_launch_time(tmp_pat
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+        json.dump({"symbols": [{"symbol": "ETHUSD1", "status": "TRADING", "onboardDate": 1783069200000}]}, f)
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
 
@@ -544,7 +545,7 @@ def test_runner_accepts_post_watermark_bapi_confirmed_1_5d_event(tmp_path, monke
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        json.dump({"symbols": [{"symbol": "XYZUSDT"}]}, f)
+        json.dump({"symbols": [{"symbol": "XYZUSDT", "status": "TRADING", "onboardDate": 1784644200000 - 30_000}]}, f)
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
 
@@ -642,7 +643,7 @@ def test_runner_future_launch_pending_does_not_write_rejected_row_and_retries_la
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+        json.dump({"symbols": [{"symbol": "ETHUSD1", "status": "TRADING", "onboardDate": 1783069200000}]}, f)
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
 
@@ -754,7 +755,7 @@ def test_runner_accepts_delayed_launch_when_detected_time_is_before_running_wate
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        json.dump({"symbols": [{"symbol": "SPCXUSD1"}]}, f)
+        json.dump({"symbols": [{"symbol": "SPCXUSD1", "status": "TRADING", "onboardDate": 1784538000000}]}, f)
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
 
@@ -865,7 +866,7 @@ def test_runner_rejected_age_exceeded_row_includes_age_and_watermark_diagnostics
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        json.dump({"symbols": [{"symbol": "ETHUSD1"}]}, f)
+        json.dump({"symbols": [{"symbol": "ETHUSD1", "status": "TRADING", "onboardDate": 1783069200000}]}, f)
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         json.dump({"bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": 1000}, f)
 
@@ -1054,8 +1055,9 @@ def test_enrich_depth_request_manifest_row_rejects_missing_symbol():
 def test_depth_manifest_row_written_for_active_state_contains_symbol_keys(tmp_path):
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
+    import time as _time
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "onboardDate": int(_time.time() * 1000) - 10_000}]}))
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         f.write(json.dumps({
             "bids": [["100.0", "10.0"]],
@@ -1175,8 +1177,9 @@ def test_failed_depth_manifest_row_contains_event_symbol_context():
 def test_mock_depth_manifest_row_written_exactly_once(tmp_path):
     mock_dir = tmp_path / "mock_responses"
     os.makedirs(mock_dir, exist_ok=True)
+    import time as _time
     with open(mock_dir / "binance_exchangeinfo_payload.json", "w") as f:
-        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+        f.write(json.dumps({"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "onboardDate": int(_time.time() * 1000) - 10_000}]}))
     with open(mock_dir / "binance_depth_payload_healthy.json", "w") as f:
         f.write(json.dumps({
             "bids": [["100.0", "10.0"]],
@@ -1272,7 +1275,7 @@ def test_live_depth_manifest_row_written_exactly_once(tmp_path):
     watermark_time = now_ms - 10000
     mock_dir = tmp_path / "mock_responses"
     mock_dir.mkdir()
-    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": [{"symbol": "ABCUSDT"}]}))
+    (mock_dir / "binance_exchangeinfo_payload.json").write_text(json.dumps({"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "onboardDate": event_time}]}))
     (mock_dir / "binance_depth_payload_healthy.json").write_text(json.dumps({
         "bids": [["100.0", "10.0"]], "asks": [["101.0", "10.0"]], "T": now_ms,
     }))
@@ -3294,7 +3297,11 @@ def test_four_symbol_staggered_long_lead_integration_matrix():
     exchangeinfo_state = {
         "available": True,
         "symbols": set(launch_event["symbols"]),
-        "symbol_rows": {},
+        "symbol_rows": {
+            s: {"status": "TRADING", "onboardDate": launch_event["symbol_effective_observation_anchor_ms"][s]}
+            for s in launch_event["symbols"]
+        },
+        "payload_sha256": "h",
     }
     # Create 4 states
     states = {}
@@ -3329,7 +3336,7 @@ def test_four_symbol_staggered_long_lead_integration_matrix():
     # 3. Each Symbol becomes ready only at its own anchor plus the launch guard.
     for sym, state in states.items():
         ready_at_ms = launch_event["symbol_effective_observation_anchor_ms"][sym] + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
-        updated = re_resolve_pending_anchor(state, [launch_event], exchangeinfo_state=exchangeinfo_state, now_ms=ready_at_ms)
+        updated = re_resolve_pending_anchor(state, [launch_event], exchangeinfo_state={**exchangeinfo_state, "fetched_at_ms": ready_at_ms}, now_ms=ready_at_ms)
         assert updated.status == "pending_ready_for_admission", f"{sym} should become ready at its own anchor"
         for sibling, sibling_state in states.items():
             if sibling == sym:
@@ -3337,7 +3344,7 @@ def test_four_symbol_staggered_long_lead_integration_matrix():
             sibling_ready_at_ms = launch_event["symbol_effective_observation_anchor_ms"][sibling] + base.EXTERNAL_SIGNAL_STAGE1_5F_LAUNCH_START_GUARD_MS
             if ready_at_ms < sibling_ready_at_ms:
                 sibling_updated = re_resolve_pending_anchor(
-                    sibling_state, [launch_event], exchangeinfo_state=exchangeinfo_state, now_ms=ready_at_ms,
+                    sibling_state, [launch_event], exchangeinfo_state={**exchangeinfo_state, "fetched_at_ms": ready_at_ms}, now_ms=ready_at_ms,
                 )
                 assert sibling_updated.status == "pending_launch_time_in_future", f"{sibling} promoted early"
 
@@ -4556,3 +4563,332 @@ echo "CHECKOUT_REACHED"
     assert "MATCHING_WRITER: pid=555" in res.stderr
     assert "integer expression expected" not in res.stderr
     assert "CHECKOUT_REACHED" not in res.stdout
+
+
+def test_postponement_runner_first_admission_and_promotion_depth_zero_until_trading_and_post_response_clock(tmp_path, monkeypatch):
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as runner
+    from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_event_anchor_contract_row,
+        build_symbol_anchor_contract,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        EventSymbolState,
+    )
+
+    s0 = 1_794_389_400_000  # 11-11 09:30 UTC
+    detected_at = s0 - 16_100_000
+    raw = {
+        "event_id": "evt_postpone_runner_1",
+        "event_type": "futures_contract_launch",
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "symbols": ["HYPEUSDC"],
+        "symbol": "HYPEUSDC",
+        "detected_at_ms": detected_at,
+        "first_detected_at_ms": detected_at,
+        "source_published_at_ms": detected_at - 60_000,
+        "detail_fetch_attempted": True,
+        "detail_fetch_status": "success",
+        "detail_payload_hash": "a" * 64,
+        "detail_fetched_at_ms": detected_at + 5_000,
+        "symbol_extraction_source": "bapi_article_body",
+        "symbol_validation_status": "validated",
+        "source_detail_url_normalized": "https://www.binance.com/bapi/apex/v1/public/apex/cms/article/detail/query?articleCode=2d89a5966b174a2689ab2c2a15db1757",
+        "symbol_launch_times_ms": {"HYPEUSDC": s0},
+        "candidate_provenance": {
+            "HYPEUSDC": {
+                "raw_time_text": "2026-11-11 09:30 (UTC)",
+                "timezone_text": "UTC",
+                "node_path": "body.child[0]",
+                "logical_block_id": "2d89a5966b174a2689ab2c2a15db1757:HYPEUSDC",
+                "schedule_text_context": "2026-11-11 09:30 (UTC)",
+                "mapping_method": "per_symbol_official_schedule",
+                "payload_sha256": "a" * 64,
+                "parser_version": "stage1_5d_symbol_extraction_v3",
+            }
+        },
+    }
+    contract = build_symbol_anchor_contract(
+        symbol="HYPEUSDC",
+        official_schedule_anchor_ms=s0,
+        exchangeinfo_onboard_date_ms=None,
+        anchor_contract_decision_at_ms=detected_at + 10_000,
+        official_schedule_revision_id=None,
+        official_schedule_available_at_ms=detected_at + 5_000,
+        mapping_confidence="exact_per_symbol_row",
+        provenance=raw["candidate_provenance"]["HYPEUSDC"],
+    )
+    ev = build_formal_event_anchor_contract_row(base_event=raw, symbol_contracts={"HYPEUSDC": contract})
+
+    def _run_case(mode: str):
+        case_dir = tmp_path / mode
+        events_file = case_dir / "events.jsonl"
+        out_root = case_dir / "out"
+        events_file.parent.mkdir(parents=True, exist_ok=True)
+        out_root.mkdir(parents=True, exist_ok=True)
+        events_file.write_text(json.dumps(ev) + "\n", encoding="utf-8")
+        d_summary = case_dir / "stage1_5d_summary.json"
+        d_summary.write_text(json.dumps({
+            "decision": "stage1_5d_smoke_passed",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }), encoding="utf-8")
+        e_summary = case_dir / "stage1_5e_summary.json"
+        e_summary.write_text(json.dumps({
+            "execution_feasibility_claim_allowed": False,
+            "trade_signal_allowed": False,
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }), encoding="utf-8")
+
+        from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+            Watermark,
+        )
+        wm = Watermark(
+            watermark_schema_version=2,
+            bootstrap_max_seen_detected_at_ms=detected_at - 10_000,
+            bootstrap_created_at_ms=detected_at - 5_000,
+            bootstrap_source_root=str(events_file.parent),
+            bootstrap_root_id="boot_root_1",
+            max_seen_detected_at_ms=detected_at - 10_000,
+            updated_at_ms=detected_at - 10_000,
+        )
+        (out_root / "watermark.json").write_text(json.dumps(wm.to_dict()), encoding="utf-8")
+
+        depth_calls = []
+        poll_tick_sec = (s0 + 30_000) / 1000.0
+        clock = {"now": poll_tick_sec}
+
+        def fake_time():
+            return clock["now"]
+
+        def fake_refresh(now_ms, previous_cache, live_public_readonly=False, mock_exchangeinfo_payload=None, raw_payload_root=None):
+            if mode == "pending_trading":
+                return {
+                    "last_refreshed_ms": now_ms,
+                    "fetched_at_ms": now_ms,
+                    "symbols": {"HYPEUSDC"},
+                    "symbol_rows": {"HYPEUSDC": {"status": "PENDING_TRADING", "onboardDate": s0}},
+                    "available": True,
+                    "payload_sha256": "b" * 64,
+                    "raw_payload_path": "",
+                    "manifest_row": None,
+                }
+            if mode == "conflict":
+                return {
+                    "last_refreshed_ms": now_ms,
+                    "fetched_at_ms": now_ms,
+                    "symbols": {"HYPEUSDC"},
+                    "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s0 + 600_000}},
+                    "available": True,
+                    "payload_sha256": "b" * 64,
+                    "raw_payload_path": "",
+                    "manifest_row": None,
+                }
+            if mode == "network_fail_cached":
+                return {
+                    "last_refreshed_ms": now_ms - 400_000,
+                    "fetched_at_ms": now_ms - 400_000,
+                    "symbols": {"HYPEUSDC"},
+                    "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s0}},
+                    "available": False,
+                    "payload_sha256": "b" * 64,
+                    "raw_payload_path": "",
+                    "manifest_row": None,
+                }
+            # mode == "post_response_clock": HTTP took 35s (> 30s skew bound relative to pre-HTTP poll tick)
+            clock["now"] = poll_tick_sec + 35.0
+            resp_ms = int(clock["now"] * 1000)
+            return {
+                "last_refreshed_ms": resp_ms,
+                "fetched_at_ms": resp_ms,
+                "symbols": {"HYPEUSDC"},
+                "symbol_rows": {"HYPEUSDC": {"status": "TRADING", "onboardDate": s0}},
+                "available": True,
+                "payload_sha256": "b" * 64,
+                "raw_payload_path": "",
+                "manifest_row": None,
+            }
+
+        def fake_depth(symbol, live_public_readonly=False):
+            depth_calls.append(symbol)
+            return {
+                "ok": True,
+                "data": {"bids": [["10.0", "100.0"]], "asks": [["10.1", "100.0"]]},
+                "manifest_row": {"fetched_at_ms": int(clock["now"] * 1000), "http_status": 200},
+            }
+
+        monkeypatch.setattr("time.time", fake_time)
+        monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.refresh_exchangeinfo_cache", fake_refresh)
+        monkeypatch.setattr("src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_depth_snapshot", fake_depth)
+        monkeypatch.setattr(runner, "verify_consumer_runtime_proof", lambda *a, **kw: {"valid": True, "startup_head_sha": "abc"})
+
+        monkeypatch.setattr("sys.argv", [
+            "run_stage1_5f_live_depth_observer.py",
+            "--fixture-events-jsonl", str(events_file),
+            "--stage1-5d-summary", str(d_summary),
+            "--stage1-5e-summary", str(e_summary),
+            "--output-root", str(out_root),
+            "--max-polls", "1",
+        ])
+        with pytest.raises(SystemExit) as exc_info:
+            runner.main()
+        assert exc_info.value.code == 0
+        state_files = sorted(out_root.rglob("*state*.jsonl"))
+        latest_state = None
+        for sf in state_files:
+            for line in sf.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    latest_state = EventSymbolState.from_dict(json.loads(line))
+        return len(depth_calls), latest_state
+
+    d_pt, st_pt = _run_case("pending_trading")
+    assert d_pt == 0
+    assert st_pt is not None and st_pt.status == "pending_exchangeinfo_not_trading"
+
+    d_cf, st_cf = _run_case("conflict")
+    assert d_cf == 0
+    assert st_cf is not None and st_cf.status == "pending_anchor_conflict"
+
+    d_nf, st_nf = _run_case("network_fail_cached")
+    assert d_nf == 0
+    assert st_nf is not None and st_nf.status == "pending_exchangeinfo_unavailable"
+
+    d_ok, st_ok = _run_case("post_response_clock")
+    assert d_ok > 0
+    assert st_ok is not None and st_ok.status == "active"
+
+
+def test_postponement_f_runner_consumes_same_page_l1_revision(tmp_path):
+    from research.external_signal_shadow.stage1_5_launch_anchor_contract import (
+        build_formal_schedule_revision_row,
+    )
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        create_pending_observation_state,
+    )
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        process_schedule_revision_event,
+    )
+
+    class _FakeGuard:
+        def reserve_and_write(self, *, write_func, **kwargs):
+            write_func()
+            return {"status": "ready", "written": True}
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    s1 = 1_794_389_400_000
+    s2 = s1 + 5 * 86_400_000
+    st = create_pending_observation_state(
+        {
+            "event_symbol_id": f"event_{art_id}:HYPEUSDC",
+            "event_id": f"event_{art_id}",
+            "symbol": "HYPEUSDC",
+            "detected_at_ms": s1 - 3_600_000,
+            "source_article_id": art_id,
+            "effective_observation_anchor_source": "official_schedule_anchor",
+        },
+        "pending_launch_time_in_future",
+        {
+            "observation_anchor_ms": s1,
+            "effective_observation_anchor_source": "official_schedule_anchor",
+            "formal_event_contract_version": 2,
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art_id}|HYPEUSDC",
+        },
+        s1 - 3_600_000,
+    )
+    rev_id = "a" * 64
+    rev_ev = build_formal_schedule_revision_row(
+        source_article_id=art_id,
+        supersedes_source_article_id=art_id,
+        symbol="HYPEUSDC",
+        revised_anchor_ms=s2,
+        superseded_anchor_ms=s1,
+        revision_intent="rescheduled_with_new_anchor",
+        link_status="linked",
+        revision_id=rev_id,
+        revision_semantic_id=rev_id,
+        revision_application_id=rev_id,
+        revision_payload_version_id="b" * 64,
+        revision_observation_id="c" * 64,
+        revision_payload_hash="d" * 64,
+        revision_available_at_ms=s1 - 600_000,
+        provenance={"payload_sha256": "d" * 64, "parser_version": "v2"},
+    )
+    guard = _FakeGuard()
+    states = {st.event_symbol_id: st}
+    res = process_schedule_revision_event(
+        rev_ev,
+        states=states,
+        state_file=str(tmp_path / "state.jsonl"),
+        registry_file=tmp_path / "rev_reg.jsonl",
+        storage_guard=guard,
+        now_ms=s1 - 600_000,
+    )
+    assert res["status"] == "revision_applied"
+    from research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        re_resolve_pending_anchor,
+    )
+    launch_ev = {
+        "event_id": f"event_{art_id}",
+        "source_article_id": art_id,
+        "symbols": ["HYPEUSDC"],
+        "detected_at_ms": s1 - 3_600_000,
+        "formal_event_contract_version": 2,
+        "source_contract_status": "formal_v2_valid",
+        "event_all_symbols_consumable_by_stage1_5f": True,
+        "symbol_official_schedule_anchor_ms": {"HYPEUSDC": s1},
+        "symbol_effective_observation_anchor_ms": {"HYPEUSDC": s1},
+        "symbol_effective_observation_anchor_sources": {"HYPEUSDC": "official_schedule_anchor"},
+        "symbol_anchor_validation_statuses": {"HYPEUSDC": "valid"},
+        "symbol_max_evidence_classes": {"HYPEUSDC": "clean_or_recovery"},
+        "symbol_official_schedule_statuses": {"HYPEUSDC": "selected"},
+        "symbol_anchor_provenance": {"HYPEUSDC": {"payload_sha256": "a" * 64}},
+    }
+    ex = {
+        "available": True,
+        "symbols": {"HYPEUSDC"},
+        "symbol_rows": {"HYPEUSDC": {"status": "PENDING_TRADING", "onboardDate": s2}},
+        "fetched_at_ms": s1 - 600_000,
+        "payload_sha256": "e" * 64,
+    }
+    updated_st = re_resolve_pending_anchor(states[st.event_symbol_id], [launch_ev, rev_ev], ex, s1 - 600_000)
+    assert updated_st.observation_anchor_ms == s2
+
+
+def test_postponement_f_writes_future_launch_recovery_in_root_contract(tmp_path):
+    from scripts.external_signal_shadow.run_stage1_5f_live_depth_observer import (
+        load_future_launch_recovery_from_gate,
+        write_observer_root_contract_atomically,
+    )
+
+    class _FakeGuard:
+        def reserve_and_write(self, *, write_func, **kwargs):
+            write_func()
+            return {"status": "ready", "written": True}
+
+    rec = {
+        "article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "symbols": ["HYPEUSDC", "TRXUSDC"],
+        "provenance": "explicit_future_launch_revalidation_v1",
+    }
+    gate_path = tmp_path / "live_safety_gate_summary.json"
+    gate_path.write_text(json.dumps({"future_launch_recovery": rec}), encoding="utf-8")
+    loaded = load_future_launch_recovery_from_gate(str(gate_path))
+    assert loaded == rec
+
+    out_root = tmp_path / "f_out"
+    out_root.mkdir()
+    written = write_observer_root_contract_atomically(
+        str(out_root),
+        "formal_v2",
+        reason="bootstrap_watermark",
+        storage_guard=_FakeGuard(),
+        future_launch_recovery=loaded,
+    )
+    assert written["future_launch_recovery"] == rec
+    persisted = json.loads((out_root / "observer_root_contract.json").read_text(encoding="utf-8"))
+    assert persisted["future_launch_recovery"] == rec

@@ -1,8 +1,9 @@
-from pathlib import Path
 import json
+from pathlib import Path
+
 from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
-    validate_stage1_5d_runtime_gate,
     validate_historical_stage1_5d_safety_gate,
+    validate_stage1_5d_runtime_gate,
 )
 
 
@@ -151,3 +152,25 @@ def test_1_5f_loader_historical_override_requires_bootstrap_watermark(tmp_path):
     )
     assert res["valid"] is False
     assert res["reason"] == "historical_classification_bootstrap_watermark_missing"
+
+
+def test_postponement_runtime_gate_validator_checks_future_launch_recovery(tmp_path):
+    gate_file = tmp_path / "live_safety_gate_summary.json"
+    gate_data = _build_ready_gate(tmp_path)
+    gate_data["future_launch_recovery"] = {
+        "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+        "symbols": ["HYPEUSDC", "TRXUSDC"],
+    }
+    gate_file.write_text(json.dumps(gate_data))
+    res_ok = validate_stage1_5d_runtime_gate(gate_file, str(tmp_path / "events" / "*.jsonl"), now_ms=101_000)
+    assert res_ok["valid"] is True
+
+    bad_gate = _build_ready_gate(tmp_path)
+    bad_gate["future_launch_recovery"] = {
+        "source_article_id": "not-32-hex",
+        "symbols": ["HYPEUSDC"],
+    }
+    gate_file.write_text(json.dumps(bad_gate))
+    res_bad = validate_stage1_5d_runtime_gate(gate_file, str(tmp_path / "events" / "*.jsonl"), now_ms=101_000)
+    assert res_bad["valid"] is False
+    assert res_bad["reason"] == "runtime_gate_future_launch_recovery_invalid"

@@ -98,6 +98,8 @@ STAGE1_5D_V3_DURABLE_ARTICLE_KEYS = frozenset({
     "detail_payload_trusted",
     "exchangeinfo_validation_attempt_count",
     "exchangeinfo_validation_retryable",
+    "next_schedule_recheck_at_ms",
+    "schedule_recheck_deadline_ms",
     "last_exchangeinfo_validation_at_ms",
     "next_exchangeinfo_validation_at_ms",
     "quote_derivation_source",
@@ -168,20 +170,46 @@ def validate_stage1_5d_v3_scheduler_state(
         return ["state_not_dict"]
 
     top_keys = set(raw_state.keys())
-    expected_top_keys = {
+    required_top_keys = {
         "metadata_version",
         "catalog_bootstrap_cutoff_ms",
         "resume_provenance",
         "articles",
         "endpoint_health",
     }
-    if top_keys != expected_top_keys:
-        missing = expected_top_keys - top_keys
-        extra = top_keys - expected_top_keys
-        if missing:
-            blockers.append(f"top_level_missing_keys:{sorted(missing)}")
-        if extra:
-            blockers.append(f"top_level_unknown_keys:{sorted(extra)}")
+    optional_top_keys = {"schedule_recheck_watches"}
+    missing = required_top_keys - top_keys
+    extra = top_keys - (required_top_keys | optional_top_keys)
+    if missing:
+        blockers.append(f"top_level_missing_keys:{sorted(missing)}")
+    if extra:
+        blockers.append(f"top_level_unknown_keys:{sorted(extra)}")
+    if "schedule_recheck_watches" in raw_state:
+        watches = raw_state.get("schedule_recheck_watches")
+        if not isinstance(watches, dict):
+            blockers.append("schedule_recheck_watches_not_dict")
+        else:
+            expected_watch_keys = {
+                "next_schedule_recheck_at_ms",
+                "schedule_recheck_deadline_ms",
+                "detail_payload_hash",
+                "schedule_revision_producer_status",
+            }
+            for w_art_id, w_val in watches.items():
+                if not isinstance(w_art_id, str) or not w_art_id:
+                    blockers.append("schedule_recheck_watch_key_invalid")
+                    break
+                if not isinstance(w_val, dict) or set(w_val.keys()) != expected_watch_keys:
+                    blockers.append(f"schedule_recheck_watch_keys_invalid:{w_art_id}")
+                    continue
+                if w_val["next_schedule_recheck_at_ms"] is not None and not _is_positive_int(w_val["next_schedule_recheck_at_ms"]):
+                    blockers.append(f"schedule_recheck_watch_next_at_invalid:{w_art_id}")
+                if w_val["schedule_recheck_deadline_ms"] is not None and not _is_positive_int(w_val["schedule_recheck_deadline_ms"]):
+                    blockers.append(f"schedule_recheck_watch_deadline_invalid:{w_art_id}")
+                if w_val["detail_payload_hash"] is not None and not isinstance(w_val["detail_payload_hash"], str):
+                    blockers.append(f"schedule_recheck_watch_hash_invalid:{w_art_id}")
+                if w_val["schedule_revision_producer_status"] is not None and not isinstance(w_val["schedule_revision_producer_status"], str):
+                    blockers.append(f"schedule_recheck_watch_status_invalid:{w_art_id}")
 
     # 1. metadata_version
     mv = raw_state.get("metadata_version")
@@ -289,6 +317,8 @@ def validate_stage1_5d_v3_scheduler_state(
                 "detail_fetched_at_ms",
                 "last_exchangeinfo_validation_at_ms",
                 "next_exchangeinfo_validation_at_ms",
+                "next_schedule_recheck_at_ms",
+                "schedule_recheck_deadline_ms",
             ]
             for fld in opt_non_neg_int_fields:
                 val = row.get(fld)
@@ -853,6 +883,19 @@ def serialize_retry_articles(detail_retry_state: dict[str, dict]) -> dict[str, d
             "hard_rejected_symbols": state.get("hard_rejected_symbols"),
             "symbol_exchangeinfo_statuses": state.get("symbol_exchangeinfo_statuses"),
             "inflight_cycle": state.get("inflight_cycle"),
+            "detail_budget_deferred_count": int(state.get("detail_budget_deferred_count") or 0),
+            "detail_fetch_attempted": state.get("detail_fetch_attempted"),
+            "detail_fetch_status": state.get("detail_fetch_status"),
+            "detail_fetch_url_used": state.get("detail_fetch_url_used"),
+            "detail_fetch_variant": state.get("detail_fetch_variant"),
+            "detail_fetched_at_ms": state.get("detail_fetched_at_ms"),
+            "detail_parse_status": state.get("detail_parse_status"),
+            "detail_payload_hash": state.get("detail_payload_hash"),
+            "detail_payload_trusted": state.get("detail_payload_trusted"),
+            "exchangeinfo_validation_attempt_count": int(state.get("exchangeinfo_validation_attempt_count") or 0),
+            "exchangeinfo_validation_retryable": state.get("exchangeinfo_validation_retryable"),
+            "next_schedule_recheck_at_ms": state.get("next_schedule_recheck_at_ms"),
+            "schedule_recheck_deadline_ms": state.get("schedule_recheck_deadline_ms"),
         }
     return serialized
 
@@ -886,6 +929,8 @@ def load_detail_retry_scheduler_state(output_root: Path) -> dict:
         art.setdefault("symbol_launch_time_candidates_ms", None)
         art.setdefault("launch_time_conflict_ms", None)
         art.setdefault("detail_work_type", None)
+        art.setdefault("next_schedule_recheck_at_ms", None)
+        art.setdefault("schedule_recheck_deadline_ms", None)
 
     return loaded
 

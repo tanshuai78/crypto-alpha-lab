@@ -1306,6 +1306,8 @@ def make_valid_v3_article(article_id: str = "0123456789abcdef0123456789abcdef") 
         "quote_derivation_source": None,
         "retry_count": 0,
         "schedule_revision_producer_status": None,
+        "next_schedule_recheck_at_ms": None,
+        "schedule_recheck_deadline_ms": None,
     }
 
 
@@ -1451,7 +1453,7 @@ def test_serialize_stage1_5d_v3_articles():
     assert "last_bapi_payload_sha256" not in res_row
     assert "symbol_launch_times_utc" not in res_row
     assert "symbol_effective_launch_times_utc" not in res_row
-    assert len(res_row) == 86
+    assert len(res_row) == 88
 
     # Unknown runtime key raises ValueError
     art["unknown_bad_key"] = 123
@@ -1590,6 +1592,89 @@ def test_stage1_5d_v3_durable_article_keys_ast_inventory():
         STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES,
     )
 
-    assert len(STAGE1_5D_V3_DURABLE_ARTICLE_KEYS) == 86
+    assert len(STAGE1_5D_V3_DURABLE_ARTICLE_KEYS) == 88
     assert len(STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES) == 6
     assert STAGE1_5D_V3_DURABLE_ARTICLE_KEYS.isdisjoint(STAGE1_5D_V3_RUNTIME_ONLY_ARTICLE_ALIASES)
+
+
+def test_postponement_serialize_detail_retry_state_preserves_detail_provenance(tmp_path):
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        load_detail_retry_scheduler_state,
+        serialize_retry_articles,
+        write_detail_retry_scheduler_state,
+    )
+
+    class _FakeGuard:
+        def reserve_and_write(self, *, write_func, **kwargs):
+            write_func()
+            return {"status": "ready", "written": True}
+
+    prov = [
+        {
+            "symbol": "HYPEUSDC",
+            "logical_block_id": "bapi_schedule_block",
+            "symbol_node_path": "body.child[0]",
+            "time_node_path": "body.child[0]",
+            "raw_time_text": "2026-11-11 09:30 (UTC)",
+            "timezone_text": "UTC",
+        },
+        {
+            "symbol": "TRXUSDC",
+            "logical_block_id": "bapi_schedule_block",
+            "symbol_node_path": "body.child[1]",
+            "time_node_path": "body.child[1]",
+            "raw_time_text": "2026-11-11 09:35 (UTC)",
+            "timezone_text": "UTC",
+        },
+    ]
+    raw_state = {
+        "articles": {
+            "2d89a5966b174a2689ab2c2a15db1757": {
+                "source_article_id": "2d89a5966b174a2689ab2c2a15db1757",
+                "status": "pending_pre_trading",
+                "candidate_symbols": ["HYPEUSDC", "TRXUSDC"],
+                "candidate_provenance": prov,
+                "detail_fetch_attempted": True,
+                "detail_fetch_status": "success",
+                "detail_fetch_url_used": "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=2d89a5966b174a2689ab2c2a15db1757",
+                "detail_fetch_variant": "bapi_article_detail_query",
+                "detail_fetched_at_ms": 1794373300000,
+                "detail_parse_status": "parsed",
+                "detail_payload_hash": "a" * 64,
+                "detail_payload_trusted": True,
+                "exchangeinfo_validation_attempt_count": 1,
+                "exchangeinfo_validation_retryable": True,
+            }
+        }
+    }
+    serialized = {"metadata_version": 2, "articles": serialize_retry_articles(raw_state["articles"]), "endpoint_health": {}}
+    write_detail_retry_scheduler_state(tmp_path, serialized, storage_guard=_FakeGuard())
+    reloaded = load_detail_retry_scheduler_state(tmp_path)
+    art = reloaded["articles"]["2d89a5966b174a2689ab2c2a15db1757"]
+    assert art["detail_fetch_attempted"] is True
+    assert art["detail_payload_hash"] == "a" * 64
+    assert art["detail_fetched_at_ms"] == 1794373300000
+    assert art["detail_fetch_url_used"] == "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode=2d89a5966b174a2689ab2c2a15db1757"
+    assert art["detail_fetch_variant"] == "bapi_article_detail_query"
+    assert art["detail_payload_trusted"] is True
+    assert art["candidate_provenance"] == prov
+    assert art["exchangeinfo_validation_attempt_count"] == 1
+    assert art["exchangeinfo_validation_retryable"] is True
+
+
+def test_postponement_scheduler_allows_and_validates_schedule_recheck_fields():
+    from src.research.external_signal_shadow.stage1_5d_detail_retry_scheduler import (
+        STAGE1_5D_V3_DURABLE_ARTICLE_KEYS,
+        validate_stage1_5d_v3_scheduler_state,
+    )
+
+    assert "next_schedule_recheck_at_ms" in STAGE1_5D_V3_DURABLE_ARTICLE_KEYS
+    assert "schedule_recheck_deadline_ms" in STAGE1_5D_V3_DURABLE_ARTICLE_KEYS
+
+    st = make_valid_v3_state()
+    art_id = list(st["articles"].keys())[0]
+    st["articles"][art_id].setdefault("next_schedule_recheck_at_ms", None)
+    st["articles"][art_id].setdefault("schedule_recheck_deadline_ms", None)
+    assert validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE) == []
+    st["articles"][art_id]["next_schedule_recheck_at_ms"] = -1
+    assert any("next_schedule_recheck_at_ms" in b for b in validate_stage1_5d_v3_scheduler_state(st, expected_resume_provenance=TEST_PROVENANCE))

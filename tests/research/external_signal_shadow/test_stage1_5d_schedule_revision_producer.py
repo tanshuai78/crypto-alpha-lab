@@ -321,3 +321,112 @@ def test_late_conflict_transport():
     assert len(written_rows) == 1
     assert written_rows[0]["revision_intent"] == "rescheduled_with_new_anchor"
     assert batch_diag["is_late_conflict"] is True
+
+
+def test_postponement_same_page_l1_revision_emits_when_enabled_and_blocks_when_disabled(tmp_path):
+    from research.external_signal_shadow.stage1_5d_schedule_revision_producer import (
+        detect_and_emit_same_page_schedule_revision,
+    )
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    old_s1 = 1794389400000
+    old_s2 = 1794389700000
+    new_s1 = old_s1 + 5 * 86_400_000
+    new_s2 = old_s2 + 5 * 86_400_000
+    old_hash = "a" * 64
+    new_hash = "b" * 64
+    now_ms = 1794390000000
+
+    index_rows = [
+        {
+            "index_schema_version": 1,
+            "supersedes_source_article_id": art_id,
+            "source_article_id": art_id,
+            "symbol": "HYPEUSDC",
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art_id}|HYPEUSDC",
+            "official_schedule_anchor_ms": old_s1,
+            "original_source_published_at_ms": 1794373200000,
+            "formal_row_durable_at_ms": 1794373300000,
+            "payload_sha256": old_hash,
+        },
+        {
+            "index_schema_version": 1,
+            "supersedes_source_article_id": art_id,
+            "source_article_id": art_id,
+            "symbol": "TRXUSDC",
+            "stable_schedule_identity": f"binance|futures_contract_launch|{art_id}|TRXUSDC",
+            "official_schedule_anchor_ms": old_s2,
+            "original_source_published_at_ms": 1794373200000,
+            "formal_row_durable_at_ms": 1794373300000,
+            "payload_sha256": old_hash,
+        },
+    ]
+
+    # 1. Producer disabled -> diagnostic only, 0 emitted rows
+    rows_dis, res_dis = detect_and_emit_same_page_schedule_revision(
+        source_article_id=art_id,
+        old_symbols=["HYPEUSDC", "TRXUSDC"],
+        new_symbols=["HYPEUSDC", "TRXUSDC"],
+        old_anchors_ms={"HYPEUSDC": old_s1, "TRXUSDC": old_s2},
+        new_anchors_ms={"HYPEUSDC": new_s1, "TRXUSDC": new_s2},
+        old_payload_sha256=old_hash,
+        new_payload_sha256=new_hash,
+        index_rows=index_rows,
+        available_at_ms=now_ms,
+        producer_effective_enabled=False,
+    )
+    assert rows_dis == []
+    assert res_dis["status"] == "revision_diagnostic"
+
+    # 2. Producer enabled -> emits 2 linked L1 revision rows with supersedes_source_article_id == source_article_id
+    rows_en, res_en = detect_and_emit_same_page_schedule_revision(
+        source_article_id=art_id,
+        old_symbols=["HYPEUSDC", "TRXUSDC"],
+        new_symbols=["HYPEUSDC", "TRXUSDC"],
+        old_anchors_ms={"HYPEUSDC": old_s1, "TRXUSDC": old_s2},
+        new_anchors_ms={"HYPEUSDC": new_s1, "TRXUSDC": new_s2},
+        old_payload_sha256=old_hash,
+        new_payload_sha256=new_hash,
+        index_rows=index_rows,
+        available_at_ms=now_ms,
+        producer_effective_enabled=True,
+    )
+    assert res_en["status"] == "revision_emitted"
+    assert len(rows_en) == 2
+    for r in rows_en:
+        assert r["source_article_id"] == art_id
+        assert r["supersedes_source_article_id"] == art_id
+        assert r["revision_intent"] == "rescheduled_with_new_anchor"
+        assert r["revision_link_status"] == "linked"
+
+    # 3. Same payload hash -> no revision
+    rows_same, res_same = detect_and_emit_same_page_schedule_revision(
+        source_article_id=art_id,
+        old_symbols=["HYPEUSDC", "TRXUSDC"],
+        new_symbols=["HYPEUSDC", "TRXUSDC"],
+        old_anchors_ms={"HYPEUSDC": old_s1, "TRXUSDC": old_s2},
+        new_anchors_ms={"HYPEUSDC": new_s1, "TRXUSDC": new_s2},
+        old_payload_sha256=old_hash,
+        new_payload_sha256=old_hash,
+        index_rows=index_rows,
+        available_at_ms=now_ms,
+        producer_effective_enabled=True,
+    )
+    assert rows_same == []
+    assert res_same["status"] == "not_revision"
+
+    # 4. Non-later anchor -> rejected diagnostic
+    rows_early, res_early = detect_and_emit_same_page_schedule_revision(
+        source_article_id=art_id,
+        old_symbols=["HYPEUSDC", "TRXUSDC"],
+        new_symbols=["HYPEUSDC", "TRXUSDC"],
+        old_anchors_ms={"HYPEUSDC": old_s1, "TRXUSDC": old_s2},
+        new_anchors_ms={"HYPEUSDC": old_s1, "TRXUSDC": new_s2},
+        old_payload_sha256=old_hash,
+        new_payload_sha256=new_hash,
+        index_rows=index_rows,
+        available_at_ms=now_ms,
+        producer_effective_enabled=True,
+    )
+    assert rows_early == []
+    assert res_early["status"] == "revision_diagnostic"
