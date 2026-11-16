@@ -5024,13 +5024,20 @@ def _verify_same_page_real_evidence_bundle(
         assert old_clock_ms >= old_pub, f"old_bapi fetched_at_ms ({old_clock_ms}) precedes article publishDate ({old_pub})"
     replay_new_clock_ms = max(new_clock_ms, ex_clock_ms)
 
-    for label, b_obj in (("old_bapi", old_obj), ("new_bapi", new_obj)):
-        trusted = col.validate_bapi_article_detail_payload(
-            b_obj,
-            requested_article_code=art_id,
-            catalog_title=title,
-        )
-        assert trusted.get("payload_trusted") is True, f"Untrusted {label} payload: {trusted}"
+    old_trusted = col.validate_bapi_article_detail_payload(
+        old_obj,
+        requested_article_code=art_id,
+        catalog_title=title,
+    )
+    assert old_trusted.get("payload_trusted") is True, f"Untrusted old_bapi payload: {old_trusted}"
+    new_trusted = col.validate_bapi_payload_for_same_page_recheck(
+        new_obj,
+        requested_article_code=art_id,
+        formal_original_title=title,
+        reconciled_source_article_id=art_id,
+        reconciled_in_current_poll=True,
+    )
+    assert new_trusted.get("payload_trusted") is True, f"Untrusted new_bapi payload: {new_trusted}"
 
     old_ext = extract_symbol_candidates_from_bapi_article_payload(old_obj, title=title)
     new_ext = extract_symbol_candidates_from_bapi_article_payload(new_obj, title=title)
@@ -5604,6 +5611,117 @@ def test_same_page_scope_real_revision_verifier_rejects_incomplete_and_runs_dual
                 monkeypatch,
                 approved_manifest_sha256=sha_to_bind,
             )
+
+
+def test_same_page_scope_real_revision_verifier_allows_trailing_date_change_only(tmp_path, monkeypatch):
+    """Same-page real-evidence verifier accepts trailing valid Gregorian date change (2026-11-11 -> 2026-11-16)
+    only in new_bapi with postponed body, and rejects non-date title modifications."""
+    import hashlib
+    from datetime import datetime, timezone
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    base_title = "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC and TRXUSDC Perpetual Contracts"
+    old_title = f"{base_title} (2026-11-11)"
+    new_title_valid = f"{base_title} (2026-11-16)"
+    t0 = 1_794_388_800_000
+    old_hype = 1_794_389_400_000
+    old_trx = 1_794_389_700_000
+    new_hype = 1_794_817_800_000
+    new_trx = 1_794_818_100_000
+    t1 = 1_794_816_000_000
+
+    def _utc(ms: int) -> str:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M (UTC)")
+
+    bundle = tmp_path / "date_bundle"
+    (bundle / "raw").mkdir(parents=True)
+    old_obj = {
+        "code": "000000",
+        "data": {
+            "code": art_id,
+            "title": old_title,
+            "publishDate": t0,
+            "body": json.dumps({
+                "node": "root",
+                "child": [
+                    {"node": "text", "text": f"{_utc(old_hype)}: HYPEUSDC Perpetual Contract"},
+                    {"node": "text", "text": f"{_utc(old_trx)}: TRXUSDC Perpetual Contract"},
+                ],
+            }),
+        },
+    }
+    ex_obj = {
+        "symbols": [
+            {"symbol": "HYPEUSDC", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDC", "marginAsset": "USDC", "onboardDate": new_hype},
+            {"symbol": "TRXUSDC", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDC", "marginAsset": "USDC", "onboardDate": new_trx},
+        ]
+    }
+
+    def _write_case(new_title: str) -> str:
+        new_obj = {
+            "code": "000000",
+            "data": {
+                "code": art_id,
+                "title": new_title,
+                "publishDate": t0,
+                "body": json.dumps({
+                    "node": "root",
+                    "child": [
+                        {"node": "text", "text": f"{_utc(new_hype)}: HYPEUSDC Perpetual Contract"},
+                        {"node": "text", "text": f"{_utc(new_trx)}: TRXUSDC Perpetual Contract"},
+                    ],
+                }),
+            },
+        }
+        old_bytes = json.dumps(old_obj).encode("utf-8")
+        new_bytes = json.dumps(new_obj).encode("utf-8")
+        ex_bytes = json.dumps(ex_obj).encode("utf-8")
+        (bundle / "raw" / "old_bapi.bin").write_bytes(old_bytes)
+        (bundle / "raw" / "new_bapi.bin").write_bytes(new_bytes)
+        (bundle / "raw" / "exchangeinfo.json").write_bytes(ex_bytes)
+        (bundle / "summary.txt").write_text("Trailing Gregorian date same-page postponement evidence.", encoding="utf-8")
+        m_obj = {
+            "source_article_id": art_id,
+            "title": old_title,
+            "symbols": ["HYPEUSDC", "TRXUSDC"],
+            "summary_relpath": "summary.txt",
+            "old_bapi": {
+                "raw_payload_relpath": "raw/old_bapi.bin",
+                "payload_sha256": hashlib.sha256(old_bytes).hexdigest(),
+                "source_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={art_id}",
+                "fetched_at_ms": t0,
+            },
+            "new_bapi": {
+                "raw_payload_relpath": "raw/new_bapi.bin",
+                "payload_sha256": hashlib.sha256(new_bytes).hexdigest(),
+                "source_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={art_id}",
+                "fetched_at_ms": t1,
+            },
+            "exchangeinfo": {
+                "raw_payload_relpath": "raw/exchangeinfo.json",
+                "payload_sha256": hashlib.sha256(ex_bytes).hexdigest(),
+                "source_url": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+                "fetched_at_ms": t1,
+            },
+        }
+        m_bytes = json.dumps(m_obj, indent=2).encode("utf-8")
+        (bundle / "manifest.json").write_bytes(m_bytes)
+        return hashlib.sha256(m_bytes).hexdigest()
+
+    monkeypatch.delenv("STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR", raising=False)
+    monkeypatch.delenv("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256", raising=False)
+
+    # Positive: trailing valid Gregorian date (2026-11-11 -> 2026-11-16) passes end-to-end D -> F
+    m_sha_ok = _write_case(new_title_valid)
+    res = _verify_same_page_real_evidence_bundle(bundle, tmp_path / "w_date_ok", monkeypatch, approved_manifest_sha256=m_sha_ok)
+    assert res["updated_anchors"] == {"HYPEUSDC": new_hype, "TRXUSDC": new_trx}
+    assert res["applied_symbols"] == {"HYPEUSDC", "TRXUSDC"}
+
+    # Negative: invalid Gregorian date or extra words MUST fail closed
+    for bad_idx, bad_title in enumerate((f"{base_title} (2026-02-30)", f"{base_title} (2026-11-16) Updated")):
+        m_sha_bad = _write_case(bad_title)
+        with pytest.raises(AssertionError, match=r"bapi_article_title_mismatch"):
+            _verify_same_page_real_evidence_bundle(bundle, tmp_path / f"w_date_bad_{bad_idx}", monkeypatch, approved_manifest_sha256=m_sha_bad)
 
 
 def test_same_page_scope_f_article_isolation(tmp_path, monkeypatch):

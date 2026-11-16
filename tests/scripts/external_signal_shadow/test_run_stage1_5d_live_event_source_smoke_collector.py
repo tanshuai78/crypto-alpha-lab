@@ -9969,3 +9969,287 @@ def test_same_page_scope_d_poll_reads_events_stream_single_pass(tmp_path, monkey
                             assert main() == 0
     read_counts_in_poll.append(poll_reconcile_calls["reads"])
     assert read_counts_in_poll == [1]
+
+
+def test_same_page_trailing_gregorian_date_helper_and_recheck_guard():
+    """Verify strict trailing Gregorian calendar date helper & unreconciled fail-closed guard."""
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        titles_differ_only_in_trailing_gregorian_date,
+        validate_bapi_payload_for_same_page_recheck,
+    )
+
+    base_t = "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC and TRXUSDC Perpetual Contracts"
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-11-16)") is True
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2024-02-29)", f"{base_t} (2024-03-01)") is True
+
+    # Strictly rejected diffs: case/whitespace/Unicode changes, full-width parens, bare dates, invalid calendar dates
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-11-11)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t.replace('Binance Futures', 'BINANCE  Futures')} (2026-11-16)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} （2026-11-16）") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t}（2026-11-11）", f"{base_t}（2026-11-16）") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (２０２６-１１-１６)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (٢٠٢٦-١١-١٦)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} 2026-11-11", f"{base_t} 2026-11-16") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-02-30)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-02-29)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-04-31)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(base_t, f"{base_t} (2026-11-16)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} (2026-11-16) Postponed") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t} 2026-11-16") is False
+    assert titles_differ_only_in_trailing_gregorian_date(f"{base_t} (2026-11-11)", f"{base_t}  (2026-11-16)") is False
+    assert titles_differ_only_in_trailing_gregorian_date(
+        "Binance Futures Will Launch ABCUSDT (2026-11-11)",
+        "Binance Futures Will Launch XYZUSDT (2026-11-16)",
+    ) is False
+
+    art_id = "61" * 16
+    payload_new_date = {
+        "code": "000000",
+        "data": {"code": art_id, "title": f"{base_t} (2026-11-16)", "body": {"node": "root", "child": []}},
+    }
+    # Fail closed if NOT reconciled in current poll or source_article_id/formal_title invalid
+    res_unreconciled = validate_bapi_payload_for_same_page_recheck(
+        payload_new_date,
+        requested_article_code=art_id,
+        formal_original_title=f"{base_t} (2026-11-11)",
+        reconciled_source_article_id=art_id,
+        reconciled_in_current_poll=False,
+    )
+    assert res_unreconciled["payload_trusted"] is False
+    assert res_unreconciled["error"] == "recheck_formal_context_missing"
+
+    res_empty_title = validate_bapi_payload_for_same_page_recheck(
+        payload_new_date,
+        requested_article_code=art_id,
+        formal_original_title="",
+        reconciled_source_article_id=art_id,
+        reconciled_in_current_poll=True,
+    )
+    assert res_empty_title["payload_trusted"] is False
+    assert res_empty_title["error"] == "recheck_formal_context_missing"
+
+    res_id_mismatch = validate_bapi_payload_for_same_page_recheck(
+        {
+            "code": "000000",
+            "data": {"code": "62" * 16, "title": f"{base_t} (2026-11-16)", "body": {"node": "root", "child": []}},
+        },
+        requested_article_code=art_id,
+        formal_original_title=f"{base_t} (2026-11-11)",
+        reconciled_source_article_id=art_id,
+        reconciled_in_current_poll=True,
+    )
+    assert res_id_mismatch["payload_trusted"] is False
+    assert res_id_mismatch["error"] == "bapi_article_identity_mismatch"
+
+
+def test_same_page_scope_d_recheck_trailing_date_exception_controls(tmp_path, monkeypatch):
+    """Verify trailing Gregorian date exception in real D poll:
+    1) title date updated (2026-11-11 -> 2026-11-16) + postponed body emits revision (reads formal title, not persisted);
+    2) title unchanged + postponed body emits revision;
+    3) only title date updated without postponed body does NOT emit revision;
+    4) non-date/invalid-date/unreconciled normal launch changes fail closed with strict check."""
+    import subprocess as _sp
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        main,
+    )
+
+    now_ms = 1_794_800_000_000
+    s1_ms = ((now_ms + 3_600_000) // 60_000) * 60_000
+    s2_ms = s1_ms + 4 * 86_400_000
+    s1_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s1_ms / 1000))
+    s2_utc = time.strftime("%Y-%m-%d %H:%M (UTC)", time.gmtime(s2_ms / 1000))
+    prefix_title = "Binance Futures Will Launch USDⓈ-Margined DATEUSDT Perpetual Contract"
+    orig_title = f"{prefix_title} (2026-11-11)"
+
+    def _run_case(
+        case_name: str,
+        *,
+        bapi_title: str,
+        body_utc: str,
+        formal_title_override: str | None = None,
+        bapi_code_override: str | None = None,
+        catalog_articles_fn=None,
+    ):
+        case_dir = tmp_path / case_name
+        case_dir.mkdir(parents=True, exist_ok=True)
+        c1, c = _write_valid_upstream(case_dir)
+        out_root = case_dir / "d_root"
+        f_root = case_dir / "f_root"
+        with patch("scripts.external_signal_shadow.run_stage1_5f_live_depth_observer.time.time", return_value=now_ms / 1000.0):
+            repo_dir, rc_path, sum_path = _setup_canonical_git_and_consumer_proof(case_dir, out_root, f_root, now_ms)
+        repo_head = _sp.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True).stdout.strip()
+        _seed_v3_resumable_root(out_root, cutoff_ms=1, startup_head_sha=repo_head)
+
+        art_id = "71" * 16
+        ev, idxs = _build_canonical_v2_launch_and_index_rows(
+            out_root,
+            source_article_id=art_id,
+            symbols=["DATEUSDT"],
+            anchor_ms=s1_ms,
+            detected_ms=now_ms - 900_000,
+            durable_ms=now_ms - 800_000,
+            commit_sha=repo_head,
+            title=formal_title_override or orig_title,
+        )
+        (out_root / "events" / "2026-11-11.jsonl").write_text(json.dumps(ev) + "\n", encoding="utf-8")
+        (out_root / "formal_launch_identity_index.jsonl").write_text(json.dumps(idxs[0]) + "\n", encoding="utf-8")
+
+        def fake_bapi(article_code, **kwargs):
+            return {
+                "ok": True,
+                "payload": {
+                    "code": "000000",
+                    "data": {
+                        "code": bapi_code_override or article_code,
+                        "title": bapi_title,
+                        "body": json.dumps({"node": "root", "child": [{"node": "text", "text": f"{body_utc}: DATEUSDT Perpetual Contract"}]}),
+                    },
+                },
+                "final_url": f"https://www.binance.com/bapi/detail?articleCode={article_code}",
+                "http_status": 200,
+                "error": None,
+            }
+
+        def fake_json(url, **kwargs):
+            if "exchangeInfo" in url:
+                return {
+                    "ok": True,
+                    "payload": {"symbols": [
+                        {"symbol": "DATEUSDT", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": s2_ms},
+                        {"symbol": "FRESHUSDT", "status": "PENDING_TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": s2_ms},
+                    ]},
+                    "final_url": url,
+                    "http_status": 200,
+                    "error": None,
+                }
+            cats = catalog_articles_fn() if catalog_articles_fn else []
+            return {"ok": True, "payload": {"data": {"catalogs": [{"articles": cats}]}}, "final_url": url, "http_status": 200, "error": None}
+
+        with (
+            _patch_collector_repo_root(repo_dir),
+            patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.time.time", return_value=now_ms / 1000.0),
+            patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_json", side_effect=fake_json),
+            patch("scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector.fetch_public_bapi_article_detail", side_effect=fake_bapi),
+        ):
+            with monkeypatch.context() as mc:
+                mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", True)
+                with patch("sys.argv", [
+                    "run_stage1_5d_live_event_source_smoke_collector.py",
+                    "--live-public-readonly",
+                    "--stage1-5c1-summary", str(c1),
+                    "--stage1-5c-summary", str(c),
+                    "--output-root", str(out_root),
+                    "--stage1-5f-consumer-root-contract", str(rc_path),
+                    "--stage1-5f-consumer-summary", str(sum_path),
+                    "--max-polls", "1",
+                ]):
+                    assert main() == 0
+
+        events_all = _read_jsonl_files(out_root / "events")
+        revs = [r for r in events_all if r.get("event_type") == "futures_contract_launch_schedule_revision"]
+        launches_all = [r for r in events_all if r.get("event_type") == "futures_contract_launch"]
+        manifests = _read_jsonl_files(out_root / "request_manifest")
+        bapi_manifests = [m for m in manifests if m.get("detail_fetch_variant") == "bapi_article_detail_query"]
+        return revs, launches_all, bapi_manifests
+
+    # 1) Trailing date changed (2026-11-11 -> 2026-11-16) + valid body postponement -> trusted & EMITS formal revision
+    revs_pos_date, _, man_pos_date = _run_case("pos_date_and_body", bapi_title=f"{prefix_title} (2026-11-16)", body_utc=s2_utc)
+    assert len(man_pos_date) == 1 and man_pos_date[0]["payload_trusted"] is True
+    assert len(revs_pos_date) == 1
+    assert revs_pos_date[0]["symbol_revised_anchor_ms"] == {"DATEUSDT": s2_ms}
+
+    # 2) Title unchanged + valid body postponement -> still EMITS formal revision
+    revs_pos_same, _, man_pos_same = _run_case("pos_same_title", bapi_title=orig_title, body_utc=s2_utc)
+    assert len(man_pos_same) == 1 and man_pos_same[0]["payload_trusted"] is True
+    assert len(revs_pos_same) == 1
+    assert revs_pos_same[0]["symbol_revised_anchor_ms"] == {"DATEUSDT": s2_ms}
+
+    # 3) ONLY title date changed, body anchor NOT postponed -> trusted passes, ZERO formal revision emitted
+    revs_date_only, _, man_date_only = _run_case("neg_date_only_no_postpone", bapi_title=f"{prefix_title} (2026-11-16)", body_utc=s1_utc)
+    assert len(man_date_only) == 1 and man_date_only[0]["payload_trusted"] is True
+    assert revs_date_only == []
+
+    # 4) Invalid Gregorian date (2026-02-30) -> untrusted, NO revision emitted
+    revs_bad_cal, _, man_bad_cal = _run_case("neg_invalid_gregorian", bapi_title=f"{prefix_title} (2026-02-30)", body_utc=s2_utc)
+    assert len(man_bad_cal) == 1 and man_bad_cal[0]["payload_trusted"] is False
+    assert revs_bad_cal == []
+
+    # 5) Prefix mismatch -> untrusted, NO revision emitted
+    revs_bad_prefix, _, man_bad_prefix = _run_case("neg_bad_prefix", bapi_title="Binance Futures Will Launch OTHUSDT (2026-11-16)", body_utc=s2_utc)
+    assert len(man_bad_prefix) == 1 and man_bad_prefix[0]["payload_trusted"] is False
+    assert revs_bad_prefix == []
+
+    # 6) Ordinary new contract launch with mismatched trailing date -> strict check rejects BAPI, does NOT emit launch
+    fresh_art = "72" * 16
+    _, launches_new, man_new = _run_case(
+        "neg_normal_launch_strict",
+        bapi_title="Binance Futures Will Launch USDⓈ-Margined FRESHUSDT Perpetual Contract (2026-11-16)",
+        body_utc=s2_utc,
+        catalog_articles_fn=lambda: [{
+            "code": fresh_art,
+            "title": "Binance Futures Will Launch USDⓈ-Margined FRESHUSDT Perpetual Contract (2026-11-11)",
+            "releaseDate": now_ms,
+        }],
+    )
+    fresh_man = [m for m in man_new if m.get("source_article_id") == fresh_art]
+    assert len(fresh_man) == 1 and fresh_man[0]["payload_trusted"] is False
+    assert not [r for r in launches_new if r.get("source_article_id") == fresh_art]
+
+    # 7) Article ID mismatch on same-page recheck -> identity mismatch rejects, NO revision emitted
+    revs_bad_id, _, man_bad_id = _run_case(
+        "neg_article_id_mismatch",
+        bapi_title=f"{prefix_title} (2026-11-16)",
+        body_utc=s2_utc,
+        bapi_code_override="99" * 16,
+    )
+    assert len(man_bad_id) == 1 and man_bad_id[0]["payload_trusted"] is False
+    assert revs_bad_id == []
+
+    # 8) Subject case/whitespace shift ("Binance Futures" -> "BINANCE  Futures") with valid trailing date -> MUST reject
+    revs_case_ws, _, man_case_ws = _run_case(
+        "neg_case_whitespace_shift",
+        bapi_title=f"{prefix_title.replace('Binance Futures', 'BINANCE  Futures')} (2026-11-16)",
+        body_utc=s2_utc,
+    )
+    assert len(man_case_ws) == 1 and man_case_ws[0]["payload_trusted"] is False
+    assert revs_case_ws == []
+
+    # 9) Full-width trailing parens -> MUST reject
+    revs_fullwidth, _, man_fullwidth = _run_case(
+        "neg_fullwidth_parens",
+        bapi_title=f"{prefix_title} （2026-11-16）",
+        body_utc=s2_utc,
+    )
+    assert len(man_fullwidth) == 1 and man_fullwidth[0]["payload_trusted"] is False
+    assert revs_fullwidth == []
+
+    # 10) Both titles use bare trailing date (no parentheses) -> MUST reject
+    revs_bare, _, man_bare = _run_case(
+        "neg_bare_dates_no_parens",
+        formal_title_override=f"{prefix_title} 2026-11-11",
+        bapi_title=f"{prefix_title} 2026-11-16",
+        body_utc=s2_utc,
+    )
+    assert len(man_bare) == 1 and man_bare[0]["payload_trusted"] is False
+    assert revs_bare == []
+
+    # 11) Full-width digits (２０２６-１１-１６) inside ASCII parens -> MUST reject
+    revs_fw_digits, _, man_fw_digits = _run_case(
+        "neg_fullwidth_digits",
+        bapi_title=f"{prefix_title} (２０２６-１１-１６)",
+        body_utc=s2_utc,
+    )
+    assert len(man_fw_digits) == 1 and man_fw_digits[0]["payload_trusted"] is False
+    assert revs_fw_digits == []
+
+    # 12) Arabic-Indic digits (٢٠٢٦-١١-١٦) inside ASCII parens -> MUST reject
+    revs_ar_digits, _, man_ar_digits = _run_case(
+        "neg_arabic_indic_digits",
+        bapi_title=f"{prefix_title} (٢٠٢٦-١١-١٦)",
+        body_utc=s2_utc,
+    )
+    assert len(man_ar_digits) == 1 and man_ar_digits[0]["payload_trusted"] is False
+    assert revs_ar_digits == []

@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +185,81 @@ def is_standalone_schedule_revision_notice_title(title: str) -> bool:
     if _NORMAL_LAUNCH_MAIN_CLAUSE_RE.match(t):
         return False
     return bool(_STANDALONE_REVISION_MAIN_CLAUSE_RE.match(t))
+
+
+_TRAILING_GREGORIAN_PAREN_RE = re.compile(r"\A(?P<prefix>.+) \((?P<y>[0-9]{4})-(?P<m>[0-9]{2})-(?P<d>[0-9]{2})\)\Z")
+
+
+def _split_trailing_valid_gregorian_date(title: str) -> tuple[str, date] | None:
+    """Return (verbatim_prefix, date) iff raw title ends with literal ' (YYYY-MM-DD)' valid Gregorian date."""
+    if not isinstance(title, str) or not title:
+        return None
+    m = _TRAILING_GREGORIAN_PAREN_RE.match(title)
+    if not m:
+        return None
+    prefix = m.group("prefix")
+    if not prefix.strip():
+        return None
+    try:
+        cal_date = date(int(m.group("y")), int(m.group("m")), int(m.group("d")))
+    except ValueError:
+        return None
+    return prefix, cal_date
+
+
+def titles_differ_only_in_trailing_gregorian_date(expected_title: str, response_title: str) -> bool:
+    """Return True iff raw titles end with ' (YYYY-MM-DD)' valid Gregorian dates, differ there, and match verbatim before."""
+    left = _split_trailing_valid_gregorian_date(expected_title)
+    right = _split_trailing_valid_gregorian_date(response_title)
+    if left is None or right is None:
+        return False
+    return left[0] == right[0] and left[1] != right[1]
+
+
+def validate_bapi_payload_for_same_page_recheck(
+    payload: object,
+    *,
+    requested_article_code: str,
+    formal_original_title: str,
+    reconciled_source_article_id: str,
+    reconciled_in_current_poll: bool,
+) -> dict:
+    """Validate unmodified same-page recheck BAPI payload against reconciled formal launch title."""
+    if (
+        not reconciled_in_current_poll
+        or not isinstance(reconciled_source_article_id, str)
+        or reconciled_source_article_id != requested_article_code
+        or not isinstance(formal_original_title, str)
+        or not formal_original_title.strip()
+    ):
+        return {"payload_trusted": False, "error": "recheck_formal_context_missing"}
+
+    strict_res = validate_bapi_article_detail_payload(
+        payload,
+        requested_article_code=requested_article_code,
+        catalog_title=formal_original_title,
+    )
+    if strict_res.get("payload_trusted") or strict_res.get("error") != "bapi_article_title_mismatch":
+        return strict_res
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict) or data.get("code") != requested_article_code:
+        return strict_res
+    resp_title = data.get("title")
+    if not isinstance(resp_title, str) or not resp_title.strip():
+        return strict_res
+    if not titles_differ_only_in_trailing_gregorian_date(formal_original_title, resp_title):
+        return strict_res
+
+    # Re-run unmodified validator checks (code/data/body/WAF) using the validated trailing-date title.
+    checked = validate_bapi_article_detail_payload(
+        payload,
+        requested_article_code=requested_article_code,
+        catalog_title=resp_title,
+    )
+    if checked.get("payload_trusted"):
+        return {**checked, "title_trailing_date_exception_applied": True}
+    return checked
 
 
 def build_stage1_5d_v3_resume_provenance(output_root: Path, startup_head_sha: str) -> dict[str, object]:
@@ -3730,7 +3806,13 @@ def _main():
                     for _, _, art_id, a_rows, deadline_ms, persisted, watch in due_rechecks[:recheck_budget]:
                         ev_proj = reconciled_projections.get(art_id) or {}
                         ev_row_proj = ev_proj.get("event_row") if isinstance(ev_proj.get("event_row"), dict) else {}
-                        art_title = str(persisted.get("title") or ev_row_proj.get("title") or "")
+                        formal_event_title = ev_row_proj.get("title") if isinstance(ev_row_proj.get("title"), str) else ""
+                        formal_event_source_article_id = (
+                            ev_row_proj.get("source_article_id")
+                            if isinstance(ev_row_proj.get("source_article_id"), str)
+                            else ""
+                        )
+                        art_title = str(formal_event_title or persisted.get("title") or "")
                         durable_ms = max(int(r.get("formal_row_durable_at_ms") or 0) for r in a_rows)
                         next_at = watch.get("next_schedule_recheck_at_ms")
                         if not isinstance(next_at, int) or isinstance(next_at, bool):
@@ -3778,6 +3860,15 @@ def _main():
                             "schedule_recheck_deadline_ms": deadline_ms,
                             "prior_terminal": dict(persisted),
                             "index_rows": a_rows,
+                            "reconciled_in_current_poll": bool(
+                                ev_row_proj
+                                and ev_row_proj.get("event_type") == "futures_contract_launch"
+                                and formal_event_source_article_id == art_id
+                                and formal_event_title.strip()
+                                and a_rows
+                            ),
+                            "formal_event_title": formal_event_title,
+                            "formal_event_source_article_id": formal_event_source_article_id,
                         }
                         detail_retry_state[art_id] = recheck_item
 
@@ -4409,11 +4500,21 @@ def _main():
 
                     bapi_trusted_info = None
                     if bapi_res["ok"] and bapi_res.get("payload"):
-                        bapi_trusted_info = validate_bapi_article_detail_payload(
-                            bapi_res["payload"],
-                            requested_article_code=code,
-                            catalog_title=state["raw"].get("title"),
-                        )
+                        if state.get("detail_work_type") == "launch_schedule_revision_detail":
+                            rctx_trust = recheck_context_by_art.get(code) or {}
+                            bapi_trusted_info = validate_bapi_payload_for_same_page_recheck(
+                                bapi_res["payload"],
+                                requested_article_code=code,
+                                formal_original_title=str(rctx_trust.get("formal_event_title") or ""),
+                                reconciled_source_article_id=str(rctx_trust.get("formal_event_source_article_id") or ""),
+                                reconciled_in_current_poll=bool(rctx_trust.get("reconciled_in_current_poll")),
+                            )
+                        else:
+                            bapi_trusted_info = validate_bapi_article_detail_payload(
+                                bapi_res["payload"],
+                                requested_article_code=code,
+                                catalog_title=state["raw"].get("title"),
+                            )
 
                     bapi_is_trusted = bool(bapi_trusted_info and bapi_trusted_info.get("payload_trusted"))
 
