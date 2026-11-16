@@ -94,7 +94,6 @@ from src.research.external_signal_shadow.stage1_5d_schedule_revision_producer im
     build_revision_diagnostic,
     classify_schedule_revision_candidates,
     emit_schedule_revision_batch,
-    is_schedule_revision_listing_candidate,
     load_emitted_revision_semantic_ids,
     load_valid_formal_launch_identity_index,
     rebuild_missing_formal_launch_identity_index,
@@ -164,6 +163,27 @@ def canonical_root_contract_sha256(root_contract: dict) -> str:
 _DATE_JSONL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
 _BIN_PAYLOAD_RE = re.compile(r"^(bapi_article_detail_query|primary|detail_path_fallback)\.[0-9a-f]{64}\.bin$")
 _SAFE_ARTICLE_ID_RE = re.compile(r"^[0-9a-zA-Z_\-]+$")
+_NORMAL_LAUNCH_MAIN_CLAUSE_RE = re.compile(
+    r"^\s*binance\s+futures\s+will\s+launch\b",
+    re.IGNORECASE,
+)
+_STANDALONE_REVISION_MAIN_CLAUSE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:binance\s+futures\s+)?will\s+(?:postpone|reschedule|cancel)\s+(?:the\s+)?launch\b"
+    r"|(?:notice\s+(?:on|of)\s+)?(?:postponement|rescheduling|cancellation)\s+of\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_standalone_schedule_revision_notice_title(title: str) -> bool:
+    """Block standalone postpone/reschedule/cancel notices while keeping normal launch titles."""
+    t = str(title or "").strip()
+    if not t:
+        return False
+    if _NORMAL_LAUNCH_MAIN_CLAUSE_RE.match(t):
+        return False
+    return bool(_STANDALONE_REVISION_MAIN_CLAUSE_RE.match(t))
 
 
 def build_stage1_5d_v3_resume_provenance(output_root: Path, startup_head_sha: str) -> dict[str, object]:
@@ -247,6 +267,299 @@ def _is_allowlisted_relative_path(rel_path: Path, is_dir: bool) -> bool:
         return False
 
     return False
+
+
+def reconcile_durable_launch_event_and_index_projection(
+    output_root: Path,
+    *,
+    expected_source_root_id: str,
+    expected_commit_sha: str,
+    as_of_ms: int | None = None,
+    fail_on_any_article_mismatch: bool = True,
+) -> dict[str, object]:
+    """Reconcile durable v2 launch events under events/*.jsonl with per-symbol identity index rows."""
+
+    def _fail(reason: str) -> dict[str, object]:
+        return {
+            "valid": False,
+            "reason": reason,
+            "formal_projections": {},
+            "reconciled_index_rows": [],
+            "reconciled_by_article": {},
+            "rejected_articles": {},
+            "revision_rows": [],
+        }
+
+    events_by_article: dict[str, dict[str, object]] = {}
+    revision_rows: list[dict[str, object]] = []
+    events_dir = output_root / "events"
+    if events_dir.exists():
+        if events_dir.is_symlink() or not events_dir.is_dir():
+            return _fail("stage1_5d_v3_events_dir_invalid")
+        for ef in sorted(events_dir.glob("*.jsonl")):
+            if ef.is_symlink() or not ef.is_file():
+                return _fail("stage1_5d_v3_events_file_invalid")
+            try:
+                elines = ef.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                return _fail("stage1_5d_v3_events_unreadable")
+            for eline in elines:
+                if not eline.strip():
+                    continue
+                try:
+                    erow = json.loads(eline)
+                except Exception:
+                    return _fail("stage1_5d_v3_events_malformed")
+                if not isinstance(erow, dict):
+                    return _fail("stage1_5d_v3_events_malformed")
+                ev_type = erow.get("event_type")
+                if ev_type == "futures_contract_launch_schedule_revision":
+                    revision_rows.append(erow)
+                    continue
+                if ev_type != "futures_contract_launch":
+                    return _fail(f"stage1_5d_v3_formal_event_unexpected_type:{ev_type}")
+                raw_src_id = erow.get("source_article_id")
+                src_id = raw_src_id.strip() if isinstance(raw_src_id, str) else ""
+                raw_ev_id = erow.get("event_id")
+                ev_id = raw_ev_id.strip() if isinstance(raw_ev_id, str) else ""
+                syms = erow.get("symbols")
+                if (
+                    erow.get("formal_event_contract_version") != 2
+                    or not src_id
+                    or not ev_id
+                    or not isinstance(syms, list)
+                    or not syms
+                ):
+                    return _fail(f"stage1_5d_v3_formal_event_invalid:{src_id}")
+                norm_syms = [str(s or "").strip().upper() for s in syms]
+                if any(not s for s in norm_syms) or len(set(norm_syms)) != len(norm_syms):
+                    return _fail(f"stage1_5d_v3_formal_event_symbols_invalid:{src_id}")
+                for sym_u in norm_syms:
+                    val = validate_launch_anchor_contract(erow, sym_u, compatibility_mode=False)
+                    if not val.get("valid"):
+                        return _fail(f"stage1_5d_v3_formal_event_anchor_invalid:{src_id}:{sym_u}")
+                if src_id in events_by_article:
+                    return _fail(f"stage1_5d_v3_duplicate_formal_event:{src_id}")
+                events_by_article[src_id] = {
+                    "row": erow,
+                    "symbols": norm_syms,
+                    "event_id": ev_id,
+                }
+
+    index_rows_by_article: dict[str, list[dict[str, object]]] = {}
+    index_row_bad_articles: dict[str, str] = {}
+    index_path = output_root / "formal_launch_identity_index.jsonl"
+    if index_path.exists():
+        if index_path.is_symlink() or not index_path.is_file():
+            return _fail("stage1_5d_v3_formal_index_invalid")
+        try:
+            ilines = index_path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            return _fail("stage1_5d_v3_formal_index_unreadable")
+        for iline in ilines:
+            if not iline.strip():
+                continue
+            try:
+                row = json.loads(iline)
+            except Exception:
+                return _fail("stage1_5d_v3_formal_index_malformed")
+            if not isinstance(row, dict):
+                return _fail("stage1_5d_v3_formal_index_malformed")
+            raw_src_id = row.get("source_article_id")
+            src_id = raw_src_id.strip() if isinstance(raw_src_id, str) else ""
+            raw_sup_id = row.get("supersedes_source_article_id")
+            sup_id = raw_sup_id.strip() if isinstance(raw_sup_id, str) else ""
+            raw_ev_id = row.get("event_id")
+            ev_id = raw_ev_id.strip() if isinstance(raw_ev_id, str) else ""
+            sym = row.get("symbol")
+            if (
+                "symbols" in row
+                or row.get("index_schema_version") != 1
+                or not src_id
+                or not ev_id
+                or sup_id != src_id
+                or not isinstance(sym, str)
+                or not sym.strip()
+            ):
+                err = f"stage1_5d_v3_formal_index_row_invalid:{src_id}"
+                if fail_on_any_article_mismatch or not src_id:
+                    return _fail(err)
+                if src_id not in index_row_bad_articles:
+                    index_row_bad_articles[src_id] = err
+                continue
+            if src_id not in index_rows_by_article:
+                index_rows_by_article[src_id] = []
+            index_rows_by_article[src_id].append(row)
+
+    formal_projections: dict[str, dict[str, object]] = {}
+    reconciled_index_rows: list[dict[str, object]] = []
+    reconciled_by_article: dict[str, list[dict[str, object]]] = {}
+    rejected_articles: dict[str, str] = dict(index_row_bad_articles)
+
+    all_article_ids = sorted(set(events_by_article.keys()) | set(index_rows_by_article.keys()) | set(index_row_bad_articles.keys()))
+    for src_id in all_article_ids:
+        blocker = index_row_bad_articles.get(src_id)
+        if not blocker and src_id not in events_by_article:
+            blocker = f"stage1_5d_v3_orphan_index:{src_id}"
+        elif not blocker and src_id not in index_rows_by_article:
+            blocker = f"stage1_5d_v3_missing_index:{src_id}"
+        if blocker:
+            if fail_on_any_article_mismatch:
+                return _fail(blocker)
+            rejected_articles[src_id] = blocker
+            continue
+
+        ev_info = events_by_article[src_id]
+        erow = ev_info["row"]
+        ev_syms = ev_info["symbols"]
+        ev_id = str(ev_info["event_id"])
+        idx_rows = index_rows_by_article[src_id]
+
+        ev_anchor_hashes = erow.get("symbol_source_anchor_contract_hashes")
+        ev_anchor_ms_map = erow.get("symbol_official_schedule_anchor_ms")
+        ev_onboard_map = erow.get("symbol_exchangeinfo_onboard_date_ms")
+        ev_rev_id_map = erow.get("symbol_official_schedule_revision_ids")
+        ev_avail_map = erow.get("symbol_official_schedule_revision_available_at_ms")
+        ev_prov_map = erow.get("symbol_anchor_provenance")
+        ev_eff_ms_map = erow.get("symbol_effective_observation_anchor_ms")
+        ev_eff_src_map = erow.get("symbol_effective_observation_anchor_sources")
+        ev_lvl_map = erow.get("symbol_anchor_evidence_levels")
+        ev_max_cls_map = erow.get("symbol_max_evidence_classes")
+        ev_val_st_map = erow.get("symbol_anchor_validation_statuses")
+        ev_cmp_st_map = erow.get("symbol_anchor_comparison_statuses")
+        decision_ms = erow.get("anchor_contract_decision_at_ms")
+        ev_payload_sha = str(erow.get("detail_payload_hash") or "")
+        seen_syms: set[str] = set()
+        art_blocker: str | None = None
+
+        if (
+            isinstance(decision_ms, bool)
+            or not isinstance(decision_ms, int)
+            or not isinstance(ev_anchor_hashes, dict)
+            or not isinstance(ev_prov_map, dict)
+            or not isinstance(ev_eff_ms_map, dict)
+            or not isinstance(ev_eff_src_map, dict)
+            or not isinstance(ev_lvl_map, dict)
+            or not isinstance(ev_max_cls_map, dict)
+            or not isinstance(ev_val_st_map, dict)
+            or not isinstance(ev_cmp_st_map, dict)
+        ):
+            art_blocker = f"stage1_5d_v3_formal_event_contract_structure_invalid:{src_id}"
+
+        if not art_blocker:
+            for sym_u in ev_syms:
+                prov_entry = ev_prov_map.get(sym_u)
+                if not isinstance(prov_entry, dict):
+                    art_blocker = f"stage1_5d_v3_formal_event_provenance_missing:{src_id}:{sym_u}"
+                    break
+                mapping_conf = prov_entry.get("mapping_confidence")
+                if not isinstance(mapping_conf, str) or not mapping_conf:
+                    art_blocker = f"stage1_5d_v3_formal_event_mapping_confidence_missing:{src_id}:{sym_u}"
+                    break
+                rebuilt = build_symbol_anchor_contract(
+                    symbol=sym_u,
+                    official_schedule_anchor_ms=ev_anchor_ms_map.get(sym_u) if isinstance(ev_anchor_ms_map, dict) else None,
+                    exchangeinfo_onboard_date_ms=ev_onboard_map.get(sym_u) if isinstance(ev_onboard_map, dict) else None,
+                    anchor_contract_decision_at_ms=decision_ms,
+                    official_schedule_revision_id=ev_rev_id_map.get(sym_u) if isinstance(ev_rev_id_map, dict) else None,
+                    official_schedule_available_at_ms=ev_avail_map.get(sym_u) if isinstance(ev_avail_map, dict) else None,
+                    mapping_confidence=mapping_conf,
+                    provenance=prov_entry,
+                )
+                stored_hash = ev_anchor_hashes.get(sym_u)
+                if (
+                    not isinstance(stored_hash, str)
+                    or not stored_hash
+                    or rebuilt["source_anchor_contract_hash"] != stored_hash
+                    or ev_eff_ms_map.get(sym_u) != rebuilt["effective_observation_anchor_ms"]
+                    or ev_eff_src_map.get(sym_u) != rebuilt["effective_observation_anchor_source"]
+                    or ev_lvl_map.get(sym_u) != rebuilt["anchor_evidence_level"]
+                    or ev_max_cls_map.get(sym_u) != rebuilt["max_evidence_class"]
+                    or ev_val_st_map.get(sym_u) != rebuilt["validation_status"]
+                    or ev_cmp_st_map.get(sym_u) != rebuilt["comparison_status"]
+                ):
+                    art_blocker = f"stage1_5d_v3_formal_event_anchor_hash_mismatch:{src_id}:{sym_u}"
+                    break
+
+        if not art_blocker:
+            ev_anchor_ms_safe = ev_anchor_ms_map if isinstance(ev_anchor_ms_map, dict) else {}
+            for r in idx_rows:
+                sym_u = str(r.get("symbol") or "").strip().upper()
+                if sym_u in seen_syms:
+                    art_blocker = f"stage1_5d_v3_duplicate_index_symbol:{src_id}:{sym_u}"
+                    break
+                seen_syms.add(sym_u)
+                if sym_u not in ev_syms:
+                    art_blocker = f"stage1_5d_v3_extra_index_symbol:{src_id}:{sym_u}"
+                    break
+                if r.get("source_root_id") != expected_source_root_id:
+                    art_blocker = f"stage1_5d_v3_index_source_root_mismatch:{src_id}:{sym_u}"
+                    break
+                if r.get("source_root_commit_sha") != expected_commit_sha or r.get("commit_sha") != expected_commit_sha:
+                    art_blocker = f"stage1_5d_v3_index_commit_sha_mismatch:{src_id}:{sym_u}"
+                    break
+                if r.get("event_id") != ev_id:
+                    art_blocker = f"stage1_5d_v3_index_event_id_mismatch:{src_id}:{sym_u}"
+                    break
+                if r.get("stable_schedule_identity") != f"binance|futures_contract_launch|{src_id}|{sym_u}":
+                    art_blocker = f"stage1_5d_v3_index_stable_id_mismatch:{src_id}:{sym_u}"
+                    break
+                if not isinstance(ev_anchor_hashes.get(sym_u), str) or not ev_anchor_hashes.get(sym_u) or r.get("source_anchor_contract_hash") != ev_anchor_hashes.get(sym_u):
+                    art_blocker = f"stage1_5d_v3_index_anchor_hash_mismatch:{src_id}:{sym_u}"
+                    break
+                idx_anchor_ms = r.get("official_schedule_anchor_ms")
+                if idx_anchor_ms != ev_anchor_ms_safe.get(sym_u):
+                    art_blocker = f"stage1_5d_v3_index_anchor_ms_mismatch:{src_id}:{sym_u}"
+                    break
+                idx_payload_sha = str(r.get("payload_sha256") or "")
+                if idx_payload_sha != ev_payload_sha:
+                    art_blocker = f"stage1_5d_v3_index_payload_sha_mismatch:{src_id}:{sym_u}"
+                    break
+                if erow.get("effective_observation_anchor_source") == "official_schedule_anchor" or as_of_ms is not None:
+                    if isinstance(idx_anchor_ms, bool) or not isinstance(idx_anchor_ms, int) or idx_anchor_ms <= 0:
+                        art_blocker = f"stage1_5d_v3_index_official_anchor_missing:{src_id}:{sym_u}"
+                        break
+                if as_of_ms is not None and not idx_payload_sha.strip():
+                    art_blocker = f"stage1_5d_v3_index_payload_sha_empty:{src_id}:{sym_u}"
+                    break
+                obs_ms = r.get("identity_first_observed_at_ms")
+                dur_ms = r.get("formal_row_durable_at_ms")
+                if isinstance(obs_ms, bool) or not isinstance(obs_ms, int) or obs_ms < 0:
+                    art_blocker = f"stage1_5d_v3_index_first_observed_invalid:{src_id}:{sym_u}"
+                    break
+                if isinstance(dur_ms, bool) or not isinstance(dur_ms, int) or dur_ms < 0:
+                    art_blocker = f"stage1_5d_v3_index_durable_at_invalid:{src_id}:{sym_u}"
+                    break
+                if as_of_ms is not None and (obs_ms <= 0 or obs_ms > as_of_ms or dur_ms <= 0 or dur_ms > as_of_ms):
+                    art_blocker = f"stage1_5d_v3_index_future_timestamp:{src_id}:{sym_u}"
+                    break
+
+        if not art_blocker and seen_syms != set(ev_syms):
+            art_blocker = f"stage1_5d_v3_partial_index_symbols:{src_id}"
+
+        if art_blocker:
+            if fail_on_any_article_mismatch:
+                return _fail(art_blocker)
+            rejected_articles[src_id] = art_blocker
+            continue
+
+        formal_projections[src_id] = {
+            "event_id": ev_id,
+            "symbols": sorted(ev_syms),
+            "event_row": erow,
+        }
+        reconciled_index_rows.extend(idx_rows)
+        reconciled_by_article[src_id] = list(idx_rows)
+
+    return {
+        "valid": True,
+        "reason": None,
+        "formal_projections": formal_projections,
+        "reconciled_index_rows": reconciled_index_rows,
+        "reconciled_by_article": reconciled_by_article,
+        "rejected_articles": rejected_articles,
+        "revision_rows": revision_rows,
+    }
 
 
 def preflight_stage1_5d_v3_root(
@@ -338,35 +651,29 @@ def preflight_stage1_5d_v3_root(
             "crash_cleanup_row": None,
         }
 
-    # 6. Read formal event and index projection
-    formal_projections = {}
-    index_path = output_root / "formal_launch_identity_index.jsonl"
-    if index_path.exists() and index_path.is_file():
-        for line in index_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                return {
-                    "kind": "rejected",
-                    "reason": "stage1_5d_v3_formal_index_malformed",
-                    "state": None,
-                    "formal_completed_source_article_ids": set(),
-                    "crash_cleanup_row": None,
-                }
-            src_id = row.get("source_article_id")
-            ev_id = row.get("event_id")
-            syms = row.get("symbols")
-            if not (src_id and ev_id and isinstance(syms, list) and syms):
-                return {
-                    "kind": "rejected",
-                    "reason": f"stage1_5d_v3_formal_index_row_invalid:{src_id}",
-                    "state": None,
-                    "formal_completed_source_article_ids": set(),
-                    "crash_cleanup_row": None,
-                }
-            formal_projections[src_id] = {"event_id": ev_id, "symbols": sorted(syms)}
+    # 6. Read formal event and index projection (V3 D-05 reconciliation)
+    expected_source_root_id = str(output_root.resolve())
+    expected_commit_sha = str(
+        (expected_resume_provenance or {}).get("producer_startup_head_sha")
+        or (expected_resume_provenance or {}).get("startup_head_sha")
+        or ""
+    ).strip()
+    reconcile_res = reconcile_durable_launch_event_and_index_projection(
+        output_root,
+        expected_source_root_id=expected_source_root_id,
+        expected_commit_sha=expected_commit_sha,
+        as_of_ms=None,
+        fail_on_any_article_mismatch=True,
+    )
+    if not reconcile_res.get("valid"):
+        return {
+            "kind": "rejected",
+            "reason": str(reconcile_res.get("reason") or "stage1_5d_v3_formal_projection_mismatch"),
+            "state": None,
+            "formal_completed_source_article_ids": set(),
+            "crash_cleanup_row": None,
+        }
+    formal_projections = dict(reconcile_res.get("formal_projections") or {})
 
     # Check Table 6.2.1 exclusivity matrix
     formal_completed_ids = set()
@@ -1337,6 +1644,9 @@ def record_formal_futures_launch_event(
         return None
     seen_event_ids.add(written["event_id"])
     events_detected.append(written)
+    inprocess_ids = stream_paths.get("inprocess_completed_source_article_ids")
+    if isinstance(inprocess_ids, set) and written.get("source_article_id"):
+        inprocess_ids.add(str(written["source_article_id"]))
 
     # Poll Ordering Rule: append launch event first, then append identity index.
     index_path = Path(stream_paths.get("formal_launch_identity_index", ""))
@@ -2341,9 +2651,13 @@ def _main():
 
     startup_head_sha = "0" * 40
     try:
-        git_res = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
-        if re.match(r"^[0-9a-f]{40}$", git_res):
-            startup_head_sha = git_res
+        rc_sha = read_current_commit_sha()
+        if re.match(r"^[0-9a-f]{40}$", rc_sha):
+            startup_head_sha = rc_sha
+        else:
+            git_res = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+            if re.match(r"^[0-9a-f]{40}$", git_res):
+                startup_head_sha = git_res
     except Exception:
         pass
 
@@ -2507,6 +2821,7 @@ def _main():
         }
         catalog_bootstrap_cutoff_ms = None
         formal_completed_source_article_ids = set()
+    inprocess_completed_source_article_ids: set[str] = set()
 
     payload_version_first_observed = load_payload_version_first_observed(
         output_root / "revision_payload_versions.jsonl"
@@ -2530,6 +2845,10 @@ def _main():
     startup_now_ms = int(time.time() * 1000)
     for code, article in persisted_articles.items():
         if article.get("terminal_state"):
+            continue
+        if is_standalone_schedule_revision_notice_title(str(article.get("title") or "")):
+            continue
+        if article.get("detail_work_type") == "launch_schedule_revision_detail":
             continue
         raw_art = {
             "code": article["source_article_id"],
@@ -2738,15 +3057,20 @@ def _main():
         }
 
     startup_stream_paths = build_stream_paths(output_root, startup_now_ms, storage_guard=storage_guard)
+    startup_stream_paths["formal_completed_source_article_ids"] = formal_completed_source_article_ids
+    startup_stream_paths["inprocess_completed_source_article_ids"] = inprocess_completed_source_article_ids
     if active_root_recovery_authority:
         startup_stream_paths["active_root_recovery_authority"] = active_root_recovery_authority
-    rebuilt_index_rows, index_rebuild_diagnostics = rebuild_missing_formal_launch_identity_index(
-        events_dir=output_root / "events",
-        index_path=startup_stream_paths["formal_launch_identity_index"],
-        source_root_id=str(output_root.resolve()),
-        commit_sha=current_commit_sha,
-        storage_guard=storage_guard,
-    )
+    if preflight_res["kind"] == "resumable":
+        rebuilt_index_rows, index_rebuild_diagnostics = [], []
+    else:
+        rebuilt_index_rows, index_rebuild_diagnostics = rebuild_missing_formal_launch_identity_index(
+            events_dir=output_root / "events",
+            index_path=startup_stream_paths["formal_launch_identity_index"],
+            source_root_id=str(output_root.resolve()),
+            commit_sha=current_commit_sha,
+            storage_guard=storage_guard,
+        )
     for diagnostic in index_rebuild_diagnostics:
         append_stage1_5d_diagnostic(
             startup_stream_paths,
@@ -2876,6 +3200,8 @@ def _main():
         last_poll_started_at_ms = now_ms
 
         stream_paths = build_stream_paths(output_root, now_ms, storage_guard=storage_guard)
+        stream_paths["formal_completed_source_article_ids"] = formal_completed_source_article_ids
+        stream_paths["inprocess_completed_source_article_ids"] = inprocess_completed_source_article_ids
         if active_root_recovery_authority:
             stream_paths["active_root_recovery_authority"] = active_root_recovery_authority
 
@@ -3122,6 +3448,10 @@ def _main():
             for ev in cycle_res["events"]:
                 code = ev["source_article_id"]
                 raw_art = next((art for art in raw_articles if art.get("code") == code), {})
+                if is_standalone_schedule_revision_notice_title(
+                    str(raw_art.get("title") or ev.get("title") or "")
+                ):
+                    continue
 
                 admission = classify_stage1_5d_catalog_admission(
                     raw_art,
@@ -3220,40 +3550,11 @@ def _main():
                             pending_reason=persisted.get("pending_reason", "title_symbol_missing"),
                         )
 
-            # Revision titles are not launch events, but their trusted BAPI
-            # detail may supersede a prior launch. Reuse the existing queue.
-            for raw_art in raw_articles:
-                code = str(raw_art.get("code") or "")
-                if not code or code in detail_retry_state or not is_schedule_revision_listing_candidate(
-                    str(raw_art.get("title") or "")
-                ):
-                    continue
-                persisted = persisted_articles.get(code, {})
-                detail_retry_state[code] = build_stage1_5d_v3_active_article(
-                    existing=persisted,
-                    source_article_id=code,
-                    title=str(raw_art.get("title") or persisted.get("title") or ""),
-                    source_detail_url_normalized=persisted.get(
-                        "source_detail_url_normalized"
-                    ) or f"{source_parent_url.rstrip('/')}/{code}",
-                    source_parent_url=source_parent_url,
-                    source_published_at_ms=raw_art.get("releaseDate"),
-                    detected_at_ms=now_ms,
-                    first_detected_at_ms=now_ms,
-                    raw=raw_art,
-                    event_type="futures_contract_launch",
-                    detail_work_type="launch_schedule_revision_detail",
-                    source_published_at_ms_confidence="medium",
-                    symbol_extraction_source="none",
-                    pending_reason="revision_detail_required",
-                    detail_fetch_status="pending",
-                )
-
-
-            # Clean up first_bar_queue to remove empty symbol events
+            # Clean up first_bar_queue to remove standalone revision notices and empty symbol events
             first_bar_queue = [
                 q for q in cycle_res["first_bar_queue"]
-                if q.get("symbols") or q.get("source_article_id") not in detail_retry_state
+                if not is_standalone_schedule_revision_notice_title(str(q.get("title") or ""))
+                and (q.get("symbols") or q.get("source_article_id") not in detail_retry_state)
             ]
 
             # Detail fallback processing
@@ -3264,13 +3565,17 @@ def _main():
             recheck_context_by_art: dict[str, dict] = {}
             if args.live_public_readonly and recheck_budget > 0:
                 recheck_now_ms = now_ms
-                recheck_index_rows, idx_blockers = load_valid_formal_launch_identity_index(
-                    stream_paths["formal_launch_identity_index"],
+                reconcile_res = reconcile_durable_launch_event_and_index_projection(
+                    output_root,
+                    expected_source_root_id=str(output_root.resolve()),
+                    expected_commit_sha=current_commit_sha,
                     as_of_ms=recheck_now_ms,
-                    snapshot_path=args.formal_launch_identity_index_snapshot,
+                    fail_on_any_article_mismatch=False,
                 )
+                recheck_index_rows = list(reconcile_res.get("reconciled_index_rows") or [])
+                reconciled_projections = reconcile_res.get("formal_projections") or {}
                 recheck_transport_invalid_articles: set[str] = set()
-                if recheck_index_rows and not idx_blockers:
+                if recheck_index_rows:
                     from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
                         select_latest_applicable_official_schedule,
                         validate_schedule_revision_contract,
@@ -3320,39 +3625,32 @@ def _main():
                             "supersedes_revision_id": sup_id,
                         }
 
-                    events_dir = output_root / "events"
-                    if events_dir.exists():
-                        for ef in sorted(events_dir.glob("*.jsonl")):
-                            try:
-                                elines = ef.read_text(encoding="utf-8").splitlines()
-                            except (OSError, UnicodeDecodeError):
+                    for erow in (reconcile_res.get("revision_rows") or []):
+                        if not isinstance(erow, dict):
+                            continue
+                        if erow.get("event_type") != "futures_contract_launch_schedule_revision":
+                            continue
+                        raw_art_key = erow.get("supersedes_source_article_id")
+                        if not isinstance(raw_art_key, str) or not raw_art_key.strip():
+                            raw_art_key = erow.get("source_article_id")
+                        art_key = raw_art_key.strip() if isinstance(raw_art_key, str) else ""
+                        syms_raw = erow.get("symbols") or ([erow.get("symbol")] if erow.get("symbol") else [])
+                        if not art_key or not syms_raw:
+                            if art_key:
+                                recheck_transport_invalid_articles.add(art_key)
+                            continue
+                        for sym in syms_raw:
+                            sym_u = str(sym or "").strip().upper()
+                            if not sym_u:
                                 continue
-                            for eline in elines:
-                                if not eline.strip():
-                                    continue
-                                try:
-                                    erow = json.loads(eline)
-                                except json.JSONDecodeError:
-                                    continue
-                                if not isinstance(erow, dict):
-                                    continue
-                                if erow.get("event_type") != "futures_contract_launch_schedule_revision":
-                                    continue
-                                art_key = str(erow.get("supersedes_source_article_id") or erow.get("source_article_id") or "").strip()
-                                syms_raw = erow.get("symbols") or ([erow.get("symbol")] if erow.get("symbol") else [])
-                                if not art_key or not syms_raw:
-                                    if art_key:
-                                        recheck_transport_invalid_articles.add(art_key)
-                                    continue
-                                for sym in syms_raw:
-                                    sym_u = str(sym or "").strip().upper()
-                                    if not sym_u:
-                                        continue
-                                    proj = _project_revision_transport_for_selector(erow, sym_u)
-                                    if proj is None:
-                                        recheck_transport_invalid_articles.add(art_key)
-                                    else:
-                                        recheck_revisions_by_art_sym.setdefault((art_key, sym_u), []).append(proj)
+                            proj = _project_revision_transport_for_selector(erow, sym_u)
+                            if proj is None:
+                                recheck_transport_invalid_articles.add(art_key)
+                            else:
+                                rev_key = (art_key, sym_u)
+                                if rev_key not in recheck_revisions_by_art_sym:
+                                    recheck_revisions_by_art_sym[rev_key] = []
+                                recheck_revisions_by_art_sym[rev_key].append(proj)
 
                     by_article: dict[str, list[dict]] = {}
                     for ir in recheck_index_rows:
@@ -3367,20 +3665,25 @@ def _main():
                             continue
                         persisted = persisted_articles.get(art_id) or {}
                         watch = schedule_recheck_watches.get(art_id) or {}
-                        if art_id not in formal_completed_source_article_ids and not persisted.get("terminal_state"):
+                        if (
+                            art_id not in formal_completed_source_article_ids
+                            and art_id not in inprocess_completed_source_article_ids
+                            and art_id not in reconciled_projections
+                            and not persisted.get("terminal_state")
+                        ):
                             continue
                         first_obs = min(int(r.get("identity_first_observed_at_ms") or r.get("original_source_published_at_ms") or recheck_now_ms) for r in a_rows)
+                        durable_ms = max(int(r.get("formal_row_durable_at_ms") or 0) for r in a_rows)
                         deadline_ms = int(watch.get("schedule_recheck_deadline_ms") or persisted.get("schedule_recheck_deadline_ms") or (first_obs + 14 * 86_400_000))
                         if recheck_now_ms > deadline_ms:
                             continue
                         next_at = watch.get("next_schedule_recheck_at_ms")
-                        if not isinstance(next_at, int):
+                        if not isinstance(next_at, int) or isinstance(next_at, bool):
                             next_at = persisted.get("next_schedule_recheck_at_ms")
-                        if isinstance(next_at, int):
+                        if isinstance(next_at, int) and not isinstance(next_at, bool):
                             if recheck_now_ms < next_at:
                                 continue
                         else:
-                            durable_ms = max(int(r.get("formal_row_durable_at_ms") or 0) for r in a_rows)
                             if durable_ms > 0 and (recheck_now_ms - durable_ms) < recheck_interval_ms:
                                 continue
 
@@ -3425,20 +3728,42 @@ def _main():
 
                     due_rechecks.sort(key=lambda x: (x[0], x[1], x[2]))
                     for _, _, art_id, a_rows, deadline_ms, persisted, watch in due_rechecks[:recheck_budget]:
+                        ev_proj = reconciled_projections.get(art_id) or {}
+                        ev_row_proj = ev_proj.get("event_row") if isinstance(ev_proj.get("event_row"), dict) else {}
+                        art_title = str(persisted.get("title") or ev_row_proj.get("title") or "")
+                        durable_ms = max(int(r.get("formal_row_durable_at_ms") or 0) for r in a_rows)
+                        next_at = watch.get("next_schedule_recheck_at_ms")
+                        if not isinstance(next_at, int) or isinstance(next_at, bool):
+                            next_at = persisted.get("next_schedule_recheck_at_ms")
                         recheck_item = build_stage1_5d_v3_active_article(
                             existing=persisted,
                             source_article_id=art_id,
-                            title=str(persisted.get("title") or ""),
+                            title=art_title,
                             source_detail_url_normalized=str(persisted.get("source_detail_url_normalized") or f"{source_parent_url.rstrip('/')}/{art_id}"),
                             source_parent_url=source_parent_url,
-                            source_published_at_ms=persisted.get("source_published_at_ms"),
-                            detected_at_ms=int(persisted.get("detected_at_ms") or recheck_now_ms),
-                            first_detected_at_ms=int(persisted.get("first_detected_at_ms") or recheck_now_ms),
-                            raw=persisted.get("raw") or {"code": art_id, "title": str(persisted.get("title") or "")},
+                            source_published_at_ms=persisted.get("source_published_at_ms") or ev_row_proj.get("source_published_at_ms"),
+                            detected_at_ms=recheck_now_ms,
+                            first_detected_at_ms=recheck_now_ms,
+                            raw=persisted.get("raw") or {"code": art_id, "title": art_title},
                             event_type="futures_contract_launch",
                             detail_work_type="launch_schedule_revision_detail",
                             detail_fetch_attempted=True,
                             detail_fetch_status="pending",
+                        )
+                        recheck_due_at = (
+                            int(next_at)
+                            if isinstance(next_at, int) and not isinstance(next_at, bool) and next_at > 0
+                            else (durable_ms + recheck_interval_ms if durable_ms > 0 else recheck_now_ms)
+                        )
+                        recheck_item["detail_retry_cycle_count"] = max(1, int(recheck_item.get("detail_retry_cycle_count") or 0))
+                        recheck_item["detail_fetch_attempt_count"] = max(1, int(recheck_item.get("detail_fetch_attempt_count") or 0))
+                        recheck_item["detail_http_request_count"] = max(1, int(recheck_item.get("detail_http_request_count") or 0))
+                        recheck_item["detail_retryable"] = True
+                        recheck_item["next_detail_retry_at_ms"] = max(1, recheck_due_at)
+                        recheck_item["last_retry_at_ms"] = (
+                            max(0, recheck_due_at - recheck_interval_ms)
+                            if isinstance(next_at, int) and not isinstance(next_at, bool)
+                            else durable_ms
                         )
                         recheck_context_by_art[art_id] = {
                             "detail_payload_hash": (
@@ -3455,6 +3780,14 @@ def _main():
                             "index_rows": a_rows,
                         }
                         detail_retry_state[art_id] = recheck_item
+
+            for stray_code in list(detail_retry_state.keys()):
+                st_row = detail_retry_state[stray_code]
+                if (
+                    st_row.get("detail_work_type") == "launch_schedule_revision_detail"
+                    and stray_code not in recheck_context_by_art
+                ) or is_standalone_schedule_revision_notice_title(str(st_row.get("title") or "")):
+                    detail_retry_state.pop(stray_code, None)
 
             detail_budget_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_FETCH_BUDGET_PER_POLL", 3)
             detail_http_requests_remaining = getattr(base, "EXTERNAL_SIGNAL_STAGE1_5D_DETAIL_HTTP_REQUEST_BUDGET_PER_POLL", 4)
@@ -4022,12 +4355,13 @@ def _main():
                     and (now_ms - int(state.get("last_bapi_parse_attempt_at_ms") or 0) < bapi_recheck_interval_ms)
                 )
                 bapi_handled = False
+                bapi_res = None
+                bapi_attempt_result = None
                 pattern = bapi_article_code_pattern
 
                 if not bapi_degraded and not is_bapi_no_symbol_deduped and detail_http_requests_remaining > 0 and code and re.match(pattern, code):
                     bapi_url = build_bapi_article_detail_url(code)
 
-                    bapi_res = None
                     if args.fixture_json:
                         bapi_payload = state["raw"].get("bapiPayload")
                         if bapi_payload is not None:
@@ -4192,32 +4526,10 @@ def _main():
                         }
                         append_jsonl(stream_paths["bapi_parse_results"], bapi_parse_audit_row, storage_guard=storage_guard)
 
-                        revision_result = process_trusted_schedule_revision_detail(
-                            stream_paths=stream_paths,
-                            source_article_id=code,
-                            title=state["raw"].get("title") or "",
-                            detail_text=str(bapi_extraction.get("extracted_text") or ""),
-                            symbols=bapi_parsed_symbols,
-                            symbol_launch_times_ms=bapi_extraction.get("symbol_launch_times_ms"),
-                            payload_sha256=str(bapi_write_res.get("raw_payload_sha256") or ""),
-                            available_at_ms=payload_version_available_at_ms,
-                            producer_effective_enabled=schedule_revision_producer_effective_enabled,
-                            formal_launch_identity_index_snapshot=args.formal_launch_identity_index_snapshot,
-                            emitted_revision_semantic_ids=emitted_revision_semantic_ids,
-                        )
-                        state["schedule_revision_producer_status"] = revision_result["status"]
-                        if revision_result["status"] == "revision_emitted":
-                            schedule_revision_emitted_count += revision_result["emitted_count"]
-                        elif revision_result["status"] == "revision_diagnostic":
-                            schedule_revision_diagnostic_count += 1
-                            if revision_result.get("producer_health") == "blocked_index_collision":
-                                schedule_revision_index_collision_count += 1
-                                schedule_revision_integration_health = "blocked_index_collision"
-
                         if state.get("detail_work_type") == "launch_schedule_revision_detail":
                             new_hash = str(bapi_write_res.get("raw_payload_sha256") or "")
                             rctx = recheck_context_by_art.get(code) or {}
-                            if revision_result["status"] != "revision_emitted" and rctx.get("index_rows"):
+                            if rctx.get("index_rows"):
                                 from src.research.external_signal_shadow.stage1_5_launch_anchor_contract import (
                                     select_latest_applicable_official_schedule,
                                 )
@@ -4264,17 +4576,16 @@ def _main():
                                         lookback_days=base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS,
                                         emitted_ids=emitted_revision_semantic_ids,
                                     )
+                                    state["schedule_revision_producer_status"] = rev_diag.get("status")
                                     if rev_diag.get("status") == "revision_emitted" and rev_rows:
                                         for rrow in rev_rows:
                                             written_rev = append_formal_schedule_revision(stream_paths, rrow)
                                             if written_rev is not None:
                                                 schedule_revision_emitted_count += 1
                                                 emitted_revision_semantic_ids.add(str(written_rev["revision_semantic_id"]))
-                                        state["schedule_revision_producer_status"] = "revision_emitted"
                                     elif rev_diag.get("status") == "revision_diagnostic":
                                         schedule_revision_diagnostic_count += 1
                                         append_stage1_5d_diagnostic(stream_paths, rev_diag)
-                                        state["schedule_revision_producer_status"] = "revision_diagnostic"
 
                             prev_watch = schedule_recheck_watches.get(code) or {}
                             watch_hash = prev_watch.get("detail_payload_hash") or rctx.get("detail_payload_hash")
@@ -4289,7 +4600,7 @@ def _main():
                                 "schedule_revision_producer_status": state.get("schedule_revision_producer_status"),
                             }
                             prior_term = rctx.get("prior_terminal")
-                            if code in formal_completed_source_article_ids:
+                            if code in formal_completed_source_article_ids or code in inprocess_completed_source_article_ids:
                                 persisted_articles.pop(code, None)
                             elif isinstance(prior_term, dict) and prior_term.get("terminal_state"):
                                 restored = dict(prior_term)
@@ -4444,7 +4755,47 @@ def _main():
                                 state["detail_payload_trusted"] = True
                                 continue
                     else:
-                        bapi_to_support_fallback_count += 1
+                        if state.get("detail_work_type") == "launch_schedule_revision_detail":
+                            detail_fetch_failed_count += 1
+                            if isinstance(bapi_res, dict) and bapi_res.get("http_status") in TRANSIENT_DETAIL_HTTP_STATUSES:
+                                detail_http_not_ready_count += 1
+                            if isinstance(bapi_res, dict) and (
+                                bapi_res.get("error") == "empty_detail_payload"
+                                or bapi_res.get("payload_size_bytes") == 0
+                            ):
+                                detail_empty_payload_count += 1
+                            rctx = recheck_context_by_art.get(code) or {}
+                            prev_watch = schedule_recheck_watches.get(code) or {}
+                            watch_hash = prev_watch.get("detail_payload_hash") or rctx.get("detail_payload_hash")
+                            fail_status = f"recheck_fetch_failed:{bapi_attempt_result or 'unknown'}"
+                            schedule_recheck_watches[code] = {
+                                "next_schedule_recheck_at_ms": now_ms + recheck_interval_ms,
+                                "schedule_recheck_deadline_ms": rctx.get("schedule_recheck_deadline_ms"),
+                                "detail_payload_hash": watch_hash,
+                                "schedule_revision_producer_status": fail_status,
+                            }
+                            prior_term = rctx.get("prior_terminal")
+                            if code in formal_completed_source_article_ids or code in inprocess_completed_source_article_ids:
+                                persisted_articles.pop(code, None)
+                            elif isinstance(prior_term, dict) and prior_term.get("terminal_state"):
+                                restored = dict(prior_term)
+                                restored["next_schedule_recheck_at_ms"] = now_ms + recheck_interval_ms
+                                restored["schedule_recheck_deadline_ms"] = rctx.get("schedule_recheck_deadline_ms")
+                                restored["schedule_revision_producer_status"] = fail_status
+                                persisted_articles[code] = restored
+                            detail_retry_state.pop(code, None)
+                            bapi_handled = True
+                        else:
+                            bapi_to_support_fallback_count += 1
+
+                if state.get("detail_work_type") == "launch_schedule_revision_detail" and not bapi_handled:
+                    rctx = recheck_context_by_art.get(code) or {}
+                    if code in formal_completed_source_article_ids or code in inprocess_completed_source_article_ids:
+                        persisted_articles.pop(code, None)
+                    elif isinstance(rctx.get("prior_terminal"), dict):
+                        persisted_articles[code] = dict(rctx["prior_terminal"])
+                    detail_retry_state.pop(code, None)
+                    continue
 
                 if bapi_handled:
                     continue
@@ -5087,7 +5438,7 @@ def _main():
                 st = detail_retry_state[code]
                 if st.get("detail_work_type") == "launch_schedule_revision_detail":
                     rctx = recheck_context_by_art.get(code) or {}
-                    if code in formal_completed_source_article_ids:
+                    if code in formal_completed_source_article_ids or code in inprocess_completed_source_article_ids:
                         persisted_articles.pop(code, None)
                     elif isinstance(rctx.get("prior_terminal"), dict):
                         persisted_articles[code] = dict(rctx["prior_terminal"])

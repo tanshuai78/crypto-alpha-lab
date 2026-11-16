@@ -4892,3 +4892,1330 @@ def test_postponement_f_writes_future_launch_recovery_in_root_contract(tmp_path)
     assert written["future_launch_recovery"] == rec
     persisted = json.loads((out_root / "observer_root_contract.json").read_text(encoding="utf-8"))
     assert persisted["future_launch_recovery"] == rec
+
+
+def _verify_same_page_real_evidence_bundle(
+    evidence_dir: Path,
+    work_dir: Path,
+    monkeypatch,
+    *,
+    approved_manifest_sha256: str | None = None,
+) -> dict:
+    import hashlib
+    import subprocess
+    import urllib.parse
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow import (
+        run_stage1_5d_live_event_source_smoke_collector as col,
+    )
+    from scripts.external_signal_shadow import (
+        run_stage1_5f_live_depth_observer as f_runner,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_client import (
+        host_allowed,
+    )
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        extract_symbol_candidates_from_bapi_article_payload,
+        normalize_live_event,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        make_event_symbol_id,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_state_by_event_symbol_id,
+    )
+
+    assert evidence_dir.is_dir(), f"Evidence dir missing: {evidence_dir}"
+    manifest_path = evidence_dir / "manifest.json"
+    assert not manifest_path.is_symlink() and manifest_path.is_file(), f"Missing manifest.json in {evidence_dir}"
+    manifest_bytes = manifest_path.read_bytes()
+    actual_manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+
+    arg_sha = (approved_manifest_sha256 or "").strip().lower()
+    env_sha = (os.environ.get("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256") or "").strip().lower()
+    if arg_sha and env_sha:
+        assert arg_sha == env_sha, f"Conflicting approved manifest SHA-256: arg={arg_sha} env={env_sha}"
+    expected_manifest_sha = arg_sha or env_sha
+    assert len(expected_manifest_sha) == 64 and all(c in "0123456789abcdef" for c in expected_manifest_sha), (
+        "Missing or invalid independent approved_manifest_sha256 "
+        "(pass approved_manifest_sha256 or set STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256)"
+    )
+    assert actual_manifest_sha256 == expected_manifest_sha, (
+        f"manifest.json SHA-256 mismatch: actual={actual_manifest_sha256} expected={expected_manifest_sha}"
+    )
+
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    assert isinstance(manifest, dict) and manifest, "manifest.json must be a non-empty JSON object"
+
+    art_id = manifest.get("source_article_id")
+    assert isinstance(art_id, str) and len(art_id.strip()) == 32, "manifest.source_article_id must be 32-char article id"
+    art_id = art_id.strip()
+    title = manifest.get("title")
+    assert isinstance(title, str) and title.strip(), "manifest.title is required"
+    title = title.strip()
+
+    raw_syms = manifest.get("symbols")
+    assert isinstance(raw_syms, list) and len(raw_syms) >= 2, "manifest.symbols must include at least two symbols"
+    target_syms = [str(s or "").strip().upper() for s in raw_syms]
+    assert all(target_syms) and len(set(target_syms)) == len(target_syms), "manifest.symbols must be unique non-empty"
+
+    # Complete summary check
+    summary_text = manifest.get("summary")
+    summary_rel = manifest.get("summary_relpath")
+    has_summary_text = isinstance(summary_text, str) and bool(summary_text.strip())
+    has_summary_file = False
+    if isinstance(summary_rel, str) and summary_rel.strip():
+        sp = (evidence_dir / summary_rel).resolve()
+        assert sp.is_relative_to(evidence_dir.resolve()) and not sp.is_symlink() and sp.is_file(), f"Invalid summary file: {sp}"
+        has_summary_file = bool(sp.read_text(encoding="utf-8").strip())
+    assert has_summary_text or has_summary_file, "Complete evidence summary is required in manifest.summary or manifest.summary_relpath"
+
+    def _validate_raw_entry(key: str, *, expected_path_fragment: str) -> tuple[bytes, dict, dict]:
+        entry = manifest.get(key)
+        assert isinstance(entry, dict), f"manifest.{key} must be an object"
+        rel = entry.get("raw_payload_relpath")
+        sha = entry.get("payload_sha256")
+        url = entry.get("source_url")
+        fetched = entry.get("fetched_at_ms")
+        assert isinstance(rel, str) and rel.strip(), f"manifest.{key}.raw_payload_relpath missing"
+        assert isinstance(sha, str) and len(sha) == 64, f"manifest.{key}.payload_sha256 invalid"
+        assert isinstance(url, str) and url.strip(), f"manifest.{key}.source_url missing"
+        parsed_url = urllib.parse.urlparse(url)
+        assert parsed_url.scheme == "https" and parsed_url.hostname and host_allowed(
+            parsed_url.hostname.lower(), ("binance.com", "www.binance.com", "fapi.binance.com")
+        ), f"manifest.{key}.source_url host not allowlisted: {url}"
+        assert expected_path_fragment in parsed_url.path, f"manifest.{key}.source_url unexpected path: {url}"
+        assert isinstance(fetched, int) and not isinstance(fetched, bool) and fetched > 0, f"manifest.{key}.fetched_at_ms must be > 0"
+        if "available_at_ms" in entry and entry["available_at_ms"] is not None:
+            avail = entry["available_at_ms"]
+            assert isinstance(avail, int) and not isinstance(avail, bool) and avail == fetched, (
+                f"manifest.{key}.available_at_ms ({avail}) must match verified fetched_at_ms ({fetched})"
+            )
+        raw_path = (evidence_dir / rel).resolve()
+        assert raw_path.is_relative_to(evidence_dir.resolve()) and not raw_path.is_symlink() and raw_path.is_file(), (
+            f"Missing raw file for {key}: {raw_path}"
+        )
+        raw_bytes = raw_path.read_bytes()
+        assert raw_bytes, f"Empty raw payload bytes for {key}"
+        assert hashlib.sha256(raw_bytes).hexdigest() == sha, f"SHA-256 mismatch for {key}"
+        parsed_obj = json.loads(raw_bytes.decode("utf-8"))
+        assert isinstance(parsed_obj, dict), f"Raw JSON for {key} must be an object"
+        return raw_bytes, parsed_obj, entry
+
+    old_bytes, old_obj, old_meta = _validate_raw_entry("old_bapi", expected_path_fragment="/bapi/")
+    new_bytes, new_obj, new_meta = _validate_raw_entry("new_bapi", expected_path_fragment="/bapi/")
+    ex_bytes, ex_obj, ex_meta = _validate_raw_entry("exchangeinfo", expected_path_fragment="exchangeInfo")
+
+    assert new_meta["payload_sha256"] != old_meta["payload_sha256"], "new_bapi bytes must differ from old_bapi bytes"
+    old_clock_ms = int(old_meta["fetched_at_ms"])
+    new_clock_ms = int(new_meta["fetched_at_ms"])
+    ex_clock_ms = int(ex_meta["fetched_at_ms"])
+    assert new_clock_ms > old_clock_ms, "new_bapi timestamp must strictly follow old_bapi timestamp"
+    assert ex_clock_ms > old_clock_ms, "exchangeinfo fetched_at_ms must strictly follow old_bapi timestamp"
+    assert (new_clock_ms - 300_000) <= ex_clock_ms <= (new_clock_ms + 60_000), (
+        f"exchangeinfo fetched_at_ms ({ex_clock_ms}) outside new_bapi capture batch window ({new_clock_ms})"
+    )
+    old_data_check = old_obj.get("data") if isinstance(old_obj.get("data"), dict) else old_obj
+    old_pub = old_data_check.get("publishDate") or old_data_check.get("releaseDate")
+    if isinstance(old_pub, int) and not isinstance(old_pub, bool) and old_pub > 0:
+        assert old_clock_ms >= old_pub, f"old_bapi fetched_at_ms ({old_clock_ms}) precedes article publishDate ({old_pub})"
+    replay_new_clock_ms = max(new_clock_ms, ex_clock_ms)
+
+    for label, b_obj in (("old_bapi", old_obj), ("new_bapi", new_obj)):
+        trusted = col.validate_bapi_article_detail_payload(
+            b_obj,
+            requested_article_code=art_id,
+            catalog_title=title,
+        )
+        assert trusted.get("payload_trusted") is True, f"Untrusted {label} payload: {trusted}"
+
+    old_ext = extract_symbol_candidates_from_bapi_article_payload(old_obj, title=title)
+    new_ext = extract_symbol_candidates_from_bapi_article_payload(new_obj, title=title)
+    assert set(old_ext.get("symbols") or []) == set(target_syms), f"old_bapi symbols mismatch: {old_ext}"
+    assert set(new_ext.get("symbols") or []) == set(target_syms), f"new_bapi symbols mismatch: {new_ext}"
+
+    old_anchors = {s: int((old_ext.get("symbol_launch_times_ms") or {}).get(s) or 0) for s in target_syms}
+    new_anchors = {s: int((new_ext.get("symbol_launch_times_ms") or {}).get(s) or 0) for s in target_syms}
+    for s in target_syms:
+        assert old_anchors[s] > 0 and new_anchors[s] > old_anchors[s], f"Expected postponed anchor for {s}: {old_anchors[s]} -> {new_anchors[s]}"
+
+    if isinstance(manifest.get("expected_old_anchors_ms"), dict):
+        for s in target_syms:
+            assert old_anchors[s] == manifest["expected_old_anchors_ms"][s]
+    if isinstance(manifest.get("expected_new_anchors_ms"), dict):
+        for s in target_syms:
+            assert new_anchors[s] == manifest["expected_new_anchors_ms"][s]
+
+    assert 0 < old_clock_ms < min(old_anchors.values()), "old_bapi availability must precede old official launch anchors"
+    assert (new_clock_ms - old_clock_ms) >= cfg_base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_INTERVAL_SEC * 1000
+    assert (new_clock_ms - old_clock_ms) <= cfg_base.EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_LOOKBACK_DAYS * 86_400_000
+
+    ex_list = ex_obj.get("symbols")
+    assert isinstance(ex_list, list) and ex_list, "exchangeinfo.symbols must be a non-empty list"
+    ex_by_sym = {
+        str(row.get("symbol") or "").strip().upper(): row
+        for row in ex_list
+        if isinstance(row, dict)
+    }
+    for s in target_syms:
+        row_ex = ex_by_sym.get(s)
+        assert isinstance(row_ex, dict) and row_ex.get("contractType") == "PERPETUAL", f"exchangeInfo missing PERPETUAL row for {s}"
+
+    if (evidence_dir / "events").exists():
+        ev_revs = []
+        for ef in sorted((evidence_dir / "events").glob("*.jsonl")):
+            for ln in ef.read_text(encoding="utf-8").splitlines():
+                if ln.strip():
+                    r = json.loads(ln)
+                    if r.get("event_type") == "futures_contract_launch_schedule_revision":
+                        ev_revs.append(r)
+        if ev_revs:
+            assert all(r.get("supersedes_source_article_id") == art_id for r in ev_revs)
+
+    # End-to-end production D -> F execution on verified raw artifacts inside isolated work_dir
+    work_dir.mkdir(parents=True, exist_ok=True)
+    repo_dir = work_dir / "git_repo"
+    repo_dir.mkdir(exist_ok=True)
+    for rel in sorted(set(col.PROTECTED_TREE_MANIFEST) | set(col.CONSUMER_RUNTIME_MANIFEST) | {"configs/base.py"}):
+        p = repo_dir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if rel == "configs/base.py":
+            real_base = Path(__file__).resolve().parents[3] / "configs" / "base.py"
+            p.write_text(real_base.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            p.write_text(f"# {rel}\n", encoding="utf-8")
+    subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, capture_output=True)
+    head_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True).stdout.strip()
+
+    c1 = work_dir / "c1.json"
+    c = work_dir / "c.json"
+    e_sum = work_dir / "stage1_5e_summary.json"
+    c1.write_text(
+        json.dumps({
+            "decision": "stage1_5c1_price_coverage_ready_for_1_5c_rerun",
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }),
+        encoding="utf-8",
+    )
+    c.write_text(
+        json.dumps({
+            "top_level_decision": "stage1_5c_replay_completed",
+            "research_result_valid": True,
+            "promising_cells": [
+                "futures_contract_launch|futures_launch_long_attention_diagnostic|12h|G1_source_event_after_first_hour_delay"
+            ],
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }),
+        encoding="utf-8",
+    )
+    e_sum.write_text(
+        json.dumps({
+            "decision": "stage1_5e_audit_passed",
+            "execution_feasibility_claim_allowed": False,
+            "trade_signal_allowed": False,
+            "paper_trading_allowed": False,
+            "live_trading_allowed": False,
+            "execution_engine_allowed": False,
+            "alpha_interpretation_allowed": False,
+        }),
+        encoding="utf-8",
+    )
+
+    d_root = work_dir / "d_root"
+    f_root = work_dir / "f_root"
+    f_root.mkdir(parents=True, exist_ok=True)
+    mock_dir = work_dir / "f_mock"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    # Before ex_clock_ms, exchangeInfo.json must NOT expose new-era ex_bytes
+    (mock_dir / "exchangeInfo.json").write_text(json.dumps({"symbols": []}), encoding="utf-8")
+
+    gate_path = d_root / "live_safety_gate_summary.json"
+    d_sum = d_root / "binance_futures_launch_smoke_summary.json"
+
+    orig_f_static = f_runner.verify_consumer_static_proof
+    orig_f_runtime = f_runner.verify_consumer_runtime_proof
+    orig_d_static = col.verify_git_ancestry_and_static_proof
+    orig_d_runtime = col.verify_stage1_5d_runtime_attestation
+
+    def _invoke_f(clock_ms: int, *, bootstrap: bool = False):
+        argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(d_root / "events" / "*.jsonl"),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--stage1-5e-summary", str(e_sum),
+            "--output-root", str(f_root),
+            "--mock-response-dir", str(mock_dir),
+            "--max-polls", "1",
+        ]
+        if bootstrap:
+            argv.append("--bootstrap-watermark")
+        with (
+            patch.object(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", head_sha),
+            patch.object(f_runner.time, "time", return_value=clock_ms / 1000.0),
+            patch.object(f_runner.time, "sleep", return_value=None),
+            patch.object(f_runner, "verify_consumer_static_proof", side_effect=lambda _r, dl=None: orig_f_static(repo_dir, dl)),
+            patch.object(f_runner, "verify_consumer_runtime_proof", side_effect=lambda _r, *a, **kw: orig_f_runtime(repo_dir, *a, **kw)),
+            patch.object(sys, "argv", argv),
+        ):
+            try:
+                f_runner._main()
+            except SystemExit as exc:
+                assert exc.code == 0
+
+    def _run_d_single_poll(
+        clock_ms: int,
+        bapi_raw_bytes: bytes,
+        bapi_parsed: dict,
+        bapi_url: str,
+        *,
+        producer_enabled: bool,
+    ):
+        def _fake_json(url, **kwargs):
+            if "exchangeInfo" in url:
+                if clock_ms >= ex_clock_ms:
+                    return {
+                        "ok": True,
+                        "payload": ex_obj,
+                        "raw_bytes": ex_bytes,
+                        "final_url": ex_meta["source_url"],
+                        "http_status": 200,
+                        "error": None,
+                    }
+                return {
+                    "ok": True,
+                    "payload": {"symbols": []},
+                    "final_url": ex_meta["source_url"],
+                    "http_status": 200,
+                    "error": None,
+                }
+            return {
+                "ok": True,
+                "payload": {"code": "000000", "data": {"catalogs": [{"articles": []}]}},
+                "final_url": url,
+                "http_status": 200,
+                "error": None,
+            }
+
+        def _fake_bapi(code, **kwargs):
+            assert code == art_id
+            return {
+                "ok": True,
+                "payload": bapi_parsed,
+                "raw_bytes": bapi_raw_bytes,
+                "final_url": bapi_url,
+                "http_status": 200,
+                "error": None,
+            }
+
+        d_argv = [
+            "run_stage1_5d_live_event_source_smoke_collector.py",
+            "--live-public-readonly",
+            "--stage1-5c1-summary", str(c1),
+            "--stage1-5c-summary", str(c),
+            "--output-root", str(d_root),
+            "--output-summary", str(d_sum),
+            "--stage1-5f-consumer-root-contract", str(f_root / "observer_root_contract.json"),
+            "--stage1-5f-consumer-summary", str(f_root / "live_depth_observer_summary.json"),
+            "--max-polls", "1",
+        ]
+        with (
+            monkeypatch.context() as mc,
+            patch.object(col.time, "time", return_value=clock_ms / 1000.0),
+            patch.object(col.time, "sleep", return_value=None),
+            patch.object(col, "verify_git_ancestry_and_static_proof", side_effect=lambda *, repo_root, **kw: orig_d_static(repo_root=repo_dir, **kw)),
+            patch.object(col, "verify_stage1_5d_runtime_attestation", side_effect=lambda _r, sha, pm, dl: orig_d_runtime(repo_dir, sha, pm, dl)),
+            patch.object(col, "read_current_commit_sha", return_value=head_sha),
+            patch.object(col, "fetch_public_json", side_effect=_fake_json),
+            patch.object(col, "fetch_public_bapi_article_detail", side_effect=_fake_bapi),
+            patch.object(sys, "argv", d_argv),
+        ):
+            mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PREREQUISITE_COMMIT_SHA", head_sha)
+            mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PART_A_SUITE_PASSED", True)
+            mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_REAL_FIXTURE_VERIFIED", True)
+            mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED", producer_enabled)
+            assert col.main() == 0
+
+    # Step 1: Normal D startup init (producer disabled, no --future-launch-recovery) -> F bootstrap + F proof
+    _run_d_single_poll(old_clock_ms - 6_000, old_bytes, old_obj, old_meta["source_url"], producer_enabled=False)
+    _invoke_f(old_clock_ms - 5_000, bootstrap=True)
+    _invoke_f(old_clock_ms - 4_000)
+
+    # Step 2: Persist canonical formal launch event from verified old_bapi ONLY at old_clock_ms (NEVER mix in new ex_obj)
+    with (
+        patch.object(col.time, "time", return_value=old_clock_ms / 1000.0),
+        patch.object(col, "read_current_commit_sha", return_value=head_sha),
+    ):
+        d_guard = StorageGuard(output_root=d_root, stage="1.5D")
+        sp = col.build_stream_paths(d_root, old_clock_ms, storage_guard=d_guard)
+        old_data = old_obj.get("data") if isinstance(old_obj.get("data"), dict) else old_obj
+        raw_art = {
+            "code": art_id,
+            "title": title,
+            "releaseDate": old_data.get("publishDate") or old_data.get("releaseDate") or old_clock_ms,
+        }
+        old_ex_val = {"symbol_exchangeinfo": {}, "symbol_onboard_times_ms": {}}
+        eff_init = col.build_effective_launch_times_ms(
+            candidate_symbols=target_syms,
+            symbol_onboard_times_ms={},
+            symbol_launch_times_ms=old_anchors,
+            source_published_at_ms=raw_art["releaseDate"],
+            first_detected_at_ms=old_clock_ms,
+            allow_release_date_fallback=False,
+            allow_legacy_max_age_fallback=False,
+        )
+        init_state = {
+            "source_article_id": art_id,
+            "title": title,
+            "detail_fetch_attempted": True,
+            "detail_fetch_status": "success",
+            "detail_fetch_variant": "bapi_article_detail_query",
+            "detail_fetch_url_used": old_meta["source_url"],
+            "detail_payload_hash": old_meta["payload_sha256"],
+            "detail_payload_trusted": True,
+            "candidate_provenance": old_ext.get("candidate_provenance") or [],
+            "symbol_launch_times_ms": old_anchors,
+            "symbol_onboard_times_ms": {},
+            "symbol_effective_launch_times_ms": eff_init.get("symbol_effective_launch_times_ms", {}),
+        }
+        launch_ev = normalize_live_event(
+            raw=raw_art,
+            source_parent_url="https://www.binance.com/en/support/announcement",
+            detected_at_ms=old_clock_ms,
+            source_published_at_ms=raw_art["releaseDate"],
+            source_published_at_ms_confidence="medium",
+            symbols_override=tuple(target_syms),
+            extraction_metadata={
+                "evidence_source": "official_article_body_confirmed",
+                "detail_transport": "bapi_article_detail_query",
+                "symbol_extraction_source": "bapi_article_body",
+                "detail_fetch_attempted": True,
+                "detail_fetch_status": "success",
+                "detail_fetch_variant": "bapi_article_detail_query",
+                "detail_fetch_url_used": old_meta["source_url"],
+                "detail_payload_hash": old_meta["payload_sha256"],
+                "detail_payload_trusted": True,
+                "symbol_validation_status": "validated_candidate_set",
+            },
+        )
+        launch_ev["symbol_launch_times_ms"] = init_state["symbol_launch_times_ms"]
+        launch_ev["symbol_onboard_times_ms"] = init_state["symbol_onboard_times_ms"]
+        launch_ev["symbol_effective_launch_times_ms"] = eff_init.get("symbol_effective_launch_times_ms", {})
+        launch_ev["first_detected_at_ms"] = old_clock_ms
+        launch_ev["detail_fetched_at_ms"] = old_clock_ms
+        launch_ev["symbol_resolved_at_ms"] = old_clock_ms
+        launch_ev["symbol_resolution_latency_ms"] = 0
+        col.apply_formal_launch_event_contract(launch_ev, init_state, old_ex_val, target_syms, eff_init)
+        cand_id = col.build_candidate_symbol_set_identity(target_syms)
+        em_id = col.build_multi_symbol_emission_id(art_id, "futures_contract_launch", cand_id["candidate_symbol_set_hash"])
+        col.apply_multi_symbol_candidate_set_contract(launch_ev, init_state, old_ex_val, target_syms, cand_id, em_id, eff_init, old_clock_ms)
+        written_ev = col.record_formal_futures_launch_event(
+            stream_paths=sp,
+            row=launch_ev,
+            seen_event_ids=set(),
+            events_detected=[],
+        )
+        assert written_ev is not None
+        launch_ev = written_ev
+
+    # F ingests clean old_bapi launch event during old_clock_ms era (no new ex_bytes available yet)
+    _invoke_f(old_clock_ms + 1_000)
+    states_old = load_latest_state_by_event_symbol_id(str(f_root / "observer_state.jsonl"))
+    for s in target_syms:
+        esid = make_event_symbol_id(launch_ev, s)
+        assert states_old[esid].status == "pending_launch_time_in_future"
+        assert states_old[esid].observation_anchor_ms == old_anchors[s]
+
+    # Step 3 & 4: Do NOT expose new exchangeInfo before ex_clock_ms; advance to replay_new_clock_ms:
+    # -605s: D refreshes watch expiring at -5s; -6s: D refreshes d_gate without touching art_id cooldown;
+    #  at replay_new_clock_ms (>= max(new_clock_ms, ex_clock_ms)): expose ex_bytes, refresh F heartbeat,
+    #  and run D(producer=True) to emit revisions.
+    _run_d_single_poll(replay_new_clock_ms - 605_000, old_bytes, old_obj, old_meta["source_url"], producer_enabled=False)
+    _run_d_single_poll(replay_new_clock_ms - 6_000, old_bytes, old_obj, old_meta["source_url"], producer_enabled=False)
+    (mock_dir / "exchangeInfo.json").write_bytes(ex_bytes)
+    _invoke_f(replay_new_clock_ms)
+    states_init = load_latest_state_by_event_symbol_id(str(f_root / "observer_state.jsonl"))
+    for s in target_syms:
+        esid = make_event_symbol_id(launch_ev, s)
+        assert states_init[esid].status in {"pending_launch_time_in_future", "pending_anchor_conflict"}
+        cands = states_init[esid].observation_anchor_candidates or {}
+        assert (cands.get("official_schedule_anchor") or states_init[esid].observation_anchor_ms) == old_anchors[s]
+    _run_d_single_poll(replay_new_clock_ms, new_bytes, new_obj, new_meta["source_url"], producer_enabled=True)
+
+    d_events_after = [
+        json.loads(line)
+        for ef in sorted((d_root / "events").glob("*.jsonl"))
+        for line in ef.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    rev_rows = [r for r in d_events_after if r.get("event_type") == "futures_contract_launch_schedule_revision"]
+    assert len(rev_rows) == len(target_syms), f"Expected {len(target_syms)} revisions, got {len(rev_rows)}"
+    assert {str((r.get("symbols") or [""])[0]) for r in rev_rows} == set(target_syms)
+
+    # F Poll 1 consumes revisions & F Poll 2 verifies replay idempotence
+    _invoke_f(replay_new_clock_ms + 1_000)
+    states_after = load_latest_state_by_event_symbol_id(str(f_root / "observer_state.jsonl"))
+    updated_anchors = {}
+    for s in target_syms:
+        esid = make_event_symbol_id(launch_ev, s)
+        updated_anchors[s] = states_after[esid].observation_anchor_ms
+        assert states_after[esid].observation_anchor_ms == new_anchors[s]
+        assert states_after[esid].anchor_contract_revision_count == 1
+
+    reg_rows = [json.loads(ln) for ln in (f_root / "schedule_revision_registry.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+    applied = [r for r in reg_rows if r.get("status") == "revision_applied"]
+    assert len(applied) == len(target_syms)
+    applied_symbols = {
+        str(r.get("stable_schedule_identity") or "").split("|")[-1]
+        for r in applied
+    }
+    assert applied_symbols == set(target_syms)
+
+    _invoke_f(replay_new_clock_ms + 2_000)
+    reg_replay = [json.loads(ln) for ln in (f_root / "schedule_revision_registry.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len([r for r in reg_replay if r.get("status") == "revision_applied"]) == len(target_syms)
+
+    return {
+        "updated_anchors": updated_anchors,
+        "applied_symbols": applied_symbols,
+        "revisions": rev_rows,
+        "meta": {
+            "manifest_sha256": actual_manifest_sha256,
+            "old_fetched": old_meta["fetched_at_ms"],
+            "new_fetched": new_meta["fetched_at_ms"],
+            "ex_fetched": ex_meta["fetched_at_ms"],
+        },
+    }
+
+
+def test_same_page_scope_real_revision_when_authorized(tmp_path, monkeypatch):
+    """Real-source same-page revision D->F verification when STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR
+    and independent STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256 are explicitly provided."""
+    evidence_dir = os.environ.get("STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR")
+    if not evidence_dir:
+        pytest.skip("STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR not set; real-source same-page check skipped.")
+    approved_manifest_sha = os.environ.get("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256")
+    _verify_same_page_real_evidence_bundle(
+        Path(evidence_dir),
+        tmp_path,
+        monkeypatch,
+        approved_manifest_sha256=approved_manifest_sha,
+    )
+
+
+def test_same_page_scope_real_revision_verifier_rejects_incomplete_and_runs_dual_symbol_df(tmp_path, monkeypatch):
+    """P1-01: Synthetic events-only or tampered/incomplete real-evidence dirs MUST fail closed;
+    complete dual-symbol raw BAPI v1+v2 + exchangeInfo + manifest + summary passes full D->F verification."""
+    import hashlib
+    from datetime import datetime, timezone
+
+    art_id = "2d89a5966b174a2689ab2c2a15db1757"
+    title = "Binance Futures Will Launch USDⓈ-Margined HYPEUSDC and TRXUSDC Perpetual Contracts"
+    t0 = 1_794_388_800_000  # 2026-11-11 09:20:00Z (available before old launch)
+    old_hype = 1_794_389_400_000
+    old_trx = 1_794_389_700_000
+    new_hype = 1_794_817_800_000
+    new_trx = 1_794_818_100_000
+    t1 = 1_794_816_000_000  # ~5 days after t0 (< 14d lookback, > 600s cooldown)
+
+    def _utc(ms: int) -> str:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M (UTC)")
+
+    # 1. Exact negative probe: synthetic events/*.jsonl alone WITHOUT manifest/raw BAPI/exchangeInfo/summary MUST fail!
+    events_only_dir = tmp_path / "events_only_probe"
+    (events_only_dir / "events").mkdir(parents=True)
+    (events_only_dir / "events" / "2026-11-16.jsonl").write_text(
+        json.dumps({
+            "event_type": "futures_contract_launch_schedule_revision",
+            "source_article_id": art_id,
+            "supersedes_source_article_id": art_id,
+            "symbols": ["HYPEUSDC"],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError):
+        _verify_same_page_real_evidence_bundle(events_only_dir, tmp_path / "w_neg1", monkeypatch)
+
+    # Build complete dual-symbol raw evidence bundle in tmp_path
+    bundle = tmp_path / "valid_bundle"
+    (bundle / "raw").mkdir(parents=True)
+    old_bapi_obj = {
+        "code": "000000",
+        "data": {
+            "code": art_id,
+            "title": title,
+            "publishDate": t0,
+            "body": json.dumps({
+                "node": "root",
+                "child": [
+                    {"node": "text", "text": f"{_utc(old_hype)}: HYPEUSDC Perpetual Contract"},
+                    {"node": "text", "text": f"{_utc(old_trx)}: TRXUSDC Perpetual Contract"},
+                ],
+            }),
+        },
+    }
+    new_bapi_obj = {
+        "code": "000000",
+        "data": {
+            "code": art_id,
+            "title": title,
+            "publishDate": t0,
+            "body": json.dumps({
+                "node": "root",
+                "child": [
+                    {"node": "text", "text": f"{_utc(new_hype)}: HYPEUSDC Perpetual Contract"},
+                    {"node": "text", "text": f"{_utc(new_trx)}: TRXUSDC Perpetual Contract"},
+                ],
+            }),
+        },
+    }
+    ex_obj = {
+        "symbols": [
+            {
+                "symbol": "HYPEUSDC",
+                "status": "PENDING_TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDC",
+                "marginAsset": "USDC",
+                "onboardDate": new_hype,
+            },
+            {
+                "symbol": "TRXUSDC",
+                "status": "PENDING_TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDC",
+                "marginAsset": "USDC",
+                "onboardDate": new_trx,
+            },
+        ]
+    }
+    old_bytes = json.dumps(old_bapi_obj).encode("utf-8")
+    new_bytes = json.dumps(new_bapi_obj).encode("utf-8")
+    ex_bytes = json.dumps(ex_obj).encode("utf-8")
+    (bundle / "raw" / "old_bapi.bin").write_bytes(old_bytes)
+    (bundle / "raw" / "new_bapi.bin").write_bytes(new_bytes)
+    (bundle / "raw" / "exchangeinfo.json").write_bytes(ex_bytes)
+    (bundle / "summary.txt").write_text("Captured HYPEUSDC/TRXUSDC same-page BAPI v1+v2 and exchangeInfo evidence.", encoding="utf-8")
+
+    valid_manifest = {
+        "source_article_id": art_id,
+        "title": title,
+        "symbols": ["HYPEUSDC", "TRXUSDC"],
+        "summary_relpath": "summary.txt",
+        "old_bapi": {
+            "raw_payload_relpath": "raw/old_bapi.bin",
+            "payload_sha256": hashlib.sha256(old_bytes).hexdigest(),
+            "source_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={art_id}",
+            "fetched_at_ms": t0,
+        },
+        "new_bapi": {
+            "raw_payload_relpath": "raw/new_bapi.bin",
+            "payload_sha256": hashlib.sha256(new_bytes).hexdigest(),
+            "source_url": f"https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?articleCode={art_id}",
+            "fetched_at_ms": t1,
+        },
+        "exchangeinfo": {
+            "raw_payload_relpath": "raw/exchangeinfo.json",
+            "payload_sha256": hashlib.sha256(ex_bytes).hexdigest(),
+            "source_url": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+            "fetched_at_ms": t1,
+        },
+    }
+    valid_manifest_bytes = json.dumps(valid_manifest, indent=2).encode("utf-8")
+    valid_manifest_sha = hashlib.sha256(valid_manifest_bytes).hexdigest()
+    (bundle / "manifest.json").write_bytes(valid_manifest_bytes)
+
+    # 1b. Without independent manifest digest binding, authorized entrypoint MUST fail closed (never pass)
+    monkeypatch.setenv("STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR", str(bundle))
+    monkeypatch.delenv("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256", raising=False)
+    with pytest.raises(AssertionError, match=r"approved_manifest_sha256"):
+        test_same_page_scope_real_revision_when_authorized(tmp_path / "w_no_sha", monkeypatch)
+
+    # 2. Positive dual-symbol end-to-end D -> F execution on valid bundle bound to approved manifest digest
+    monkeypatch.setenv("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256", valid_manifest_sha)
+    res = _verify_same_page_real_evidence_bundle(bundle, tmp_path / "w_pos", monkeypatch)
+    assert res["meta"].get("manifest_sha256") == valid_manifest_sha
+    monkeypatch.delenv("STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256", raising=False)
+    monkeypatch.delenv("STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR", raising=False)
+    assert res["updated_anchors"] == {"HYPEUSDC": new_hype, "TRXUSDC": new_trx}
+    assert res["applied_symbols"] == {"HYPEUSDC", "TRXUSDC"}
+    assert {
+        str((r.get("symbols") or [""])[0]): (r.get("symbol_official_schedule_revision_available_at_ms") or {}).get(str((r.get("symbols") or [""])[0]))
+        for r in res["revisions"]
+    } == {"HYPEUSDC": t1, "TRXUSDC": t1}
+    pos_events = [
+        json.loads(line)
+        for ef in sorted((tmp_path / "w_pos" / "d_root" / "events").glob("*.jsonl"))
+        for line in ef.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    pos_launches = [r for r in pos_events if r.get("event_type") == "futures_contract_launch"]
+    assert len(pos_launches) == 1
+    assert pos_launches[0].get("symbol_onboard_times_ms") == {}
+    assert pos_launches[0].get("symbol_exchangeinfo_onboard_date_ms") == {"HYPEUSDC": None, "TRXUSDC": None}
+    assert pos_launches[0].get("symbol_exchangeinfo_statuses") == {"HYPEUSDC": None, "TRXUSDC": None}
+    assert pos_launches[0].get("symbol_anchor_comparison_statuses") == {
+        "HYPEUSDC": "single_source_official_schedule",
+        "TRXUSDC": "single_source_official_schedule",
+    }
+
+    # 3. Incomplete/tampered/PIT-violating bundles MUST fail closed:
+    #    - structural/PIT cases fail even with self-matching manifest hash
+    #    - shifting both captured timestamps with intact raw bytes fails vs independent valid_manifest_sha
+    for mut_name, mut_fn, bind_original_sha, expected_err in (
+        ("hash_mismatch", lambda m: {**m, "new_bapi": {**m["new_bapi"], "payload_sha256": "0" * 64}}, False, r"SHA-256 mismatch"),
+        ("missing_summary", lambda m: {k: v for k, v in m.items() if k != "summary_relpath"}, False, r"summary"),
+        ("bad_source_url", lambda m: {**m, "old_bapi": {**m["old_bapi"], "source_url": "https://evil.example.com/bapi"}}, False, r"allowlisted"),
+        ("non_monotonic_time", lambda m: {**m, "new_bapi": {**m["new_bapi"], "fetched_at_ms": t0 - 1_000}}, False, r"strictly follow"),
+        ("single_symbol_only", lambda m: {**m, "symbols": ["HYPEUSDC"]}, False, r"at least two symbols"),
+        ("backdated_new_bapi_available_at", lambda m: {**m, "new_bapi": {**m["new_bapi"], "available_at_ms": t1 - 3_600_000}}, False, r"available_at_ms"),
+        ("backdated_old_bapi_available_at", lambda m: {**m, "old_bapi": {**m["old_bapi"], "available_at_ms": t0 - 3_600_000}}, False, r"available_at_ms"),
+        ("next_day_exchangeinfo_fetched", lambda m: {**m, "exchangeinfo": {**m["exchangeinfo"], "fetched_at_ms": t1 + 86_400_000}}, False, r"capture batch window"),
+        ("stale_old_era_exchangeinfo_fetched", lambda m: {**m, "exchangeinfo": {**m["exchangeinfo"], "fetched_at_ms": t0}}, False, r"strictly follow"),
+        (
+            "both_new_timestamps_shifted_earlier_same_raw_bytes",
+            lambda m: {
+                **m,
+                "new_bapi": {**m["new_bapi"], "fetched_at_ms": t1 - 3_600_000},
+                "exchangeinfo": {**m["exchangeinfo"], "fetched_at_ms": t1 - 3_600_000},
+            },
+            True,
+            r"manifest\.json SHA-256 mismatch",
+        ),
+    ):
+        mut_bytes = json.dumps(mut_fn(valid_manifest), indent=2).encode("utf-8")
+        (bundle / "manifest.json").write_bytes(mut_bytes)
+        sha_to_bind = valid_manifest_sha if bind_original_sha else hashlib.sha256(mut_bytes).hexdigest()
+        with pytest.raises(AssertionError, match=expected_err):
+            _verify_same_page_real_evidence_bundle(
+                bundle,
+                tmp_path / f"w_{mut_name}",
+                monkeypatch,
+                approved_manifest_sha256=sha_to_bind,
+            )
+
+
+def test_same_page_scope_f_article_isolation(tmp_path, monkeypatch):
+    """Task 3: Independent article launches sharing a symbol never cross-mutate or hijack F evidence."""
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow import run_stage1_5f_live_depth_observer as f_runner
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        apply_formal_launch_event_contract,
+        build_effective_launch_times_ms,
+        build_stream_paths,
+        record_formal_futures_launch_event,
+    )
+    from src.research.external_signal_shadow.stage1_5_storage_guard import StorageGuard
+    from src.research.external_signal_shadow.stage1_5d_live_event_source_parser import (
+        normalize_live_event,
+    )
+    from src.research.external_signal_shadow.stage1_5d_runtime_gate import (
+        build_stage1_5d_runtime_gate,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_loader import (
+        make_event_symbol_id,
+        resolve_depth_observation_anchor_ms,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_models import (
+        DepthSnapshot,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_state import (
+        load_latest_state_by_event_symbol_id,
+    )
+    from src.research.external_signal_shadow.stage1_5f_live_depth_observer_storage import (
+        append_jsonl,
+        build_daily_path,
+    )
+
+    def _emit_canonical_v2_event(
+        d_root: Path,
+        *,
+        article_id: str,
+        symbol: str,
+        title: str,
+        detected_at_ms: int,
+        launch_ms: int,
+        onboard_ms: int,
+        seen_ids: set,
+        events_detected: list,
+    ) -> dict:
+        guard = StorageGuard(output_root=d_root, stage="1.5D")
+        stream_paths = build_stream_paths(d_root, detected_at_ms, storage_guard=guard)
+        raw = {
+            "id": int(detected_at_ms % 1_000_000),
+            "code": article_id,
+            "title": title,
+            "releaseDate": detected_at_ms,
+        }
+        norm = normalize_live_event(
+            raw=raw,
+            source_parent_url="https://www.binance.com/en/support/announcement/c-48",
+            detected_at_ms=detected_at_ms,
+            source_published_at_ms=detected_at_ms,
+            source_published_at_ms_confidence="list_release_date",
+            symbols_override=[symbol],
+        )
+        launch_utc = datetime.fromtimestamp(launch_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M (UTC)")
+        payload_hash = f"{abs(hash((article_id, launch_ms))):064x}"[-64:]
+        norm["detail_fetch_attempted"] = True
+        norm["detail_fetch_status"] = "success"
+        norm["detail_fetch_variant"] = "bapi_article_detail_query"
+        norm["detail_fetched_at_ms"] = detected_at_ms
+        norm["detail_payload_hash"] = payload_hash
+        norm["symbol_resolved_at_ms"] = detected_at_ms
+        state_stub = {
+            "source_article_id": article_id,
+            "title": title,
+            "detail_fetch_attempted": True,
+            "detail_fetch_status": "success",
+            "detail_fetch_variant": "bapi_article_detail_query",
+            "detail_payload_hash": payload_hash,
+            "symbol_launch_times_ms": {symbol: launch_ms},
+            "symbol_onboard_times_ms": {symbol: onboard_ms},
+            "symbol_launch_times_utc": {symbol: launch_utc},
+            "candidate_provenance": [
+                {
+                    "symbol": symbol,
+                    "time_node_path": "root.child[0]",
+                    "raw_time_text": launch_utc,
+                    "local_text_span": f"{launch_utc}: {symbol} Perpetual Contract",
+                }
+            ],
+        }
+        eff = build_effective_launch_times_ms(
+            candidate_symbols=[symbol],
+            symbol_onboard_times_ms={symbol: onboard_ms},
+            symbol_launch_times_ms={symbol: launch_ms},
+            source_published_at_ms=detected_at_ms,
+            first_detected_at_ms=detected_at_ms,
+        )
+        apply_formal_launch_event_contract(
+            norm,
+            state_stub,
+            {"symbol_onboard_times_ms": {symbol: onboard_ms}},
+            [symbol],
+            eff,
+        )
+        written = record_formal_futures_launch_event(
+            stream_paths=stream_paths,
+            row=norm,
+            seen_event_ids=seen_ids,
+            events_detected=events_detected,
+        )
+        assert written is not None
+        return written
+
+    def _init_summaries(base_dir: Path, d_root: Path):
+        d_sum = base_dir / "d_summary.json"
+        e_sum = base_dir / "e_summary.json"
+        d_sum.write_text(
+            json.dumps(
+                {
+                    "decision": "stage1_5d_smoke_passed",
+                    "paper_trading_allowed": False,
+                    "live_trading_allowed": False,
+                    "execution_engine_allowed": False,
+                    "alpha_interpretation_allowed": False,
+                    "output_root": str(d_root),
+                }
+            ),
+            encoding="utf-8",
+        )
+        e_sum.write_text(
+            json.dumps(
+                {
+                    "decision": "stage1_5e_audit_passed",
+                    "execution_feasibility_claim_allowed": False,
+                    "trade_signal_allowed": False,
+                    "paper_trading_allowed": False,
+                    "live_trading_allowed": False,
+                    "execution_engine_allowed": False,
+                    "alpha_interpretation_allowed": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return d_sum, e_sum
+
+    def _read_all_jsonl(subdir: Path) -> list[dict]:
+        if not subdir.exists():
+            return []
+        out = []
+        for p in sorted(subdir.rglob("*.jsonl")):
+            for ln in p.read_text(encoding="utf-8").splitlines():
+                if ln.strip():
+                    out.append(json.loads(ln))
+        return out
+
+    def _run_f_once(
+        *,
+        d_root: Path,
+        f_root: Path,
+        d_sum: Path,
+        e_sum: Path,
+        now_ms: int,
+        ex_symbol_rows: dict,
+        bootstrap: bool = False,
+    ) -> list[tuple[str, int]]:
+        depth_calls: list[tuple[str, int]] = []
+        clock_val = now_ms / 1000.0
+
+        def _fake_refresh(**kwargs):
+            return {
+                "available": True,
+                "symbols": set(ex_symbol_rows.keys()),
+                "symbol_rows": ex_symbol_rows,
+                "payload_sha256": "e" * 64,
+                "raw_payload_path": "raw_payloads/exchangeinfo/mock.json",
+                "fetched_at_ms": now_ms,
+                "manifest_row": None,
+            }
+
+        def _fake_depth(symbol: str, live_public_readonly: bool = False):
+            depth_calls.append((symbol, now_ms))
+            return {
+                "ok": True,
+                "data": {"E": now_ms, "T": now_ms, "bids": [["1.00", "5000"]], "asks": [["1.01", "5000"]]},
+                "manifest_row": {
+                    "request_type": "depth_snapshot",
+                    "requested_url_hash": "r" * 64,
+                    "final_url_hash": "f" * 64,
+                    "http_status": 200,
+                    "payload_size_bytes": 64,
+                    "response_payload_hash": "d" * 64,
+                    "retry_count": 0,
+                    "error": None,
+                    "fetched_at_ms": now_ms,
+                },
+            }
+
+        gate_path = d_root / "live_safety_gate_summary.json"
+        gate_obj = build_stage1_5d_runtime_gate(
+            output_root=str(d_root),
+            successful_poll_count=1,
+            poll_attempt_count=1,
+            generated_at_ms=now_ms,
+            now_ms=now_ms,
+        )
+        gate_path.write_text(json.dumps(gate_obj), encoding="utf-8")
+
+        argv = [
+            "run_stage1_5f_live_depth_observer.py",
+            "--stage1-5d-events-glob", str(d_root / "events" / "*.jsonl"),
+            "--stage1-5d-summary", str(d_sum),
+            "--stage1-5e-summary", str(e_sum),
+            "--stage1-5d-runtime-gate", str(gate_path),
+            "--output-root", str(f_root),
+            "--live-public-readonly",
+            "--max-polls", "1",
+        ]
+        if bootstrap:
+            argv.append("--bootstrap-watermark")
+
+        with (
+            patch.object(f_runner.time, "time", return_value=clock_val),
+            patch.object(f_runner.time, "sleep", return_value=None),
+            patch(
+                "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.refresh_exchangeinfo_cache",
+                side_effect=_fake_refresh,
+            ),
+            patch(
+                "src.research.external_signal_shadow.stage1_5f_live_depth_observer_client.fetch_depth_snapshot",
+                side_effect=_fake_depth,
+            ),
+            patch.object(sys, "argv", argv),
+        ):
+            with pytest.raises(SystemExit) as exc:
+                f_runner._main()
+            assert exc.value.code == 0
+        return depth_calls
+
+    # --- Case 1: S0=10:00 (not TRADING -> 0 depth), 10:07 new article A1 (S1=10:10), 10:10 TRADING onboardDate=S1 ---
+    c1 = tmp_path / "case1"
+    c1_d, c1_f = c1 / "d", c1 / "f"
+    c1_d.mkdir(parents=True)
+    d_sum1, e_sum1 = _init_summaries(c1, c1_d)
+    seen1, evs1 = set(), []
+
+    s0 = 1_794_823_200_000  # 10:00:00Z bucket
+    s1 = s0 + 600_000       # 10:10:00Z (> 60s disagreement vs S0, < 15m recovery bound)
+    t_boot = s0 - 900_000   # 09:45:00Z
+
+    _run_f_once(d_root=c1_d, f_root=c1_f, d_sum=d_sum1, e_sum=e_sum1, now_ms=t_boot, ex_symbol_rows={}, bootstrap=True)
+
+    a0_row = _emit_canonical_v2_event(
+        c1_d,
+        article_id="art_old_0001",
+        symbol="ISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined ISOLUSDT Perpetual Contract",
+        detected_at_ms=s0 - 300_000,
+        launch_ms=s0,
+        onboard_ms=s0,
+        seen_ids=seen1,
+        events_detected=evs1,
+    )
+    _run_f_once(
+        d_root=c1_d,
+        f_root=c1_f,
+        d_sum=d_sum1,
+        e_sum=e_sum1,
+        now_ms=s0,
+        ex_symbol_rows={
+            "ISOLUSDT": {
+                "symbol": "ISOLUSDT",
+                "status": "PENDING_TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": s0,
+            }
+        },
+    )
+    # A0 not TRADING at S0 -> 0 depth requests and 0 depth snapshots
+    a0_esid = make_event_symbol_id(a0_row, "ISOLUSDT")
+    states_p1 = load_latest_state_by_event_symbol_id(str(c1_f / "observer_state.jsonl"))
+    assert states_p1[a0_esid].status == "pending_exchangeinfo_not_trading"
+    assert _read_all_jsonl(c1_f / "depth_snapshots") == []
+    assert [r for r in _read_all_jsonl(c1_f / "request_manifest") if r.get("request_type") == "depth_snapshot"] == []
+
+    # At 10:07, new launch article A1 persisted with S1=10:10; at 10:10, exchangeInfo is TRADING with onboardDate=S1
+    a1_row = _emit_canonical_v2_event(
+        c1_d,
+        article_id="art_new_0002",
+        symbol="ISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined ISOLUSDT Perpetual Contract",
+        detected_at_ms=s0 + 420_000,
+        launch_ms=s1,
+        onboard_ms=s1,
+        seen_ids=seen1,
+        events_detected=evs1,
+    )
+    a1_esid = make_event_symbol_id(a1_row, "ISOLUSDT")
+    assert a1_esid != a0_esid
+
+    _run_f_once(
+        d_root=c1_d,
+        f_root=c1_f,
+        d_sum=d_sum1,
+        e_sum=e_sum1,
+        now_ms=s1,
+        ex_symbol_rows={
+            "ISOLUSDT": {
+                "symbol": "ISOLUSDT",
+                "status": "TRADING",
+                "contractType": "PERPETUAL",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "onboardDate": s1,
+            }
+        },
+    )
+
+    states_p2 = load_latest_state_by_event_symbol_id(str(c1_f / "observer_state.jsonl"))
+    assert states_p2[a0_esid].status == "pending_anchor_conflict"
+    assert states_p2[a0_esid].source_article_id == "art_old_0001"
+    assert states_p2[a0_esid].depth_snapshot_count == 0
+    assert states_p2[a1_esid].status == "active"
+    assert states_p2[a1_esid].observation_anchor_ms == s1
+    assert states_p2[a1_esid].source_article_id == "art_new_0002"
+
+    depth_req_rows1 = [r for r in _read_all_jsonl(c1_f / "request_manifest") if r.get("request_type") == "depth_snapshot"]
+    assert [(r["event_symbol_id"], r["event_id"]) for r in depth_req_rows1] == [(a1_esid, a1_row["event_id"])]
+    depth_snaps1 = _read_all_jsonl(c1_f / "depth_snapshots")
+    assert [r["event_symbol_id"] for r in depth_snaps1] == [a1_esid]
+    accepted1 = {r["event_symbol_id"]: r for r in _read_all_jsonl(c1_f / "events_accepted")}
+    assert a0_esid not in accepted1
+    assert accepted1[a1_esid]["source_article_id"] == "art_new_0002"
+    assert accepted1[a1_esid]["event_id"] == a1_row["event_id"]
+
+    # --- Case 2: Existing active A0 preserved across new A1 (with room AND when capacity full) ---
+    c2 = tmp_path / "case2"
+    c2_d, c2_f = c2 / "d", c2 / "f"
+    c2_d.mkdir(parents=True)
+    d_sum2, e_sum2 = _init_summaries(c2, c2_d)
+    seen2, evs2 = set(), []
+    t0 = s0
+    t1 = t0 + 300_000
+    t2 = t0 + 600_000
+
+    _run_f_once(d_root=c2_d, f_root=c2_f, d_sum=d_sum2, e_sum=e_sum2, now_ms=t_boot, ex_symbol_rows={}, bootstrap=True)
+    b0_row = _emit_canonical_v2_event(
+        c2_d,
+        article_id="art_act_0001",
+        symbol="ACTISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined ACTISOLUSDT Perpetual Contract",
+        detected_at_ms=t0 - 120_000,
+        launch_ms=t0,
+        onboard_ms=t0,
+        seen_ids=seen2,
+        events_detected=evs2,
+    )
+    b0_esid = make_event_symbol_id(b0_row, "ACTISOLUSDT")
+    _run_f_once(
+        d_root=c2_d,
+        f_root=c2_f,
+        d_sum=d_sum2,
+        e_sum=e_sum2,
+        now_ms=t0,
+        ex_symbol_rows={"ACTISOLUSDT": {"symbol": "ACTISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t0}},
+    )
+    # Sufficient capacity: B1 promotes alongside active B0 without mutating B0 window or attribution
+    b1_row = _emit_canonical_v2_event(
+        c2_d,
+        article_id="art_act_0002",
+        symbol="ACTISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined ACTISOLUSDT Perpetual Contract",
+        detected_at_ms=t1 - 60_000,
+        launch_ms=t1,
+        onboard_ms=t1,
+        seen_ids=seen2,
+        events_detected=evs2,
+    )
+    b1_esid = make_event_symbol_id(b1_row, "ACTISOLUSDT")
+    _run_f_once(
+        d_root=c2_d,
+        f_root=c2_f,
+        d_sum=d_sum2,
+        e_sum=e_sum2,
+        now_ms=t1,
+        ex_symbol_rows={"ACTISOLUSDT": {"symbol": "ACTISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t1}},
+    )
+    st2_a = load_latest_state_by_event_symbol_id(str(c2_f / "observer_state.jsonl"))
+    assert st2_a[b0_esid].status == "active"
+    assert st2_a[b0_esid].observation_anchor_ms == t0
+    assert st2_a[b0_esid].source_article_id == "art_act_0001"
+    assert st2_a[b1_esid].status == "active"
+    assert st2_a[b1_esid].observation_anchor_ms == t1
+    assert st2_a[b1_esid].source_article_id == "art_act_0002"
+
+    # Full capacity (max_active=2 already occupied by B0+B1): B2 defers to pending_observation_capacity, never preempts B0/B1
+    b2_row = _emit_canonical_v2_event(
+        c2_d,
+        article_id="art_act_0003",
+        symbol="ACTISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined ACTISOLUSDT Perpetual Contract",
+        detected_at_ms=t2 - 60_000,
+        launch_ms=t2,
+        onboard_ms=t2,
+        seen_ids=seen2,
+        events_detected=evs2,
+    )
+    b2_esid = make_event_symbol_id(b2_row, "ACTISOLUSDT")
+    with monkeypatch.context() as mp:
+        mp.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5F_MAX_ACTIVE_EVENT_SYMBOLS", 2)
+        _run_f_once(
+            d_root=c2_d,
+            f_root=c2_f,
+            d_sum=d_sum2,
+            e_sum=e_sum2,
+            now_ms=t2,
+            ex_symbol_rows={"ACTISOLUSDT": {"symbol": "ACTISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t2}},
+        )
+    st2_b = load_latest_state_by_event_symbol_id(str(c2_f / "observer_state.jsonl"))
+    assert st2_b[b0_esid].status == "active"
+    assert st2_b[b1_esid].status == "active"
+    assert st2_b[b2_esid].status == "pending_observation_capacity"
+    assert st2_b[b2_esid].depth_snapshot_count == 0
+    b_depth_reqs = [r["event_symbol_id"] for r in _read_all_jsonl(c2_f / "request_manifest") if r.get("request_type") == "depth_snapshot"]
+    assert b0_esid in b_depth_reqs and b1_esid in b_depth_reqs and b2_esid not in b_depth_reqs
+
+    # --- Case 3: Terminal states (ignored_historical / rejected / completed) never falsely dedupe new article or revive ---
+    c3 = tmp_path / "case3"
+    c3_d, c3_f = c3 / "d", c3 / "f"
+    c3_d.mkdir(parents=True)
+    d_sum3, e_sum3 = _init_summaries(c3, c3_d)
+    seen3, evs3 = set(), []
+
+    _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_seed_0",
+        symbol="SEEDISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined SEEDISOLUSDT Perpetual Contract",
+        detected_at_ms=t_boot,
+        launch_ms=t_boot - 60_000,
+        onboard_ms=t_boot - 60_000,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    _run_f_once(d_root=c3_d, f_root=c3_f, d_sum=d_sum3, e_sum=e_sum3, now_ms=t_boot, ex_symbol_rows={}, bootstrap=True)
+    chist = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_hist_1",
+        symbol="TERMISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined TERMISOLUSDT Perpetual Contract",
+        detected_at_ms=t_boot - 10_000,
+        launch_ms=t_boot - 60_000,
+        onboard_ms=t_boot - 60_000,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    crej = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_rej_1",
+        symbol="REJISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined REJISOLUSDT Perpetual Contract",
+        detected_at_ms=t_boot + 30_000,
+        launch_ms=t_boot + 60_000,
+        onboard_ms=t_boot + 60_000,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    t_rej_poll = t_boot + 60_000 + 2_000_000  # > 15m post-anchor -> rejected
+    cdone = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_done_1",
+        symbol="COMPISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined COMPISOLUSDT Perpetual Contract",
+        detected_at_ms=t_boot + 30_000,
+        launch_ms=t_rej_poll,
+        onboard_ms=t_rej_poll,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    _run_f_once(
+        d_root=c3_d,
+        f_root=c3_f,
+        d_sum=d_sum3,
+        e_sum=e_sum3,
+        now_ms=t_rej_poll,
+        ex_symbol_rows={
+            "REJISOLUSDT": {"symbol": "REJISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t_boot + 60_000},
+            "COMPISOLUSDT": {"symbol": "COMPISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t_rej_poll},
+        },
+    )
+    # Backfill canonical healthy DepthSnapshot buckets across COMPISOLUSDT window so finalize reaches completed
+    cdone_esid = make_event_symbol_id(cdone, "COMPISOLUSDT")
+    cdone_st = load_latest_state_by_event_symbol_id(str(c3_f / "observer_state.jsonl"))[cdone_esid]
+    f3_guard = StorageGuard(output_root=c3_f, stage="1.5F")
+    step_ms = cfg_base.EXTERNAL_SIGNAL_STAGE1_5F_DEPTH_POLL_INTERVAL_SEC * 1000
+    snap_ts = int(cdone_st.observation_window_start_ms) + step_ms
+    while snap_ts < int(cdone_st.observation_window_end_ms):
+        snap_row = DepthSnapshot(
+            event_symbol_id=cdone_esid,
+            symbol="COMPISOLUSDT",
+            fetched_at_ms=snap_ts,
+            exchange_time_ms=snap_ts,
+            best_bid=1.0,
+            best_ask=1.01,
+            spread_bps=99.5,
+            top_bid_depth_usdt=5000.0,
+            top_ask_depth_usdt=5000.0,
+            buy_slippage_bps=10.0,
+            sell_slippage_bps=10.0,
+            slippage_status="ok",
+            depth_status="healthy",
+        )
+        snap_path = build_daily_path(c3_f, "depth_snapshots", snap_ts, event_symbol_id=cdone_esid)
+        append_jsonl(snap_path, snap_row.to_dict(), storage_guard=f3_guard)
+        snap_ts += step_ms
+    # Advance past COMPISOLUSDT's observation window (+13h) to finalize to completed
+    t_completed = t_rej_poll + 13 * 3_600_000
+    _run_f_once(
+        d_root=c3_d,
+        f_root=c3_f,
+        d_sum=d_sum3,
+        e_sum=e_sum3,
+        now_ms=t_completed,
+        ex_symbol_rows={"COMPISOLUSDT": {"symbol": "COMPISOLUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t_rej_poll}},
+    )
+    # Emit brand-new articles for the same 3 symbols
+    t_fresh = t_completed + 60_000
+    chist_new = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_hist_2",
+        symbol="TERMISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined TERMISOLUSDT Perpetual Contract",
+        detected_at_ms=t_completed + 10_000,
+        launch_ms=t_fresh,
+        onboard_ms=t_fresh,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    crej_new = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_rej_2",
+        symbol="REJISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined REJISOLUSDT Perpetual Contract",
+        detected_at_ms=t_completed + 10_000,
+        launch_ms=t_fresh,
+        onboard_ms=t_fresh,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    cdone_new = _emit_canonical_v2_event(
+        c3_d,
+        article_id="art_done_2",
+        symbol="COMPISOLUSDT",
+        title="Binance Futures Will Launch USDⓈ-Margined COMPISOLUSDT Perpetual Contract",
+        detected_at_ms=t_completed + 10_000,
+        launch_ms=t_fresh,
+        onboard_ms=t_fresh,
+        seen_ids=seen3,
+        events_detected=evs3,
+    )
+    _run_f_once(
+        d_root=c3_d,
+        f_root=c3_f,
+        d_sum=d_sum3,
+        e_sum=e_sum3,
+        now_ms=t_fresh,
+        ex_symbol_rows={
+            sym: {"symbol": sym, "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": t_fresh}
+            for sym in ("TERMISOLUSDT", "REJISOLUSDT", "COMPISOLUSDT")
+        },
+    )
+    st3 = load_latest_state_by_event_symbol_id(str(c3_f / "observer_state.jsonl"))
+    assert st3[make_event_symbol_id(chist, "TERMISOLUSDT")].status == "ignored_historical_anchor_pre_bootstrap"
+    assert st3[make_event_symbol_id(crej, "REJISOLUSDT")].status == "rejected"
+    assert st3[make_event_symbol_id(cdone, "COMPISOLUSDT")].status == "completed"
+    for new_row, sym in ((chist_new, "TERMISOLUSDT"), (crej_new, "REJISOLUSDT"), (cdone_new, "COMPISOLUSDT")):
+        new_esid = make_event_symbol_id(new_row, sym)
+        assert st3[new_esid].status == "active"
+        assert st3[new_esid].source_article_id == new_row["source_article_id"]
+        assert st3[new_esid].depth_snapshot_count == 1
+    c3_sum = json.loads((c3_f / "live_depth_observer_summary.json").read_text(encoding="utf-8"))
+    assert c3_sum["completed_observation_count"] == 1
+    accepted3 = {r["event_symbol_id"]: r for r in _read_all_jsonl(c3_f / "events_accepted")}
+    assert accepted3[make_event_symbol_id(cdone, "COMPISOLUSDT")]["source_article_id"] == "art_done_1"
+    fresh_depth_reqs = [
+        (r["event_symbol_id"], r["event_id"])
+        for r in _read_all_jsonl(c3_f / "request_manifest")
+        if r.get("request_type") == "depth_snapshot" and r.get("fetched_at_ms") == t_fresh
+    ]
+    assert set(fresh_depth_reqs) == {
+        (make_event_symbol_id(chist_new, "TERMISOLUSDT"), chist_new["event_id"]),
+        (make_event_symbol_id(crej_new, "REJISOLUSDT"), crej_new["event_id"]),
+        (make_event_symbol_id(cdone_new, "COMPISOLUSDT"), cdone_new["event_id"]),
+    }
+
+    # --- Case 4: Indistinguishable timing fallback -> no fabricated exclusive or "latest article wins" guarantee ---
+    shared_anchor = t_fresh
+    ex_shared = {
+        "symbol_rows": {"FALLBACKUSDT": {"symbol": "FALLBACKUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT", "marginAsset": "USDT", "onboardDate": shared_anchor}},
+        "payload_sha256": "f" * 64,
+        "fetched_at_ms": shared_anchor,
+    }
+    row_fb_old = {"source_article_id": "fb_old", "event_id": "fb_old_ev", "detected_at_ms": shared_anchor - 60_000, "symbols": ["FALLBACKUSDT"]}
+    row_fb_new = {"source_article_id": "fb_new", "event_id": "fb_new_ev", "detected_at_ms": shared_anchor - 10_000, "symbols": ["FALLBACKUSDT"]}
+    anc_old = resolve_depth_observation_anchor_ms(row_fb_old, "FALLBACKUSDT", ex_shared, shared_anchor)
+    anc_new = resolve_depth_observation_anchor_ms(row_fb_new, "FALLBACKUSDT", ex_shared, shared_anchor)
+    assert anc_old["observation_anchor_ms"] == shared_anchor
+    assert anc_new["observation_anchor_ms"] == shared_anchor
+    assert anc_old["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
+    assert anc_new["observation_anchor_basis"] == "exchangeinfo_current_onboard_time"
+    assert anc_old["observation_anchor_conflict_active"] is False
+    assert anc_new["observation_anchor_conflict_active"] is False

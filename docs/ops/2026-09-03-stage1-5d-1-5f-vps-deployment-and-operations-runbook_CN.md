@@ -761,17 +761,16 @@ echo "STAGE1_5G_REVIEW_COMPLETED: $STAGE1_5G_OUT"
    - **无冲突分支**（`PENDING_TRADING` 或未见冲突）：固定使用 `symbol_visibility_deadline_ms = S + EXTERNAL_SIGNAL_STAGE1_5F_MAX_RECOVERY_START_DELAY_MS`（`S + 15m`），超时即拒绝为 `rejected_launch_not_trading_timeout`。
    - **明确冲突分支**（`O > S + 60_000`）：使用固定未决冲突 episode 期限 `anchor_resolution_deadline_ms`（`6h`），仅当当前新鲜完整 `exchangeInfo` 的 `O` 与可信 `S` 在 `60s` 内一致时才解除冲突，否则到期拒绝为 `rejected_anchor_conflict_unresolved_timeout`。
 
-### 9.2 Stage 1.5D 有界改期重检与 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 启用前置条件
+### 9.2 Stage 1.5D 同页有界改期重检与 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 启用前置条件
 1. **默认安全开关**：
-   - `configs/base.py` 中 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 默认保持 `False`，且 `RISK_LIVE_TRADING_ENABLED` 默认保持 `False`。未获明确批准前严禁翻转为 `True`。
-2. **有界重检参数**（均冻结于 `configs/base.py`）：
-   - `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_INTERVAL_SEC = 600`（单文章最小冷却 600 秒）
-   - `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_BUDGET_PER_POLL = 1`（每轮 poll 最多重检 1 篇文章）
-   - 重检复用现有 `launch_schedule_revision_detail` 队列、`detail_budget_remaining` 总预算及 `persisted_articles`（`next_schedule_recheck_at_ms` / `schedule_recheck_deadline_ms`，固定 14 天 deadline），从 `events/*.jsonl` 使用 `select_latest_applicable_official_schedule` 读取最新合法修订，永不挤占新公告首次抓取预算。
-3. **开启 Producer 前置条件与真实 Fixture 核验**：
-   - 仅当经独立审计与用户明确批准后，方可进入四项启用配置（含 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED = True`），且部署树必须与通过验收的 proof commit SHA 完全一致（无未提交/未跟踪 Python 源码）。
-   - 开启时必须向 1.5D 传入有效的 `--stage1-5f-consumer-root-contract` 与 `--stage1-5f-consumer-summary`，确保下游 1.5F 消费者静态与运行时证明均已通过。
-   - 离线实源契约核验须设置只读外置目录环境变量 `STAGE15_POSTPONEMENT_REAL_FIXTURE_DIR` 并运行 `test_postponement_real_source_contract_when_authorized`（分别核验真实 AIA 与同页改期样例，确认原始字节、manifest SHA-256 与 formal event 契约均通过）。
+   - `configs/base.py` 中 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED` 默认保持 `False`，且 `RISK_LIVE_TRADING_ENABLED` 默认保持 `False`。未获另行批准与前置核验全通过前，严禁翻转为 `True`。
+2. **同页范围收缩、允许漏采条件与 14 天有界残余请求**：
+   - **仅限同页改期**：1.5D 停止主动抓取或入队主句为 `Will Postpone the Launch of ...`、`Will Reschedule the Launch of ...`、`Will Cancel the Launch of ...` 的独立修订通知，仅对已正式落盘上新事件的文章执行同页改期重检；若官方另发新的普通 `Will Launch ...` 公告，仍作为新 `source_article_id` 独立入站。
+   - **允许漏采条件**：若新时间仅出现在独立修订通知中、原公告页面未同步更新且没有新的普通上新公告，允许按收窄契约漏采；严禁以猜测、旧锚点或仅凭 API 时间推算新官方计划。未开盘阶段仍依赖 `9.1` 的 1.5F `exchangeInfo` 就绪门禁与冲突隔离（不承诺捕获所有取消或每次实际开盘）。
+   - **14 天有界残余请求（参数冻结于 `configs/base.py`）**：已发上新文章的同页重检保留至多 14 天（`EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_INTERVAL_SEC = 600`、`EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_RECHECK_BUDGET_PER_POLL = 1`），复用 `launch_schedule_revision_detail`、`detail_budget_remaining` 与 `select_latest_applicable_official_schedule`，优先级严格低于新公告首次详情抓取；超过 14 天 `schedule_recheck_deadline_ms` 后停止产生残余重检请求。
+3. **不追溯改写历史 AIA 记录 & 启用前置条件（未完成前严禁启用）**：
+   - **历史不追溯**：旧 `2026-11-13` 热修复文档、历史验收门槛与 AIA 重抓原始诊断件均原样保留，不追溯修改旧 AIA 记录，也不宣称历史 AIA 实源门槛已通过。
+   - **同页版本开启前前置门禁**：仅代码实现完成**不得**启用 `EXTERNAL_SIGNAL_STAGE1_5D_SCHEDULE_REVISION_PRODUCER_ENABLED`。启用前必须基于同一经审定且受保护树干净的 proof commit SHA，另行授权并依次完成：(a) 适用 Part A 复验；(b) 设置外置已授权目录环境变量 `STAGE15_SAME_PAGE_REAL_EVIDENCE_DIR` 与独立核准清单摘要 `STAGE15_SAME_PAGE_APPROVED_MANIFEST_SHA256` 通过 `test_same_page_scope_real_revision_when_authorized`（HYPE/TRX 旧/新 BAPI 正文与新版 `exchangeInfo` 同页实源端到端核验）；(c) Git ancestry 与受保护树静态/运行时证明；(d) 按 `--stage1-5f-consumer-root-contract` 与 `--stage1-5f-consumer-summary` 绑定新鲜同根 1.5F 消费者运行时证明与同根 `watermark.json`；上述任一项未完成前继续维持 `False`（第 5 节日常监控巡检、9.1 与 9.3 运维及 `--future-launch-recovery` 权限边界保持不变）。
 
 ### 9.3 `--future-launch-recovery` 新建 Root 启动顺序与停止条件
 当历史/旧 root 中某未来上线公告（如 `2d89a5966b174a2689ab2c2a15db1757:HYPEUSDC,TRXUSDC`）因早期契约缺陷需在**全新独立 root** 补采时，必须严格遵守以下顺序（严禁使用 `find ... | tail -1` 隐式选择 root，必须显式指定新 `RUN_ID`、绝对 D/F root 路径及互指 proof 路径）：
