@@ -10253,3 +10253,64 @@ def test_same_page_scope_d_recheck_trailing_date_exception_controls(tmp_path, mo
     )
     assert len(man_ar_digits) == 1 and man_ar_digits[0]["payload_trusted"] is False
     assert revs_ar_digits == []
+
+
+def test_verify_stage1_5f_consumer_proof_uses_runtime_gate_staleness(tmp_path, monkeypatch):
+    """Verify verify_stage1_5f_consumer_proof enforces runtime-gate staleness config (180s)
+    and rejects explicit stale=True even when fresh."""
+    import subprocess as _sp
+    from unittest.mock import patch
+
+    from configs import base as cfg_base
+    from scripts.external_signal_shadow.run_stage1_5d_live_event_source_smoke_collector import (
+        CONSUMER_RUNTIME_MANIFEST,
+        canonical_manifest_sha256,
+        canonical_root_id,
+        verify_stage1_5f_consumer_proof,
+    )
+
+    fixture_now_ms = 1_794_800_000_000
+    d_out_root = tmp_path / "d_root"
+    f_root = tmp_path / "f_root"
+    with patch("scripts.external_signal_shadow.run_stage1_5f_live_depth_observer.time.time", return_value=fixture_now_ms / 1000.0):
+        repo_dir, rc_path, sum_path = _setup_canonical_git_and_consumer_proof(tmp_path, d_out_root, f_root, fixture_now_ms)
+
+    head_sha = _sp.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True).stdout.strip()
+    d_root_id = canonical_root_id(d_out_root)
+    manifest_sha = canonical_manifest_sha256("1.5F_v1", CONSUMER_RUNTIME_MANIFEST)
+
+    summary_obj = json.loads(sum_path.read_text(encoding="utf-8"))
+    hb_ms = summary_obj["last_heartbeat_at_ms"]
+    assert isinstance(hb_ms, int) and not isinstance(hb_ms, bool) and hb_ms == fixture_now_ms
+
+    def _call(at_ms: int) -> dict:
+        return verify_stage1_5f_consumer_proof(
+            consumer_root_contract_path=rc_path,
+            consumer_summary_path=sum_path,
+            expected_d_output_root_id=d_root_id,
+            expected_d_startup_head_sha=head_sha,
+            expected_consumer_manifest_sha256=manifest_sha,
+            now_ms=at_ms,
+        )
+
+    # Fixed production vectors under default runtime-gate staleness (180s = 180_000 ms)
+    assert _call(hb_ms + 60_029) == {
+        "valid": True,
+        "reason": "consumer_proof_passed",
+        "consumer_root_id": summary_obj["consumer_root_id"],
+        "consumer_process_instance_id": summary_obj["consumer_process_instance_id"],
+        "consumer_root_contract_path": str(rc_path.resolve()),
+        "consumer_summary_path": str(sum_path.resolve()),
+    }
+    assert _call(hb_ms + 180_000)["valid"] is True
+    assert _call(hb_ms + 180_001) == {"valid": False, "reason": "consumer_summary_heartbeat_expired"}
+
+    # Process-local override proves boundary follows EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_STALENESS_SEC
+    with monkeypatch.context() as mc:
+        mc.setattr(cfg_base, "EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_STALENESS_SEC", 90)
+        assert _call(hb_ms + 90_000)["valid"] is True
+        assert _call(hb_ms + 90_001) == {"valid": False, "reason": "consumer_summary_heartbeat_expired"}
+
+    # Single-point stale=True mutation on fresh summary still fails with consumer_summary_stale
+    sum_path.write_text(json.dumps({**summary_obj, "stale": True}), encoding="utf-8")
+    assert _call(hb_ms + 1_000) == {"valid": False, "reason": "consumer_summary_stale"}

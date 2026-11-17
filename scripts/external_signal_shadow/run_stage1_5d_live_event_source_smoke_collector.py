@@ -1387,7 +1387,7 @@ def verify_stage1_5f_consumer_proof(
 
     if now_ms is not None:
         last_hb = summary.get("last_heartbeat_at_ms") or summary.get("created_at_ms") or 0
-        if now_ms - last_hb > 10_000:
+        if now_ms - last_hb > base.EXTERNAL_SIGNAL_STAGE1_5D_RUNTIME_GATE_MAX_STALENESS_SEC * 1000:
             return {"valid": False, "reason": "consumer_summary_heartbeat_expired"}
 
     computed_contract_sha = canonical_root_contract_sha256(contract)
