@@ -2,6 +2,7 @@
 
 **创建时间：** 2026-05-23
 **最新状态审计点：** 2026-09-30（证据时间戳：2026-09-30T10:48:59Z）
+**研究讨论更新：** 2026-11-22（仅更新文档，不代表新的运行状态审计或执行授权）
 **主状态快照文件：** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **有效文档索引入口：** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -33,6 +34,10 @@
 ---
 
 ## 2. 当前位置与运行状态 (Current Position)
+
+**研究更新（2026-11-22）：**H1 S1 固定候选停止本轮开发（`no_increment_observed`），广义 H1 仍为 `evidence_insufficient`，D2 继续暂停，见 [H1 复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md)。当前建议先核清 R10 历史原件能否定位，再比较 Route B 与衍生品截面候选；尚未选定或授权新研究。当前讨论优先于下文旧的下一步建议，不改变历史契约。
+
+下列工程、进程及 PID 快照保留原证据日期；本次未核验当前 VPS 状态。
 
 *(本节更新至 2026-10-01，基于 Stage 1.5H V3 跨 Root 流动性摩擦诊断完成、Stage 1.5G 跨 Root 准入、Stage 1.3 R10 历史信号准入前置校验完成与 Stage 1.5 服务器实时观察)*
 
@@ -79,7 +84,8 @@
 | **Cross-Sectional Factor Lab** | `stopped` | `docs/reviews/2026-06-10-cross-sectional-factor-lab-stageA2-cmom-diagnostic-review_CN.md` (2026-06-10) | 已测试的 30d/14d 纯价格动量在成本情景下组合表现为负且出现大幅回撤；此 Stage A2 证据不评估亦不证伪非价格因子。 | 保持已测试的纯价格规格关闭；任何非价格因子需另起 L2 Design。 | 不适用于未经测试的因子。 |
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | 基础设施与公共只读采集器验证通过。 | Stage 1.3 信号发现。 | 网络读取失败率 > 5%。 |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | 本地强平快照受交易所频控降级。转向 Stage 1.5 催化剂公告。 | 被 Stage 1.5 替代。 | 强平数据流被交易所限频。 |
-| **Stage 1.3 R10 (Readmission Preflight)** | `completed` | Commit `8c6f3a0` / `docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md` (2026-09-30) | 实现离线准入前置校验门禁，在零未来函数、零收益泄漏前提下严密核验 Bars 结构与 PIT 因果；下游消费强制 Fail-Closed 硬阻断。 | 等待候选 Manifest/Bars 离线数据集执行。 | 收据篡改、目录覆盖或缺少 PIT 因果完整性。 |
+| **Stage 1.3 R10 (Readmission Preflight)** | `completed` | Commit `8c6f3a0` / `docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md` (2026-09-30) | 仅准入代码完成：校验结构与 PIT，不计算未来收益或期望值。历史输入可得性尚未重验，下游仍 Fail-Closed。 | 先定位 Git 锚定历史 manifest、bars 和事件账本；准入成功最多支持另提经批准的探索性 expectancy Design。 | 缺证据保持缺口，不当作负 EV；不靠补下载或改冻结契约挽救旧记录。 |
+| **H1 S1 成交压力与价格减速候选** | `stopped` | [2026-11-21 复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md) | 28 个评价 Parent 上，加入 X 后 MSE 恶化约 5.16%，停止本固定候选的本轮开发；广义 H1 仍为 `evidence_insufficient`，不是全面证伪。 | 不自动改窗/换模型，也不恢复 D2。 | 保留固定实验非正增量的资源决定，不事后删事件翻案。 |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | 催化剂公告在历史重放中被证实产生显著的价格响应。 | Stage 1.5D 实时采集器。 | 价格覆盖率 < 80%。 |
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | 服务器 PID 88580 持续运行。BAPI 详情页解析器 + 202 重试调度器保持活跃。 | 保持 7 天连续稳定运行。 | 详情页重试饥饿 > 1800 秒。 |
 | **Stage 1.5E (Static Execution Feasibility)** | `completed` | `data/external_signal_shadow/stage1_5e/execution_feasibility/execution_feasibility_audit_summary.json` (2026-06-25) | 静态订单簿审计证实可承载 500 USDT 仓位深度。 | Stage 1.5F 实时观察器。 | 深度承载力 < 500 USDT。 |
@@ -88,7 +94,7 @@
 | **Stage 1.5H (Cross-Root Liquidity Friction Diagnostic)** | `completed` | `data/external_signal_shadow/stage1_5h/v3_cross_root_friction/stage1_5h_v3_cross_root_friction_20261001T120000Z/stage1_5h_v3_cross_root_friction_summary.json` (2026-10-01) | 只读诊断模块完成 2 个父事件 / 8 个子标的 P95 滑点摩擦诊断。结论严格为 `evidence_insufficient`，`stage1_5g_gate3_complete = false`。强制 14 项 false 否定授权标志；下游消费 Fail-Closed。 | 等待 VPS 持续采集累积更多独立上线事件样本，或规划后续多交易所微观结构只读研究。 | 出现任何交易信号、执行可行性声明或授权外泄。 |
 | **Stage 1.5J-A (历史归档覆盖度盘点)** | `completed` | `data/external_signal_shadow/stage1_5j_a/historical_archive_coverage_inventory/stage1_5j_a_historical_archive_coverage_inventory_20261010T163500Z/summary.json` (2026-10-10) | 365天全量上线公告归档盘点。替换根符合严格空值语义与 Rule 17 `stage1_5j_a_receipt_v2` profile。120 篇父事件完整（280 个完整 USDT 子标的），11 篇父事件证据缺口。严格加载器与闭环审计全通；状态严格为 `coverage_inventory_evidence_gap`；13 项 false 标志；下游强制 Fail-Closed。 | 作为 Stage 1.5J-B 历史 aggTrades 价格反应探索研究输入。 | 出现任何交易信号、执行可行性声明或下游消费越权。 |
 | **Stage 1.5J-B (上线锚点价格反应探索性研究)** | `completed` | `data/external_signal_shadow/stage1_5j_b/historical_aggtrades_launch_response/stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z/summary.json` (2026-10-14) | 重放 280 个 ZIP 归档；278 个标的成功捕获上线锚点。多周期价格反应中位数持续为负（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps），呈现显著右偏长尾异值依赖。无条件开盘买入在扣除手续费与滑点（50-80 bps）后期望为负。严格加载器、Rule 17 v2 校验器与闭环审计全通。12 项 false 标志；零 Alpha/交易权限。 | 作为 Stage 1.5J-C 路径可行性诊断输入。 | 出现任何交易信号、执行可行性声明或下游消费越权。 |
-| **Stage 1.5J-C (上线时间与路径可行性诊断)** | `completed` | `docs/designs/2026-10-23-external-signal-shadow-lab-stage1-5j-c-launch-time-path-feasibility-design_CN.md` (2026-10-24) / Commit `71a44ff` | 评估 71 个标的（18 个 Pre-Market，53 个 Standard）；实测证实首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。简单开盘动量追涨/追空策略被确凿证伪。结题封存，关闭无条件开盘动量路线。 | 转向路线 B（新永续公告对既有现货的传导影响）准备度核对。 | 满足（首触风险线 > 80%，扣除摩擦后期望持续为负）。 |
+| **Stage 1.5J-C (上线时间与路径可行性诊断)** | `completed` | `docs/designs/2026-10-23-external-signal-shadow-lab-stage1-5j-c-launch-time-path-feasibility-design_CN.md` (2026-10-24) / Commit `71a44ff` | 评估 71 个标的（18 个 Pre-Market，53 个 Standard）；实测证实首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。简单开盘动量追涨/追空策略被确凿证伪。结题封存，关闭无条件开盘动量路线。 | 历史 Route B 建议；当前取舍见关卡 5。 | 满足（首触风险线 > 80%，扣除摩擦后期望持续为负）。 |
 | **Stage 1.6A (Futures Delisting Source Schema & Grammar)** | `completed` | `docs/reviews/2026-08-24-external-signal-shadow-lab-stage1-6a-bapi-h2-versioned-body-grammar-replay-delta-completion-audit_CN.md` (2026-08-24) | 验证币安期货下架公告源、BAPI H2 版本化语法及 3 个时间戳锚点。 | Stage 1.6B 下架目录。 | 交割/结算语义不明确或缺失时间戳锚点。 |
 | **Stage 1.6B (Delisting Catalog & Event Burst Queue)** | `completed` | `docs/reviews/2026-08-19-external-signal-shadow-lab-stage1-6b-canonical-source-deployment-checklist_CN.md` (2026-08-22) | 规范下架目录、突发队列故障恢复及 Checkpoint 契约已完成验证。 | Stage 1.6E 标的能力审计。 | 突发负载下出现不可恢复的队列丢包。 |
 | **Stage 1.6E (Market Data Observer & Capability Audit)** | `completed` | `docs/reviews/2026-09-04-external-signal-shadow-lab-stage1-6e-b-live-semantic-trigger-event-market-data-observer-completion-audit_CN.md` (2026-09-04) | 实时语义触发观察器与历史 1s kline / mark / index 标的能力审计完成。 | Stage 1.6F 匹配对照。 | Kline/mark/index 覆盖率 < 80%。 |
@@ -200,7 +206,7 @@ Stage 1.6F-W2-0 探索性诊断
   * **问题描述**：Stage 1.5J-B 实证揭示开盘买入具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps）且均值严重依赖极端右偏异值；Stage 1.5J-C 进一步对 71 个标的完成 15m 路径可行性诊断，实测证实首分钟后入场在 15m 内先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。开盘追涨动量策略期望持续为负。
   * **事实证据**：Stage 1.5J-B 生产回执与 Stage 1.5J-C 诊断结果（Commit `71a44ff`）。
   * **潜在风险**：在缺乏前置微观结构优势下盲目开盘追单，将面临极高概率的开盘套牢与滑点损耗。
-  * **解封动作**：彻底关闭并封存无条件开盘动量追涨路线（`falsified`）；后续研究根据《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`）单线转向路线 B（新永续合约上线公告对同所既有现货的传导影响）数据源与资格核对。
+  * **解封动作**：保持已关闭的无条件开盘动量规格封存。10-23 决策表曾建议下一步核查 Route B；当前候选取舍见关卡 5 的讨论记录，不自动执行 Route B。
   * **停止条件**：开盘追涨路线永久停机；下游消费保持 Fail-Closed。
 
 ### P2 阻塞项
@@ -237,17 +243,14 @@ Stage 1.6F-W2-0 探索性诊断
   * 1.5J-C 路径可行性完成 71 个标的诊断（Commit `71a44ff`），证实多空双向超 80%~90% 先击穿 -100 bps 止损线，开盘路径动量策略证伪并关闭。
 * **安全边界**：仅限研究；零交易/执行权限。
 
-### 关卡 5（当前活跃关卡）：路线 B 研究准备度前置门禁
-* **前置依赖**：《后续研究准备度决策表》（`docs/reviews/2026-10-23-next-research-readiness-decision-table_CN.md`）批准。
-* **核心问题**：币安新永续合约上线公告对同所既有现货的传导影响，在考虑真实获知时延与交易成本后，是否存在可捕捉的持续调整窗口？
-* **所需证据**：低成本（$\le 6$ 人时）数据源与方向资格核对：
-  1. 从既有公告目录定义现货标的候选集合；
-  2. 核对单市场（同所）既有现货历史数据源及准确获知时间戳可得性；
-  3. 梳理方向资格分层（价格可观察 vs 现货可买入 vs 做空/借币渠道可验证）。
-* **当前状态**：**活跃（下一步待开展）**。等待开启数据源与资格核对。
-* **通过标准**：可信的点在时（PIT）获知时间戳、可得的现货历史价格序列，以及可核验的借币/做空历史记录，且无需先建大型数据基础设施。
-* **拒绝/停止条件**：获知时间不可靠、历史现货数据缺失，或借币/做空渠道在预算内长期不可核验。
-* **安全边界**：纯只读核验（`trade_signal_allowed = False`，`execution_engine_allowed = False`）。
+### 关卡 5：后续研究准备度候选（2026-11-22 讨论）
+* **状态**：仅记录讨论建议；旧 Route B 单线 `ACTIVE` 标签不等于当前选题或执行授权。本节不报告任何新预审或收益实验已经完成。
+* **建议先问 R10**：原 manifest、bars 和事件账本能否满足既有[再准入契约](designs/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-design_CN.md)？负中位数不证明负均值，但旧事件数也不证明独立性。找不到原件则保留 `EVIDENCE_GAP`，不为翻案重建历史数据集。
+* **随后比较，不并行开发**：以同口径的完整取证/研究成本、结果决策价值和独立验证可行性，比较 Route B 与衍生品截面候选；最多选择一个实验，也允许全部暂缓。预审通过不自动授权 Design、实施或运行。
+* **Route B 仍是事件研究候选**：新永续公告对同所既有现货，在真实获知时延后是否仍有持续反应。[10-23 决策表](reviews/2026-10-23-next-research-readiness-decision-table_CN.md)的最多 6 人时是来源/资格核对建议，不自动续期。价格可观察、现货可买入、可做空分别记录；做空未验证只阻断对应方向的可执行声明，不默认扩建跨所管道。
+* **衍生品截面是新候选，不是重开 CMOM**：先评估历史时点币池、资金费/OI/Mark/Index 共同覆盖、信息可得时间与换手/资金费成本。尚未冻结币数、四因子评分、行情分组或多空组合；更多行不等于更多独立样本，金额中性不等于风险中性。不授权面板采集或回测。
+* **停止/暂缓条件**：身份、时间或可承受的验证路径缺失，可以停止投入，不冒称科学证伪；H1 S1、D2 和已关闭的纯价格 CMOM 规格均不自动重开。
+* **安全边界**：本节仅记录讨论。输入读取、下载、代码、拟合及 runtime 动作仍须适用的单独授权；不授予 commit/push、部署、paper/live 或 execution 权限。
 
 ---
 
@@ -276,6 +279,9 @@ Stage 1.6F-W2-0 探索性诊断
 * **2026-10-14**：完成 Stage 1.5J-B 生产回执生成（`stage1_5j_b_historical_aggtrades_launch_response_20261014T044500Z`），完整重放 280 个归档包。实测证实无条件开盘买入具有持续为负的中位数价格反应（5m -40.7 bps, 1h -81.9 bps, 4h -85.3 bps）与极强的右偏异值依赖，扣除手续费与滑点后期望为负。
 * **2026-10-24**：完成 Stage 1.5J-C 新合约上线时间与路径可行性诊断核心模块实现（Commit `71a44ff`，37 项测试全通）。对 71 个标的在 60s 观察 + 3s 延迟入场、15m 终点协议下完成路径回放。实测证实多空双向先触及 -100 bps 风险线的概率超 80%~90%，先触及 +200 bps 目标线仅占 ~4%。开盘路径动量追涨/追空策略被确凿证伪，路线正式结题并关闭。
 * **2026-10-29**：完成项目治理精简计划（Commit `ec67c52`），确立 L1 为唯一工程规则权威，精简工作流与 Rule 17 验证分层。VPS 端重启 1.5D（PID 4431）与 1.5F（PID 4470）守护进程，完成最新 TradFi 批次深度审查（`20261029T154429Z`）。
+
+* **2026-11-21**：H1 S1 固定候选完成一次探索，评价 MSE 恶化约 5.16%，停止本轮开发；广义 H1 仍为证据不足，D2 继续暂停。[复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md)保留发展过程及未证实归因，不修改历史批准文件或规则。
+* **2026-11-22（讨论记录，非执行批准）**：建议先核清 R10 原件可得性，再按完整成本与决策价值比较 Route B 和衍生品截面候选，最多选一条进入实验；没有自动策略重开、运行或新数据采集权限。
 
 ---
 
