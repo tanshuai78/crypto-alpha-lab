@@ -1,6 +1,7 @@
 # Crypto Alpha Lab 当前项目状态 (Current Project State)
 
 > **文档生成时间：** 2026-10-14T15:50:00+08:00 (Local Evidence UTC: 2026-10-14T07:50:00Z)
+> **最新研究进展指向（2026-11-27 注记）：** 本文保留 `2026-10-14`（Commit `981780f`）全量状态快照，后续研究结项与收口（含 Stage 1.5J-C、2026-10-29 治理精简、H1 S1 停止及 `2026-11-23`～`2026-11-26` Stage 1.3 固定五币量价系列收口）请以 [docs/roadmap.md](../roadmap.md) 与 [docs/roadmap_CN.md](../roadmap_CN.md) 为最新权威入口，直至下次全量状态与 VPS 快照同步。
 > **双态事实数据源：**
 > - **本地代码库与治理基线：** Git HEAD `981780f`（2026-10-14，包含 Stage 1.5J-B 归档流式解压规约修复、生产回执 20261014T044500Z 生成与 Rule 17 v2 收据闭环审计结项、Stage 1.5J-A 替换回执与 Rule 17 v2 profile 治理结项、Stage 1.3 R10、Stage 1.5G N=3、Stage 1.5H N=3 与 Stage 1.6F W2-0 探索性诊断结项）
 > - **服务器运行时快照基线：** `../../_project_context/server_runtime_snapshot_20260726T021054Z.txt`（2026-07-26 采集，PID 88580 与 PID 88770 稳定运行，直至下次 VPS 同步）

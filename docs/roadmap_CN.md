@@ -2,7 +2,7 @@
 
 **创建时间：** 2026-05-23
 **最新状态审计点：** 2026-09-30（证据时间戳：2026-09-30T10:48:59Z）
-**研究讨论更新：** 2026-11-22（仅更新文档，不代表新的运行状态审计或执行授权）
+**研究状态更新：** 2026-11-27（Stage 1.3 固定五币量价系列研究已在 Commit `9df7507` 归档收口；仅更新文档，不代表新的 VPS 运行状态审计或执行授权）
 **主状态快照文件：** [docs/project-status/current-project-state_CN.md](project-status/current-project-state_CN.md)
 **有效文档索引入口：** [docs/project-status/current-document-index_CN.md](project-status/current-document-index_CN.md)
 
@@ -35,7 +35,7 @@
 
 ## 2. 当前位置与运行状态 (Current Position)
 
-**研究更新（2026-11-22）：**H1 S1 固定候选停止本轮开发（`no_increment_observed`），广义 H1 仍为 `evidence_insufficient`，D2 继续暂停，见 [H1 复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md)。当前建议先核清 R10 历史原件能否定位，再比较 Route B 与衍生品截面候选；尚未选定或授权新研究。当前讨论优先于下文旧的下一步建议，不改变历史契约。
+**研究更新（2026-11-27）：**2026-11-23 至 2026-11-26 的 Stage 1.3 固定五币 15m 现货量价诊断系列（固定五币均值诊断、放量条件增量、跨币放量广度与特殊周归因，代码与方案归档于 Commit `9df7507`）已**停止继续投入**（`evidence_insufficient`，`stop_due_to_evidence / pause_for_new_evidence`），详见 [2026-11-27 复盘与收口](reviews/2026-11-27-stage1-3-volume-price-series-retrospective-and-closure_CN.md)。H1 S1 固定候选维持停止（`no_increment_observed`，见 [H1 复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md)），广义 H1 仍为 `evidence_insufficient`，D2 继续暂停。当前尚未选定或授权新研究方向，后续新方向须先经 `L2 §14.1` 四问初筛。当前更新优先于下文旧的下一步建议，不改变历史契约。
 
 下列工程、进程及 PID 快照保留原证据日期；本次未核验当前 VPS 状态。
 
@@ -85,6 +85,7 @@
 | **Stage 0 – 1.2 (Shadow Setup)** | `completed` | `docs/reviews/2026-06-12-external-signal-shadow-lab-stage1-2-gate-public-read-only-collector-review_CN.md` (2026-06-12) | 基础设施与公共只读采集器验证通过。 | Stage 1.3 信号发现。 | 网络读取失败率 > 5%。 |
 | **Stage 1.3 – 1.4E (Derivatives Stress)** | `superseded` | `docs/reviews/2026-06-20-external-signal-shadow-lab-stage1-4e-deleveraging-proxy-sensitivity-review_CN.md` (2026-06-20) | 本地强平快照受交易所频控降级。转向 Stage 1.5 催化剂公告。 | 被 Stage 1.5 替代。 | 强平数据流被交易所限频。 |
 | **Stage 1.3 R10 (Readmission Preflight)** | `completed` | Commit `8c6f3a0` / `docs/plans/2026-09-29-external-signal-shadow-lab-stage1-3-r10-readmission-preflight-implementation-plan_CN.md` (2026-09-30) | 仅准入代码完成：校验结构与 PIT，不计算未来收益或期望值。历史输入可得性尚未重验，下游仍 Fail-Closed。 | 先定位 Git 锚定历史 manifest、bars 和事件账本；准入成功最多支持另提经批准的探索性 expectancy Design。 | 缺证据保持缺口，不当作负 EV；不靠补下载或改冻结契约挽救旧记录。 |
+| **Stage 1.3 固定五币量价系列（11-23～11-26）** | `stopped` | Commit `9df7507` / [2026-11-27 复盘与收口](reviews/2026-11-27-stage1-3-volume-price-series-retrospective-and-closure_CN.md) | 固定 5 币现货 23 周（`2026-06-15..2026-11-23`）三轮独立审计离线诊断：单指标毛均值偏薄（`16.14 / 4.08 bps`）；固定 `Q=964` 共振增量（`J=155`，`mu=43.05 bps`、`delta=55.50 bps`）名义 CI 跨零，剔除 `block_id=9` 后降至 `11.97 / 10.71 bps`，后半段 Blocks 11–22 降至 `1.62 / -1.70 bps`；跨币广度 `G` 因边界缺口 `4/155` 触发 `breadth_not_estimable`，特殊周时间线同时暴露 `G=3` 在见顶回撤段的深尾损（`MAE < -1000 bps`）及 DOGE 同周对照阶段错配。停止本分支投入（`evidence_insufficient`，非广义证伪）。 | 不自动补齐 4 个边界槽位、不删未知样本，不在该已暴露 23 周区间调参寻优。 | 保持本分支封存，除非出现经 `L2 §14.1` 初筛的新机制与未暴露数据源。 |
 | **H1 S1 成交压力与价格减速候选** | `stopped` | [2026-11-21 复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md) | 28 个评价 Parent 上，加入 X 后 MSE 恶化约 5.16%，停止本固定候选的本轮开发；广义 H1 仍为 `evidence_insufficient`，不是全面证伪。 | 不自动改窗/换模型，也不恢复 D2。 | 保留固定实验非正增量的资源决定，不事后删事件翻案。 |
 | **Stage 1.5A – 1.5C1 (Catalyst Replay)** | `completed` | `data/external_signal_shadow/stage1_5c1/price_coverage/price_coverage_expansion_summary.json` (2026-06-24) | 催化剂公告在历史重放中被证实产生显著的价格响应。 | Stage 1.5D 实时采集器。 | 价格覆盖率 < 80%。 |
 | **Stage 1.5D (Live Event Collector)** | `active` | `_project_context/runtime_evidence/crypto-alpha-runtime-evidence-latest/stage1_5d/detail_retry_scheduler_state.json` (2026-07-26) | 服务器 PID 88580 持续运行。BAPI 详情页解析器 + 202 重试调度器保持活跃。 | 保持 7 天连续稳定运行。 | 详情页重试饥饿 > 1800 秒。 |
@@ -282,6 +283,7 @@ Stage 1.6F-W2-0 探索性诊断
 
 * **2026-11-21**：H1 S1 固定候选完成一次探索，评价 MSE 恶化约 5.16%，停止本轮开发；广义 H1 仍为证据不足，D2 继续暂停。[复盘](reviews/2026-11-21-h1-research-retrospective-and-lessons_CN.md)保留发展过程及未证实归因，不修改历史批准文件或规则。
 * **2026-11-22（讨论记录，非执行批准）**：建议先核清 R10 原件可得性，再按完整成本与决策价值比较 Route B 和衍生品截面候选，最多选一条进入实验；没有自动策略重开、运行或新数据采集权限。
+* **2026-11-27（Stage 1.3 固定五币量价系列收口）**：将 `2026-11-23`～`2026-11-26` 三轮经独立审计的离线诊断代码、测试与原始 Design/Plan 归档为 Commit `9df7507`（零实盘/模拟/执行权限，`RISK_LIVE_TRADING_ENABLED=False`）：（1）固定五币单指标均值诊断（`volume_spike_1h` `n=787`、`mu=16.14 bps`；`relative_strength_vs_btc` `n=964`、`mu=4.08 bps`；均 `inconclusive_or_concentrated`）；（2）固定 `Q=964` 放量条件增量（`J=155`、`mu=43.05 bps`、`delta=55.50 bps`，23 块 CI 跨零；剔除 `block_id=9` 后降至 `11.97 / 10.71 bps`，后半段降至 `1.62 / -1.70 bps`；`inconclusive_or_concentrated`）；（3）跨币放量广度 `G` 与 `block_id=9`（62 行）归因（受预热起点与周日块尾 `block_boundary_censored` 影响，已知 `151` / 未知 `4`，保留全部 155 行并将四级收益表置 `null`；特殊周时间线暴露 `G=3` 回撤段深尾损 `MAE < -1000 bps` 及 DOGE 对照阶段错配；`breadth_not_estimable / stop_due_to_evidence`）。正式停止该 15m 现货量价分支继续投入（`evidence_insufficient`，不冒称广义科学证伪），详见 [2026-11-27 复盘与收口](reviews/2026-11-27-stage1-3-volume-price-series-retrospective-and-closure_CN.md)。
 
 ---
 
